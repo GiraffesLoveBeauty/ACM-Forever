@@ -10,7 +10,7 @@
 - `/internal/v1/*`：供受信任的梓喵服务使用的机器接口，使用 `Authorization: Bearer <ACM_BOT_API_TOKEN>` 认证，覆盖成员资料与绑定、提交和统计查询、排行榜与速报、训练和挑战、推荐题目、播报设置、账号验证及同步任务。
 - `/health`：服务和数据库健康检查。
 
-梓喵适配器通过 HTTP 客户端调用 `/internal/v1/*`，SQLite、OJ 凭据和数据同步由本服务持有。当前迁移改动仍在主题分支，生产服务切换需等代码审查、合并和服务器配置完成。
+梓喵适配器通过 HTTP 客户端调用 `/internal/v1/*`，SQLite、OJ 凭据和数据同步由本服务持有。Web 端通过 `/api/*` 调用同一服务。接口的认证方式、常用请求和 Python 示例见 [API 调用指南](docs/api-guide.md)。
 
 ## 本地启动
 
@@ -39,7 +39,7 @@ python -m api
 
 GitHub Actions 会在 `/home/WYJ/acm-forever-data/.env` 已存在时安装依赖并启动用户级 systemd 服务 `acm-forever-webui`。首次部署前，在服务器创建该环境文件，至少设置 `ACM_API_HOST`、`ACM_DATABASE_PATH`、`ACM_WEBUI_SECRET_KEY` 和 `ACM_BOT_API_TOKEN`。数据库路径应设为 `/home/WYJ/acm-forever-data/acm_forever.db`。需要通过服务器网卡访问时，将 `ACM_API_HOST` 设为 `0.0.0.0` 并在防火墙限制可访问来源；经 HTTPS 反向代理时设置 `ACM_WEBUI_COOKIE_SECURE=true`。系统服务定义位于 `deploy/acm-forever-webui.service`。首次配置还需由服务器管理员运行 `sudo loginctl enable-linger WYJ`，让用户级服务在 SSH 断开后和服务器重启后继续运行。
 
-切换顺序：先合并并部署 ACM-Forever API，再将旧数据库安全迁入 `/home/WYJ/acm-forever-data/acm_forever.db`，配置 API 环境变量并确认服务健康；之后配置梓喵的 `ACM_BOT_API_TOKEN` 和 API 地址，再部署梓喵适配器。梓喵插件不再直接读取数据库；两端通过此服务访问同一份数据。切换期间应保留数据库备份，验证新旧功能后再清理旧数据副本。
+服务器当前实际使用的数据库路径、服务运行状态和梓喵接入情况，应以服务器环境文件与运行检查为准，不能仅凭仓库代码推断。若要把旧数据库切换到本服务，先停止会写入旧库的服务并制作可恢复备份（包含 WAL 状态），再设置 `ACM_DATABASE_PATH`、启动 API 并核对关键数据；确认 Web 与梓喵都经 API 正常读写后，再按运维流程停用旧写入路径。不要在没有备份和核验的情况下覆盖生产数据库。
 
 首次启动时，服务会自动建立数据库表结构。若数据库中没有 Web 账号，可配置 `ACM_BOOTSTRAP_ROOT_QQ_ID` 和 `ACM_BOOTSTRAP_ROOT_PASSWORD` 初始化一个 root 账号；初始化成功后应移除这两个变量。也可先在环境中配置旧式管理员登录账号与密码，但应优先使用数据库账号登录。
 
@@ -72,6 +72,8 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 
 ## 接口概览
 
+接口概览只列出主要路由；参数、认证方式和可运行的 Python 示例见 [API 调用指南](docs/api-guide.md)。
+
 WebUI API 以原 WebUI 路由为兼容基线。常用路由包括：
 
 - `POST /api/auth/login`、`POST /api/auth/logout`、`GET /api/auth/me`
@@ -101,4 +103,14 @@ Bot 服务接口包括：
 - `/internal/v1/settings/*`、`/internal/v1/notifications/*`、`/internal/v1/challenges/*`：播报配置、提醒与月度挑战
 - `/internal/v1/submissions/batch`、`/internal/v1/maintenance/*`：提交记录写入和数据维护
 
-请求体和响应字段以接口实现为准。内部 Token 只应保存在 API 服务和梓喵服务端的环境变量中，不能放进网页代码、客户端或 Git 仓库。
+`/api/*` 面向 Web 会话用户，`/internal/v1/*` 是受信任服务之间的接口。内部 Token 只应保存在 API 服务和梓喵服务端的环境变量中，不能放进网页代码、桌面或移动客户端、公开示例和 Git 仓库。修改接口时，应同步更新调用指南与相关自动化测试。
+
+## 开发验证
+
+在仓库根目录安装 `feat/api/requirements.txt` 后运行 API 集成测试：
+
+```powershell
+python -m unittest discover -s feat/api/tests -p "test_*.py"
+```
+
+GitHub Actions 会在 API 代码或测试变更的 Pull Request 和 `main` 推送上运行同一组测试。测试使用临时 SQLite 数据库，不连接生产服务器或 OJ。
