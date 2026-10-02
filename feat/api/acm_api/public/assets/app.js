@@ -67,7 +67,7 @@ async function renderNav(){
     if(!order.includes('admin'))order.push('admin');
   }
   const byId=new Map(items.map(item=>[item[0],item]));
-  const primary=['forum','leaderboard','home','login'];
+  const primary=['forum','leaderboard','home'];
   document.querySelectorAll('.nav').forEach(nav=>{
     const visibleOrder=nav.classList.contains('primary-nav')?primary:order;
     const core=['forum','leaderboard','home'];

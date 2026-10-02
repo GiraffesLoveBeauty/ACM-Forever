@@ -1,10 +1,10 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>排行榜 · ACM Forever</title><link rel="stylesheet" href="/assets/app.css?v=community-3"><link rel="stylesheet" href="/assets/forum.css?v=community-3"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>排行榜 · ACM Forever</title><link rel="stylesheet" href="/assets/app.css?v=design-system-1"><link rel="stylesheet" href="/assets/forum.css?v=design-system-1"></head>
 <body class="forum-page leaderboard-page">
   <header class="forum-header"><a class="forum-brand" href="/index.html"><span class="forum-brand-mark">A</span><span>ACM <b>Forever</b><small>长理 ACM 学习社区</small></span></a><nav class="nav primary-nav" aria-label="主导航"></nav><div class="forum-header-actions"><button class="btn" id="theme-toggle" aria-label="切换主题">◐</button><a class="btn" id="login-link" href="/login.html">登录</a><button class="btn" id="logout" style="display:none">退出</button></div></header>
   <main class="community-main leaderboard-main">
-    <section class="community-page-heading leaderboard-heading"><div><span class="panel-eyebrow">COMMUNITY STANDINGS</span><h1>排行榜</h1><p id="subtitle">近 7 日各平台去重 AC 题数 · 公开昵称与统计</p></div><div class="rank-heading-mark" aria-hidden="true">♛</div></section>
+    <section class="community-page-heading leaderboard-heading"><div><h1>社区排行榜</h1><p id="subtitle">近 7 日各平台去重 AC 题数，仅展示公开昵称与统计。</p></div></section>
     <section class="community-panel leaderboard-panel">
       <div class="leaderboard-toolbar">
         <form id="rank-search" class="rank-search"><span>⌕</span><input id="search" type="search" placeholder="按公开昵称或身份搜索"><button type="submit">查找</button></form>
@@ -13,13 +13,13 @@
           <label class="oj-filter"><input type="checkbox" value="codeforces" checked><span class="oj-icon oj-cf">CF</span><span>Codeforces</span></label><label class="oj-filter"><input type="checkbox" value="luogu" checked><span class="oj-icon oj-luogu">洛</span><span>洛谷</span></label><label class="oj-filter"><input type="checkbox" value="nowcoder" checked><span class="oj-icon oj-nowcoder">牛客</span><span>牛客</span></label><label class="oj-filter"><input type="checkbox" value="atcoder" checked><span class="oj-icon oj-atcoder">At</span><span>AtCoder</span></label><label class="oj-filter"><input type="checkbox" value="cjlu" checked><span class="oj-icon oj-cjlu">校</span><span>校 OJ</span></label>
         </div></div>
       </div>
-      <div class="leaderboard-summary"><div><span class="panel-eyebrow">CURRENT RANKINGS</span><b id="summary">正在加载排行榜…</b></div><span class="muted">只展示公开昵称与刷题统计</span></div>
+      <div class="leaderboard-summary"><b id="summary">正在加载排行榜…</b><span class="muted">按平台去重统计</span></div>
       <div class="community-table-wrap"><table class="community-table"><thead><tr><th>排名</th><th>成员</th><th>Codeforces</th><th>洛谷</th><th>牛客</th><th>AtCoder</th><th>校 OJ</th><th>总题数</th><th>身份</th></tr></thead><tbody id="rows"><tr><td colspan="9" class="empty">正在加载排行榜…</td></tr></tbody></table></div>
       <div class="leaderboard-pagination"><button class="btn" id="prev">← 上一页</button><span class="muted" id="pager">—</span><button class="btn" id="next">下一页 →</button></div>
     </section>
     <p class="leaderboard-footnote">排行榜根据已同步的 OJ 通过记录统计；题数按平台与题号去重。</p>
   </main>
-  <script src="/assets/app.js?v=community-3"></script>
+  <script src="/assets/app.js?v=design-system-1"></script>
   <script>
     const state={rows:[],total:0,page:1,pageSize:20};
     const dayLabels={7:'近 7 日',30:'近 30 日',90:'近 90 日',365:'近 1 年',all:'生涯'};

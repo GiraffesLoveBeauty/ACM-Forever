@@ -2,8 +2,8 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#f5f7fb"><title>论坛 · ACM Forever</title>
-  <link rel="stylesheet" href="/assets/app.css?v=community-3"><link rel="stylesheet" href="/assets/forum.css?v=community-3">
+  <meta name="theme-color" content="#f0f4f1"><title>论坛 · ACM Forever</title>
+  <link rel="stylesheet" href="/assets/app.css?v=design-system-1"><link rel="stylesheet" href="/assets/forum.css?v=design-system-1">
 </head>
 <body class="forum-page">
   <header class="forum-header">
@@ -18,7 +18,7 @@
       <div class="forum-side-links"><a href="/leaderboard.html">♛　查看刷题排行榜</a><a href="/home.html">◉　进入个人中心</a></div>
     </aside>
     <section class="forum-feed-column">
-      <div class="forum-welcome"><div><span class="forum-kicker">CJLU ACM COMMUNITY</span><h1>今天想聊点什么？</h1><p>提问、分享题解，或者记录你的学习进度。</p></div><div class="forum-welcome-orbit" aria-hidden="true">✦</div></div>
+      <div class="forum-welcome"><div><span class="forum-kicker">长理 ACM · 学习与交流</span><h1>今天想聊点什么？</h1><p>提问、分享题解，或者记录你的学习进度。</p></div><button class="forum-hero-cta" id="write-post-main">写一个新话题 <span aria-hidden="true">＋</span></button></div>
       <form class="forum-search" id="forum-search"><span>⌕</span><input id="search-query" type="search" placeholder="搜索问题、题解或学习经验"><button type="submit">搜索</button></form>
       <div class="forum-feed-toolbar"><div class="forum-tabs" role="tablist"><button class="forum-tab active" data-sort="latest">最新</button><button class="forum-tab" data-sort="hot">热门</button><button class="forum-tab" data-sort="unanswered">等你回答</button></div><span id="feed-count" class="muted"></span></div>
       <div id="forum-feed" class="forum-feed"><div class="forum-loading"><span class="spinner"></span>正在加载社区话题…</div></div>
@@ -32,7 +32,7 @@
   </main>
   <div class="forum-modal" id="composer" aria-hidden="true"><div class="forum-modal-backdrop" data-close-composer></div><section class="forum-composer" role="dialog" aria-modal="true" aria-labelledby="composer-title"><div class="forum-modal-head"><div><span class="forum-kicker">START A DISCUSSION</span><h2 id="composer-title">发布新话题</h2></div><button class="icon-button" data-close-composer aria-label="关闭">×</button></div><label>选择版块<select id="post-category"></select></label><label>话题标题<input id="post-title" maxlength="120" placeholder="用一句话概括你想讨论的内容"></label><label>详细内容<textarea id="post-body" maxlength="20000" rows="8" placeholder="补充背景、你的尝试或想分享的经验"></textarea></label><div class="composer-hint">新帖经管理员审核后会展示在论坛中。</div><div class="forum-modal-actions"><button class="btn" data-close-composer>取消</button><button class="btn primary" id="submit-post">提交审核</button></div><div class="form-message" id="composer-message" role="status"></div></section></div>
   <div class="forum-toast" id="forum-toast" role="status"></div>
-  <script src="/assets/app.js?v=community-3"></script>
+  <script src="/assets/app.js?v=design-system-1"></script>
   <script>
     const forumState={sort:'latest',category:'',query:'',page:1,pageSize:12,total:0,loading:false};
     const timeAgo=value=>{const seconds=Math.max(0,Math.floor(Date.now()/1000-Number(value||0)));if(seconds<60)return '刚刚';if(seconds<3600)return `${Math.floor(seconds/60)} 分钟前`;if(seconds<86400)return `${Math.floor(seconds/3600)} 小时前`;return `${Math.floor(seconds/86400)} 天前`};
@@ -45,7 +45,7 @@
     document.getElementById('forum-search').onsubmit=event=>{event.preventDefault();forumState.query=document.getElementById('search-query').value.trim();forumState.page=1;loadFeed()};
     document.querySelectorAll('.forum-tab').forEach(tab=>tab.onclick=()=>{document.querySelectorAll('.forum-tab').forEach(item=>item.classList.toggle('active',item===tab));forumState.sort=tab.dataset.sort;forumState.page=1;loadFeed()});
     document.getElementById('load-more').onclick=()=>{forumState.page+=1;loadFeed(true)};
-    document.getElementById('write-post-side').onclick=openComposer;
+    document.querySelectorAll('#write-post-side, #write-post-main').forEach(button=>button.onclick=openComposer);
     document.querySelectorAll('[data-close-composer]').forEach(button=>button.onclick=closeComposer);
     document.getElementById('submit-post').onclick=async()=>{const message=document.getElementById('composer-message');message.textContent='';try{const result=await api('/forum/posts',{method:'POST',body:JSON.stringify({category_id:document.getElementById('post-category').value,title:document.getElementById('post-title').value,body:document.getElementById('post-body').value})});closeComposer();document.getElementById('post-title').value='';document.getElementById('post-body').value='';toast(result.message||'已提交审核');}catch(error){message.textContent=error.message}};
     async function loadHotTopics(){try{const data=await api('/forum/posts?sort=hot&page_size=4');const rows=data.rows||[];document.getElementById('hot-topics').innerHTML=rows.map((post,i)=>`<a href="/post.html?id=${post.id}"><span>${String(i+1).padStart(2,'0')}</span><b>${esc(post.title)}</b><small>${Number(post.comments_count||0)} 条讨论</small></a>`).join('')||'<span class="muted">还没有热门话题</span>'}catch{document.getElementById('hot-topics').innerHTML='<span class="muted">热门话题暂不可用</span>'}}
