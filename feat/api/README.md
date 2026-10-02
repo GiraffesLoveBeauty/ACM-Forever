@@ -5,6 +5,8 @@
 当前包含两组接口：
 
 - `/api/*`：移植的 WebUI API，包含登录与账号管理、成员信息、提交记录、训练与挑战、学习计划、统计分析、审核与复盘、排行榜等功能。Web 端使用 Cookie 会话和 CSRF 校验。
+- `/api/forum/*`：公开话题列表与详情、分类、搜索、热门与待回答筛选；登录成员可以发帖、评论、回复、点赞、收藏和举报。新话题进入管理员审核队列，审核与举报处理都需要 Web 管理员权限。
+- `/api/community/leaderboard`：公开展示昵称、身份和各平台 AC 统计，不返回 QQ 号、真实姓名或学校字段。
 - `/internal/v1/*`：供受信任的梓喵服务使用的机器接口，使用 `Authorization: Bearer <ACM_BOT_API_TOKEN>` 认证，覆盖成员资料与绑定、提交和统计查询、排行榜与速报、训练和挑战、推荐题目、播报设置、账号验证及同步任务。
 - `/health`：服务和数据库健康检查。
 
@@ -78,6 +80,14 @@ WebUI API 以原 WebUI 路由为兼容基线。常用路由包括：
 - `/api/problems`、`/api/me/problems`、`/api/submissions/attempts`
 - `/api/training/*`、`/api/me/training/*`、`/api/study-plan`、`/api/me/study-plan`
 - `/api/stats`、`/api/leaderboard`、`/api/me/leaderboard`
+
+论坛常用路由包括：
+
+- `GET /api/forum/categories`、`GET /api/forum/posts`、`GET /api/forum/posts/<id>`
+- `POST /api/forum/posts`、`POST /api/forum/posts/<id>/comments`
+- `POST /api/forum/posts/<id>/like`、`POST /api/forum/posts/<id>/bookmark`、`POST /api/forum/posts/<id>/report`
+- `GET /api/forum/mine/posts`、`GET /api/forum/mine/bookmarks`
+- 管理员审核：`GET /api/forum/moderation/posts`、`POST /api/forum/moderation/posts/<id>` 和举报处理接口
 
 Bot 服务接口包括：
 

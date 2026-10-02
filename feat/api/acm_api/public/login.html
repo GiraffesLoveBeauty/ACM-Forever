@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>登录 · ACM Forever</title><link rel="stylesheet" href="/assets/app.css?v=forum-1"><link rel="stylesheet" href="/assets/forum.css?v=forum-1"></head>
+<body class="login-page">
+  <main id="login" class="login">
+    <section class="card">
+      <a class="forum-brand login-brand" href="/index.html"><span class="forum-brand-mark">A</span><span>ACM <b>Forever</b><small>长理 ACM 学习社区</small></span></a>
+      <h1>欢迎回到社区</h1>
+      <p class="muted">使用 QQ 号和管理员发放的初始密码登录。</p>
+      <form id="login-form">
+        <label for="username">QQ 号</label><input id="username" autocomplete="username" inputmode="numeric" placeholder="请输入 QQ 号或旧管理员账号" required>
+        <label for="password">密码</label><input id="password" type="password" autocomplete="current-password" required>
+        <button class="btn primary" type="submit">登录并继续</button>
+        <div id="login-message" class="muted" role="status"></div>
+      </form>
+      <a class="login-back" href="/index.html">← 返回论坛</a>
+    </section>
+  </main>
+  <script src="/assets/app.js?v=forum-1"></script>
+</body>
+</html>

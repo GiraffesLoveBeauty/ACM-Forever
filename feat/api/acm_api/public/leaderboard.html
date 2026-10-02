@@ -42,18 +42,19 @@
     <main class="main">
       <header class="topbar">
         <div>
-          <div class="eyebrow">Community</div>
+          <div class="eyebrow">Community standings</div>
           <h1>排行榜</h1>
-          <span class="muted" id="subtitle">近 7 日各平台去重 AC 题数</span>
+          <span class="muted" id="subtitle">近 7 日各平台去重 AC 题数 · 公开昵称与统计</span>
         </div>
         <div class="userbar">
           <button class="btn" id="theme-toggle">◐</button>
-          <button class="btn" id="logout">退出</button>
+          <a class="btn" id="login-link" href="/login.html">登录</a>
+          <button class="btn" id="logout" style="display:none">退出</button>
         </div>
       </header>
       <section class="card">
         <div class="filters">
-          <input id="search" placeholder="搜索成员昵称、真实姓名或 QQ 号">
+          <input id="search" placeholder="按公开昵称或身份搜索">
           <div class="oj-filters" id="platform-filters" title="勾选计入排行榜总题数的平台">
             <label class="oj-filter"><input type="checkbox" value="codeforces" checked><span class="oj-icon oj-cf">CF</span><span>Codeforces</span></label>
             <label class="oj-filter"><input type="checkbox" value="luogu" checked><span class="oj-icon oj-luogu">洛</span><span>洛谷</span></label>
@@ -83,11 +84,10 @@
             <option value="100">每页 100 条</option>
           </select>
           <button class="btn primary" id="refresh">查询</button>
-          <button class="btn" id="export">导出 CSV</button>
         </div>
         <div class="topbar" style="margin-top:14px">
           <span class="muted" id="summary">正在加载排行榜…</span>
-          <span class="muted" id="leaderboard-admin-hint">真实姓名可由管理员直接编辑</span>
+          <span class="muted">只展示公开昵称与刷题统计</span>
         </div>
         <div class="table-wrap">
           <table>
@@ -102,12 +102,10 @@
                 <th>校 OJ</th>
                 <th>总题数</th>
                 <th>身份</th>
-                <th>学校</th>
-                <th>操作</th>
               </tr>
             </thead>
             <tbody id="rows">
-              <tr><td colspan="11" class="empty">正在加载排行榜…</td></tr>
+              <tr><td colspan="9" class="empty">正在加载排行榜…</td></tr>
             </tbody>
           </table>
         </div>
@@ -147,22 +145,17 @@
 
     async function load(resetPage = false) {
       if (resetPage) state.page = 1;
-      const isMember = AUTH.role === 'member';
-      $('#search').style.display = isMember ? 'none' : '';
-      $('#export').style.display = isMember ? 'none' : '';
-      $('#leaderboard-admin-hint').style.display = isMember ? 'none' : '';
-      document.querySelectorAll('thead th').forEach((cell, index) => { cell.style.display = isMember && index > 7 ? 'none' : ''; });
       const box = $('#rows');
-      box.innerHTML = '<tr><td colspan="11" class="empty">正在加载排行榜…</td></tr>';
+      box.innerHTML = '<tr><td colspan="9" class="empty">正在加载排行榜…</td></tr>';
       try {
-        const data = await api('/leaderboard?' + queryString());
+        const data = await api('/community/leaderboard?' + queryString());
         state.rows = Array.isArray(data.rows) ? data.rows : [];
         state.total = Number(data.total || 0);
         state.page = Number(data.page || 1);
         state.pageSize = Number(data.page_size || $('#page-size').value);
         render();
       } catch (error) {
-        box.innerHTML = `<tr><td colspan="11" class="empty">排行榜加载失败：${esc(error.message)}</td></tr>`;
+        box.innerHTML = `<tr><td colspan="9" class="empty">排行榜加载失败：${esc(error.message)}</td></tr>`;
         $('#summary').textContent = '加载失败';
       }
     }
@@ -177,13 +170,9 @@
       $('#rows').innerHTML = state.rows.map((user, index) => {
         const rank = (state.page - 1) * state.pageSize + index + 1;
         const nickname = esc(user.name || '未命名');
-        if (AUTH.role === 'member') {
-          return `<tr><td>${rank}</td><td><b>${nickname}</b></td><td>${user.cf_count || 0}</td><td>${user.luogu_count || 0}</td><td>${user.nowcoder_count || 0}</td><td>${user.atcoder_count || 0}</td><td>${user.cjlu_count || 0}</td><td><b>${user.total_count || 0}</b></td></tr>`;
-        }
-        const realName = esc(user.real_name || '—');
         return `<tr>
-          <td>${rank}</td>
-          <td><b>${nickname}</b><br><small class="muted">${realName}</small><br><button class="btn" onclick="editRealName('${esc(user.qq_id)}')">编辑姓名</button></td>
+          <td><b>${rank}</b></td>
+          <td><b>${nickname}</b></td>
           <td>${user.cf_count || 0}</td>
           <td>${user.luogu_count || 0}</td>
           <td>${user.nowcoder_count || 0}</td>
@@ -191,30 +180,8 @@
           <td>${user.cjlu_count || 0}</td>
           <td><b>${user.total_count || 0}</b></td>
           <td>${esc(user.status || '—')}</td>
-          <td>${esc(user.school || '—')}</td>
-          <td><a class="btn" href="/member.html?qq_id=${encodeURIComponent(user.qq_id)}">详情</a></td>
         </tr>`;
-      }).join('') || '<tr><td colspan="11" class="empty">暂无数据</td></tr>';
-    }
-
-    async function editRealName(qqId) {
-      const user = state.rows.find(item => String(item.qq_id) === String(qqId));
-      const value = prompt('请输入真实姓名；留空表示恢复为横杠。', user?.real_name || '');
-      if (value === null) return;
-      try {
-        const result = await api('/user/real-name', {
-          method: 'PUT',
-          body: JSON.stringify({qq_id: qqId, real_name: value.trim()}),
-        });
-        if (user) user.real_name = result.real_name || '';
-        render();
-      } catch (error) {
-        alert(error.message);
-      }
-    }
-
-    function exportCsv() {
-      window.location.href = '/api/leaderboard/export?' + queryString(false);
+      }).join('') || '<tr><td colspan="9" class="empty">暂无数据</td></tr>';
     }
 
     $('#refresh').onclick = () => load(true);
@@ -232,8 +199,15 @@
     $('#search').onkeydown = event => { if (event.key === 'Enter') load(true); };
     $('#prev').onclick = () => { if (state.page > 1) { state.page -= 1; load(); } };
     $('#next').onclick = () => { state.page += 1; load(); };
-    $('#export').onclick = exportCsv;
-    window.PAGE_LOAD = load;
+    window.PAGE_LOAD = async () => {
+      const login = $('#login-link');
+      if (AUTH.authenticated) {
+        login.textContent = AUTH.role === 'member' ? '个人中心' : '管理中心';
+        login.href = AUTH.role === 'member' ? '/home.html' : '/admin.html';
+        $('#logout').style.display = '';
+      }
+      await load();
+    };
   </script>
 </body>
 </html>

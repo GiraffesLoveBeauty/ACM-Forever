@@ -112,6 +112,61 @@ async def connect_db(db_path):
         if col not in user_cols:
             await db.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT")
 
+    await db.execute(
+        "CREATE TABLE IF NOT EXISTS forum_categories ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, name TEXT NOT NULL, "
+        "description TEXT NOT NULL DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0)"
+    )
+    await db.execute(
+        "CREATE TABLE IF NOT EXISTS forum_posts ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, author_qq_id TEXT NOT NULL REFERENCES users(qq_id), "
+        "category_id INTEGER NOT NULL REFERENCES forum_categories(id), title TEXT NOT NULL, body TEXT NOT NULL, "
+        "status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','published','rejected','removed')), "
+        "is_pinned INTEGER NOT NULL DEFAULT 0, views_count INTEGER NOT NULL DEFAULT 0, "
+        "created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, reviewed_at INTEGER, reviewed_by TEXT)"
+    )
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_posts_status_created ON forum_posts(status, created_at DESC)")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_posts_category_created ON forum_posts(category_id, status, created_at DESC)")
+    await db.execute(
+        "CREATE TABLE IF NOT EXISTS forum_comments ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER NOT NULL REFERENCES forum_posts(id) ON DELETE CASCADE, "
+        "parent_id INTEGER REFERENCES forum_comments(id) ON DELETE CASCADE, "
+        "author_qq_id TEXT NOT NULL REFERENCES users(qq_id), body TEXT NOT NULL, "
+        "status TEXT NOT NULL DEFAULT 'published' CHECK(status IN ('published','hidden','removed')), created_at INTEGER NOT NULL)"
+    )
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_comments_post_created ON forum_comments(post_id, status, created_at)")
+    await db.execute(
+        "CREATE TABLE IF NOT EXISTS forum_post_likes ("
+        "post_id INTEGER NOT NULL REFERENCES forum_posts(id) ON DELETE CASCADE, "
+        "qq_id TEXT NOT NULL REFERENCES users(qq_id) ON DELETE CASCADE, created_at INTEGER NOT NULL, "
+        "PRIMARY KEY(post_id, qq_id))"
+    )
+    await db.execute(
+        "CREATE TABLE IF NOT EXISTS forum_bookmarks ("
+        "post_id INTEGER NOT NULL REFERENCES forum_posts(id) ON DELETE CASCADE, "
+        "qq_id TEXT NOT NULL REFERENCES users(qq_id) ON DELETE CASCADE, created_at INTEGER NOT NULL, "
+        "PRIMARY KEY(post_id, qq_id))"
+    )
+    await db.execute(
+        "CREATE TABLE IF NOT EXISTS forum_reports ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER NOT NULL REFERENCES forum_posts(id) ON DELETE CASCADE, "
+        "reporter_qq_id TEXT NOT NULL REFERENCES users(qq_id), reason TEXT NOT NULL, "
+        "status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','resolved','dismissed')), "
+        "created_at INTEGER NOT NULL, resolved_at INTEGER, resolved_by TEXT)"
+    )
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_reports_status_created ON forum_reports(status, created_at)")
+    for slug, name, description, order in (
+        ("discussion", "综合交流", "ACM 学习与校园生活交流", 10),
+        ("help", "求助问答", "描述问题、分享思路，一起找到解法", 20),
+        ("solution", "题解分享", "题目分析、代码思路与知识点总结", 30),
+        ("experience", "经验分享", "学习路线、竞赛经验与成长记录", 40),
+        ("events", "活动通知", "训练安排、比赛信息与社团活动", 50),
+    ):
+        await db.execute(
+            "INSERT OR IGNORE INTO forum_categories(slug,name,description,sort_order) VALUES(?,?,?,?)",
+            (slug, name, description, order),
+        )
+
     # 账号绑定的最终防线：即使来自 WebUI 或其他代码路径，也不能把同一平台账号
     # 绑定给多个 QQ。使用触发器而不是唯一索引，是为了兼容旧库中已经存在的重复数据；
     # 旧数据不自动删除，但新的插入/修改会被拒绝。

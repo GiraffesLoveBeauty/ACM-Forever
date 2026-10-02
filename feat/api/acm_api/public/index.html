@@ -1,21 +1,55 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>登录 · ACM Compass</title><link rel="stylesheet" href="/assets/app.css?v=member-auth-1"></head>
-<body>
-  <main id="login" class="login">
-    <section class="card">
-      <div class="brand"><b>✦</b> ACM Compass</div>
-      <h1>登录训练工作台</h1>
-      <p class="muted">成员使用 QQ 号和管理员发放的初始密码登录。</p>
-      <form id="login-form">
-        <label for="username">QQ 号</label><input id="username" autocomplete="username" inputmode="numeric" placeholder="请输入 QQ 号或旧管理员账号" required>
-        <label for="password">密码</label><input id="password" type="password" autocomplete="current-password" required>
-        <button class="btn primary" type="submit">登录</button>
-        <div id="login-message" class="muted" role="status"></div>
-      </form>
-      <small class="muted">管理员账号迁移期间可使用旧管理员账号登录。</small>
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f5f7fb"><title>论坛 · ACM Forever</title>
+  <link rel="stylesheet" href="/assets/app.css?v=forum-1"><link rel="stylesheet" href="/assets/forum.css?v=forum-1">
+</head>
+<body class="forum-page">
+  <header class="forum-header">
+    <a class="forum-brand" href="/index.html"><span class="forum-brand-mark">A</span><span>ACM <b>Forever</b><small>长理 ACM 学习社区</small></span></a>
+    <nav class="nav primary-nav" aria-label="主导航"></nav>
+    <div class="forum-header-actions"><button class="btn" id="theme-toggle" aria-label="切换主题">◐</button><a class="btn primary" id="login-link" href="/login.html">登录后发帖</a><button class="btn" id="logout" style="display:none">退出</button></div>
+  </header>
+  <main class="forum-layout">
+    <aside class="forum-rail forum-left-rail">
+      <div class="forum-community-card"><span class="community-spark">✦</span><h2>让每一次思考<br>都被看见</h2><p>和长理 ACMer 一起提问、讨论、进步。</p><button class="btn primary forum-write" id="write-post-side">＋ 发布新话题</button></div>
+      <div class="forum-side-section"><div class="forum-side-title">社区版块</div><div id="category-list" class="forum-categories"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div></div>
+      <div class="forum-side-links"><a href="/leaderboard.html">♛　查看刷题排行榜</a><a href="/home.html">◉　进入个人中心</a></div>
+    </aside>
+    <section class="forum-feed-column">
+      <div class="forum-welcome"><div><span class="forum-kicker">CJLU ACM COMMUNITY</span><h1>今天想聊点什么？</h1><p>提问、分享题解，或者记录你的学习进度。</p></div><div class="forum-welcome-orbit" aria-hidden="true">✦</div></div>
+      <form class="forum-search" id="forum-search"><span>⌕</span><input id="search-query" type="search" placeholder="搜索问题、题解或学习经验"><button type="submit">搜索</button></form>
+      <div class="forum-feed-toolbar"><div class="forum-tabs" role="tablist"><button class="forum-tab active" data-sort="latest">最新</button><button class="forum-tab" data-sort="hot">热门</button><button class="forum-tab" data-sort="unanswered">等你回答</button></div><span id="feed-count" class="muted"></span></div>
+      <div id="forum-feed" class="forum-feed"><div class="forum-loading"><span class="spinner"></span>正在加载社区话题…</div></div>
+      <button id="load-more" class="btn forum-load-more" style="display:none">加载更多</button>
     </section>
+    <aside class="forum-rail forum-right-rail">
+      <section class="forum-rail-card"><div class="forum-side-title">热门话题 <span>↗</span></div><div id="hot-topics" class="hot-topic-list"><div class="skeleton-line"></div><div class="skeleton-line"></div></div></section>
+      <section class="forum-rail-card forum-community-note"><div class="forum-side-title">社区公约</div><p>友善交流，清楚描述问题，分享自己的尝试。题解请注明来源，一起维护适合每位同学学习的讨论氛围。</p><a href="/index.html#community-guidelines">了解社区规则 →</a></section>
+      <footer class="forum-footer">ACM Forever · 为长理 ACM 学习与交流而建</footer>
+    </aside>
   </main>
-  <script src="/assets/app.js?v=member-auth-1"></script>
+  <div class="forum-modal" id="composer" aria-hidden="true"><div class="forum-modal-backdrop" data-close-composer></div><section class="forum-composer" role="dialog" aria-modal="true" aria-labelledby="composer-title"><div class="forum-modal-head"><div><span class="forum-kicker">START A DISCUSSION</span><h2 id="composer-title">发布新话题</h2></div><button class="icon-button" data-close-composer aria-label="关闭">×</button></div><label>选择版块<select id="post-category"></select></label><label>话题标题<input id="post-title" maxlength="120" placeholder="用一句话概括你想讨论的内容"></label><label>详细内容<textarea id="post-body" maxlength="20000" rows="8" placeholder="补充背景、你的尝试或想分享的经验"></textarea></label><div class="composer-hint">新帖经管理员审核后会展示在论坛中。</div><div class="forum-modal-actions"><button class="btn" data-close-composer>取消</button><button class="btn primary" id="submit-post">提交审核</button></div><div class="form-message" id="composer-message" role="status"></div></section></div>
+  <div class="forum-toast" id="forum-toast" role="status"></div>
+  <script src="/assets/app.js?v=forum-1"></script>
+  <script>
+    const forumState={sort:'latest',category:'',query:'',page:1,pageSize:12,total:0,loading:false};
+    const timeAgo=value=>{const seconds=Math.max(0,Math.floor(Date.now()/1000-Number(value||0)));if(seconds<60)return '刚刚';if(seconds<3600)return `${Math.floor(seconds/60)} 分钟前`;if(seconds<86400)return `${Math.floor(seconds/3600)} 小时前`;return `${Math.floor(seconds/86400)} 天前`};
+    const toast=message=>{const node=document.getElementById('forum-toast');node.textContent=message;node.classList.add('visible');setTimeout(()=>node.classList.remove('visible'),2800)};
+    function postCard(post){return `<article class="forum-post-card"><div class="forum-post-meta"><span class="forum-category-pill">${esc(post.category_name)}</span>${post.is_pinned?'<span class="forum-pinned">置顶</span>':''}<span class="forum-post-time">${timeAgo(post.created_at)}</span></div><h2><a href="/post.html?id=${post.id}">${esc(post.title)}</a></h2><a class="forum-post-excerpt" href="/post.html?id=${post.id}">${esc(post.excerpt||'')}</a><div class="forum-post-author"><span class="forum-avatar">${esc((post.author_name||'A').slice(0,1))}</span><span>${esc(post.author_name||'ACM 成员')}</span><span class="forum-post-author-dot">·</span><span>长理 ACMer</span></div><div class="forum-post-actions"><a href="/post.html?id=${post.id}#comments">▤ ${Number(post.comments_count||0)} 条评论</a><button data-like="${post.id}" class="${post.viewer_liked?'is-active':''}">♡ ${Number(post.likes_count||0)} 赞</button><span>◉ ${Number(post.views_count||0)} 阅读</span><button data-bookmark="${post.id}" class="${post.viewer_bookmarked?'is-active':''}">${post.viewer_bookmarked?'★ 已收藏':'☆ 收藏'}</button></div></article>`}
+    async function loadCategories(){const categories=await api('/forum/categories');const box=document.getElementById('category-list');box.innerHTML=`<button class="forum-category-link ${forumState.category===''?'active':''}" data-category="">全部话题<span>${categories.reduce((n,x)=>n+Number(x.post_count||0),0)}</span></button>`+categories.map(c=>`<button class="forum-category-link ${forumState.category===c.slug?'active':''}" data-category="${esc(c.slug)}"><span class="category-dot category-${esc(c.slug)}"></span>${esc(c.name)}<span>${Number(c.post_count||0)}</span></button>`).join('');document.getElementById('post-category').innerHTML=categories.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');box.querySelectorAll('[data-category]').forEach(button=>button.onclick=()=>{forumState.category=button.dataset.category;forumState.page=1;box.querySelectorAll('.forum-category-link').forEach(item=>item.classList.toggle('active',item===button));loadFeed()});}
+    async function loadFeed(append=false){if(forumState.loading)return;forumState.loading=true;const box=document.getElementById('forum-feed');if(!append)box.innerHTML='<div class="forum-loading"><span class="spinner"></span>正在加载社区话题…</div>';const params=new URLSearchParams({sort:forumState.sort,page:String(forumState.page),page_size:String(forumState.pageSize)});if(forumState.category)params.set('category',forumState.category);if(forumState.query)params.set('q',forumState.query);try{const data=await api('/forum/posts?'+params);forumState.total=Number(data.total||0);const rows=Array.isArray(data.rows)?data.rows:[];box.innerHTML=(append?box.innerHTML:'')+rows.map(postCard).join('')||'<div class="forum-empty"><span>✦</span><h3>这里还没有话题</h3><p>来发布第一个讨论，开启社区交流吧。</p></div>';document.getElementById('feed-count').textContent=`${forumState.total} 个话题`;document.getElementById('load-more').style.display=forumState.page*forumState.pageSize<forumState.total?'':'none';box.querySelectorAll('[data-like]').forEach(button=>button.onclick=async()=>{if(!AUTH.authenticated){location.href='/login.html?next='+encodeURIComponent(location.pathname);return}try{const result=await api(`/forum/posts/${button.dataset.like}/like`,{method:'POST'});const count=Number(button.textContent.match(/\d+/)?.[0]||0)+(result.active?1:-1);button.textContent=`${result.active?'♥':'♡'} ${Math.max(0,count)} 赞`;button.classList.toggle('is-active',result.active)}catch(e){toast(e.message)}});box.querySelectorAll('[data-bookmark]').forEach(button=>button.onclick=async()=>{if(!AUTH.authenticated){location.href='/login.html?next='+encodeURIComponent(location.pathname);return}try{const result=await api(`/forum/posts/${button.dataset.bookmark}/bookmark`,{method:'POST'});button.textContent=result.active?'★ 已收藏':'☆ 收藏';button.classList.toggle('is-active',result.active)}catch(e){toast(e.message)}});if(forumState.sort==='hot'&&!forumState.category&&!forumState.query){const hot=document.getElementById('hot-topics');hot.innerHTML=rows.slice(0,4).map((post,i)=>`<a href="/post.html?id=${post.id}"><span>${String(i+1).padStart(2,'0')}</span><b>${esc(post.title)}</b><small>${Number(post.comments_count||0)} 条讨论</small></a>`).join('')||'<span class="muted">暂时还没有热门话题</span>'}}catch(error){box.innerHTML=`<div class="forum-empty"><h3>话题加载失败</h3><p>${esc(error.message)}</p></div>`}finally{forumState.loading=false}}
+    function openComposer(){if(!AUTH.authenticated){location.href='/login.html?next='+encodeURIComponent(location.pathname);return}const modal=document.getElementById('composer');modal.classList.add('open');modal.setAttribute('aria-hidden','false');document.getElementById('post-title').focus()}
+    function closeComposer(){const modal=document.getElementById('composer');modal.classList.remove('open');modal.setAttribute('aria-hidden','true')}
+    document.getElementById('forum-search').onsubmit=event=>{event.preventDefault();forumState.query=document.getElementById('search-query').value.trim();forumState.page=1;loadFeed()};
+    document.querySelectorAll('.forum-tab').forEach(tab=>tab.onclick=()=>{document.querySelectorAll('.forum-tab').forEach(item=>item.classList.toggle('active',item===tab));forumState.sort=tab.dataset.sort;forumState.page=1;loadFeed()});
+    document.getElementById('load-more').onclick=()=>{forumState.page+=1;loadFeed(true)};
+    document.getElementById('write-post-side').onclick=openComposer;
+    document.querySelectorAll('[data-close-composer]').forEach(button=>button.onclick=closeComposer);
+    document.getElementById('submit-post').onclick=async()=>{const message=document.getElementById('composer-message');message.textContent='';try{const result=await api('/forum/posts',{method:'POST',body:JSON.stringify({category_id:document.getElementById('post-category').value,title:document.getElementById('post-title').value,body:document.getElementById('post-body').value})});closeComposer();document.getElementById('post-title').value='';document.getElementById('post-body').value='';toast(result.message||'已提交审核');}catch(error){message.textContent=error.message}};
+    async function loadHotTopics(){try{const data=await api('/forum/posts?sort=hot&page_size=4');const rows=data.rows||[];document.getElementById('hot-topics').innerHTML=rows.map((post,i)=>`<a href="/post.html?id=${post.id}"><span>${String(i+1).padStart(2,'0')}</span><b>${esc(post.title)}</b><small>${Number(post.comments_count||0)} 条讨论</small></a>`).join('')||'<span class="muted">还没有热门话题</span>'}catch{document.getElementById('hot-topics').innerHTML='<span class="muted">热门话题暂不可用</span>'}}
+    window.PAGE_LOAD=async()=>{const login=document.getElementById('login-link');const logout=document.getElementById('logout');if(AUTH.authenticated){login.textContent=AUTH.role==='member'?'个人中心':'管理中心';login.href=AUTH.role==='member'?'/home.html':'/admin.html';logout.style.display=''}try{await Promise.all([loadCategories(),loadFeed(),loadHotTopics()])}catch(error){document.getElementById('forum-feed').innerHTML=`<div class="forum-empty">${esc(error.message)}</div>`}};
+  </script>
 </body>
 </html>

@@ -9,7 +9,6 @@ function mapMemberRequest(path,opt={}){
   const params=new URLSearchParams(query);
   params.delete('owner_qq_id');params.delete('qq_id');
   const routes=[
-    ['/leaderboard','/me/leaderboard'],
     ['/challenge/list','/me/training/challenges'],
     ['/challenge/start','/me/challenge/start'],
     ['/challenge/rating','/me/challenge/rating'],
@@ -46,7 +45,7 @@ async function api(path,opt={}){
   try{
     const response=await fetch('/api'+path,{credentials:'same-origin',...fetchOptions,signal:controller.signal,headers:{'Content-Type':'application/json','X-CSRF-Token':csrf,...(fetchOptions.headers||{})}});
     const data=await response.json().catch(()=>({}));
-    if(response.status===401&&!path.startsWith('/auth/login')){location.href='/index.html';throw Error('请先登录')}
+    if(response.status===401&&!path.startsWith('/auth/login')){location.href='/login.html?next='+encodeURIComponent(location.pathname+location.search);throw Error('请先登录')}
     if(response.status===428){location.href='/change-password.html';throw Error('请先修改初始密码')}
     if(!response.ok)throw Error(data.message||data.error||`HTTP ${response.status}`);
     return data;
@@ -54,9 +53,10 @@ async function api(path,opt={}){
 }
 
 function navItems(){
-  const common=[['home','⌂ 我的首页','/home.html'],['leaderboard','♛ 排行榜','/leaderboard.html'],['challenge','◎ 今日训练','/challenge.html'],['reviews','✓ 待复盘','/reviews.html'],['problem-bank','▦ 题库','/problem-bank.html'],['submissions','◷ 提交时间线','/submissions.html'],['workspace','✎ 笔记与计划','/workspace.html'],['contest-review','◈ 赛事复盘','/contest-review.html']];
+  const common=[['forum','⌂ 论坛','/index.html'],['leaderboard','♛ 排行榜','/leaderboard.html'],['home','◉ 个人中心','/home.html'],['challenge','◎ 今日训练','/challenge.html'],['reviews','✓ 待复盘','/reviews.html'],['problem-bank','▦ 题库','/problem-bank.html'],['submissions','◷ 提交时间线','/submissions.html'],['workspace','✎ 笔记与计划','/workspace.html'],['contest-review','◈ 赛事复盘','/contest-review.html']];
+  if(!AUTH.authenticated)return [...common.slice(0,2),['login','登录','/login.html']];
   if(AUTH.role==='member')return common;
-  return [...common,['admin','⚙ 管理后台','/admin.html']];
+  return [...common,['forum-moderation','☷ 内容审核','/forum-moderation.html'],['admin','⚙ 管理后台','/admin.html']];
 }
 
 async function renderNav(){
@@ -67,7 +67,16 @@ async function renderNav(){
     if(!order.includes('admin'))order.push('admin');
   }
   const byId=new Map(items.map(item=>[item[0],item]));
-  document.querySelectorAll('.nav').forEach(nav=>{nav.innerHTML=order.map(id=>byId.get(id)).filter(item=>item&&!hidden.has(item[0])).map(item=>`<a class="${location.pathname.endsWith(item[2])?'active':''}" href="${item[2]}">${item[1]}</a>`).join('')});
+  const primary=['forum','leaderboard','home','login'];
+  document.querySelectorAll('.nav').forEach(nav=>{
+    const visibleOrder=nav.classList.contains('primary-nav')?primary:order;
+    const core=['forum','leaderboard','home'];
+    const ids=nav.classList.contains('primary-nav')?visibleOrder:core.concat(visibleOrder.filter(id=>!core.includes(id)));
+    nav.innerHTML=ids.map(id=>byId.get(id)).filter(item=>item&&(!hidden.has(item[0])||core.includes(item[0]))).map(item=>{
+      const active=item[0]==='forum'?(location.pathname==='/'||location.pathname.endsWith('/index.html')):location.pathname.endsWith(item[2]);
+      return `<a class="${active?'active':''}" href="${item[2]}">${item[1]}</a>`
+    }).join('')
+  });
 }
 
 function lockOwnerInputs(){
@@ -84,7 +93,9 @@ async function login(event){
   try{
     const data=await api('/auth/login',{method:'POST',body:JSON.stringify({qq_id:/^\d{4,12}$/.test(identifier)?identifier:'',username:identifier,password})});
     csrf=data.csrf_token||'';
-    location.href=data.must_change_password?'/change-password.html':(['admin','root'].includes(data.role)?'/admin.html':'/home.html');
+    const next=new URLSearchParams(location.search).get('next')||'/index.html';
+    const safeNext=next.startsWith('/')&&!next.startsWith('//')?next:'/index.html';
+    location.href=data.must_change_password?'/change-password.html':safeNext;
   }catch(error){const message=$('#login-message');if(message)message.textContent=error.message}
 }
 async function logout(){try{await api('/auth/logout',{method:'POST'})}catch{}location.href='/index.html'}
@@ -92,14 +103,20 @@ async function logout(){try{await api('/auth/logout',{method:'POST'})}catch{}loc
 async function init(){
   try{const response=await fetch('/api/auth/me',{credentials:'same-origin'});AUTH=await response.json();}catch{AUTH={authenticated:false}}
   window.AUTH=AUTH;
-  if(!AUTH.authenticated){showLogin();return}
-  csrf=AUTH.csrf_token||'';
-  document.body.dataset.theme=localStorage.theme||'light';
   const page=location.pathname.split('/').pop()||'index.html';
-  if(AUTH.must_change_password&&page!=='change-password.html'){location.replace('/change-password.html');return}
-  if(page==='index.html'){
-    location.replace(['admin','root'].includes(AUTH.role)?'/admin.html':'/home.html');return;
+  document.body.dataset.theme=localStorage.theme||'light';
+  if(!AUTH.authenticated){
+    if(['index.html','post.html','leaderboard.html','login.html'].includes(page)){
+      if(page==='login.html')return;
+      await renderNav();
+      if(typeof window.PAGE_LOAD==='function')await window.PAGE_LOAD();
+      return;
+    }
+    location.replace('/login.html?next='+encodeURIComponent(location.pathname+location.search));return;
   }
+  csrf=AUTH.csrf_token||'';
+  if(AUTH.must_change_password&&page!=='change-password.html'){location.replace('/change-password.html');return}
+  if(page==='login.html'){location.replace('/index.html');return}
   if(page==='change-password.html')return;
   await renderNav();lockOwnerInputs();
   const requestedMember=new URLSearchParams(location.search).get('qq_id');
