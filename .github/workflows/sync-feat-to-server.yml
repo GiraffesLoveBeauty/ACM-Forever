@@ -9,6 +9,7 @@ on:
       - main
     paths:
       - 'feat/**'
+      - '.github/workflows/sync-feat-to-server.yml'
   workflow_dispatch:
 
 permissions:
@@ -134,7 +135,7 @@ jobs:
               for attempt in $(seq 1 20); do
                 if systemctl --user is-active --quiet acm-forever-webui.service \
                   && curl --fail --silent --show-error --max-time 3 \
-                    http://100.91.79.54:8088/health >/dev/null; then
+                    http://127.0.0.1:8088/health >/dev/null; then
                   echo "ACM-Forever WebUI is healthy on port 8088."
                   break
                 fi
