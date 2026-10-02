@@ -1,26 +1,25 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>个人中心 · ACM Compass</title><link rel="stylesheet" href="/assets/app.css?v=member-auth-1"></head>
-<body>
-  <div class="app">
-    <aside class="sidebar"><div class="brand"><b>✦</b> ACM Compass</div><nav class="nav"></nav></aside>
-    <main class="main">
-      <header class="topbar"><div><div class="eyebrow">Personal center</div><h1>个人中心</h1><span class="muted">查看刷题进度、绑定 OJ 账号和最近 AC</span></div><div class="userbar"><a class="btn" href="/change-password.html">修改密码</a><button class="btn" id="theme-toggle">◐</button><button class="btn" id="logout">退出</button></div></header>
-      <section class="hero"><h2 id="greeting">欢迎回来</h2><p>你的训练记录只对你本人和 Web 管理员开放。</p></section>
-      <section class="grid kpis" id="stats"></section>
-      <section class="card" style="margin-top:18px"><div class="topbar"><h2>个人资料</h2><button class="btn" id="edit-name">修改昵称</button></div><div id="profile" class="list"></div></section>
-      <section class="card" style="margin-top:18px"><h2>最近 AC</h2><div id="recent" class="list"><div class="empty">正在加载…</div></div></section>
-      <section class="card" style="margin-top:18px"><div class="topbar"><h2>我的社区内容</h2><div class="userbar"><button class="btn primary" data-forum-tab="posts">我的话题</button><button class="btn" data-forum-tab="bookmarks">我的收藏</button></div></div><div id="my-forum-content" class="list"><div class="empty">正在加载…</div></div></section>
-    </main>
-  </div>
-  <script src="/assets/app.js?v=member-auth-1"></script>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>个人中心 · ACM Forever</title><link rel="stylesheet" href="/assets/app.css?v=community-3"><link rel="stylesheet" href="/assets/forum.css?v=community-3"></head>
+<body class="forum-page personal-page">
+  <header class="forum-header"><a class="forum-brand" href="/index.html"><span class="forum-brand-mark">A</span><span>ACM <b>Forever</b><small>长理 ACM 学习社区</small></span></a><nav class="nav primary-nav" aria-label="主导航"></nav><div class="forum-header-actions"><button class="btn" id="theme-toggle" aria-label="切换主题">◐</button><button class="btn" id="logout">退出</button></div></header>
+  <main class="community-main personal-main">
+    <section class="personal-welcome"><div><span class="forum-kicker">YOUR ACM JOURNEY</span><h1 id="greeting">个人中心</h1><p>回看自己的刷题进度、账号绑定和社区参与。</p></div><a class="personal-rank-link" href="/leaderboard.html"><span>♛</span><span><b>看看大家的进度</b><small>进入社区排行榜 →</small></span></a></section>
+    <section class="profile-stat-grid grid kpis" id="stats"></section>
+    <div class="personal-columns">
+      <section class="community-panel profile-details-panel"><div class="panel-heading"><div><span class="panel-eyebrow">PROFILE</span><h2>个人资料</h2></div><button class="btn" id="edit-name">修改昵称</button></div><p class="panel-caption">你的绑定账号和做题统计仅本人及管理员可见。</p><div id="profile" class="profile-binding-grid"></div></section>
+      <section class="community-panel recent-panel"><div class="panel-heading"><div><span class="panel-eyebrow">RECENT ACCEPTED</span><h2>最近 AC</h2></div><a class="panel-text-link" href="/submissions.html">提交时间线 →</a></div><div id="recent" class="list"><div class="empty">正在加载…</div></div></section>
+    </div>
+    <section class="community-panel personal-community-panel"><div class="panel-heading"><div><span class="panel-eyebrow">YOUR COMMUNITY</span><h2>我的社区内容</h2></div><a class="panel-text-link" href="/index.html">去论坛逛逛 →</a></div><div class="personal-content-tabs"><button class="personal-content-tab active" data-forum-tab="posts">我的话题</button><button class="personal-content-tab" data-forum-tab="bookmarks">我的收藏</button></div><div id="my-forum-content" class="personal-content-list"><div class="empty">正在加载…</div></div></section>
+  </main>
+  <script src="/assets/app.js?v=community-3"></script>
   <script>
     let profileData;
     async function loadForumContent(tab='posts'){
       const box=document.getElementById('my-forum-content');
       try{
         const rows=await api(tab==='posts'?'/forum/mine/posts':'/forum/mine/bookmarks');
-        box.innerHTML=rows.map(item=>`<div class="list-item"><span><a href="/post.html?id=${item.id}"><b>${esc(item.title)}</b></a><br><small class="muted">${esc(item.category_name||'')} · ${tab==='posts'?({pending:'待审核',published:'已发布',rejected:'未通过'}[item.status]||item.status):esc(item.author_name||'')}</small></span>${item.status==='published'||tab==='bookmarks'?'<a class="btn" href="/post.html?id='+item.id+'">查看</a>':''}</div>`).join('')||'<div class="empty">这里还没有内容</div>';
+        box.innerHTML=rows.map(item=>`<a class="personal-community-item" href="/post.html?id=${item.id}"><span class="personal-community-icon">${tab==='posts'?'↗':'☆'}</span><span class="personal-community-copy"><b>${esc(item.title)}</b><small>${esc(item.category_name||'')} · ${tab==='posts'?({pending:'待审核',published:'已发布',rejected:'未通过'}[item.status]||item.status):esc(item.author_name||'')}</small></span><span class="personal-community-status ${item.status==='pending'?'is-pending':''}">${tab==='posts'?({pending:'审核中',published:'已发布',rejected:'未通过'}[item.status]||'查看'): '查看'}</span></a>`).join('')||'<div class="empty">这里还没有内容，去论坛看看吧。</div>';
       }catch(error){box.innerHTML=`<div class="empty">${esc(error.message)}</div>`}
     }
     async function load(){
@@ -28,13 +27,13 @@
         profileData=await api('/me/profile');const user=profileData.user;
         document.getElementById('greeting').textContent='欢迎回来，'+user.name;
         const counts=profileData.platform_counts||{};
-        document.getElementById('stats').innerHTML=`<div class="card"><div class="label">累计 AC</div><div class="value">${profileData.total_count||0}</div></div><div class="card"><div class="label">Codeforces</div><div class="value">${counts.codeforces||0}</div></div><div class="card"><div class="label">AtCoder</div><div class="value">${counts.atcoder||0}</div></div><div class="card"><div class="label">其他平台</div><div class="value">${Object.entries(counts).filter(([key])=>!['codeforces','atcoder'].includes(key)).reduce((sum,[,count])=>sum+count,0)}</div></div>`;
-        document.getElementById('profile').innerHTML=`<div class="list-item"><span>昵称</span><b>${esc(user.name)}</b></div><div class="list-item"><span>身份</span><b>${esc(user.status||'未设置')}</b></div><div class="list-item"><span>Codeforces</span><b>${esc(user.cf_handle||'未绑定')}</b></div><div class="list-item"><span>洛谷</span><b>${esc(user.luogu_id||'未绑定')}</b></div><div class="list-item"><span>AtCoder</span><b>${esc(user.atcoder_handle||'未绑定')}</b></div><div class="list-item"><span>牛客</span><b>${esc(user.nowcoder_id||'未绑定')}</b></div>`;
-        document.getElementById('recent').innerHTML=(profileData.recent_ac||[]).map(item=>`<div class="list-item"><span><b>${esc(item.problem_name||item.problem_id)}</b><br><small class="muted">${esc(item.platform)} · ${esc(item.problem_rating||'未知难度')} · ${new Date(item.submit_time*1000).toLocaleString()}</small></span>${item.problem_url?`<a class="btn" href="${esc(item.problem_url)}" target="_blank" rel="noopener noreferrer">打开题目</a>`:''}</div>`).join('')||'<div class="empty">暂无 AC 记录</div>';
+        document.getElementById('stats').innerHTML=`<div class="card profile-stat-card"><div class="stat-icon">✦</div><div class="label">累计 AC</div><div class="value">${profileData.total_count||0}</div><small>跨平台去重题数</small></div><div class="card profile-stat-card"><div class="stat-icon stat-blue">CF</div><div class="label">Codeforces</div><div class="value">${counts.codeforces||0}</div><small>已通过题目</small></div><div class="card profile-stat-card"><div class="stat-icon stat-green">At</div><div class="label">AtCoder</div><div class="value">${counts.atcoder||0}</div><small>已通过题目</small></div><div class="card profile-stat-card"><div class="stat-icon stat-warm">＋</div><div class="label">其他平台</div><div class="value">${Object.entries(counts).filter(([key])=>!['codeforces','atcoder'].includes(key)).reduce((sum,[,count])=>sum+count,0)}</div><small>洛谷、牛客与校 OJ</small></div>`;
+        document.getElementById('profile').innerHTML=`<div class="binding-row"><span>社区昵称</span><b>${esc(user.name)}</b></div><div class="binding-row"><span>身份</span><b>${esc(user.status||'未设置')}</b></div><div class="binding-row"><span>Codeforces</span><b>${esc(user.cf_handle||'未绑定')}</b></div><div class="binding-row"><span>洛谷</span><b>${esc(user.luogu_id||'未绑定')}</b></div><div class="binding-row"><span>AtCoder</span><b>${esc(user.atcoder_handle||'未绑定')}</b></div><div class="binding-row"><span>牛客</span><b>${esc(user.nowcoder_id||'未绑定')}</b></div>`;
+        document.getElementById('recent').innerHTML=(profileData.recent_ac||[]).slice(0,6).map(item=>`<div class="recent-ac-row"><span class="recent-ac-check">✓</span><span class="recent-ac-copy"><b>${esc(item.problem_name||item.problem_id)}</b><small>${esc(item.platform)} · ${esc(item.problem_rating||'难度未知')} · ${new Date(item.submit_time*1000).toLocaleDateString()}</small></span>${item.problem_url?`<a class="recent-ac-open" href="${esc(item.problem_url)}" target="_blank" rel="noopener noreferrer" aria-label="打开题目">↗</a>`:''}</div>`).join('')||'<div class="empty">暂无 AC 记录</div>';
       }catch(error){document.getElementById('recent').innerHTML=`<div class="empty">${esc(error.message)}</div>`}
       loadForumContent();
     }
-    document.querySelectorAll('[data-forum-tab]').forEach(button=>button.onclick=()=>{document.querySelectorAll('[data-forum-tab]').forEach(item=>item.classList.toggle('primary',item===button));loadForumContent(button.dataset.forumTab)});
+    document.querySelectorAll('[data-forum-tab]').forEach(button=>button.onclick=()=>{document.querySelectorAll('[data-forum-tab]').forEach(item=>item.classList.toggle('active',item===button));loadForumContent(button.dataset.forumTab)});
     document.getElementById('edit-name').onclick=async()=>{const name=prompt('请输入新昵称',profileData?.user?.name||'');if(!name)return;try{await api('/me/profile',{method:'PUT',body:JSON.stringify({name})});await load()}catch(error){alert(error.message)}};
     window.PAGE_LOAD=load;
   </script>
