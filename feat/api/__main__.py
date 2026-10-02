@@ -8,7 +8,7 @@ def main():
     config = Config()
     config.bind = [
         f"{__import__('os').getenv('ACM_API_HOST', '127.0.0.1')}:"
-        f"{__import__('os').getenv('ACM_API_PORT', '8090')}"
+        f"{__import__('os').getenv('ACM_API_PORT', '8088')}"
     ]
     config.accesslog = "-"
     config.errorlog = "-"

@@ -117,3 +117,21 @@ jobs:
             fi
             mv "$stage" "$target"
             echo "Synced feat directory to $target"
+
+            env_file="/home/WYJ/acm-forever-data/.env"
+            service_source="$target/api/deploy/acm-forever-webui.service"
+            service_dir="/home/WYJ/.config/systemd/user"
+            if [ -f "$env_file" ] && [ -f "$service_source" ]; then
+              mkdir -p /home/WYJ/acm-forever-data "$service_dir"
+              if [ ! -x /home/WYJ/acm-forever-data/venv/bin/python ]; then
+                python3 -m venv /home/WYJ/acm-forever-data/venv
+              fi
+              /home/WYJ/acm-forever-data/venv/bin/pip install -r "$target/api/requirements.txt"
+              install -m 0644 "$service_source" "$service_dir/acm-forever-webui.service"
+              systemctl --user daemon-reload
+              systemctl --user enable acm-forever-webui.service
+              systemctl --user restart acm-forever-webui.service
+              echo "Started ACM-Forever WebUI on the configured port."
+            else
+              echo "WebUI service not started: create $env_file before enabling deployment startup."
+            fi
