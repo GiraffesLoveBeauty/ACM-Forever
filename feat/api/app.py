@@ -11,6 +11,7 @@ from .acm_api.backend_api import api
 from .acm_api.bot_api import bot_api
 from .acm_api.auth_service import hash_password, validate_password
 from .acm_api.database import connect_db
+from .acm_api.forum_api import forum_api
 from .service_runtime import SyncEngine, WebTaskManager, create_web_challenge
 
 
@@ -168,10 +169,8 @@ def create_app():
         from .acm_api.backend_api import _session_identity
 
         identity = await _session_identity()
-        if identity:
-            if identity["must_change_password"]:
-                return redirect("/change-password.html")
-            return redirect("/admin.html" if identity["role"] in {"admin", "root"} else "/home.html")
+        if identity and identity["must_change_password"]:
+            return redirect("/change-password.html")
         return await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], "index.html")
 
     @app.get("/<path:filename>")
@@ -192,16 +191,17 @@ def create_app():
             return redirect("/change-password.html")
         if filename in _ADMIN_PAGES:
             if not identity:
-                return redirect("/index.html")
+                return redirect("/login.html")
             if identity["role"] not in {"admin", "root"}:
                 abort(403)
-        elif filename in _AUTH_PAGES:
-            if filename == "change-password.html" and not identity:
+        elif filename == "change-password.html":
+            if not identity:
+                return redirect("/login.html")
+        elif filename == "login.html":
+            if identity:
                 return redirect("/index.html")
-            if filename == "index.html" and identity:
-                return redirect("/admin.html" if identity["role"] in {"admin", "root"} else "/home.html")
-        elif not identity:
-            return redirect("/index.html")
+        elif filename not in _ANONYMOUS_PAGES and not identity:
+            return redirect("/login.html?next=/" + filename)
         return await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], filename)
 
     @app.after_request
@@ -236,19 +236,21 @@ def create_app():
 
     app.register_blueprint(api, url_prefix="/api")
     app.register_blueprint(bot_api, url_prefix="/internal/v1")
+    app.register_blueprint(forum_api, url_prefix="/api")
     app.sync_engine = sync_engine
     app.task_manager = task_manager
     return app
 
 
 _PUBLIC_PAGES = {
-    "index.html", "change-password.html", "home.html", "admin.html",
+    "index.html", "login.html", "post.html", "forum-moderation.html",
+    "change-password.html", "home.html", "admin.html",
     "leaderboard.html", "challenge.html", "reviews.html", "problem-bank.html",
     "submissions.html", "workspace.html", "contest-review.html", "member.html",
     "tasks.html", "settings.html",
 }
-_AUTH_PAGES = {"index.html", "change-password.html"}
-_ADMIN_PAGES = {"admin.html", "member.html", "tasks.html", "settings.html"}
+_ANONYMOUS_PAGES = {"index.html", "login.html", "post.html", "leaderboard.html"}
+_ADMIN_PAGES = {"admin.html", "member.html", "tasks.html", "settings.html", "forum-moderation.html"}
 
 
 app = create_app()
