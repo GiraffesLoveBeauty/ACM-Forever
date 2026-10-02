@@ -131,7 +131,20 @@ jobs:
               systemctl --user daemon-reload
               systemctl --user enable acm-forever-webui.service
               systemctl --user restart acm-forever-webui.service
-              echo "Started ACM-Forever WebUI on the configured port."
+              for attempt in $(seq 1 20); do
+                if systemctl --user is-active --quiet acm-forever-webui.service \
+                  && curl --fail --silent --show-error --max-time 3 \
+                    http://100.91.79.54:8088/health >/dev/null; then
+                  echo "ACM-Forever WebUI is healthy on port 8088."
+                  break
+                fi
+                if [ "$attempt" -eq 20 ]; then
+                  echo "ACM-Forever WebUI failed to become healthy. Recent service log:"
+                  journalctl --user -u acm-forever-webui.service -n 60 --no-pager
+                  exit 1
+                fi
+                sleep 2
+              done
             else
               echo "WebUI service not started: create $env_file before enabling deployment startup."
             fi
