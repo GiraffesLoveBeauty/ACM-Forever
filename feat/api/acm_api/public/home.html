@@ -1,18 +1,18 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>个人中心 · ACM Forever</title><link rel="stylesheet" href="/assets/app.css?v=community-3"><link rel="stylesheet" href="/assets/forum.css?v=community-3"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>个人中心 · ACM Forever</title><link rel="stylesheet" href="/assets/app.css?v=design-system-1"><link rel="stylesheet" href="/assets/forum.css?v=design-system-1"></head>
 <body class="forum-page personal-page">
   <header class="forum-header"><a class="forum-brand" href="/index.html"><span class="forum-brand-mark">A</span><span>ACM <b>Forever</b><small>长理 ACM 学习社区</small></span></a><nav class="nav primary-nav" aria-label="主导航"></nav><div class="forum-header-actions"><button class="btn" id="theme-toggle" aria-label="切换主题">◐</button><button class="btn" id="logout">退出</button></div></header>
   <main class="community-main personal-main">
-    <section class="personal-welcome"><div><span class="forum-kicker">YOUR ACM JOURNEY</span><h1 id="greeting">个人中心</h1><p>回看自己的刷题进度、账号绑定和社区参与。</p></div><a class="personal-rank-link" href="/leaderboard.html"><span>♛</span><span><b>看看大家的进度</b><small>进入社区排行榜 →</small></span></a></section>
+    <section class="personal-welcome"><div><h1 id="greeting">个人中心</h1><p>查看刷题进度、账号绑定和社区参与。</p></div><a class="personal-rank-link" href="/leaderboard.html"><span>社区排行榜</span><b>查看大家的进度　↗</b></a></section>
     <section class="profile-stat-grid grid kpis" id="stats"></section>
     <div class="personal-columns">
-      <section class="community-panel profile-details-panel"><div class="panel-heading"><div><span class="panel-eyebrow">PROFILE</span><h2>个人资料</h2></div><button class="btn" id="edit-name">修改昵称</button></div><p class="panel-caption">你的绑定账号和做题统计仅本人及管理员可见。</p><div id="profile" class="profile-binding-grid"></div></section>
-      <section class="community-panel recent-panel"><div class="panel-heading"><div><span class="panel-eyebrow">RECENT ACCEPTED</span><h2>最近 AC</h2></div><a class="panel-text-link" href="/submissions.html">提交时间线 →</a></div><div id="recent" class="list"><div class="empty">正在加载…</div></div></section>
+      <section class="community-panel profile-details-panel"><div class="panel-heading"><h2>个人资料</h2><button class="btn" id="edit-name">修改昵称</button></div><p class="panel-caption">绑定账号和做题统计仅本人及管理员可见。</p><div id="profile" class="profile-binding-grid"></div></section>
+      <section class="community-panel recent-panel"><div class="panel-heading"><h2>最近 AC</h2><a class="panel-text-link" href="/submissions.html">提交时间线　↗</a></div><div id="recent" class="list"><div class="empty">正在加载…</div></div></section>
     </div>
-    <section class="community-panel personal-community-panel"><div class="panel-heading"><div><span class="panel-eyebrow">YOUR COMMUNITY</span><h2>我的社区内容</h2></div><a class="panel-text-link" href="/index.html">去论坛逛逛 →</a></div><div class="personal-content-tabs"><button class="personal-content-tab active" data-forum-tab="posts">我的话题</button><button class="personal-content-tab" data-forum-tab="bookmarks">我的收藏</button></div><div id="my-forum-content" class="personal-content-list"><div class="empty">正在加载…</div></div></section>
+    <section class="community-panel personal-community-panel"><div class="panel-heading"><h2>我的社区内容</h2><a class="panel-text-link" href="/index.html">去论坛看看　↗</a></div><div class="personal-content-tabs"><button class="personal-content-tab active" data-forum-tab="posts">我的话题</button><button class="personal-content-tab" data-forum-tab="bookmarks">我的收藏</button></div><div id="my-forum-content" class="personal-content-list"><div class="empty">正在加载…</div></div></section>
   </main>
-  <script src="/assets/app.js?v=community-3"></script>
+  <script src="/assets/app.js?v=design-system-1"></script>
   <script>
     let profileData;
     async function loadForumContent(tab='posts'){
