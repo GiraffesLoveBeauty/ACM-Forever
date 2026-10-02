@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>我的训练首页 · ACM Compass</title><link rel="stylesheet" href="/assets/app.css?v=member-auth-1"></head>
+<body>
+  <div class="app">
+    <aside class="sidebar"><div class="brand"><b>✦</b> ACM Compass</div><nav class="nav"></nav></aside>
+    <main class="main">
+      <header class="topbar"><div><div class="eyebrow">Personal workspace</div><h1>我的训练首页</h1><span class="muted">个人资料、平台统计和最近 AC</span></div><div class="userbar"><a class="btn" href="/change-password.html">修改密码</a><button class="btn" id="theme-toggle">◐</button><button class="btn" id="logout">退出</button></div></header>
+      <section class="hero"><h2 id="greeting">欢迎回来</h2><p>你的训练记录只对你本人和 Web 管理员开放。</p></section>
+      <section class="grid kpis" id="stats"></section>
+      <section class="card" style="margin-top:18px"><div class="topbar"><h2>个人资料</h2><button class="btn" id="edit-name">修改昵称</button></div><div id="profile" class="list"></div></section>
+      <section class="card" style="margin-top:18px"><h2>最近 AC</h2><div id="recent" class="list"><div class="empty">正在加载…</div></div></section>
+    </main>
+  </div>
+  <script src="/assets/app.js?v=member-auth-1"></script>
+  <script>
+    let profileData;
+    async function load(){
+      try{
+        profileData=await api('/me/profile');const user=profileData.user;
+        document.getElementById('greeting').textContent='欢迎回来，'+user.name;
+        const counts=profileData.platform_counts||{};
+        document.getElementById('stats').innerHTML=`<div class="card"><div class="label">累计 AC</div><div class="value">${profileData.total_count||0}</div></div><div class="card"><div class="label">Codeforces</div><div class="value">${counts.codeforces||0}</div></div><div class="card"><div class="label">AtCoder</div><div class="value">${counts.atcoder||0}</div></div><div class="card"><div class="label">其他平台</div><div class="value">${Object.entries(counts).filter(([key])=>!['codeforces','atcoder'].includes(key)).reduce((sum,[,count])=>sum+count,0)}</div></div>`;
+        document.getElementById('profile').innerHTML=`<div class="list-item"><span>昵称</span><b>${esc(user.name)}</b></div><div class="list-item"><span>身份</span><b>${esc(user.status||'未设置')}</b></div><div class="list-item"><span>Codeforces</span><b>${esc(user.cf_handle||'未绑定')}</b></div><div class="list-item"><span>洛谷</span><b>${esc(user.luogu_id||'未绑定')}</b></div><div class="list-item"><span>AtCoder</span><b>${esc(user.atcoder_handle||'未绑定')}</b></div><div class="list-item"><span>牛客</span><b>${esc(user.nowcoder_id||'未绑定')}</b></div>`;
+        document.getElementById('recent').innerHTML=(profileData.recent_ac||[]).map(item=>`<div class="list-item"><span><b>${esc(item.problem_name||item.problem_id)}</b><br><small class="muted">${esc(item.platform)} · ${esc(item.problem_rating||'未知难度')} · ${new Date(item.submit_time*1000).toLocaleString()}</small></span>${item.problem_url?`<a class="btn" href="${esc(item.problem_url)}" target="_blank" rel="noopener noreferrer">打开题目</a>`:''}</div>`).join('')||'<div class="empty">暂无 AC 记录</div>';
+      }catch(error){document.getElementById('recent').innerHTML=`<div class="empty">${esc(error.message)}</div>`}
+    }
+    document.getElementById('edit-name').onclick=async()=>{const name=prompt('请输入新昵称',profileData?.user?.name||'');if(!name)return;try{await api('/me/profile',{method:'PUT',body:JSON.stringify({name})});await load()}catch(error){alert(error.message)}};
+    window.PAGE_LOAD=load;
+  </script>
+</body>
+</html>

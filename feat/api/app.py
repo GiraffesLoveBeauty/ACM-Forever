@@ -5,7 +5,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-from quart import Quart, jsonify, request
+from quart import Quart, abort, jsonify, redirect, request, send_from_directory
 
 from .acm_api.backend_api import api
 from .acm_api.bot_api import bot_api
@@ -51,12 +51,18 @@ def _write_admins(db_path, root_ids, admins):
 
 
 def create_app():
-    app = Quart(__name__)
+    app = Quart(__name__, static_folder=None)
     db_path = Path(os.getenv("ACM_DATABASE_PATH", "./data/acm_forever.db")).expanduser()
     secret_key = os.getenv("ACM_WEBUI_SECRET_KEY", "").strip()
     app.secret_key = secret_key
+    app.config.update(
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Strict",
+        SESSION_COOKIE_SECURE=_bool_env("ACM_WEBUI_COOKIE_SECURE", False),
+    )
     app.config["DB_PATH"] = str(db_path)
     app.config["BOT_API_TOKEN"] = os.getenv("ACM_BOT_API_TOKEN", "").strip()
+    app.config["WEBUI_PUBLIC_DIR"] = Path(__file__).parent / "acm_api" / "public"
     root_ids = _csv_env("ACM_ROOT_QQ_IDS")
     initial_admin_ids = _csv_env("ACM_ADMIN_QQ_IDS")
     crawler_config = {
@@ -156,6 +162,47 @@ def create_app():
             await db.close()
         return jsonify({"status": "ok"})
 
+    @app.get("/")
+    async def webui_index():
+        from .acm_api.backend_api import _session_identity
+
+        identity = await _session_identity()
+        if identity:
+            if identity["must_change_password"]:
+                return redirect("/change-password.html")
+            return redirect("/admin.html" if identity["role"] in {"admin", "root"} else "/home.html")
+        return await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], "index.html")
+
+    @app.get("/<path:filename>")
+    async def webui_static(filename):
+        filename = filename.replace("\\", "/")
+        extension = Path(filename).suffix.lower()
+        if filename.startswith("assets/") and extension in {
+            ".css", ".js", ".png", ".jpg", ".jpeg", ".svg", ".woff", ".woff2", ".otf", ".ico",
+        }:
+            return await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], filename)
+        if filename not in _PUBLIC_PAGES:
+            abort(404)
+
+        from .acm_api.backend_api import _session_identity
+
+        identity = await _session_identity()
+        if identity and identity["must_change_password"] and filename != "change-password.html":
+            return redirect("/change-password.html")
+        if filename in _ADMIN_PAGES:
+            if not identity:
+                return redirect("/index.html")
+            if identity["role"] not in {"admin", "root"}:
+                abort(403)
+        elif filename in _AUTH_PAGES:
+            if filename == "change-password.html" and not identity:
+                return redirect("/index.html")
+            if filename == "index.html" and identity:
+                return redirect("/admin.html" if identity["role"] in {"admin", "root"} else "/home.html")
+        elif not identity:
+            return redirect("/index.html")
+        return await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], filename)
+
     @app.after_request
     async def add_security_headers(response):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -169,6 +216,10 @@ def create_app():
         )
         if response.content_type == "application/json":
             response.headers.setdefault("Cache-Control", "no-store")
+        elif response.content_type and response.content_type.startswith("text/html"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
         origin = request.headers.get("Origin", "")
         if origin and origin in plugin_config["web_allowed_origins"]:
             response.headers["Access-Control-Allow-Origin"] = origin
@@ -187,6 +238,16 @@ def create_app():
     app.sync_engine = sync_engine
     app.task_manager = task_manager
     return app
+
+
+_PUBLIC_PAGES = {
+    "index.html", "change-password.html", "home.html", "admin.html",
+    "leaderboard.html", "challenge.html", "reviews.html", "problem-bank.html",
+    "submissions.html", "workspace.html", "contest-review.html", "member.html",
+    "tasks.html", "settings.html",
+}
+_AUTH_PAGES = {"index.html", "change-password.html"}
+_ADMIN_PAGES = {"admin.html", "member.html", "tasks.html", "settings.html"}
 
 
 app = create_app()

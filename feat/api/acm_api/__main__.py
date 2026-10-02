@@ -10,7 +10,7 @@ from .app import app
 def main():
     config = Config()
     host = os.getenv("ACM_API_HOST", "127.0.0.1")
-    port = os.getenv("ACM_API_PORT", "8090")
+    port = os.getenv("ACM_API_PORT", "8088")
     config.bind = [f"{host}:{port}"]
     config.accesslog = "-"
     config.errorlog = "-"

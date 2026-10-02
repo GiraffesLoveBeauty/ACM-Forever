@@ -1,0 +1,14 @@
+[Unit]
+Description=ACM-Forever WebUI and API
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/WYJ/acm-forever-feat/api
+EnvironmentFile=/home/WYJ/acm-forever-data/.env
+ExecStart=/home/WYJ/acm-forever-data/venv/bin/python -m acm_api
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
