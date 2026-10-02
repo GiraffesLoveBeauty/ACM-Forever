@@ -46,16 +46,23 @@ class SyncEngine(SyncMixin):
     def _crawler_config(self):
         return self.crawler_config
 
-    async def sync_account(self, qq_id, platforms, task):
+    async def sync_account(self, qq_id, platforms, task, days=0):
         task["status"] = "running"
         task["started_at"] = int(time.time())
         results = {}
         try:
             async with self._sync_cycle_lock:
                 for platform in platforms:
-                    results[platform] = await self.sync_single_platform_for_days(
-                        qq_id, platform, 0
-                    )
+                    try:
+                        results[platform] = await self.sync_single_platform_for_days(
+                            qq_id, platform, days
+                        )
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        # A failure on one OJ should not discard results from
+                        # the other platforms in this account sync task.
+                        results[platform] = -3
             task["result"] = results
             task["status"] = (
                 "completed"
@@ -71,13 +78,50 @@ class SyncEngine(SyncMixin):
         finally:
             task["finished_at"] = int(time.time())
 
+    async def sync_all_accounts(self, task, days=0):
+        """Run the configured platforms for all users as one serialized API task."""
+        task["status"] = "running"
+        task["started_at"] = int(time.time())
+        results = {}
+        try:
+            async with self._sync_cycle_lock:
+                async with self.db.execute(
+                    "SELECT qq_id FROM users WHERE cf_handle IS NOT NULL OR luogu_id IS NOT NULL "
+                    "OR nowcoder_id IS NOT NULL OR atcoder_handle IS NOT NULL OR cjlu_username IS NOT NULL "
+                    "ORDER BY qq_id"
+                ) as cursor:
+                    qq_ids = [row["qq_id"] for row in await cursor.fetchall()]
+                for qq_id in qq_ids:
+                    results[str(qq_id)] = {}
+                    for platform in ("codeforces", "luogu", "nowcoder", "atcoder", "cjlu"):
+                        try:
+                            count = await self.sync_single_platform_for_days(
+                                qq_id, platform, days
+                            )
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:
+                            count = -1
+                        if count is not None and count != -2:
+                            results[str(qq_id)][platform] = count
+            task["result"] = results
+            task["status"] = "completed"
+        except asyncio.CancelledError:
+            task["status"] = "cancelled"
+            raise
+        except Exception as exc:
+            task["status"] = "failed"
+            task["result"] = {"error": str(exc)[:500]}
+        finally:
+            task["finished_at"] = int(time.time())
+
 
 class WebTaskManager:
     def __init__(self, sync_engine: SyncEngine):
         self.sync_engine = sync_engine
         self.tasks = {}
 
-    def submit_account_sync(self, qq_id, platforms):
+    def submit_account_sync(self, qq_id, platforms, days=0):
         normalized = []
         for platform in platforms or ():
             value = "codeforces" if platform == "cf" else str(platform).strip()
@@ -87,13 +131,18 @@ class WebTaskManager:
         if not normalized:
             return None
 
+        try:
+            days = max(0, min(3650, int(days)))
+        except (TypeError, ValueError):
+            days = 0
+
         task_id = uuid.uuid4().hex[:12]
         item = {
             "id": task_id,
             "kind": "账号全量同步",
             "qq_id": str(qq_id),
             "platform": ",".join(normalized),
-            "days": 0,
+            "days": days,
             "status": "queued",
             "started_at": None,
             "finished_at": None,
@@ -101,7 +150,35 @@ class WebTaskManager:
         }
         self.tasks[task_id] = item
         item["_task"] = asyncio.create_task(
-            self.sync_engine.sync_account(str(qq_id), normalized, item)
+            self.sync_engine.sync_account(str(qq_id), normalized, item, days=days)
+        )
+        return {"id": task_id}
+
+    def submit_all_accounts_sync(self, days=0):
+        if any(
+            item.get("status") in {"queued", "running"}
+            for item in self.tasks.values()
+        ):
+            return None
+        try:
+            days = max(0, min(3650, int(days)))
+        except (TypeError, ValueError):
+            days = 0
+        task_id = uuid.uuid4().hex[:12]
+        item = {
+            "id": task_id,
+            "kind": "全员平台同步",
+            "qq_id": "*",
+            "platform": "all",
+            "days": days,
+            "status": "queued",
+            "started_at": None,
+            "finished_at": None,
+            "result": None,
+        }
+        self.tasks[task_id] = item
+        item["_task"] = asyncio.create_task(
+            self.sync_engine.sync_all_accounts(item, days=days)
         )
         return {"id": task_id}
 
