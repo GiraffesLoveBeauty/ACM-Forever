@@ -12,14 +12,15 @@
 
 ## 本地启动
 
-在此目录安装 `requirements.txt` 中的依赖，复制 `.env.example` 为 `.env` 并填入随机密钥，然后从 `feat/api` 目录运行：
+在 `feat/` 目录安装 `api/requirements.txt` 中的依赖，并在当前终端设置环境变量后启动：
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-Copy-Item .env.example .env
-python -m acm_api
+pip install -r api\requirements.txt
+$env:ACM_WEBUI_SECRET_KEY = "本地随机密钥"
+$env:ACM_DATABASE_PATH = ".\data\acm_forever.db"
+python -m api
 ```
 
 服务默认监听 `127.0.0.1:8088`，同时提供独立 WebUI 和 API，沿用梓喵原 WebUI 端口。生产环境通过反向代理提供 HTTPS 和访问控制；若需要通过服务器地址直接访问，应按服务器防火墙策略设置 `ACM_API_HOST`。

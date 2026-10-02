@@ -4,9 +4,9 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/WYJ/acm-forever-feat/api
+WorkingDirectory=/home/WYJ/acm-forever-feat
 EnvironmentFile=/home/WYJ/acm-forever-data/.env
-ExecStart=/home/WYJ/acm-forever-data/venv/bin/python -m acm_api
+ExecStart=/home/WYJ/acm-forever-data/venv/bin/python -m api
 Restart=on-failure
 RestartSec=5
 
