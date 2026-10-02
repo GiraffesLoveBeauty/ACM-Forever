@@ -3,12 +3,14 @@ name: API tests
 on:
   pull_request:
     paths:
+      - "docs/api.md"
       - "feat/api/**"
       - ".github/workflows/api-tests.yml"
   push:
     branches:
       - main
     paths:
+      - "docs/api.md"
       - "feat/api/**"
       - ".github/workflows/api-tests.yml"
   workflow_dispatch:

@@ -10,7 +10,7 @@
 - `/internal/v1/*`：供受信任的梓喵服务使用的机器接口，使用 `Authorization: Bearer <ACM_BOT_API_TOKEN>` 认证，覆盖成员资料与绑定、提交和统计查询、排行榜与速报、训练和挑战、推荐题目、播报设置、账号验证及同步任务。
 - `/health`：服务和数据库健康检查。
 
-梓喵适配器通过 HTTP 客户端调用 `/internal/v1/*`，SQLite、OJ 凭据和数据同步由本服务持有。Web 端通过 `/api/*` 调用同一服务。接口的认证方式、常用请求和 Python 示例见 [API 调用指南](docs/api-guide.md)。
+梓喵适配器通过 HTTP 客户端调用 `/internal/v1/*`，SQLite、OJ 凭据和数据同步由本服务持有。Web 端通过 `/api/*` 调用同一服务。接口的认证方式、常用请求和 Python 示例见仓库根目录 `docs/` 中的 [api.md](../../docs/api.md)。
 
 ## 本地启动
 
@@ -72,7 +72,7 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 
 ## 接口概览
 
-接口概览只列出主要路由；参数、认证方式和可运行的 Python 示例见 [API 调用指南](docs/api-guide.md)。
+接口概览只列出主要路由；参数、认证方式和可运行的 Python 示例见仓库根目录 `docs/` 中的 [api.md](../../docs/api.md)。
 
 WebUI API 以原 WebUI 路由为兼容基线。常用路由包括：
 
