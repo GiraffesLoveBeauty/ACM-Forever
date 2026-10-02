@@ -1,0 +1,119 @@
+# Required repository secrets:
+# - TS_AUTHKEY: Tailscale auth key for the GitHub Actions runner.
+# - ACM_FOREVER_SERVER_SSH_KEY: private SSH key authorized for WYJ@100.91.79.54.
+name: Sync feat directory to server
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'feat/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: acm-forever-feat-sync
+  cancel-in-progress: false
+
+env:
+  SERVER_HOST: 100.91.79.54
+  SERVER_USER: WYJ
+  SERVER_PORT: 22
+  ARCHIVE_NAME: acm-forever-feat.tar.gz
+
+jobs:
+  sync:
+    name: Sync feat directory
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TS_AUTHKEY }}
+          tags: tag:ci
+
+      - name: Verify server connection
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..12}; do
+            if timeout 5 bash -c "</dev/tcp/${SERVER_HOST}/${SERVER_PORT}" 2>/dev/null; then
+              echo "Server is reachable."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Unable to reach ${SERVER_HOST}:${SERVER_PORT} through Tailscale."
+          exit 1
+
+      - name: Package feat directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -czf "${ARCHIVE_NAME}" -C feat .
+          test -s "${ARCHIVE_NAME}"
+          tar -tzf "${ARCHIVE_NAME}" >/dev/null
+
+      - name: Upload archive
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ env.SERVER_HOST }}
+          username: ${{ env.SERVER_USER }}
+          key: ${{ secrets.ACM_FOREVER_SERVER_SSH_KEY }}
+          port: ${{ env.SERVER_PORT }}
+          source: ${{ env.ARCHIVE_NAME }}
+          target: /tmp/
+          overwrite: true
+          timeout: 60s
+          command_timeout: 5m
+
+      - name: Install feat directory
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ env.SERVER_HOST }}
+          username: ${{ env.SERVER_USER }}
+          key: ${{ secrets.ACM_FOREVER_SERVER_SSH_KEY }}
+          port: ${{ env.SERVER_PORT }}
+          timeout: 60s
+          command_timeout: 5m
+          script_stop: true
+          script: |
+            set -eu
+
+            target="/home/WYJ/acm-forever-feat"
+            archive="/tmp/acm-forever-feat.tar.gz"
+            stage="$(mktemp -d /home/WYJ/.acm-forever-feat.stage.XXXXXX)"
+            backup="/home/WYJ/.acm-forever-feat.backup.$$"
+            had_previous=0
+
+            cleanup() {
+              status=$?
+              if [ "$status" -ne 0 ] && [ "$had_previous" -eq 1 ] && [ ! -e "$target" ] && [ -e "$backup" ]; then
+                mv "$backup" "$target"
+              fi
+              rm -rf "$stage"
+              rm -f "$archive"
+              if [ "$status" -eq 0 ] && [ "$had_previous" -eq 1 ]; then
+                rm -rf "$backup"
+              fi
+              exit "$status"
+            }
+            trap cleanup EXIT
+
+            test -s "$archive"
+            tar -tzf "$archive" >/dev/null
+            tar -xzf "$archive" -C "$stage"
+
+            if [ -e "$target" ]; then
+              mv "$target" "$backup"
+              had_previous=1
+            fi
+            mv "$stage" "$target"
+            echo "Synced feat directory to $target"
