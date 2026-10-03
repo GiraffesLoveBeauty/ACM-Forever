@@ -1678,7 +1678,7 @@ async def api_me_avatar():
             return jsonify({"success": False, "message": "头像图片不能超过 2 MB。"}), 413
         extension = _avatar_format(contents)
         if not extension:
-            return jsonify({"success": False, "message": "请上传有效图片，最长边不超过 4096 像素。"}), 400
+            return jsonify({"success": False, "message": "请上传有效图片，最长边不超过 4096 像素且总像素数不超过 1600 万。"}), 400
         upload_dir.mkdir(parents=True, exist_ok=True)
         filename = secrets.token_hex(16) + "." + extension
         new_path = upload_dir / filename

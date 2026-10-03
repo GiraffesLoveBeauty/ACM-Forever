@@ -22,7 +22,7 @@
       const bitmap=await createImageBitmap(file);
       try{
         const longest=Math.max(bitmap.width,bitmap.height);
-        if(file.size<=avatarTargetBytes&&longest<=4096&&['image/png','image/jpeg','image/webp'].includes(file.type))return file;
+        if(file.size<=avatarTargetBytes&&longest<=4096&&bitmap.width*bitmap.height<=16_000_000&&['image/png','image/jpeg','image/webp'].includes(file.type))return file;
         let edge=Math.min(1400,longest),quality=.86,outputType='image/webp',lastBlob=null;
         for(let attempt=0;attempt<14;attempt++){
           const scale=Math.min(1,edge/longest),canvas=document.createElement('canvas');
