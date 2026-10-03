@@ -168,6 +168,170 @@ async def my_posts():
         await db.close()
 
 
+def _draft_fields(data):
+    if not isinstance(data, dict):
+        return None, "请求格式无效。"
+    title_value = data.get("title", "")
+    body_value = data.get("body", "")
+    if not isinstance(title_value, str) or not isinstance(body_value, str):
+        return None, "标题和正文必须是文本。"
+    title = title_value.strip()
+    body = body_value
+    if len(title) > 120:
+        return None, "标题不能超过 120 个字符。"
+    if len(body) > 20000:
+        return None, "正文不能超过 20000 个字符。"
+    category_value = data.get("category_id")
+    if category_value in (None, "", 0, "0"):
+        category_id = None
+    else:
+        try:
+            category_id = int(category_value)
+        except (TypeError, ValueError):
+            return None, "请选择有效的帖子分类。"
+        if category_id <= 0:
+            return None, "请选择有效的帖子分类。"
+    return {"title": title, "body": body, "category_id": category_id}, None
+
+
+@forum_api.get("/forum/drafts")
+@member_required
+async def forum_drafts():
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT d.id,d.title,d.category_id,c.name AS category_name,d.created_at,d.updated_at "
+            "FROM forum_drafts d LEFT JOIN forum_categories c ON c.id=d.category_id "
+            "WHERE d.author_qq_id=? ORDER BY d.updated_at DESC,d.id DESC LIMIT 100",
+            (request.web_identity["qq_id"],),
+        ) as cursor:
+            return jsonify([dict(row) for row in await cursor.fetchall()])
+    finally:
+        await db.close()
+
+
+@forum_api.post("/forum/drafts")
+@member_required
+async def create_forum_draft():
+    data, error = _draft_fields(await request.get_json(silent=True) or {})
+    if error:
+        return jsonify({"message": error}), 400
+    db = await get_db()
+    try:
+        if data["category_id"] is not None:
+            async with db.execute("SELECT 1 FROM forum_categories WHERE id=?", (data["category_id"],)) as cursor:
+                if not await cursor.fetchone():
+                    return jsonify({"message": "请选择有效的帖子分类。"}), 400
+        now = int(time.time())
+        cursor = await db.execute(
+            "INSERT INTO forum_drafts(author_qq_id,category_id,title,body,created_at,updated_at) "
+            "VALUES(?,?,?,?,?,?)",
+            (request.web_identity["qq_id"], data["category_id"], data["title"], data["body"], now, now),
+        )
+        await db.commit()
+        return jsonify({"id": cursor.lastrowid, "updated_at": now, "message": "草稿已保存。"}), 201
+    finally:
+        await db.close()
+
+
+@forum_api.get("/forum/drafts/<int:draft_id>")
+@member_required
+async def get_forum_draft(draft_id):
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT d.id,d.category_id,d.title,d.body,d.created_at,d.updated_at "
+            "FROM forum_drafts d WHERE d.id=? AND d.author_qq_id=?",
+            (draft_id, request.web_identity["qq_id"]),
+        ) as cursor:
+            draft = await cursor.fetchone()
+        if not draft:
+            return jsonify({"message": "草稿不存在。"}), 404
+        return jsonify(dict(draft))
+    finally:
+        await db.close()
+
+
+@forum_api.put("/forum/drafts/<int:draft_id>")
+@member_required
+async def update_forum_draft(draft_id):
+    data, error = _draft_fields(await request.get_json(silent=True) or {})
+    if error:
+        return jsonify({"message": error}), 400
+    db = await get_db()
+    try:
+        if data["category_id"] is not None:
+            async with db.execute("SELECT 1 FROM forum_categories WHERE id=?", (data["category_id"],)) as cursor:
+                if not await cursor.fetchone():
+                    return jsonify({"message": "请选择有效的帖子分类。"}), 400
+        now = int(time.time())
+        cursor = await db.execute(
+            "UPDATE forum_drafts SET category_id=?,title=?,body=?,updated_at=? "
+            "WHERE id=? AND author_qq_id=?",
+            (data["category_id"], data["title"], data["body"], now, draft_id, request.web_identity["qq_id"]),
+        )
+        if cursor.rowcount == 0:
+            return jsonify({"message": "草稿不存在。"}), 404
+        await db.commit()
+        return jsonify({"id": draft_id, "updated_at": now, "message": "草稿已保存。"})
+    finally:
+        await db.close()
+
+
+@forum_api.delete("/forum/drafts/<int:draft_id>")
+@member_required
+async def delete_forum_draft(draft_id):
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "DELETE FROM forum_drafts WHERE id=? AND author_qq_id=?",
+            (draft_id, request.web_identity["qq_id"]),
+        )
+        if cursor.rowcount == 0:
+            return jsonify({"message": "草稿不存在。"}), 404
+        await db.commit()
+        return jsonify({"message": "草稿已删除。"})
+    finally:
+        await db.close()
+
+
+@forum_api.post("/forum/drafts/<int:draft_id>/submit")
+@member_required
+async def submit_forum_draft(draft_id):
+    qq_id = request.web_identity["qq_id"]
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT id,category_id,title,body FROM forum_drafts WHERE id=? AND author_qq_id=?",
+            (draft_id, qq_id),
+        ) as cursor:
+            draft = await cursor.fetchone()
+        if not draft:
+            return jsonify({"message": "草稿不存在。"}), 404
+        title, body, category_id = draft["title"].strip(), draft["body"].strip(), draft["category_id"]
+        if not 4 <= len(title) <= 120:
+            return jsonify({"message": "标题长度需要在 4 到 120 个字符之间。"}), 400
+        if not 5 <= len(body) <= 20000:
+            return jsonify({"message": "正文长度需要在 5 到 20000 个字符之间。"}), 400
+        if not category_id:
+            return jsonify({"message": "请选择帖子分类后再提交。"}), 400
+        async with db.execute("SELECT 1 FROM forum_categories WHERE id=?", (category_id,)) as cursor:
+            if not await cursor.fetchone():
+                return jsonify({"message": "请选择有效的帖子分类。"}), 400
+        now = int(time.time())
+        cursor = await db.execute(
+            "INSERT INTO forum_posts(author_qq_id,category_id,title,body,status,created_at,updated_at) "
+            "VALUES(?,?,?,?,'pending',?,?)",
+            (qq_id, category_id, title, body, now, now),
+        )
+        post_id = cursor.lastrowid
+        await db.execute("DELETE FROM forum_drafts WHERE id=? AND author_qq_id=?", (draft_id, qq_id))
+        await db.commit()
+        return jsonify({"id": post_id, "status": "pending", "message": "帖子已提交，审核通过后会出现在论坛。"}), 201
+    finally:
+        await db.close()
+
+
 @forum_api.post("/forum/posts")
 @member_required
 async def create_post():

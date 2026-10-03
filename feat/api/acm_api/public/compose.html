@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>写话题 · ACM Forever</title>
+  <link rel="stylesheet" href="/assets/app.css?v=markdown-composer-1">
+  <link rel="stylesheet" href="/assets/forum.css?v=markdown-composer-1">
+</head>
+<body class="forum-page compose-page">
+  <header class="forum-header">
+    <a class="forum-brand" href="/index.html"><img class="icpc-brand-logo" src="/assets/icpc-logo.png" alt="ICPC 官方标志"><span>ACM <b>Forever</b><small>计量 ACMer 学习社区</small></span></a>
+    <nav class="nav primary-nav" aria-label="主导航"></nav>
+    <div class="forum-header-actions"><button class="btn" id="theme-toggle" aria-label="切换主题">◐</button><button class="btn" id="logout">退出</button></div>
+  </header>
+
+  <main class="compose-main">
+    <div class="compose-topline"><a href="/index.html">← 返回论坛</a><span class="compose-save-state" id="save-state" role="status">新话题尚未保存</span></div>
+    <div class="compose-grid">
+      <section class="compose-editor-panel">
+        <div class="compose-heading"><span class="panel-eyebrow">WRITE SOMETHING GOOD</span><h1>发布新话题</h1><p>写下问题、题解或训练心得。草稿会自动保存到你的账号。</p></div>
+        <label class="compose-field">选择版块<select id="draft-category"><option value="">选择一个版块</option></select></label>
+        <label class="compose-field">话题标题<input id="draft-title" maxlength="120" placeholder="用一句话概括你想讨论的内容"></label>
+        <section class="compose-body-field" aria-label="话题正文">
+          <div class="compose-body-label"><span>正文 <small>支持 Markdown</small></span><div class="compose-view-tabs"><button type="button" class="active" data-compose-view="write">编辑</button><button type="button" data-compose-view="preview">预览</button></div></div>
+          <div class="markdown-toolbar" role="toolbar" aria-label="Markdown 格式工具">
+            <button type="button" data-markdown="h1" title="一级标题">H1</button>
+            <button type="button" data-markdown="h2" title="二级标题">H2</button>
+            <span class="toolbar-divider"></span>
+            <button type="button" data-markdown="bold" title="加粗"><b>B</b></button>
+            <button type="button" data-markdown="italic" title="斜体"><i>I</i></button>
+            <button type="button" data-markdown="strike" title="删除线"><s>S</s></button>
+            <span class="toolbar-divider"></span>
+            <button type="button" data-markdown="quote" title="引用">❝</button>
+            <button type="button" data-markdown="ul" title="无序列表">• 列表</button>
+            <button type="button" data-markdown="ol" title="有序列表">1. 列表</button>
+            <button type="button" data-markdown="code" title="行内代码">&lt;/&gt;</button>
+            <button type="button" data-markdown="codeblock" title="代码块">代码块</button>
+            <button type="button" data-markdown="link" title="插入链接">链接</button>
+          </div>
+          <textarea id="draft-body" maxlength="20000" rows="18" placeholder="从这里开始写…&#10;&#10;你可以使用工具栏插入标题、粗体、列表或代码块，也可以直接写 Markdown。" spellcheck="true"></textarea>
+          <article id="draft-preview" class="forum-markdown compose-preview" hidden></article>
+          <div class="compose-editor-foot"><span>支持标题、粗体、斜体、引用、列表、代码、链接等常用 Markdown 语法。</span><span id="body-count">0 / 20000</span></div>
+        </section>
+        <p class="compose-form-message" id="compose-message" role="alert"></p>
+        <div class="compose-actions">
+          <button class="btn compose-delete" id="delete-draft" type="button" hidden>删除草稿</button>
+          <button class="btn" id="save-draft" type="button">保存草稿</button>
+          <button class="btn primary" id="submit-draft" type="button">提交审核</button>
+        </div>
+      </section>
+
+      <aside class="compose-side">
+        <section class="compose-side-card compose-drafts-card">
+          <div class="compose-side-heading"><div><span class="panel-eyebrow">YOUR WORK</span><h2>我的草稿</h2></div><a href="/compose.html">＋ 新建</a></div>
+          <div id="draft-list" class="compose-draft-list"><div class="empty">正在读取草稿…</div></div>
+        </section>
+        <section class="compose-side-card compose-markdown-guide">
+          <span class="panel-eyebrow">QUICK GUIDE</span><h2>Markdown 小抄</h2>
+          <div><code># 一级标题</code><code>## 二级标题</code><code>**重点内容**</code><code>*强调内容*</code><code>`代码片段`</code><code>- 列表项目</code></div>
+          <p>编辑时随时切换到“预览”，确认格式后再提交。</p>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <script src="/assets/vendor/marked.min.js"></script>
+  <script src="/assets/vendor/purify.min.js"></script>
+  <script src="/assets/forum-markdown.js?v=markdown-composer-1"></script>
+  <script src="/assets/app.js?v=forum-directory-7"></script>
+  <script>
+    const titleInput=document.getElementById('draft-title');
+    const bodyInput=document.getElementById('draft-body');
+    const categoryInput=document.getElementById('draft-category');
+    const saveState=document.getElementById('save-state');
+    const messageBox=document.getElementById('compose-message');
+    const draftList=document.getElementById('draft-list');
+    const queryDraftId=new URLSearchParams(location.search).get('draft_id');
+    let draftId=queryDraftId&&/^\d+$/.test(queryDraftId)?Number(queryDraftId):null;
+    let revision=0,savedRevision=-1,saveTimer=null,savePromise=null;
+
+    function draftPayload(){return {title:titleInput.value,body:bodyInput.value,category_id:categoryInput.value||null}}
+    function setSaveState(text,kind=''){saveState.textContent=text;saveState.dataset.state=kind}
+    function updatePreview(){document.getElementById('draft-preview').innerHTML=window.renderForumMarkdown(bodyInput.value);document.getElementById('body-count').textContent=`${bodyInput.value.length} / 20000`}
+    function formatTime(value){if(!value)return '刚刚';return new Date(Number(value)*1000).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+    async function loadDraftList(){
+      try{
+        const rows=await api('/forum/drafts');
+        draftList.innerHTML=rows.map(item=>`<a class="compose-draft-item ${Number(item.id)===draftId?'active':''}" href="/compose.html?draft_id=${Number(item.id)}"><span class="compose-draft-icon">✎</span><span class="compose-draft-copy"><b>${esc(item.title||'未命名草稿')}</b><small>${esc(item.category_name||'未选择版块')} · ${formatTime(item.updated_at)}</small></span></a>`).join('')||'<div class="empty">还没有保存的草稿。</div>';
+      }catch(error){draftList.innerHTML=`<div class="empty">${esc(error.message)}</div>`}
+    }
+    async function saveDraft(force=false){
+      if(savePromise){await savePromise;if(savedRevision<revision)return saveDraft(force);return draftId}
+      if(!force&&draftId===null&&revision===0)return null;
+      if(draftId!==null&&savedRevision===revision)return draftId;
+      const currentRevision=revision;
+      setSaveState('正在保存…','saving');messageBox.textContent='';
+      savePromise=(async()=>{
+        const result=draftId===null
+          ?await api('/forum/drafts',{method:'POST',body:JSON.stringify(draftPayload())})
+          :await api(`/forum/drafts/${draftId}`,{method:'PUT',body:JSON.stringify(draftPayload())});
+        draftId=Number(result.id);
+        savedRevision=currentRevision;
+        document.getElementById('delete-draft').hidden=false;
+        history.replaceState(null,'',`/compose.html?draft_id=${draftId}`);
+        setSaveState(`已保存 · ${formatTime(result.updated_at)}`,'saved');
+        await loadDraftList();
+      })();
+      try{await savePromise}catch(error){setSaveState('保存失败，请重试','error');messageBox.textContent=error.message;throw error}finally{savePromise=null}
+      if(savedRevision<revision)return saveDraft(force);
+      return draftId;
+    }
+    function scheduleSave(){revision++;setSaveState('有未保存的修改','dirty');messageBox.textContent='';updatePreview();clearTimeout(saveTimer);saveTimer=setTimeout(()=>saveDraft().catch(()=>{}),900)}
+    function applyMarkdown(kind){
+      const start=bodyInput.selectionStart,end=bodyInput.selectionEnd;
+      const selected=bodyInput.value.slice(start,end);
+      const presets={bold:['**','**','重点内容'],italic:['*','*','强调内容'],strike:['~~','~~','删除线内容'],code:['`','`','code'],link:['[','](https://)','链接文字'],h1:['# ','','一级标题'],h2:['## ','','二级标题'],quote:['> ','','引用内容'],ul:['- ','','列表项目'],ol:['1. ','','列表项目'],codeblock:['```\n','\n```','在这里写代码']};
+      const [before,after,placeholder]=presets[kind]||[];
+      if(!before)return;
+      let replacement;
+      if(['h1','h2','quote','ul','ol'].includes(kind)){
+        const source=selected||placeholder;
+        replacement=source.split('\n').map(line=>before+line).join('\n');
+      }else replacement=before+(selected||placeholder)+after;
+      bodyInput.setRangeText(replacement,start,end,'select');bodyInput.focus();scheduleSave();
+    }
+    async function loadCategories(){
+      const rows=await api('/forum/categories');
+      categoryInput.innerHTML='<option value="">选择一个版块</option>'+rows.map(item=>`<option value="${Number(item.id)}">${esc(item.name)}</option>`).join('');
+    }
+    async function loadCurrentDraft(){
+      if(draftId===null){savedRevision=0;document.getElementById('delete-draft').hidden=true;setSaveState('新话题尚未保存');return}
+      const draft=await api(`/forum/drafts/${draftId}`);
+      titleInput.value=draft.title||'';bodyInput.value=draft.body||'';categoryInput.value=draft.category_id||'';
+      revision=0;savedRevision=0;document.getElementById('delete-draft').hidden=false;
+      setSaveState(`已保存 · ${formatTime(draft.updated_at)}`,'saved');updatePreview();
+    }
+    async function submitDraft(){
+      const button=document.getElementById('submit-draft');button.disabled=true;messageBox.textContent='';
+      try{const id=await saveDraft(true);const result=await api(`/forum/drafts/${id}/submit`,{method:'POST',body:JSON.stringify({})});setSaveState('已提交审核','saved');messageBox.classList.add('success');messageBox.textContent=result.message;setTimeout(()=>location.href='/index.html',1100)}
+      catch(error){messageBox.classList.remove('success');messageBox.textContent=error.message;button.disabled=false}
+    }
+    async function deleteDraft(){
+      if(draftId===null)return;
+      if(!confirm('确定删除这篇草稿吗？'))return;
+      try{await api(`/forum/drafts/${draftId}`,{method:'DELETE'});draftId=null;revision=0;savedRevision=-1;titleInput.value='';bodyInput.value='';categoryInput.value='';history.replaceState(null,'','/compose.html');document.getElementById('delete-draft').hidden=true;setSaveState('新话题尚未保存');updatePreview();await loadDraftList()}
+      catch(error){messageBox.textContent=error.message}
+    }
+    function showView(view){
+      const writing=view==='write';bodyInput.hidden=!writing;document.getElementById('draft-preview').hidden=writing;
+      document.querySelectorAll('[data-compose-view]').forEach(button=>button.classList.toggle('active',button.dataset.composeView===view));
+      if(!writing)updatePreview();
+    }
+    window.PAGE_LOAD=async()=>{
+      try{await loadCategories();await loadCurrentDraft();await loadDraftList()}
+      catch(error){messageBox.textContent=error.message;setSaveState('编辑器加载失败','error')}
+      updatePreview();
+    };
+    [titleInput,bodyInput,categoryInput].forEach(input=>input.addEventListener('input',scheduleSave));
+    categoryInput.addEventListener('change',scheduleSave);
+    document.querySelectorAll('[data-markdown]').forEach(button=>button.addEventListener('click',()=>{showView('write');applyMarkdown(button.dataset.markdown)}));
+    document.querySelectorAll('[data-compose-view]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.composeView)));
+    document.getElementById('save-draft').addEventListener('click',()=>saveDraft(true).catch(()=>{}));
+    document.getElementById('submit-draft').addEventListener('click',submitDraft);
+    document.getElementById('delete-draft').addEventListener('click',deleteDraft);
+    window.addEventListener('pagehide',()=>{
+      clearTimeout(saveTimer);
+      if(savePromise||savedRevision===revision||(!draftId&&revision===0))return;
+      const method=draftId?'PUT':'POST',path=draftId?`/forum/drafts/${draftId}`:'/forum/drafts';
+      api(path,{method,body:JSON.stringify(draftPayload()),keepalive:true}).catch(()=>{});
+    });
+  </script>
+</body>
+</html>
