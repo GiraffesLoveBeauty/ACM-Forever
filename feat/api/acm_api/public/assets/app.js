@@ -43,7 +43,9 @@ async function api(path,opt={}){
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),requestTimeoutMs);
   try{
-    const response=await fetch('/api'+path,{credentials:'same-origin',...fetchOptions,signal:controller.signal,headers:{'Content-Type':'application/json','X-CSRF-Token':csrf,...(fetchOptions.headers||{})}});
+    const isMultipart=typeof FormData!=='undefined'&&fetchOptions.body instanceof FormData;
+    const requestHeaders={...(isMultipart?{}:{'Content-Type':'application/json'}),'X-CSRF-Token':csrf,...(fetchOptions.headers||{})};
+    const response=await fetch('/api'+path,{credentials:'same-origin',...fetchOptions,signal:controller.signal,headers:requestHeaders});
     const data=await response.json().catch(()=>({}));
     if(response.status===401&&!path.startsWith('/auth/login')){location.href='/login.html?next='+encodeURIComponent(location.pathname+location.search);throw Error('请先登录')}
     if(response.status===428){location.href='/change-password.html';throw Error('请先修改初始密码')}
@@ -86,6 +88,10 @@ function lockOwnerInputs(){
 }
 
 function showLogin(){const box=$('#login');if(box)box.style.display='grid'}
+function avatarMarkup(url,name,classes=''){
+  const source=typeof url==='string'&&/^\/uploads\/avatars\/[a-f0-9]{32}\.(?:png|jpg)$/.test(url)?url:'/assets/default-avatar.png';
+  return `<img class="user-avatar ${classes}" src="${source}" alt="${esc(name||'计量 ACMer')} 的头像" loading="lazy" onerror="this.onerror=null;this.src='/assets/default-avatar.png'">`;
+}
 function toggleTheme(){const theme=document.body.dataset.theme==='dark'?'light':'dark';document.body.dataset.theme=theme;localStorage.theme=theme}
 function animateNumbers(root=document){
   if(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)return;
@@ -151,4 +157,4 @@ document.addEventListener('DOMContentLoaded',()=>{
   const exit=$('#logout');if(exit)exit.onclick=logout;
   init();
 });
-window.api=api;window.esc=esc;window.AUTH=AUTH;window.animateNumbers=animateNumbers;
+window.api=api;window.esc=esc;window.AUTH=AUTH;window.avatarMarkup=avatarMarkup;window.animateNumbers=animateNumbers;

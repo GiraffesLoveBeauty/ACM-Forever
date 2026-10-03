@@ -99,7 +99,7 @@ async def posts():
             total = int((await cursor.fetchone())[0])
         sql = (
             "SELECT p.id,p.title,substr(p.body,1,420) AS excerpt,p.created_at,p.updated_at,p.is_pinned,p.views_count,"
-            "c.slug AS category_slug,c.name AS category_name,CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,"
+            "c.slug AS category_slug,c.name AS category_name,CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,u.avatar_url AS author_avatar_url,"
             "(SELECT COUNT(*) FROM forum_post_likes l WHERE l.post_id=p.id) AS likes_count,"
             "(SELECT COUNT(*) FROM forum_comments cm WHERE cm.post_id=p.id AND cm.status='published') AS comments_count,"
             "EXISTS(SELECT 1 FROM forum_post_likes vl WHERE vl.post_id=p.id AND vl.qq_id=?) AS viewer_liked,"
@@ -122,7 +122,7 @@ async def post_detail(post_id):
     try:
         async with db.execute(
             "SELECT p.id,p.title,p.body,p.created_at,p.updated_at,p.views_count,p.is_pinned,"
-            "c.slug AS category_slug,c.name AS category_name,CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,"
+            "c.slug AS category_slug,c.name AS category_name,CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,u.avatar_url AS author_avatar_url,"
             "(SELECT COUNT(*) FROM forum_post_likes l WHERE l.post_id=p.id) AS likes_count,"
             "EXISTS(SELECT 1 FROM forum_post_likes vl WHERE vl.post_id=p.id AND vl.qq_id=?) AS viewer_liked,"
             "EXISTS(SELECT 1 FROM forum_bookmarks vb WHERE vb.post_id=p.id AND vb.qq_id=?) AS viewer_bookmarked "
@@ -137,7 +137,7 @@ async def post_detail(post_id):
         await db.commit()
         async with db.execute(
             "SELECT cm.id,cm.parent_id,cm.body,cm.created_at,"
-            "CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name "
+            "CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,u.avatar_url AS author_avatar_url "
             "FROM forum_comments cm JOIN users u ON u.qq_id=cm.author_qq_id "
             "WHERE cm.post_id=? AND cm.status='published' ORDER BY cm.created_at,cm.id LIMIT 500",
             (post_id,),
@@ -445,7 +445,7 @@ async def my_bookmarks():
     try:
         async with db.execute(
             "SELECT p.id,p.title,p.created_at,c.name AS category_name,"
-            "CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name "
+            "CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,u.avatar_url AS author_avatar_url "
             "FROM forum_bookmarks b JOIN forum_posts p ON p.id=b.post_id "
             "JOIN forum_categories c ON c.id=p.category_id JOIN users u ON u.qq_id=p.author_qq_id "
             "WHERE b.qq_id=? AND p.status='published' ORDER BY b.created_at DESC LIMIT 100",

@@ -134,6 +134,8 @@ page = response.json()  # rows、total、page、page_size
 | `GET /api/forum/categories` | 公开 | 论坛分类 |
 | `GET /api/forum/posts` | 公开 | 帖子分页；支持 `page`、`page_size`、`sort`、`q`、`category` |
 | `GET /api/forum/posts/<id>` | 公开 | 帖子详情和已发布评论 |
+| `POST /api/me/avatar` | Web 登录 + CSRF | 上传当前成员头像；`multipart/form-data` 字段 `avatar`，只接受 PNG/JPEG，最大 2 MB、最长边 4096 像素 |
+| `DELETE /api/me/avatar` | Web 登录 + CSRF | 移除当前头像并恢复默认头像 |
 | `POST /api/forum/posts` | Web 登录 + CSRF | 创建帖子；正文和标题通过审核后公开 |
 | `GET /api/forum/drafts` | Web 登录 Cookie | 当前成员自己的草稿列表 |
 | `POST /api/forum/drafts` | Web 登录 + CSRF | 新建草稿；`title`、`body`、`category_id` 均可暂时留空 |
@@ -147,6 +149,8 @@ page = response.json()  # rows、total、page、page_size
 | `POST /api/forum/posts/<id>/report` | Web 登录 + CSRF | 举报帖子 |
 
 帖子列表支持 `sort=latest`、`sort=hot` 和 `sort=unanswered`。列表每页最多返回 30 条。写操作返回 JSON；发生错误时通常包含 `message`，调用方应同时检查 HTTP 状态码，不要只判断响应正文。
+
+`GET /api/me/profile` 的 `user` 对象包含 `avatar_url`；论坛帖子列表和详情中的作者以及详情评论也包含头像地址。头像图片保存在服务端数据目录，并通过 `/uploads/avatars/<随机文件名>` 提供；未设置头像的前端使用 `public/assets/default-avatar.png`。
 
 帖子正文按 Markdown 源文保存在数据库中，Web 端渲染前会清理 HTML。草稿属于登录成员本人，不能通过公开论坛 API 查看；保存草稿不会进入待审核队列，调用提交接口后才会转换成待审核帖子。
 

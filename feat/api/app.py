@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sqlite3
 from pathlib import Path
 
@@ -62,6 +63,8 @@ def create_app():
         SESSION_COOKIE_SECURE=_bool_env("ACM_WEBUI_COOKIE_SECURE", False),
     )
     app.config["DB_PATH"] = str(db_path)
+    app.config["AVATAR_UPLOAD_DIR"] = db_path.parent / "uploads" / "avatars"
+    app.config["MAX_CONTENT_LENGTH"] = 3 * 1024 * 1024
     app.config["BOT_API_TOKEN"] = os.getenv("ACM_BOT_API_TOKEN", "").strip()
     app.config["WEBUI_PUBLIC_DIR"] = Path(__file__).parent / "acm_api" / "public"
     root_ids = _csv_env("ACM_ROOT_QQ_IDS")
@@ -203,6 +206,14 @@ def create_app():
         elif filename not in _ANONYMOUS_PAGES and not identity:
             return redirect("/login.html?next=/" + filename)
         return await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], filename)
+
+    @app.get("/uploads/avatars/<filename>")
+    async def uploaded_avatar(filename):
+        if not re.fullmatch(r"[a-f0-9]{32}\.(?:png|jpg)", filename):
+            abort(404)
+        response = await send_from_directory(app.config["AVATAR_UPLOAD_DIR"], filename)
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
 
     @app.after_request
     async def add_security_headers(response):
