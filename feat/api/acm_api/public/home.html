@@ -7,7 +7,7 @@
     <section class="personal-welcome"><div><h1 id="greeting">个人中心</h1><p>查看刷题进度、账号绑定和社区参与。</p></div><figure class="community-heading-photo"><img src="/assets/community-coding.jpg" alt="一起专注做题的学习时刻" loading="lazy"></figure><a class="personal-rank-link" href="/leaderboard.html"><span>社区排行榜</span><b>查看大家的进度　↗</b></a></section>
     <section class="profile-stat-grid grid kpis" id="stats"></section>
     <div class="personal-columns">
-      <section class="community-panel profile-details-panel"><div class="panel-heading"><h2>个人资料</h2><button class="btn" id="edit-name">修改昵称</button></div><p class="panel-caption">绑定账号和做题统计仅本人及管理员可见。</p><div class="profile-avatar-editor"><img id="profile-avatar-preview" class="user-avatar profile-avatar-preview" src="/assets/default-avatar.png" alt="当前头像"><div class="profile-avatar-copy"><b>社区头像</b><small>PNG 或 JPEG，最大 2 MB</small><div class="profile-avatar-actions"><label class="btn" for="avatar-file">选择图片</label><input id="avatar-file" type="file" accept="image/png,image/jpeg" hidden><button class="btn primary" id="upload-avatar" type="button">上传头像</button><button class="btn" id="reset-avatar" type="button">恢复默认</button></div></div></div><div id="profile" class="profile-binding-grid"></div></section>
+      <section class="community-panel profile-details-panel"><div class="panel-heading"><h2>个人资料</h2><button class="btn" id="edit-name">修改昵称</button></div><p class="panel-caption">绑定账号和做题统计仅本人及管理员可见。</p><div class="profile-avatar-editor"><img id="profile-avatar-preview" class="user-avatar profile-avatar-preview" src="/assets/default-avatar.png" alt="当前头像"><div class="profile-avatar-copy"><b>社区头像</b><small id="avatar-size-note">支持常见图片格式，上传时自动压缩</small><div class="profile-avatar-actions"><label class="btn" for="avatar-file">选择图片</label><input id="avatar-file" type="file" accept="image/*" hidden><button class="btn primary" id="upload-avatar" type="button">上传头像</button><button class="btn" id="reset-avatar" type="button">恢复默认</button></div></div></div><div id="profile" class="profile-binding-grid"></div></section>
       <section class="community-panel recent-panel"><div class="panel-heading"><h2>最近 AC</h2><a class="panel-text-link" href="/submissions.html">提交时间线　↗</a></div><div id="recent" class="list"><div class="empty">正在加载…</div></div></section>
     </div>
     <section class="community-panel personal-community-panel"><div class="panel-heading"><h2>我的社区内容</h2><a class="panel-text-link" href="/compose.html">查看草稿 / 写新话题　↗</a></div><div class="personal-content-tabs"><button class="personal-content-tab active" data-forum-tab="posts">我的话题</button><button class="personal-content-tab" data-forum-tab="bookmarks">我的收藏</button></div><div id="my-forum-content" class="personal-content-list"><div class="empty">正在加载…</div></div></section>
@@ -15,6 +15,32 @@
   <script src="/assets/app.js?v=avatar-upload-1"></script>
   <script>
     let profileData;
+    const avatarTargetBytes=1750*1024;
+    const formatBytes=bytes=>bytes<1024*1024?`${Math.max(1,Math.round(bytes/1024))} KB`:`${(bytes/1024/1024).toFixed(1)} MB`;
+    async function compressAvatar(file){
+      if(!file.type.startsWith('image/'))throw Error('请选择图片文件。');
+      const bitmap=await createImageBitmap(file);
+      try{
+        const longest=Math.max(bitmap.width,bitmap.height);
+        if(file.size<=avatarTargetBytes&&longest<=4096&&['image/png','image/jpeg','image/webp'].includes(file.type))return file;
+        let edge=Math.min(1400,longest),quality=.86,outputType='image/webp',lastBlob=null;
+        for(let attempt=0;attempt<14;attempt++){
+          const scale=Math.min(1,edge/longest),canvas=document.createElement('canvas');
+          canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));
+          const context=canvas.getContext('2d');if(!context)throw Error('浏览器无法处理这张图片。');
+          if(outputType==='image/jpeg'){context.fillStyle='#fffefa';context.fillRect(0,0,canvas.width,canvas.height)}
+          context.drawImage(bitmap,0,0,canvas.width,canvas.height);
+          const blob=await new Promise(resolve=>canvas.toBlob(resolve,outputType,quality));
+          if(!blob)throw Error('图片压缩失败，请换一张图片再试。');
+          if(outputType==='image/webp'&&blob.type!=='image/webp'){outputType='image/jpeg';quality=.86;continue}
+          lastBlob=blob;
+          if(blob.size<=avatarTargetBytes){const extension=outputType==='image/webp'?'webp':'jpg';return new File([blob],`avatar.${extension}`,{type:outputType,lastModified:Date.now()})}
+          if(quality>.60)quality=Math.max(.60,quality-.08);else{edge=Math.max(256,Math.floor(edge*.75));quality=.86}
+        }
+        if(lastBlob&&lastBlob.size<=2*1024*1024){const extension=lastBlob.type==='image/webp'?'webp':'jpg';return new File([lastBlob],`avatar.${extension}`,{type:lastBlob.type,lastModified:Date.now()})}
+        throw Error('这张图片无法压缩到上传限制内，请换一张图片。');
+      }finally{bitmap.close?.()}
+    }
     async function loadForumContent(tab='posts'){
       const box=document.getElementById('my-forum-content');
       try{
@@ -37,7 +63,7 @@
     document.querySelectorAll('[data-forum-tab]').forEach(button=>button.onclick=()=>{document.querySelectorAll('[data-forum-tab]').forEach(item=>item.classList.toggle('active',item===button));loadForumContent(button.dataset.forumTab)});
     document.getElementById('edit-name').onclick=async()=>{const name=prompt('请输入新昵称',profileData?.user?.name||'');if(!name)return;try{await api('/me/profile',{method:'PUT',body:JSON.stringify({name})});await load()}catch(error){alert(error.message)}};
     document.getElementById('avatar-file').onchange=event=>{const file=event.target.files?.[0];if(file){const preview=document.getElementById('profile-avatar-preview');const localUrl=URL.createObjectURL(file);preview.onload=()=>URL.revokeObjectURL(localUrl);preview.src=localUrl}};
-    document.getElementById('upload-avatar').onclick=async()=>{const file=document.getElementById('avatar-file').files?.[0];if(!file){alert('先选择一张头像图片。');return}const form=new FormData();form.append('avatar',file);const button=document.getElementById('upload-avatar');button.disabled=true;try{await api('/me/avatar',{method:'POST',body:form});document.getElementById('avatar-file').value='';await load()}catch(error){alert(error.message)}finally{button.disabled=false}};
+    document.getElementById('upload-avatar').onclick=async()=>{const file=document.getElementById('avatar-file').files?.[0];if(!file){alert('先选择一张头像图片。');return}const form=new FormData(),button=document.getElementById('upload-avatar'),note=document.getElementById('avatar-size-note');button.disabled=true;button.textContent='正在压缩…';note.textContent='正在优化图片，请稍候';try{const compressed=await compressAvatar(file);form.append('avatar',compressed,compressed.name);note.textContent=`图片已优化：${formatBytes(file.size)} → ${formatBytes(compressed.size)}`;button.textContent='正在上传…';await api('/me/avatar',{method:'POST',body:form});document.getElementById('avatar-file').value='';await load();note.textContent=`头像已更新（${formatBytes(compressed.size)}）`}catch(error){note.textContent='支持常见图片格式，上传时自动压缩';alert(error.message)}finally{button.disabled=false;button.textContent='上传头像'}};
     document.getElementById('reset-avatar').onclick=async()=>{try{await api('/me/avatar',{method:'DELETE'});document.getElementById('avatar-file').value='';await load()}catch(error){alert(error.message)}};
     window.PAGE_LOAD=load;
   </script>
