@@ -209,7 +209,7 @@ def create_app():
 
     @app.get("/uploads/avatars/<filename>")
     async def uploaded_avatar(filename):
-        if not re.fullmatch(r"[a-f0-9]{32}\.(?:png|jpg)", filename):
+        if not re.fullmatch(r"[a-f0-9]{32}\.(?:png|jpg|webp)", filename):
             abort(404)
         response = await send_from_directory(app.config["AVATAR_UPLOAD_DIR"], filename)
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"

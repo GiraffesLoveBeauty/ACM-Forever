@@ -113,7 +113,7 @@ def _valid_qq(value):
 
 
 def _avatar_format(data):
-    """Accept small PNG/JPEG images only, and reject malformed or huge dimensions."""
+    """Accept small PNG/JPEG/WebP images and reject malformed or huge dimensions."""
     width = height = 0
     if data.startswith(b"\x89PNG\r\n\x1a\n") and len(data) >= 33 and data[-12:] == b"\x00\x00\x00\x00IEND\xaeB`\x82":
         width, height = struct.unpack(">II", data[16:24])
@@ -138,6 +138,22 @@ def _avatar_format(data):
                 height, width = struct.unpack(">HH", data[offset + 3:offset + 7])
                 break
             offset += segment_length
+    elif len(data) >= 30 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        if int.from_bytes(data[4:8], "little") + 8 != len(data):
+            return None
+        chunk = data[12:16]
+        if chunk == b"VP8X":
+            width = 1 + int.from_bytes(data[24:27], "little")
+            height = 1 + int.from_bytes(data[27:30], "little")
+        elif chunk == b"VP8 " and len(data) >= 30 and data[23:26] == b"\x9d\x01\x2a":
+            width = int.from_bytes(data[26:28], "little") & 0x3FFF
+            height = int.from_bytes(data[28:30], "little") & 0x3FFF
+        elif chunk == b"VP8L" and len(data) >= 25 and data[20] == 0x2F:
+            width = 1 + data[21] + ((data[22] & 0x3F) << 8)
+            height = 1 + ((data[22] >> 6) & 0x03) + (data[23] << 2) + ((data[24] & 0x0F) << 10)
+        else:
+            return None
+        extension = "webp"
     else:
         return None
     if not width or not height or width > 4096 or height > 4096 or width * height > 16_000_000:
@@ -146,7 +162,7 @@ def _avatar_format(data):
 
 
 def _managed_avatar_file(avatar_url):
-    match = re.fullmatch(r"/uploads/avatars/([a-f0-9]{32}\.(?:png|jpg))", str(avatar_url or ""))
+    match = re.fullmatch(r"/uploads/avatars/([a-f0-9]{32}\.(?:png|jpg|webp))", str(avatar_url or ""))
     return match.group(1) if match else None
 
 
@@ -1650,7 +1666,7 @@ async def api_me_avatar():
             return jsonify({"success": False, "message": "头像图片不能超过 2 MB。"}), 413
         extension = _avatar_format(contents)
         if not extension:
-            return jsonify({"success": False, "message": "仅支持有效的 PNG 或 JPEG 图片，最长边不超过 4096 像素。"}), 400
+            return jsonify({"success": False, "message": "请上传有效图片，最长边不超过 4096 像素。"}), 400
         upload_dir.mkdir(parents=True, exist_ok=True)
         filename = secrets.token_hex(16) + "." + extension
         new_path = upload_dir / filename
