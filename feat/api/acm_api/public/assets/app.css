@@ -3,3 +3,48 @@
 body{background:var(--bg)}.avatar{background:var(--brand);color:var(--accent)}
 
 body{background:var(--bg);font-family:var(--font-body)}.btn,input,select,textarea{border-radius:var(--radius-sm)}.card,.login form{border-radius:var(--radius-md)}
+
+/* Shared ACM Forever palette and type roles. */
+:root{
+  --bg:#edf3ef;
+  --panel:#fbfdf9;
+  --panel-raised:#ffffff;
+  --text:#163432;
+  --muted:#5d7471;
+  --line:#d0ded7;
+  --brand:#16766a;
+  --brand-strong:#104e4b;
+  --brand2:#c7e45e;
+  --accent:#efcf63;
+  --accent-blue:#6679df;
+  --accent-coral:#df7759;
+  --shadow:0 16px 38px rgba(19,57,51,.09);
+  --font-body:"MiSans","HarmonyOS Sans SC","Microsoft YaHei UI","PingFang SC",sans-serif;
+  --font-display:"Bahnschrift SemiCondensed","MiSans","Microsoft YaHei UI","PingFang SC",sans-serif;
+  --font-data:"Bahnschrift",Consolas,"SFMono-Regular",monospace;
+}
+[data-theme=dark]{
+  --bg:#122222;
+  --panel:#1a302e;
+  --panel-raised:#203a37;
+  --text:#edf5eb;
+  --muted:#a9bdb5;
+  --line:#34504a;
+  --brand:#70c3a6;
+  --brand-strong:#b4dd9a;
+  --brand2:#d6ea72;
+  --accent:#edcb69;
+  --accent-blue:#a8b5ff;
+  --accent-coral:#ff9b7d;
+  --shadow:0 18px 42px rgba(0,0,0,.22);
+}
+body{font-family:var(--font-body);font-feature-settings:"kern" 1;color:var(--text)}
+h1,h2,h3,h4,.brand,.forum-brand{font-family:var(--font-display);font-weight:700}
+.value,.rank-number,.rank-total,.stat-number{font-family:var(--font-data);font-variant-numeric:tabular-nums lining-nums}
+.btn,.nav a,input,select,textarea{transition:color .18s ease,background-color .18s ease,border-color .18s ease,box-shadow .18s ease}
+.btn:hover:not(:disabled){border-color:var(--brand);box-shadow:0 5px 14px rgba(16,78,75,.12)}
+.btn.primary{background:var(--brand-strong);border-color:var(--brand-strong)}
+.nav a:hover,.nav a.active{background:#dcece2;color:var(--brand-strong)}
+[data-theme=dark] .nav a:hover,[data-theme=dark] .nav a.active{background:#294641;color:#d6ea72}
+.card{box-shadow:var(--shadow)}
+:focus-visible{outline:3px solid var(--accent-blue);outline-offset:3px}
