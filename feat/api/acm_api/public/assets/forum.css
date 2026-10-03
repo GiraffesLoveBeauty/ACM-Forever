@@ -530,3 +530,77 @@
   .forum-directory-count{display:none}
   .forum-directory-heading h2{font-size:19px}
 }
+
+/* A fixed campus-study backdrop sits behind the page; the forum itself scrolls above it. */
+body.forum-page{
+  position:relative;
+  isolation:isolate;
+  background:transparent;
+}
+body.forum-page::before{
+  content:"";
+  position:fixed;
+  z-index:-1;
+  inset:0;
+  pointer-events:none;
+  background:
+    linear-gradient(115deg,rgba(12,42,37,.60),rgba(15,47,41,.34) 48%,rgba(14,39,37,.54)),
+    url("/assets/community-study-group.jpg") center 46% / cover no-repeat;
+  transform:translateZ(0);
+}
+body.forum-page[data-theme="dark"]::before,
+[data-theme="dark"] body.forum-page::before{
+  background:
+    linear-gradient(115deg,rgba(5,18,18,.78),rgba(8,27,27,.64) 48%,rgba(5,18,18,.78)),
+    url("/assets/community-study-group.jpg") center 46% / cover no-repeat;
+}
+.forum-header{
+  position:relative;
+  top:auto;
+  background:rgba(251,253,249,.94);
+  -webkit-backdrop-filter:blur(14px);
+  backdrop-filter:blur(14px);
+}
+[data-theme="dark"] .forum-header{
+  background:rgba(18,34,34,.94);
+}
+.forum-layout,
+.community-main,
+.forum-post-layout{
+  background:rgba(251,253,249,.92);
+  border:1px solid rgba(255,255,255,.48);
+  border-radius:14px;
+  box-shadow:0 20px 64px rgba(5,25,22,.20);
+  -webkit-backdrop-filter:blur(16px);
+  backdrop-filter:blur(16px);
+}
+[data-theme="dark"] .forum-layout,
+[data-theme="dark"] .community-main,
+[data-theme="dark"] .forum-post-layout{
+  background:rgba(18,34,34,.92);
+  border-color:rgba(169,189,181,.13);
+}
+.forum-page .forum-post-card,
+.forum-page .forum-directory,
+.forum-page .forum-community-card,
+.forum-page .forum-rail-card,
+.forum-page .forum-article,
+.forum-page .forum-comments,
+.forum-page .community-panel,
+.forum-page .leaderboard-panel{
+  -webkit-backdrop-filter:blur(12px);
+  backdrop-filter:blur(12px);
+}
+@media(max-width:720px){
+  .forum-layout,
+  .community-main,
+  .forum-post-layout{
+    border-radius:11px;
+  }
+  body.forum-page::before{
+    background-position:58% center;
+  }
+  [data-theme="dark"] body.forum-page::before{
+    background-position:58% center;
+  }
+}
