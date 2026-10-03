@@ -138,21 +138,33 @@ def _avatar_format(data):
                 height, width = struct.unpack(">HH", data[offset + 3:offset + 7])
                 break
             offset += segment_length
-    elif len(data) >= 30 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        if int.from_bytes(data[4:8], "little") + 8 != len(data):
+    elif len(data) >= 20 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        # WebP is a RIFF container. Extended images can contain VP8X plus
+        # additional chunks (and chunk padding), so do not assume that the
+        # first chunk is the only image chunk or that its payload ends at EOF.
+        riff_end = int.from_bytes(data[4:8], "little") + 8
+        if riff_end < 12 or riff_end > len(data):
             return None
-        chunk = data[12:16]
-        if chunk == b"VP8X":
-            width = 1 + int.from_bytes(data[24:27], "little")
-            height = 1 + int.from_bytes(data[27:30], "little")
-        elif chunk == b"VP8 " and len(data) >= 30 and data[23:26] == b"\x9d\x01\x2a":
-            width = int.from_bytes(data[26:28], "little") & 0x3FFF
-            height = int.from_bytes(data[28:30], "little") & 0x3FFF
-        elif chunk == b"VP8L" and len(data) >= 25 and data[20] == 0x2F:
-            width = 1 + data[21] + ((data[22] & 0x3F) << 8)
-            height = 1 + ((data[22] >> 6) & 0x03) + (data[23] << 2) + ((data[24] & 0x0F) << 10)
-        else:
-            return None
+        offset = 12
+        while offset + 8 <= riff_end:
+            chunk = data[offset:offset + 4]
+            chunk_size = int.from_bytes(data[offset + 4:offset + 8], "little")
+            chunk_start = offset + 8
+            chunk_end = chunk_start + chunk_size
+            if chunk_end > riff_end:
+                return None
+            if chunk == b"VP8X" and chunk_size >= 10:
+                width = 1 + int.from_bytes(data[chunk_start + 4:chunk_start + 7], "little")
+                height = 1 + int.from_bytes(data[chunk_start + 7:chunk_start + 10], "little")
+            elif chunk == b"VP8 " and chunk_size >= 10 and data[chunk_start + 3:chunk_start + 6] == b"\x9d\x01\x2a":
+                width = int.from_bytes(data[chunk_start + 6:chunk_start + 8], "little") & 0x3FFF
+                height = int.from_bytes(data[chunk_start + 8:chunk_start + 10], "little") & 0x3FFF
+            elif chunk == b"VP8L" and chunk_size >= 5 and data[chunk_start] == 0x2F:
+                width = 1 + data[chunk_start + 1] + ((data[chunk_start + 2] & 0x3F) << 8)
+                height = 1 + ((data[chunk_start + 2] >> 6) & 0x03) + (data[chunk_start + 3] << 2) + ((data[chunk_start + 4] & 0x0F) << 10)
+            if width and height:
+                break
+            offset = chunk_end + (chunk_size & 1)
         extension = "webp"
     else:
         return None
