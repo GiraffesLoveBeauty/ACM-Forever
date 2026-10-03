@@ -455,6 +455,7 @@
 
 /* Human moments and softer typography give each community page its own voice. */
 .forum-brand small{font-family:var(--font-body);letter-spacing:.02em}
+.forum-brand .icpc-brand-logo{display:block;width:126px;height:auto;flex:none;object-fit:contain}
 .forum-kicker,.panel-eyebrow,.label,.forum-post-meta,.forum-post-actions,.forum-side-title{font-family:var(--font-body)}
 .forum-post-card h2,.forum-article h1,.forum-comments-heading h2{font-family:var(--font-display);font-weight:650}
 .forum-post-card h2{font-size:20px;line-height:1.55;letter-spacing:-.015em}
@@ -480,6 +481,8 @@
 .leaderboard-heading>div{max-width:60%}
 .forum-page .community-page-heading h1,.forum-page .personal-welcome h1{font-size:clamp(32px,3vw,42px);letter-spacing:-.025em}
 @media(max-width:720px){
+  .forum-brand{gap:8px}
+  .forum-brand .icpc-brand-logo{width:94px}
   .forum-welcome{padding:22px 19px;gap:15px}
   .forum-welcome>div:first-child{max-width:100%}
   .forum-hero-photo{position:relative;z-index:0;inset:auto;width:100%;height:142px;border-radius:5px 20px 5px 20px}

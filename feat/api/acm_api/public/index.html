@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f0f4f1"><title>论坛 · ACM Forever</title>
-  <link rel="stylesheet" href="/assets/app.css?v=community-photo-5"><link rel="stylesheet" href="/assets/forum.css?v=community-photo-5">
+  <link rel="stylesheet" href="/assets/app.css?v=icpc-brand-6"><link rel="stylesheet" href="/assets/forum.css?v=icpc-brand-6">
 </head>
 <body class="forum-page">
   <header class="forum-header">
-    <a class="forum-brand" href="/index.html"><span class="forum-brand-mark">A</span><span>ACM <b>Forever</b><small>计量 ACMer 学习社区</small></span></a>
+    <a class="forum-brand" href="/index.html"><img class="icpc-brand-logo" src="/assets/icpc-logo.png" alt="ICPC 官方标志"><span>ACM <b>Forever</b><small>计量 ACMer 学习社区</small></span></a>
     <nav class="nav primary-nav" aria-label="主导航"></nav>
     <div class="forum-header-actions"><button class="btn" id="theme-toggle" aria-label="切换主题">◐</button><a class="btn primary" id="login-link" href="/login.html">登录后发帖</a><button class="btn" id="logout" style="display:none">退出</button></div>
   </header>
@@ -32,7 +32,7 @@
   </main>
   <div class="forum-modal" id="composer" aria-hidden="true"><div class="forum-modal-backdrop" data-close-composer></div><section class="forum-composer" role="dialog" aria-modal="true" aria-labelledby="composer-title"><div class="forum-modal-head"><div><span class="forum-kicker">START A DISCUSSION</span><h2 id="composer-title">发布新话题</h2></div><button class="icon-button" data-close-composer aria-label="关闭">×</button></div><label>选择版块<select id="post-category"></select></label><label>话题标题<input id="post-title" maxlength="120" placeholder="用一句话概括你想讨论的内容"></label><label>详细内容<textarea id="post-body" maxlength="20000" rows="8" placeholder="补充背景、你的尝试或想分享的经验"></textarea></label><div class="composer-hint">新帖经管理员审核后会展示在论坛中。</div><div class="forum-modal-actions"><button class="btn" data-close-composer>取消</button><button class="btn primary" id="submit-post">提交审核</button></div><div class="form-message" id="composer-message" role="status"></div></section></div>
   <div class="forum-toast" id="forum-toast" role="status"></div>
-  <script src="/assets/app.js?v=community-photo-5"></script>
+  <script src="/assets/app.js?v=icpc-brand-6"></script>
   <script>
     const forumState={sort:'latest',category:'',query:'',page:1,pageSize:12,total:0,loading:false};
     const timeAgo=value=>{const seconds=Math.max(0,Math.floor(Date.now()/1000-Number(value||0)));if(seconds<60)return '刚刚';if(seconds<3600)return `${Math.floor(seconds/60)} 分钟前`;if(seconds<86400)return `${Math.floor(seconds/3600)} 小时前`;return `${Math.floor(seconds/86400)} 天前`};
