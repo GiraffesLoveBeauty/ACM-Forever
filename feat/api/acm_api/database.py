@@ -105,6 +105,8 @@ async def connect_db(db_path):
         await db.execute("ALTER TABLE users ADD COLUMN challenge_rating INTEGER NOT NULL DEFAULT 1000")
     if "real_name" not in user_cols:
         await db.execute("ALTER TABLE users ADD COLUMN real_name TEXT")
+    if "avatar_url" not in user_cols:
+        await db.execute("ALTER TABLE users ADD COLUMN avatar_url TEXT")
     # 老库迁移：补充牛客 / AtCoder / 校OJ 列
     async with db.execute("PRAGMA table_info(users)") as cursor:
         user_cols = {row["name"] for row in await cursor.fetchall()}

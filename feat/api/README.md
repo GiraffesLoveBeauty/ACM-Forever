@@ -79,6 +79,7 @@ WebUI API 以原 WebUI 路由为兼容基线。常用路由包括：
 - `POST /api/auth/login`、`POST /api/auth/logout`、`GET /api/auth/me`
 - `/api/admin/web-accounts`、`/api/admin/web-accounts/<qq_id>`、`/api/admins`
 - `/api/member/<qq_id>`、`/api/user`、`/api/me/profile`
+- `POST /api/me/avatar`、`DELETE /api/me/avatar`：当前成员头像上传与重置
 - `/api/problems`、`/api/me/problems`、`/api/submissions/attempts`
 - `/api/training/*`、`/api/me/training/*`、`/api/study-plan`、`/api/me/study-plan`
 - `/api/stats`、`/api/leaderboard`、`/api/me/leaderboard`

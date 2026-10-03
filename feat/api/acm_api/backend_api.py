@@ -5,11 +5,14 @@ import hmac
 import inspect
 import json
 import os
+import re
 import secrets
 import sqlite3
 import time
+import struct
 from collections import defaultdict, deque
 from functools import wraps
+from pathlib import Path
 
 import aiohttp
 import aiosqlite
@@ -107,6 +110,53 @@ def _field(data, key, limit=128):
 
 def _valid_qq(value):
     return value.isdigit() and 4 <= len(value) <= 12
+
+
+def _avatar_format(data):
+    """Accept small PNG/JPEG images only, and reject malformed or huge dimensions."""
+    width = height = 0
+    if data.startswith(b"\x89PNG\r\n\x1a\n") and len(data) >= 33 and data[-12:] == b"\x00\x00\x00\x00IEND\xaeB`\x82":
+        width, height = struct.unpack(">II", data[16:24])
+        extension = "png"
+    elif data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9"):
+        extension = "jpg"
+        offset = 2
+        while offset + 9 < len(data):
+            if data[offset] != 0xFF:
+                offset += 1
+                continue
+            marker = data[offset + 1]
+            offset += 2
+            if marker in {0xD8, 0xD9} or 0xD0 <= marker <= 0xD7:
+                continue
+            if offset + 2 > len(data):
+                break
+            segment_length = int.from_bytes(data[offset:offset + 2], "big")
+            if segment_length < 2 or offset + segment_length > len(data):
+                break
+            if marker in {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}:
+                height, width = struct.unpack(">HH", data[offset + 3:offset + 7])
+                break
+            offset += segment_length
+    else:
+        return None
+    if not width or not height or width > 4096 or height > 4096 or width * height > 16_000_000:
+        return None
+    return extension
+
+
+def _managed_avatar_file(avatar_url):
+    match = re.fullmatch(r"/uploads/avatars/([a-f0-9]{32}\.(?:png|jpg))", str(avatar_url or ""))
+    return match.group(1) if match else None
+
+
+def _remove_avatar_file(upload_dir, filename):
+    if not filename:
+        return
+    try:
+        (upload_dir / filename).unlink(missing_ok=True)
+    except OSError:
+        LOG.warning("Could not remove replaced avatar file %s", filename, exc_info=True)
 
 
 def _changed_account_platforms(account_values, existing=None):
@@ -1545,7 +1595,7 @@ async def api_me_profile():
             await db.execute("UPDATE users SET name=? WHERE qq_id=?", (name, qq_id))
             await db.commit()
         async with db.execute(
-        "SELECT name,status,cf_handle,luogu_id,nowcoder_id,atcoder_handle,cjlu_username,challenge_rating "
+        "SELECT name,status,cf_handle,luogu_id,nowcoder_id,atcoder_handle,cjlu_username,challenge_rating,avatar_url "
             "FROM users WHERE qq_id=?", (qq_id,)
         ) as cursor:
             row = await cursor.fetchone()
@@ -1566,6 +1616,55 @@ async def api_me_profile():
             "total_count": total,
             "recent_ac": recent_ac,
         })
+    finally:
+        await db.close()
+
+
+@api.route("/me/avatar", methods=["POST", "DELETE"])
+@member_required
+async def api_me_avatar():
+    qq_id = _me_qq_id()
+    upload_dir = Path(current_app.config["AVATAR_UPLOAD_DIR"])
+    db = await get_db()
+    new_path = None
+    try:
+        async with db.execute("SELECT avatar_url FROM users WHERE qq_id=?", (qq_id,)) as cursor:
+            user = await cursor.fetchone()
+        if not user:
+            return jsonify({"success": False, "message": "成员资料不存在。"}), 404
+        old_file = _managed_avatar_file(user["avatar_url"])
+        if request.method == "DELETE":
+            await db.execute("UPDATE users SET avatar_url=NULL WHERE qq_id=?", (qq_id,))
+            await db.commit()
+            _remove_avatar_file(upload_dir, old_file)
+            return jsonify({"success": True, "avatar_url": None})
+
+        files = await request.files
+        upload = files.get("avatar")
+        if upload is None:
+            return jsonify({"success": False, "message": "请选择头像图片。"}), 400
+        contents = await upload.read(2 * 1024 * 1024 + 1)
+        if not contents:
+            return jsonify({"success": False, "message": "头像文件为空。"}), 400
+        if len(contents) > 2 * 1024 * 1024:
+            return jsonify({"success": False, "message": "头像图片不能超过 2 MB。"}), 413
+        extension = _avatar_format(contents)
+        if not extension:
+            return jsonify({"success": False, "message": "仅支持有效的 PNG 或 JPEG 图片，最长边不超过 4096 像素。"}), 400
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        filename = secrets.token_hex(16) + "." + extension
+        new_path = upload_dir / filename
+        new_path.write_bytes(contents)
+        avatar_url = "/uploads/avatars/" + filename
+        await db.execute("UPDATE users SET avatar_url=? WHERE qq_id=?", (avatar_url, qq_id))
+        await db.commit()
+        new_path = None
+        _remove_avatar_file(upload_dir, old_file)
+        return jsonify({"success": True, "avatar_url": avatar_url})
+    except Exception:
+        if new_path is not None:
+            new_path.unlink(missing_ok=True)
+        raise
     finally:
         await db.close()
 
