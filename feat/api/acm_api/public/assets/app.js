@@ -87,6 +87,27 @@ function lockOwnerInputs(){
 
 function showLogin(){const box=$('#login');if(box)box.style.display='grid'}
 function toggleTheme(){const theme=document.body.dataset.theme==='dark'?'light':'dark';document.body.dataset.theme=theme;localStorage.theme=theme}
+function animateNumbers(root=document){
+  if(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)return;
+  root.querySelectorAll('.profile-stat-card .value,.rank-total').forEach((node,index)=>{
+    const target=Number(node.textContent.replaceAll(',','').trim());
+    if(!Number.isFinite(target)||target<0)return;
+    const format=new Intl.NumberFormat('zh-CN');
+    node.setAttribute('aria-label',format.format(target));
+    if(target===0||index>=10){node.textContent=format.format(target);return}
+    node.classList.add('is-counting');
+    const start=performance.now()+index*38;
+    const duration=680;
+    const frame=now=>{
+      const progress=Math.max(0,Math.min(1,(now-start)/duration));
+      const eased=1-Math.pow(1-progress,3);
+      node.textContent=format.format(Math.round(target*eased));
+      if(progress<1)requestAnimationFrame(frame);
+      else node.classList.remove('is-counting');
+    };
+    requestAnimationFrame(frame);
+  });
+}
 async function login(event){
   event.preventDefault();
   const identifier=$('#username').value.trim(),password=$('#password').value;
@@ -121,6 +142,7 @@ async function init(){
   await renderNav();lockOwnerInputs();
   const requestedMember=new URLSearchParams(location.search).get('qq_id');
   if(typeof window.PAGE_LOAD==='function')await window.PAGE_LOAD(AUTH.role==='member'?undefined:requestedMember);
+  if(document.querySelector('.profile-stat-card'))animateNumbers(document);
 }
 
 document.addEventListener('DOMContentLoaded',()=>{
@@ -129,4 +151,4 @@ document.addEventListener('DOMContentLoaded',()=>{
   const exit=$('#logout');if(exit)exit.onclick=logout;
   init();
 });
-window.api=api;window.esc=esc;window.AUTH=AUTH;
+window.api=api;window.esc=esc;window.AUTH=AUTH;window.animateNumbers=animateNumbers;
