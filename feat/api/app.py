@@ -246,7 +246,7 @@ _PUBLIC_PAGES = {
     "index.html", "login.html", "post.html", "forum-moderation.html",
     "change-password.html", "home.html", "admin.html",
     "leaderboard.html", "challenge.html", "reviews.html", "problem-bank.html",
-    "submissions.html", "workspace.html", "contest-review.html", "member.html",
+    "submissions.html", "workspace.html", "contest-review.html", "member.html", "compose.html",
     "tasks.html", "settings.html",
 }
 _ANONYMOUS_PAGES = {"index.html", "login.html", "post.html", "leaderboard.html"}

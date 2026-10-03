@@ -125,6 +125,14 @@ async def connect_db(db_path):
         "is_pinned INTEGER NOT NULL DEFAULT 0, views_count INTEGER NOT NULL DEFAULT 0, "
         "created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, reviewed_at INTEGER, reviewed_by TEXT)"
     )
+    await db.execute(
+        "CREATE TABLE IF NOT EXISTS forum_drafts ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, author_qq_id TEXT NOT NULL REFERENCES users(qq_id) ON DELETE CASCADE, "
+        "category_id INTEGER REFERENCES forum_categories(id) ON DELETE SET NULL, "
+        "title TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '', "
+        "created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)"
+    )
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_drafts_author_updated ON forum_drafts(author_qq_id, updated_at DESC)")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_posts_status_created ON forum_posts(status, created_at DESC)")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_posts_category_created ON forum_posts(category_id, status, created_at DESC)")
     await db.execute(

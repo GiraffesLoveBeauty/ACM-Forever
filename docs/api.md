@@ -135,12 +135,20 @@ page = response.json()  # rows、total、page、page_size
 | `GET /api/forum/posts` | 公开 | 帖子分页；支持 `page`、`page_size`、`sort`、`q`、`category` |
 | `GET /api/forum/posts/<id>` | 公开 | 帖子详情和已发布评论 |
 | `POST /api/forum/posts` | Web 登录 + CSRF | 创建帖子；正文和标题通过审核后公开 |
+| `GET /api/forum/drafts` | Web 登录 Cookie | 当前成员自己的草稿列表 |
+| `POST /api/forum/drafts` | Web 登录 + CSRF | 新建草稿；`title`、`body`、`category_id` 均可暂时留空 |
+| `GET /api/forum/drafts/<id>` | Web 登录 Cookie | 读取当前成员自己的草稿 |
+| `PUT /api/forum/drafts/<id>` | Web 登录 + CSRF | 保存草稿修改 |
+| `DELETE /api/forum/drafts/<id>` | Web 登录 + CSRF | 删除当前成员自己的草稿 |
+| `POST /api/forum/drafts/<id>/submit` | Web 登录 + CSRF | 提交草稿进入人工审核；成功后草稿转为待审核帖子 |
 | `POST /api/forum/posts/<id>/comments` | Web 登录 + CSRF | 评论或回复，回复可带 `parent_id` |
 | `POST /api/forum/posts/<id>/like` | Web 登录 + CSRF | 切换点赞状态 |
 | `POST /api/forum/posts/<id>/bookmark` | Web 登录 + CSRF | 切换收藏状态 |
 | `POST /api/forum/posts/<id>/report` | Web 登录 + CSRF | 举报帖子 |
 
 帖子列表支持 `sort=latest`、`sort=hot` 和 `sort=unanswered`。列表每页最多返回 30 条。写操作返回 JSON；发生错误时通常包含 `message`，调用方应同时检查 HTTP 状态码，不要只判断响应正文。
+
+帖子正文按 Markdown 源文保存在数据库中，Web 端渲染前会清理 HTML。草稿属于登录成员本人，不能通过公开论坛 API 查看；保存草稿不会进入待审核队列，调用提交接口后才会转换成待审核帖子。
 
 ## 常见状态码
 
