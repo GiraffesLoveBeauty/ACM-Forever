@@ -543,21 +543,21 @@ body.forum-page::before{
   z-index:-1;
   inset:0;
   pointer-events:none;
-  background:
-    linear-gradient(115deg,rgba(12,42,37,.60),rgba(15,47,41,.34) 48%,rgba(14,39,37,.54)),
-    url("/assets/community-study-group.jpg") center 46% / cover no-repeat;
-  transform:translateZ(0);
+  background:#cbd7ce;
 }
 body.forum-page[data-theme="dark"]::before,
 [data-theme="dark"] body.forum-page::before{
-  background:
-    linear-gradient(115deg,rgba(5,18,18,.78),rgba(8,27,27,.64) 48%,rgba(5,18,18,.78)),
-    url("/assets/community-study-group.jpg") center 46% / cover no-repeat;
+  background:#102625;
 }
 .forum-header{
   position:relative;
   top:auto;
+  width:min(90vw,1360px);
+  margin:0 auto;
+  padding-inline:clamp(14px,2vw,28px);
   background:rgba(251,253,249,.94);
+  border-radius:0 0 12px 12px;
+  border-inline:1px solid rgba(255,255,255,.48);
   -webkit-backdrop-filter:blur(14px);
   backdrop-filter:blur(14px);
 }
@@ -573,6 +573,21 @@ body.forum-page[data-theme="dark"]::before,
   box-shadow:0 20px 64px rgba(5,25,22,.20);
   -webkit-backdrop-filter:blur(16px);
   backdrop-filter:blur(16px);
+}
+.forum-layout{
+  width:min(90vw,1360px);
+  margin:26px auto 56px;
+  padding-inline:clamp(16px,2vw,30px);
+}
+.community-main{
+  width:min(86vw,1240px);
+  margin:28px auto 60px;
+  padding:32px clamp(16px,2vw,30px) 48px;
+}
+.forum-post-layout{
+  width:min(82vw,1120px);
+  margin:28px auto 60px;
+  padding-inline:clamp(16px,2vw,26px);
 }
 [data-theme="dark"] .forum-layout,
 [data-theme="dark"] .community-main,
@@ -595,12 +610,23 @@ body.forum-page[data-theme="dark"]::before,
   .forum-layout,
   .community-main,
   .forum-post-layout{
+    width:calc(100% - 28px);
+    margin:14px auto 42px;
+    padding:16px 14px 42px;
     border-radius:11px;
   }
-  body.forum-page::before{
-    background-position:58% center;
+  .forum-header{
+    width:calc(100% - 28px);
+    margin:0 auto;
+    padding:10px 14px 0;
+    border-radius:0 0 10px 10px;
   }
-  [data-theme="dark"] body.forum-page::before{
-    background-position:58% center;
+}
+@media(min-width:721px) and (max-width:1100px){
+  .forum-layout,.community-main,.forum-post-layout{
+    width:calc(100% - 48px);
+  }
+  .community-main,.forum-post-layout{
+    padding-inline:24px;
   }
 }
