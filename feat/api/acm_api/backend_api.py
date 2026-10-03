@@ -1643,7 +1643,7 @@ async def api_me_avatar():
         upload = files.get("avatar")
         if upload is None:
             return jsonify({"success": False, "message": "请选择头像图片。"}), 400
-        contents = await upload.read(2 * 1024 * 1024 + 1)
+        contents = upload.stream.read(2 * 1024 * 1024 + 1)
         if not contents:
             return jsonify({"success": False, "message": "头像文件为空。"}), 400
         if len(contents) > 2 * 1024 * 1024:
