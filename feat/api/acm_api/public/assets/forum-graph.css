@@ -57,12 +57,15 @@
 .algorithm-graph .graph-stem {stroke:#b4d9b8;stroke-opacity:.24;stroke-width:.7}
 .algorithm-graph .graph-path-haze {fill:none;stroke:#d0e593;stroke-width:7;opacity:var(--route-glow);filter:url(#forum-graph-glow)}
 .algorithm-graph .graph-path-core {fill:none;stroke:url(#forum-graph-path);stroke-width:2.1;stroke-linejoin:round}
-.algorithm-graph .graph-node {--node-near:0}
+.algorithm-graph .graph-node {--node-near:0;cursor:pointer;pointer-events:auto;outline:none;-webkit-tap-highlight-color:transparent}
+.algorithm-graph .graph-node-hit {fill:transparent;pointer-events:all}
+.algorithm-graph .graph-node>:not(.graph-node-hit) {pointer-events:none}
 .algorithm-graph .graph-node-halo {fill:#c8e59c;opacity:calc(var(--node-near) * .1);transition:opacity .18s ease-out}
 .algorithm-graph .is-path .graph-node-halo {opacity:calc(var(--route-glow) * .13 + var(--node-near) * .08)}
 .algorithm-graph .graph-node-ring {fill:none;stroke:#e6f1bd;stroke-opacity:.29;stroke-width:.8;opacity:0;transition:opacity .18s ease-out,stroke-opacity .18s ease-out}
 .algorithm-graph .is-path .graph-node-ring {opacity:1}
 .algorithm-graph .is-hover .graph-node-ring {opacity:1;stroke-opacity:.85;stroke-width:1}
+.algorithm-graph .graph-node:focus-visible .graph-node-ring {opacity:1;stroke:#f0f4ca;stroke-opacity:1;stroke-width:2;vector-effect:non-scaling-stroke}
 .algorithm-graph .graph-node-front {fill:url(#forum-graph-node);stroke:#d8e8b2;stroke-width:.6}
 .algorithm-graph .graph-node-back {fill:#326857;stroke:#b5d4bf;stroke-opacity:calc(.4 + var(--node-near) * .5);stroke-width:1;transition:stroke-opacity .18s ease-out}
 .algorithm-graph .graph-node-label {font:13px Consolas,monospace;text-anchor:middle;dominant-baseline:central;fill:#203f33}
@@ -74,6 +77,7 @@
 .algorithm-graph .graph-callout-surface {fill:#1b4e45;fill-opacity:.86;stroke:#d0e3a34c;stroke-width:.8}
 .algorithm-graph .graph-callout-text {font:11px Consolas,monospace;fill:#dfedb9}
 .algorithm-graph .graph-trace-caption {font:11px Consolas,monospace;fill:#bcd5c4;opacity:.75}
+.forum-algorithm-art .graph-sr-only {position:absolute;top:0;left:0;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 @media(max-width:720px) {
   .forum-algorithm-art {position:relative;inset:auto;width:100%;height:190px;min-height:190px;border-radius:5px 20px 5px 20px}
   .forum-algorithm-art::after {background:linear-gradient(180deg,#123f3b,transparent 44%),linear-gradient(0deg,#0e252a66,transparent 35%)}
