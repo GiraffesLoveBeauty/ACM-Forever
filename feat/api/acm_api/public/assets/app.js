@@ -108,6 +108,7 @@ function mountPalettePicker(){
   picker.className='palette-picker';
   picker.innerHTML=`<button class="btn palette-trigger" type="button" aria-label="选择整体配色" title="选择整体配色" aria-controls="palette-menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18h1.4a2.6 2.6 0 0 0 1.8-4.5 1.2 1.2 0 0 1 .8-2.1H18a3 3 0 0 0 3-3c0-4.6-4-8.4-9-8.4Z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7.5" r="1"/><circle cx="14.5" cy="7.5" r="1"/><circle cx="17" cy="11" r="1"/></svg></button><div id="palette-menu" class="palette-menu" hidden role="group" aria-label="整体配色">${PALETTE_OPTIONS.map(([key,label])=>`<button type="button" class="palette-option" data-palette="${key}" aria-pressed="false"><span class="palette-swatch palette-swatch-${key}" aria-hidden="true"></span><span>${label}</span><span class="palette-check" aria-hidden="true">✓</span></button>`).join('')}</div>`;
   if(themeButton)themeButton.insertAdjacentElement('afterend',picker);else host.append(picker);
+  applyPalette(document.documentElement.dataset.palette);
   const trigger=picker.querySelector('.palette-trigger');
   const menu=picker.querySelector('.palette-menu');
   const closeMenu=()=>{menu.hidden=true;trigger.setAttribute('aria-expanded','false')};
