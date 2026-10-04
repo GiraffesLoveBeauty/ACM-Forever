@@ -868,6 +868,7 @@ body.forum-page[data-theme="dark"]::before,
 /* Apply the selected palette to the campus backdrop, shared surfaces, and page banners. */
 .forum-page{background:radial-gradient(circle at 12% 7%,var(--wash-a),transparent 27rem),radial-gradient(circle at 91% 35%,var(--wash-b),transparent 31rem),var(--bg)}
 body.forum-page::before{background:var(--page-backdrop)}
+body.forum-page[data-theme="dark"]::before,[data-theme="dark"] body.forum-page::before{background:var(--page-backdrop)}
 .forum-page .forum-header,.forum-page .forum-layout,.forum-page .community-main,.forum-page .forum-post-layout{background:color-mix(in srgb,var(--panel) 93%,transparent);border-color:color-mix(in srgb,var(--line) 76%,transparent)}
 [data-theme="dark"] .forum-page .forum-header,[data-theme="dark"] .forum-page .forum-layout,[data-theme="dark"] .forum-page .community-main,[data-theme="dark"] .forum-page .forum-post-layout{background:color-mix(in srgb,var(--panel) 94%,transparent);border-color:color-mix(in srgb,var(--line) 48%,transparent)}
 .forum-page .forum-welcome,.forum-page .personal-welcome,.forum-page .community-page-heading{background:var(--hero-gradient);color:var(--hero-text)}
@@ -876,7 +877,8 @@ body.forum-page::before{background:var(--page-backdrop)}
 .forum-page .forum-algorithm-art{background:var(--art-background)}
 .forum-page .forum-algorithm-art .algorithm-graph{filter:hue-rotate(var(--art-hue)) saturate(var(--art-saturation))}
 .forum-page .forum-welcome .forum-kicker{color:var(--hero-text);opacity:.78}
-.forum-page .forum-community-card,.forum-page .forum-rail-card,.forum-page .forum-directory,.forum-page .forum-post-card{background-color:var(--panel)}
+.forum-page .forum-community-card,.forum-page .forum-rail-card,.forum-page .forum-directory,.forum-page .forum-post-card{background:var(--panel)}
+.forum-page .forum-directory-grid{scrollbar-color:var(--line) transparent}
 .forum-page .forum-category-pill,.forum-page .forum-directory-card.active,.forum-page .forum-directory-icon{background:var(--subtle-bg);color:var(--brand-strong)}
 .forum-page .forum-directory-card.active{box-shadow:inset 3px 0 0 var(--brand)}
 .forum-page .primary-nav a:hover,.forum-page .primary-nav a.active{background:var(--subtle-bg);color:var(--brand-strong)}
