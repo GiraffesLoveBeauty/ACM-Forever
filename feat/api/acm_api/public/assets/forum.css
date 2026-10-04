@@ -823,3 +823,44 @@ body.forum-page[data-theme="dark"]::before,
 .profile-avatar-actions label{display:inline-flex;align-items:center;cursor:pointer}
 .profile-avatar-actions button:disabled{opacity:.6;cursor:wait}
 @media(max-width:480px){.profile-avatar-editor{align-items:flex-start}.profile-avatar-actions{max-width:220px}}
+
+/* Forum homepage refinements: keep the topic stream visible and preserve useful rails on small screens. */
+.forum-page .visually-hidden{
+  position:absolute;
+  width:1px;
+  height:1px;
+  padding:0;
+  margin:-1px;
+  overflow:hidden;
+  clip:rect(0,0,0,0);
+  white-space:nowrap;
+  border:0;
+}
+.forum-community-card{padding:17px 19px}
+.forum-community-card h2{margin:3px 0 7px}
+.forum-community-card p{margin:0;line-height:1.65}
+.forum-layout{width:min(94vw,1560px);grid-template-columns:minmax(190px,230px) minmax(0,1fr) minmax(250px,300px)}
+.forum-directory{margin-top:15px;padding:13px 15px 14px}
+.forum-directory-heading{margin-bottom:9px}
+.forum-directory-grid{grid-auto-flow:column;grid-auto-columns:minmax(150px,1fr);grid-template-columns:none;overflow-x:auto;overscroll-behavior-inline:contain;scroll-snap-type:inline proximity;padding:1px 1px 5px}
+.forum-directory-card{scroll-snap-align:start;gap:9px;padding:8px 10px;border-radius:7px}
+.forum-directory-icon{width:32px;height:32px;border-radius:6px}
+.forum-directory-copy>small{display:none}
+.forum-directory-count strong{font-size:15px}
+.forum-directory-card:hover{transform:translateY(-1px)}
+.forum-right-rail .forum-rail-card{min-width:0}
+.forum-tab:focus-visible,.forum-directory-card:focus-visible{outline:3px solid var(--accent-blue);outline-offset:2px}
+@media(max-width:1100px){
+  .forum-layout{grid-template-columns:minmax(170px,210px) minmax(0,1fr)}
+  .forum-right-rail{display:grid;grid-column:1/-1;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);align-items:start;gap:14px}
+}
+@media(max-width:720px){
+  .forum-layout{width:calc(100% - 28px)}
+  .forum-right-rail{display:grid;grid-template-columns:1fr;gap:12px;margin-top:18px}
+  .forum-directory{margin:13px 0 10px;padding:12px 10px;border-radius:9px}
+  .forum-directory-grid{grid-auto-columns:minmax(142px,72%);gap:7px}
+  .forum-directory-card{gap:8px;padding:8px}
+  .forum-directory-icon{width:30px;height:30px}
+  .forum-directory-heading h2{font-size:19px}
+  .forum-directory-heading>.muted{font-size:10px}
+}
