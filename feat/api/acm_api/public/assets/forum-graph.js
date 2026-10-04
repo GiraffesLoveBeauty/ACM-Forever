@@ -19,6 +19,11 @@
       }
     }
   }
+  function routeTo(id){
+    const route=[];
+    for(let node=id;node;node=previous[node])route.unshift(node);
+    return route;
+  }
   const segmentKey=(a,b)=>[a,b].sort().join(':');
   function svgElement(tag,attributes,parent,text){
     const element=document.createElementNS('http://www.w3.org/2000/svg',tag);
@@ -56,7 +61,12 @@
   for(const point of points){
     const floorDot=svgElement('circle',{cx:point.x,cy:point.y,r:3,class:'graph-floor-node'},floor);
     svgElement('line',{x1:point.x,y1:point.y+7,x2:point.x,y2:point.y+19,class:'graph-stem'},network);
-    const group=svgElement('g',{class:'graph-node','data-node':point.id},nodesGroup);
+    const group=svgElement('g',{
+      class:'graph-node','data-node':point.id,role:'button',tabindex:0,
+      'aria-label':'节点 '+point.id+'，最短路径 '+routeTo(point.id).join(' → ')+'，总权重 '+distances[point.id],
+      'aria-pressed':point.id==='t'?'true':'false'
+    },nodesGroup);
+    svgElement('circle',{cx:point.x,cy:point.y,r:22,class:'graph-node-hit'},group);
     svgElement('circle',{cx:point.x,cy:point.y,r:20,class:'graph-node-halo'},group);
     svgElement('circle',{cx:point.x,cy:point.y,r:14,class:'graph-node-ring'},group);
     const sphere=svgElement('circle',{cx:point.x,cy:point.y,r:6,class:'graph-node-back'},group);
@@ -68,13 +78,15 @@
   svgElement('rect',{class:'graph-callout-surface',x:300,y:202,width:67,height:23,rx:5},graph);
   svgElement('text',{class:'graph-callout-text',x:313,y:218},graph,'✓ AC');
   const distanceCaption=svgElement('text',{class:'graph-trace-caption',x:81,y:274},graph);
+  // Expose the interactive nodes, while keeping decorative SVG shapes out of the accessibility tree.
+  for(const child of graph.children)if(child!==nodesGroup)child.setAttribute('aria-hidden','true');
+  const status=art.querySelector('.graph-status');
   const reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)');
-  let target='',hovered=null,lastPointer=null,pointerFrame=0;
+  let target='',selectedTarget='t',hovered=null,lastPointer=null,pointerFrame=0;
   function showRoute(nextTarget){
     if(nextTarget===target)return;
     target=nextTarget;
-    const route=[];
-    for(let node=target;node;node=previous[node])route.unshift(node);
+    const route=routeTo(target);
     const active=new Set(route);
     const routeKeys=new Set(route.slice(1).map((id,index)=>segmentKey(route[index],id)));
     const path=route.map((id,index)=>{const point=byId[id];return(index?'L':'M')+point.x+' '+point.y}).join('');
@@ -99,11 +111,18 @@
     graph.setAttribute('aria-label','十二个节点的加权图，最短路径 '+route.join(' → ')+'，总权重 '+distances[target]);
   }
   function highlightNode(id){
-    if(id===hovered)return;
-    if(hovered)nodeViews.get(hovered).group.classList.remove('is-hover');
-    hovered=id;
-    if(hovered)nodeViews.get(hovered).group.classList.add('is-hover');
-    showRoute(hovered||'t');
+    if(id!==hovered){
+      if(hovered)nodeViews.get(hovered).group.classList.remove('is-hover');
+      hovered=id;
+      if(hovered)nodeViews.get(hovered).group.classList.add('is-hover');
+    }
+    showRoute(hovered||selectedTarget);
+  }
+  function selectNode(id){
+    selectedTarget=id;
+    for(const [node,view]of nodeViews)view.group.setAttribute('aria-pressed',String(node===id));
+    resetPointer();
+    if(status)status.textContent='已选择最短路径 '+routeTo(id).join(' → ')+'，总权重 '+distances[id];
   }
   function distanceToSegment(pointer,p,q){
     const dx=q.x-p.x,dy=q.y-p.y,length=dx*dx+dy*dy;
@@ -155,7 +174,20 @@
     art.style.setProperty('--graph-roll','0deg');art.style.setProperty('--pointer-active','0');
     for(const view of nodeViews.values())view.group.style.setProperty('--node-near','0');
     for(const edge of edgeViews)edge.line.style.setProperty('--edge-near','0');
-    highlightNode(null);showRoute('t');
+    highlightNode(null);
+  }
+  for(const [id,{group}]of nodeViews){
+    group.addEventListener('click',()=>selectNode(id));
+    group.addEventListener('focus',resetPointer);
+    group.addEventListener('keydown',event=>{
+      if(event.key===' '||event.key==='Enter'||event.key==='Escape')event.preventDefault();
+      if(event.repeat)return;
+      if(event.key==='Enter')selectNode(id);
+      if(event.key==='Escape')selectNode('t');
+    });
+    group.addEventListener('keyup',event=>{
+      if(event.key===' '){event.preventDefault();selectNode(id);}
+    });
   }
   showRoute('t');
   art.addEventListener('pointerenter',followPointer);
