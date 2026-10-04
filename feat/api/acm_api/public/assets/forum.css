@@ -876,6 +876,10 @@ body.forum-page[data-theme="dark"]::before,[data-theme="dark"] body.forum-page::
 .forum-page .personal-rank-link{color:var(--text);background:var(--panel);border:1px solid var(--line)}
 .forum-page .personal-rank-link>span{color:var(--text)}
 .forum-page .personal-rank-link:hover{color:var(--text);background:var(--subtle-bg);border-color:var(--line)}
+html[data-palette="mint"]{--art-shade:#123f3b}
+html[data-palette="gray"]{--art-shade:#343a41}
+html[data-palette="sunshine"]{--art-shade:#514018}
+html[data-palette="rose"]{--art-shade:#4c2939}
 .forum-page .forum-algorithm-art{background:var(--art-background)}
 .forum-page .forum-algorithm-art .algorithm-graph{filter:hue-rotate(var(--art-hue)) saturate(var(--art-saturation))}
 .forum-page .forum-welcome .forum-kicker{color:var(--hero-text);opacity:.78}
