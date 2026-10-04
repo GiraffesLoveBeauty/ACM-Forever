@@ -1,0 +1,93 @@
+/* The approved artwork is confined to the forum welcome banner. */
+.forum-algorithm-art {
+  --graph-x:0px;
+  --graph-y:0px;
+  --graph-roll:0deg;
+  --pointer-active:0;
+  --pointer-x:50%;
+  --pointer-y:50%;
+  --route-glow:.62;
+  position:absolute;
+  z-index:0;
+  inset:0 0 0 auto;
+  width:45%;
+  height:100%;
+  margin:0;
+  overflow:hidden;
+  opacity:.96;
+  background:radial-gradient(ellipse at 80% 16%,#397f686b,transparent 70%),linear-gradient(130deg,#173f3c,#245b50 63%,#164a46);
+}
+.forum-algorithm-art::before {
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:1;
+  background:radial-gradient(circle 88px at var(--pointer-x) var(--pointer-y),#d7edab19,#c8e5b307 48%,transparent);
+  opacity:var(--pointer-active);
+  transition:opacity .22s ease-out;
+  pointer-events:none;
+}
+.forum-algorithm-art::after {
+  content:"";
+  position:absolute;
+  z-index:2;
+  inset:0;
+  background:linear-gradient(90deg,#123f3b,transparent 46%),linear-gradient(0deg,#0e252a8c,transparent 45%);
+  pointer-events:none;
+}
+[data-theme=dark] .forum-algorithm-art::after {
+  background:linear-gradient(90deg,#173d39,transparent 46%),linear-gradient(0deg,#0e252a8c,transparent 45%);
+}
+.forum-algorithm-art .algorithm-disc,.forum-algorithm-art .algorithm-square,
+.forum-algorithm-art .algorithm-slice,.forum-algorithm-art .algorithm-arch {position:absolute;pointer-events:none}
+.forum-algorithm-art .algorithm-disc {width:225px;height:225px;top:-72px;right:-22px;border-radius:50%;background:linear-gradient(130deg,#c4d59a,#79bba7);opacity:.3}
+.forum-algorithm-art .algorithm-square {width:106px;height:106px;left:26%;top:35%;border-radius:14px;transform:rotate(28deg);background:#a7c8c2;opacity:.2}
+.forum-algorithm-art .algorithm-slice {width:153px;height:153px;left:13%;bottom:-34px;background:#c0d88b;opacity:.23;clip-path:polygon(0 100%,100% 0,100% 100%)}
+.forum-algorithm-art .algorithm-arch {width:158px;height:192px;bottom:-21px;right:41px;border-radius:95px 95px 0 0;transform:rotate(-23deg);background:linear-gradient(170deg,#62a997,#2c726b);opacity:.58}
+.forum-algorithm-art .algorithm-aura {position:absolute;top:12%;right:-8%;width:76%;height:76%;border-radius:50%;background:radial-gradient(ellipse,#b9d57d24,#8bc8af15 42%,transparent 70%);transform:translate(calc(var(--graph-x) * -.65),calc(var(--graph-y) * -.65));transition:transform .28s ease-out;pointer-events:none}
+.forum-algorithm-art .algorithm-layer {position:absolute;z-index:1;inset:0;opacity:.94;font-family:Consolas,'SFMono-Regular',monospace;pointer-events:none}
+.forum-algorithm-art .algorithm-grid {position:absolute;left:9%;right:-6%;bottom:20px;height:160px;background-image:linear-gradient(#bdddb226 1px,transparent 1px),linear-gradient(90deg,#bdddb226 1px,transparent 1px);background-size:28px 28px;transform:translate(calc(var(--graph-x) * -.35),calc(var(--graph-y) * -.35)) perspective(210px) rotateX(55deg) rotateZ(-13deg);transform-origin:center bottom;mask-image:radial-gradient(ellipse at 62% 55%,#000,transparent 68%);opacity:.45;transition:transform .28s ease-out}
+.forum-algorithm-art .algorithm-graph {position:absolute;top:1px;right:-3%;width:104%;height:calc(100% - 2px);overflow:visible;transform:translate(var(--graph-x),var(--graph-y)) rotate(calc(-3deg + var(--graph-roll)));transition:transform .2s ease-out}
+.forum-algorithm-art .algorithm-code {position:absolute;top:10px;left:23%;transform:translate(calc(var(--graph-x) * .4),calc(var(--graph-y) * .4)) rotate(-6deg);color:#cadfa7;opacity:.68;font:11px/1.7 Consolas,monospace;letter-spacing:.02em;transition:transform .28s ease-out}
+.forum-algorithm-art figcaption {position:absolute;z-index:3;right:20px;bottom:15px;color:#f4f4e9;font:500 12px/1.4 var(--font-body);letter-spacing:.06em;pointer-events:none}
+.algorithm-graph .graph-floor {opacity:.2}
+.algorithm-graph .graph-floor-edge {stroke:#a6d1b0;stroke-width:.8;fill:none}
+.algorithm-graph .graph-floor-node {fill:#a8caa7}
+.algorithm-graph .graph-edge {--edge-near:0;stroke:#c2dfbc;stroke-opacity:calc(.24 + var(--edge-near) * .46);stroke-width:calc(1px + var(--edge-near) * .35px);fill:none;transition:stroke-opacity .18s ease-out}
+.algorithm-graph .graph-stem {stroke:#b4d9b8;stroke-opacity:.24;stroke-width:.7}
+.algorithm-graph .graph-path-haze {fill:none;stroke:#d0e593;stroke-width:7;opacity:var(--route-glow);filter:url(#forum-graph-glow)}
+.algorithm-graph .graph-path-core {fill:none;stroke:url(#forum-graph-path);stroke-width:2.1;stroke-linejoin:round}
+.algorithm-graph .graph-node {--node-near:0}
+.algorithm-graph .graph-node-halo {fill:#c8e59c;opacity:calc(var(--node-near) * .1);transition:opacity .18s ease-out}
+.algorithm-graph .is-path .graph-node-halo {opacity:calc(var(--route-glow) * .13 + var(--node-near) * .08)}
+.algorithm-graph .graph-node-ring {fill:none;stroke:#e6f1bd;stroke-opacity:.29;stroke-width:.8;opacity:0;transition:opacity .18s ease-out,stroke-opacity .18s ease-out}
+.algorithm-graph .is-path .graph-node-ring {opacity:1}
+.algorithm-graph .is-hover .graph-node-ring {opacity:1;stroke-opacity:.85;stroke-width:1}
+.algorithm-graph .graph-node-front {fill:url(#forum-graph-node);stroke:#d8e8b2;stroke-width:.6}
+.algorithm-graph .graph-node-back {fill:#326857;stroke:#b5d4bf;stroke-opacity:calc(.4 + var(--node-near) * .5);stroke-width:1;transition:stroke-opacity .18s ease-out}
+.algorithm-graph .graph-node-label {font:13px Consolas,monospace;text-anchor:middle;dominant-baseline:central;fill:#203f33}
+.algorithm-graph .graph-node-label-secondary {font:12px Consolas,monospace;text-anchor:middle;dominant-baseline:central;fill:#cee4cf}
+.algorithm-graph .graph-weight {font:11px Consolas,monospace;fill:#dbeaaf;text-anchor:middle;paint-order:stroke;stroke:#255848;stroke-width:3}
+.algorithm-graph .graph-weight-secondary {fill:#aac6b1;opacity:.58}
+.algorithm-graph .graph-ring-arc {fill:none;stroke:#a2cdb774;stroke-width:1;stroke-dasharray:3 7}
+.algorithm-graph .graph-callout-line {fill:none;stroke:#bcd79d73;stroke-width:.7}
+.algorithm-graph .graph-callout-surface {fill:#1b4e45;fill-opacity:.86;stroke:#d0e3a34c;stroke-width:.8}
+.algorithm-graph .graph-callout-text {font:11px Consolas,monospace;fill:#dfedb9}
+.algorithm-graph .graph-trace-caption {font:11px Consolas,monospace;fill:#bcd5c4;opacity:.75}
+@media(max-width:720px) {
+  .forum-algorithm-art {position:relative;inset:auto;width:100%;height:190px;min-height:190px;border-radius:5px 20px 5px 20px}
+  .forum-algorithm-art::after {background:linear-gradient(180deg,#123f3b,transparent 44%),linear-gradient(0deg,#0e252a66,transparent 35%)}
+  [data-theme=dark] .forum-algorithm-art::after {background:linear-gradient(180deg,#173d39,transparent 44%),linear-gradient(0deg,#0e252a66,transparent 35%)}
+  .forum-algorithm-art .algorithm-graph {top:-9px;right:-1%;width:95%;height:195px}
+  .forum-algorithm-art .algorithm-code {left:29%}
+  .forum-algorithm-art figcaption {right:13px;bottom:10px;font-size:11px}
+}
+@media(prefers-reduced-motion:reduce) {
+  .forum-algorithm-art::before,.forum-algorithm-art .algorithm-graph,.forum-algorithm-art .algorithm-aura,
+  .forum-algorithm-art .algorithm-grid,.forum-algorithm-art .algorithm-code,
+  .algorithm-graph .graph-edge,.algorithm-graph .graph-node-halo,.algorithm-graph .graph-node-ring,.algorithm-graph .graph-node-back {transition:none}
+  .forum-algorithm-art .algorithm-graph {transform:rotate(-3deg)}
+  .forum-algorithm-art .algorithm-aura {transform:none}
+  .forum-algorithm-art .algorithm-grid {transform:perspective(210px) rotateX(55deg) rotateZ(-13deg)}
+  .forum-algorithm-art .algorithm-code {transform:rotate(-6deg)}
+}

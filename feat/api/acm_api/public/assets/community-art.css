@@ -1,0 +1,72 @@
+/* Decorative artwork for the existing leaderboard and personal welcome headers. */
+.community-header-art {
+  --header-art-x:0px;
+  --header-art-y:0px;
+  position:absolute;
+  z-index:0;
+  inset:0 0 0 auto;
+  width:36%;
+  height:100%;
+  margin:0;
+  overflow:hidden;
+  background:radial-gradient(ellipse at 80% 30%,#8fba914a,transparent 68%),linear-gradient(140deg,#22564b,#16423b);
+}
+.community-header-art::after {
+  content:"";
+  position:absolute;
+  z-index:2;
+  inset:0;
+  background:linear-gradient(90deg,#123f3b,transparent 49%),linear-gradient(0deg,#102f3733,transparent 70%);
+  pointer-events:none;
+}
+.personal-welcome .community-header-art {right:24%;width:34%}
+.personal-welcome>div {max-width:38%;min-width:0;overflow-wrap:anywhere}
+.community-header-art .header-art-layer {
+  position:absolute;
+  inset:0;
+  opacity:.92;
+  transform:translate(var(--header-art-x),var(--header-art-y));
+  transition:transform .24s ease-out;
+  pointer-events:none;
+}
+.community-header-art .header-art-scene {width:100%;height:100%;overflow:visible}
+.community-header-art .header-art-scene text {font:16px Consolas,monospace;text-anchor:middle;dominant-baseline:central;fill:#d5e5bd}
+.community-header-art .header-art-floor {stroke:#c0d7b3;stroke-opacity:.22;stroke-width:1;fill:none}
+.community-header-art .header-art-route {stroke:#d2e79e;stroke-width:2;fill:none;stroke-linejoin:round;transition:stroke-opacity .2s ease-out}
+.community-header-art .header-art-traces {stroke:#c0d7b3;stroke-opacity:.22;stroke-width:1;fill:none}
+.community-header-art .header-art-step,.community-header-art .header-art-node {--header-art-near:0}
+.community-header-art .header-art-step {filter:brightness(calc(1 + var(--header-art-near) * .18));transition:filter .18s ease-out}
+.community-header-art .header-art-step-top {fill:#b7cb91;fill-opacity:.65}
+.community-header-art .header-art-step-front {fill:#3d7660}
+.community-header-art .header-art-step-side {fill:#81a578;fill-opacity:.8}
+.community-header-art .header-art-scene .header-art-rank {paint-order:stroke;stroke:#22564b;stroke-width:3px;font-size:15px}
+.community-header-art .header-art-dot {fill:#94b97a;stroke:#d5e7b3;stroke-width:1}
+.community-header-art .header-art-halo {fill:#c8df93;opacity:calc(.11 + var(--header-art-near) * .15);transition:opacity .18s ease-out}
+.community-header-art .header-art-caption {position:absolute;right:20px;bottom:12px;color:#b8d59b;opacity:.74;font:11px/1.4 Consolas,monospace;pointer-events:none}
+.community-header-art .header-art-scene .header-art-note {font-size:14px;fill:#b8d59b;opacity:.74}
+.community-header-art:hover .header-art-route {stroke-opacity:1}
+@media(max-width:720px) {
+  .community-header-art {width:42%;opacity:.75}
+  .community-header-art::after {background:linear-gradient(90deg,#123f3b,transparent 60%),linear-gradient(180deg,#123f3b44,transparent 70%)}
+  .community-header-art .header-art-caption {right:9px;bottom:9px;font-size:10px}
+  .community-header-art .header-art-scene .header-art-note {display:none}
+}
+@media(max-width:900px) {
+  .personal-welcome {flex-direction:column;align-items:stretch;gap:14px}
+  .personal-welcome>div {width:100%;max-width:none}
+  .personal-welcome .community-header-art {
+    position:relative;
+    inset:auto;
+    width:100%;
+    height:140px;
+    flex:none;
+    background:transparent;
+    opacity:.92;
+  }
+  .personal-welcome .community-header-art::after {display:none}
+  .personal-welcome .personal-rank-link {align-self:flex-start}
+}
+@media(prefers-reduced-motion:reduce) {
+  .community-header-art .header-art-layer {transform:none;transition:none}
+  .community-header-art .header-art-route,.community-header-art .header-art-step,.community-header-art .header-art-halo {transition:none}
+}
