@@ -630,6 +630,25 @@ body.forum-page[data-theme="dark"]::before,
     padding-inline:24px;
   }
 }
+@media(min-width:721px) and (max-width:900px){
+  .forum-header{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    height:auto;
+    min-height:72px;
+    gap:10px;
+    padding-block:12px;
+  }
+  .forum-brand{grid-column:1;min-width:0}
+  .forum-header-actions{grid-column:2;grid-row:1}
+  .primary-nav{
+    grid-column:1/-1;
+    grid-row:2;
+    min-width:0;
+    border-top:1px solid var(--line);
+    padding-top:6px;
+  }
+}
 
 /* Full-page Markdown composer and database-backed draft shelf. */
 .compose-main{width:min(92vw,1380px);margin:34px auto 70px}

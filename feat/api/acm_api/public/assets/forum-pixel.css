@@ -1,0 +1,74 @@
+/* Reuse the photo slot's dimensions so the approved card layout stays intact. */
+.forum-pixel-art {
+  --pixel-x:0px;
+  --pixel-y:0px;
+  --pixel-size:10px;
+  position:relative;
+  isolation:isolate;
+  overflow:hidden;
+  background:radial-gradient(ellipse at 75% 12%,#b1c68b35,transparent 80%),linear-gradient(155deg,#244f3b,#3f674a);
+}
+.forum-pixel-art::before {
+  content:"";
+  position:absolute;
+  z-index:-1;
+  inset:0;
+  background-image:linear-gradient(#b8d29b0b 1px,transparent 1px),linear-gradient(90deg,#b8d29b0b 1px,transparent 1px);
+  background-size:16px 16px;
+  pointer-events:none;
+}
+.forum-pixel-art::after {
+  content:"";
+  position:absolute;
+  z-index:1;
+  inset:0;
+  background:linear-gradient(0deg,#103b302b,transparent 40%);
+  pointer-events:none;
+}
+.forum-pixel-art .forum-pixel-layer {
+  position:absolute;
+  inset:0;
+  opacity:.96;
+  transform:translate(var(--pixel-x),var(--pixel-y));
+  transition:transform .22s ease-out;
+  pointer-events:none;
+}
+.forum-pixel-art .forum-pixel-grid {
+  position:absolute;
+  top:14px;
+  left:50%;
+  display:grid;
+  grid-template-columns:repeat(11,var(--pixel-size));
+  grid-auto-rows:var(--pixel-size);
+  gap:3px;
+  transform:translateX(-50%);
+}
+.forum-pixel-art .forum-pixel {
+  --pixel-near:0;
+  border-radius:1px;
+  background:#b7d18e;
+  box-shadow:2px 3px 0 #173e2f;
+  filter:brightness(calc(1 + var(--pixel-near) * .22));
+  transform:translateY(calc(var(--pixel-near) * -2px));
+  transition:filter .16s ease-out,transform .16s ease-out;
+}
+.forum-pixel-art .forum-pixel-empty {border-radius:1px;background:#c4d9a2;opacity:.04}
+.forum-pixel-art .forum-pixel-caption {
+  position:absolute;
+  bottom:10px;
+  left:0;
+  right:0;
+  color:#d2e0b6;
+  opacity:.74;
+  text-align:center;
+  font:11px/1.4 Consolas,monospace;
+  letter-spacing:.16em;
+}
+@media(max-width:720px) {
+  .forum-pixel-art {--pixel-size:9px}
+  .forum-pixel-art .forum-pixel-grid {top:7px}
+  .forum-pixel-art .forum-pixel-caption {bottom:7px}
+}
+@media(prefers-reduced-motion:reduce) {
+  .forum-pixel-art .forum-pixel-layer,.forum-pixel-art .forum-pixel {transform:none;transition:none}
+}
