@@ -7,39 +7,63 @@
     <section class="personal-welcome"><div><h1 id="greeting">个人中心</h1><p>查看刷题进度、账号绑定和社区参与。</p></div><figure class="community-header-art" aria-label="解题轨迹"><div class="header-art-layer"><svg class="header-art-scene" viewBox="0 0 320 190" data-header-scene="journey" role="img" aria-label="从思考、编写代码到 AC 的连续解题轨迹"></svg></div></figure><a class="personal-rank-link" href="/leaderboard.html"><span>社区排行榜</span><b>查看大家的进度　↗</b></a></section>
     <section class="profile-stat-grid grid kpis" id="stats"></section>
     <div class="personal-columns">
-      <section class="community-panel profile-details-panel"><div class="panel-heading"><h2>个人资料</h2><button class="btn" id="edit-name">修改昵称</button></div><p class="panel-caption">绑定账号和做题统计仅本人及管理员可见。</p><div class="profile-avatar-editor"><img id="profile-avatar-preview" class="user-avatar profile-avatar-preview" src="/assets/default-avatar.png" alt="当前头像"><div class="profile-avatar-copy"><b>社区头像</b><small id="avatar-size-note">支持常见图片格式，上传时自动压缩</small><div class="profile-avatar-actions"><label class="btn" for="avatar-file">选择图片</label><input id="avatar-file" type="file" accept="image/*" hidden><button class="btn primary" id="upload-avatar" type="button">上传头像</button><button class="btn" id="reset-avatar" type="button">恢复默认</button></div></div></div><div id="profile" class="profile-binding-grid"></div></section>
+      <section class="community-panel profile-details-panel"><div class="panel-heading"><h2>个人资料</h2><button class="btn" id="edit-name">修改昵称</button></div><p class="panel-caption">绑定账号和做题统计仅本人及管理员可见。</p><div class="profile-avatar-editor"><img id="profile-avatar-preview" class="user-avatar profile-avatar-preview" src="/assets/default-avatar.png" alt="当前头像" onerror="this.onerror=null;this.src='/assets/default-avatar.png'"><div class="profile-avatar-copy"><b>社区头像</b><small id="avatar-size-note" role="status" aria-live="polite">选择图片后会自动压缩并上传（最大 2 MB）</small><div class="profile-avatar-actions"><button class="btn primary" id="choose-avatar" type="button">上传头像</button><input id="avatar-file" type="file" accept="image/*" hidden><button class="btn" id="reset-avatar" type="button">恢复默认</button></div></div></div><div id="profile" class="profile-binding-grid"></div></section>
       <section class="community-panel recent-panel"><div class="panel-heading"><h2>最近 AC</h2><a class="panel-text-link" href="/submissions.html">提交时间线　↗</a></div><div id="recent" class="list"><div class="empty">正在加载…</div></div></section>
     </div>
     <section class="community-panel personal-community-panel"><div class="panel-heading"><h2>我的社区内容</h2><a class="panel-text-link" href="/compose.html">查看草稿 / 写新话题　↗</a></div><div class="personal-content-tabs"><button class="personal-content-tab active" data-forum-tab="posts">我的话题</button><button class="personal-content-tab" data-forum-tab="bookmarks">我的收藏</button></div><div id="my-forum-content" class="personal-content-list"><div class="empty">正在加载…</div></div></section>
   </main>
-  <script src="/assets/app.js?v=palette-theme-4"></script>
+  <script src="/assets/app.js?v=avatar-webp-1"></script>
   <script>
     let profileData;
-    const avatarTargetBytes=1750*1024;
+    const avatarTargetBytes=1800*1024;
+    let localAvatarPreviewUrl=null;
+    let savedAvatarUrl=null;
+    let avatarRevision=0;
+    let avatarUploadInProgress=false;
     const formatBytes=bytes=>bytes<1024*1024?`${Math.max(1,Math.round(bytes/1024))} KB`:`${(bytes/1024/1024).toFixed(1)} MB`;
+    function clearLocalAvatarPreview(){if(localAvatarPreviewUrl){URL.revokeObjectURL(localAvatarPreviewUrl);localAvatarPreviewUrl=null}}
+    function showAvatarPreview(file){
+      clearLocalAvatarPreview();
+      localAvatarPreviewUrl=URL.createObjectURL(file);
+      document.getElementById('profile-avatar-preview').src=localAvatarPreviewUrl;
+    }
+    async function decodeAvatar(file){
+      if(typeof createImageBitmap==='function'){
+        try{
+          const bitmap=await createImageBitmap(file);
+          return {width:bitmap.width,height:bitmap.height,draw:(context,width,height)=>context.drawImage(bitmap,0,0,width,height),close:()=>bitmap.close?.()};
+        }catch{}
+      }
+      const url=URL.createObjectURL(file),image=new Image();
+      image.src=url;
+      try{await image.decode()}catch{URL.revokeObjectURL(url);throw Error('浏览器无法读取这张图片，请换一张常见格式的图片。')}
+      return {width:image.naturalWidth,height:image.naturalHeight,draw:(context,width,height)=>context.drawImage(image,0,0,width,height),close:()=>URL.revokeObjectURL(url)};
+    }
     async function compressAvatar(file){
       if(!file.type.startsWith('image/'))throw Error('请选择图片文件。');
-      const bitmap=await createImageBitmap(file);
+      const image=await decodeAvatar(file);
       try{
-        const longest=Math.max(bitmap.width,bitmap.height);
-        if(file.size<=avatarTargetBytes&&longest<=4096&&bitmap.width*bitmap.height<=16_000_000&&['image/png','image/jpeg','image/webp'].includes(file.type))return file;
-        let edge=Math.min(1400,longest),quality=.86,outputType='image/webp',lastBlob=null;
-        for(let attempt=0;attempt<14;attempt++){
+        const longest=Math.max(image.width,image.height);
+        if(!longest||!image.width||!image.height)throw Error('图片尺寸无效，请换一张图片。');
+        let edge=Math.min(1024,longest),quality=.86,outputType='image/webp';
+        for(let attempt=0;attempt<48;attempt++){
           const scale=Math.min(1,edge/longest),canvas=document.createElement('canvas');
-          canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));
+          canvas.width=Math.max(1,Math.round(image.width*scale));canvas.height=Math.max(1,Math.round(image.height*scale));
           const context=canvas.getContext('2d');if(!context)throw Error('浏览器无法处理这张图片。');
-          if(outputType==='image/jpeg'){context.fillStyle='#fffefa';context.fillRect(0,0,canvas.width,canvas.height)}
-          context.drawImage(bitmap,0,0,canvas.width,canvas.height);
+          if(outputType==='image/jpeg'){context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height)}
+          image.draw(context,canvas.width,canvas.height);
           const blob=await new Promise(resolve=>canvas.toBlob(resolve,outputType,quality));
           if(!blob)throw Error('图片压缩失败，请换一张图片再试。');
-          if(outputType==='image/webp'&&blob.type!=='image/webp'){outputType='image/jpeg';quality=.86;continue}
-          lastBlob=blob;
+          if(blob.type!==outputType){if(outputType==='image/webp'){outputType='image/jpeg';quality=.86;continue}throw Error('浏览器无法导出头像图片，请换一张图片再试。')}
           if(blob.size<=avatarTargetBytes){const extension=outputType==='image/webp'?'webp':'jpg';return new File([blob],`avatar.${extension}`,{type:outputType,lastModified:Date.now()})}
-          if(quality>.60)quality=Math.max(.60,quality-.08);else{edge=Math.max(256,Math.floor(edge*.75));quality=.86}
+          if(quality>.3)quality=Math.max(.3,quality*.72);
+          else if(edge>64){edge=Math.max(64,Math.floor(edge*.7));quality=.82}
+          else if(quality>.12)quality=Math.max(.12,quality*.7);
+          else if(edge>1){edge=Math.max(1,Math.floor(edge*.5));quality=.82}
+          else throw Error('图片压缩未能达到 2 MB，请换一张图片再试。');
         }
-        if(lastBlob&&lastBlob.size<=2*1024*1024){const extension=lastBlob.type==='image/webp'?'webp':'jpg';return new File([lastBlob],`avatar.${extension}`,{type:lastBlob.type,lastModified:Date.now()})}
-        throw Error('这张图片无法压缩到上传限制内，请换一张图片。');
-      }finally{bitmap.close?.()}
+        throw Error('图片压缩未能达到 2 MB，请换一张图片再试。');
+      }finally{image.close()}
     }
     async function loadForumContent(tab='posts'){
       const box=document.getElementById('my-forum-content');
@@ -50,11 +74,13 @@
     }
     async function load(){
       try{
+        const requestedAvatarRevision=avatarRevision;
         profileData=await api('/me/profile');const user=profileData.user;
         document.getElementById('greeting').textContent='欢迎回来，'+user.name;
         const counts=profileData.platform_counts||{};
         document.getElementById('stats').innerHTML=`<div class="card profile-stat-card"><div class="stat-icon">✦</div><div class="label">累计 AC</div><div class="value">${profileData.total_count||0}</div><small>跨平台去重题数</small></div><div class="card profile-stat-card"><div class="stat-icon stat-blue">CF</div><div class="label">Codeforces</div><div class="value">${counts.codeforces||0}</div><small>已通过题目</small></div><div class="card profile-stat-card"><div class="stat-icon stat-green">At</div><div class="label">AtCoder</div><div class="value">${counts.atcoder||0}</div><small>已通过题目</small></div><div class="card profile-stat-card"><div class="stat-icon stat-warm">＋</div><div class="label">其他平台</div><div class="value">${Object.entries(counts).filter(([key])=>!['codeforces','atcoder'].includes(key)).reduce((sum,[,count])=>sum+count,0)}</div><small>洛谷、牛客与校 OJ</small></div>`;
-        document.getElementById('profile-avatar-preview').src=user.avatar_url||'/assets/default-avatar.png';
+        if(requestedAvatarRevision===avatarRevision)savedAvatarUrl=user.avatar_url||null;
+        if(!avatarUploadInProgress){clearLocalAvatarPreview();document.getElementById('profile-avatar-preview').src=savedAvatarUrl||'/assets/default-avatar.png'}
         document.getElementById('profile').innerHTML=`<div class="binding-row"><span>社区昵称</span><b>${esc(user.name)}</b></div><div class="binding-row"><span>身份</span><b>${esc(user.status||'未设置')}</b></div><div class="binding-row"><span>Codeforces</span><b>${esc(user.cf_handle||'未绑定')}</b></div><div class="binding-row"><span>洛谷</span><b>${esc(user.luogu_id||'未绑定')}</b></div><div class="binding-row"><span>AtCoder</span><b>${esc(user.atcoder_handle||'未绑定')}</b></div><div class="binding-row"><span>牛客</span><b>${esc(user.nowcoder_id||'未绑定')}</b></div>`;
         document.getElementById('recent').innerHTML=(profileData.recent_ac||[]).slice(0,6).map(item=>`<div class="recent-ac-row"><span class="recent-ac-check">✓</span><span class="recent-ac-copy"><b>${esc(item.problem_name||item.problem_id)}</b><small>${esc(item.platform)} · ${esc(item.problem_rating||'难度未知')} · ${new Date(item.submit_time*1000).toLocaleDateString()}</small></span>${item.problem_url?`<a class="recent-ac-open" href="${esc(item.problem_url)}" target="_blank" rel="noopener noreferrer" aria-label="打开题目">↗</a>`:''}</div>`).join('')||'<div class="empty">暂无 AC 记录</div>';
       }catch(error){document.getElementById('recent').innerHTML=`<div class="empty">${esc(error.message)}</div>`}
@@ -62,9 +88,41 @@
     }
     document.querySelectorAll('[data-forum-tab]').forEach(button=>button.onclick=()=>{document.querySelectorAll('[data-forum-tab]').forEach(item=>item.classList.toggle('active',item===button));loadForumContent(button.dataset.forumTab)});
     document.getElementById('edit-name').onclick=async()=>{const name=prompt('请输入新昵称',profileData?.user?.name||'');if(!name)return;try{await api('/me/profile',{method:'PUT',body:JSON.stringify({name})});await load()}catch(error){alert(error.message)}};
-    document.getElementById('avatar-file').onchange=event=>{const file=event.target.files?.[0];if(file){const preview=document.getElementById('profile-avatar-preview');const localUrl=URL.createObjectURL(file);preview.onload=()=>URL.revokeObjectURL(localUrl);preview.src=localUrl}};
-    document.getElementById('upload-avatar').onclick=async()=>{const file=document.getElementById('avatar-file').files?.[0];if(!file){alert('先选择一张头像图片。');return}const form=new FormData(),button=document.getElementById('upload-avatar'),note=document.getElementById('avatar-size-note');button.disabled=true;button.textContent='正在压缩…';note.textContent='正在优化图片，请稍候';try{const compressed=await compressAvatar(file);form.append('avatar',compressed,compressed.name);note.textContent=`图片已优化：${formatBytes(file.size)} → ${formatBytes(compressed.size)}`;button.textContent='正在上传…';await api('/me/avatar',{method:'POST',body:form});document.getElementById('avatar-file').value='';await load();note.textContent=`头像已更新（${formatBytes(compressed.size)}）`}catch(error){note.textContent='支持常见图片格式，上传时自动压缩';alert(error.message)}finally{button.disabled=false;button.textContent='上传头像'}};
-    document.getElementById('reset-avatar').onclick=async()=>{try{await api('/me/avatar',{method:'DELETE'});document.getElementById('avatar-file').value='';await load()}catch(error){alert(error.message)}};
+    const avatarFileInput=document.getElementById('avatar-file');
+    const chooseAvatarButton=document.getElementById('choose-avatar');
+    const avatarNote=document.getElementById('avatar-size-note');
+    const avatarPreview=document.getElementById('profile-avatar-preview');
+    chooseAvatarButton.onclick=()=>avatarFileInput.click();
+    avatarFileInput.onchange=async event=>{
+      const file=event.target.files?.[0];
+      if(!file)return;
+      const form=new FormData(),resetButton=document.getElementById('reset-avatar');
+      avatarRevision++;avatarUploadInProgress=true;
+      chooseAvatarButton.disabled=true;chooseAvatarButton.setAttribute('aria-busy','true');resetButton.disabled=true;
+      chooseAvatarButton.textContent='正在压缩…';avatarNote.textContent='正在压缩图片并准备上传';
+      try{
+        showAvatarPreview(file);
+        const compressed=await compressAvatar(file);
+        showAvatarPreview(compressed);
+        avatarNote.textContent=`压缩完成：${formatBytes(file.size)} → ${formatBytes(compressed.size)}，正在上传`;
+        form.append('avatar',compressed,compressed.name);
+        const result=await api('/me/avatar',{method:'POST',body:form});
+        savedAvatarUrl=result.avatar_url||null;
+        clearLocalAvatarPreview();
+        if(profileData?.user)profileData.user.avatar_url=savedAvatarUrl;
+        avatarPreview.src=savedAvatarUrl||'/assets/default-avatar.png';
+        avatarNote.textContent=`头像已更新（${formatBytes(compressed.size)}）`;
+      }catch(error){
+        clearLocalAvatarPreview();
+        avatarPreview.src=savedAvatarUrl||profileData?.user?.avatar_url||'/assets/default-avatar.png';
+        avatarNote.textContent=`上传失败：${error.message}`;
+      }finally{
+        avatarUploadInProgress=false;
+        avatarFileInput.value='';chooseAvatarButton.disabled=false;chooseAvatarButton.removeAttribute('aria-busy');
+        resetButton.disabled=false;chooseAvatarButton.textContent='上传头像';
+      }
+    };
+    document.getElementById('reset-avatar').onclick=async()=>{const button=document.getElementById('reset-avatar');button.disabled=true;try{await api('/me/avatar',{method:'DELETE'});avatarFileInput.value='';await load();avatarNote.textContent='已恢复默认头像'}catch(error){avatarNote.textContent=`恢复失败：${error.message}`}finally{button.disabled=false}};
     window.PAGE_LOAD=load;
   </script>
 </body>
