@@ -97,7 +97,7 @@
       const file=event.target.files?.[0];
       if(!file)return;
       const form=new FormData(),resetButton=document.getElementById('reset-avatar');
-      avatarRevision++;avatarUploadInProgress=true;
+      avatarUploadInProgress=true;
       chooseAvatarButton.disabled=true;chooseAvatarButton.setAttribute('aria-busy','true');resetButton.disabled=true;
       chooseAvatarButton.textContent='正在压缩…';avatarNote.textContent='正在压缩图片并准备上传';
       try{
@@ -107,6 +107,7 @@
         avatarNote.textContent=`压缩完成：${formatBytes(file.size)} → ${formatBytes(compressed.size)}，正在上传`;
         form.append('avatar',compressed,compressed.name);
         const result=await api('/me/avatar',{method:'POST',body:form});
+        avatarRevision++;
         savedAvatarUrl=result.avatar_url||null;
         clearLocalAvatarPreview();
         if(profileData?.user)profileData.user.avatar_url=savedAvatarUrl;
@@ -114,7 +115,7 @@
         avatarNote.textContent=`头像已更新（${formatBytes(compressed.size)}）`;
       }catch(error){
         clearLocalAvatarPreview();
-        avatarPreview.src=savedAvatarUrl||profileData?.user?.avatar_url||'/assets/default-avatar.png';
+        avatarPreview.src=savedAvatarUrl??profileData?.user?.avatar_url??'/assets/default-avatar.png';
         avatarNote.textContent=`上传失败：${error.message}`;
       }finally{
         avatarUploadInProgress=false;
@@ -122,7 +123,7 @@
         resetButton.disabled=false;chooseAvatarButton.textContent='上传头像';
       }
     };
-    document.getElementById('reset-avatar').onclick=async()=>{const button=document.getElementById('reset-avatar');button.disabled=true;try{await api('/me/avatar',{method:'DELETE'});avatarFileInput.value='';await load();avatarNote.textContent='已恢复默认头像'}catch(error){avatarNote.textContent=`恢复失败：${error.message}`}finally{button.disabled=false}};
+    document.getElementById('reset-avatar').onclick=async()=>{const button=document.getElementById('reset-avatar');button.disabled=true;try{await api('/me/avatar',{method:'DELETE'});avatarRevision++;savedAvatarUrl=null;if(profileData?.user)profileData.user.avatar_url=null;avatarPreview.src='/assets/default-avatar.png';avatarFileInput.value='';await load();avatarNote.textContent='已恢复默认头像'}catch(error){avatarNote.textContent=`恢复失败：${error.message}`}finally{button.disabled=false}};
     window.PAGE_LOAD=load;
   </script>
 </body>
