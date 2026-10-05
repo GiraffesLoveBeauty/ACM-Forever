@@ -89,7 +89,7 @@ function lockOwnerInputs(){
 
 function showLogin(){const box=$('#login');if(box)box.style.display='grid'}
 function avatarMarkup(url,name,classes=''){
-  const source=typeof url==='string'&&/^\/uploads\/avatars\/[a-f0-9]{32}\.(?:png|jpg)$/.test(url)?url:'/assets/default-avatar.png';
+  const source=typeof url==='string'&&/^\/uploads\/avatars\/[a-f0-9]{32}\.(?:png|jpg|webp)$/.test(url)?url:'/assets/default-avatar.png';
   return `<img class="user-avatar ${classes}" src="${source}" alt="${esc(name||'计量 ACMer')} 的头像" loading="lazy" onerror="this.onerror=null;this.src='/assets/default-avatar.png'">`;
 }
 const PALETTE_OPTIONS=[['mint','清绿'],['gray','白灰'],['sunshine','暖黄'],['rose','柔粉']];
