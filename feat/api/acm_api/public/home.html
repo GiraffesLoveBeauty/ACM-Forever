@@ -20,6 +20,7 @@
     let savedAvatarUrl=null;
     let avatarRevision=0;
     let avatarUploadInProgress=false;
+    let avatarResetInProgress=false;
     const formatBytes=bytes=>bytes<1024*1024?`${Math.max(1,Math.round(bytes/1024))} KB`:`${(bytes/1024/1024).toFixed(1)} MB`;
     function clearLocalAvatarPreview(){if(localAvatarPreviewUrl){URL.revokeObjectURL(localAvatarPreviewUrl);localAvatarPreviewUrl=null}}
     function showAvatarPreview(file){
@@ -95,10 +96,11 @@
     const chooseAvatarButton=document.getElementById('choose-avatar');
     const avatarNote=document.getElementById('avatar-size-note');
     const avatarPreview=document.getElementById('profile-avatar-preview');
-    chooseAvatarButton.onclick=()=>avatarFileInput.click();
+    chooseAvatarButton.onclick=()=>{if(!avatarResetInProgress)avatarFileInput.click()};
     avatarFileInput.onchange=async event=>{
       const file=event.target.files?.[0];
       if(!file)return;
+      if(avatarResetInProgress){avatarFileInput.value='';return}
       const form=new FormData(),resetButton=document.getElementById('reset-avatar');
       avatarUploadInProgress=true;
       chooseAvatarButton.disabled=true;chooseAvatarButton.setAttribute('aria-busy','true');resetButton.disabled=true;
@@ -126,7 +128,7 @@
         resetButton.disabled=false;chooseAvatarButton.textContent='上传头像';
       }
     };
-    document.getElementById('reset-avatar').onclick=async()=>{const button=document.getElementById('reset-avatar');button.disabled=true;try{await api('/me/avatar',{method:'DELETE'});avatarRevision++;savedAvatarUrl=null;if(profileData?.user)profileData.user.avatar_url=null;avatarPreview.src='/assets/default-avatar.png';avatarFileInput.value='';await load();avatarNote.textContent='已恢复默认头像'}catch(error){avatarNote.textContent=`恢复失败：${error.message}`}finally{button.disabled=false}};
+    document.getElementById('reset-avatar').onclick=async()=>{const button=document.getElementById('reset-avatar');if(avatarUploadInProgress||avatarResetInProgress)return;avatarResetInProgress=true;button.disabled=true;chooseAvatarButton.disabled=true;avatarFileInput.disabled=true;button.textContent='正在恢复…';try{await api('/me/avatar',{method:'DELETE'});avatarRevision++;savedAvatarUrl=null;if(profileData?.user)profileData.user.avatar_url=null;avatarPreview.src='/assets/default-avatar.png';avatarFileInput.value='';await load();avatarNote.textContent='已恢复默认头像'}catch(error){avatarNote.textContent=`恢复失败：${error.message}`}finally{avatarResetInProgress=false;button.disabled=false;chooseAvatarButton.disabled=false;avatarFileInput.disabled=false;button.textContent='恢复默认'}};
     window.PAGE_LOAD=load;
   </script>
 </body>
