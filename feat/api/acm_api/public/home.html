@@ -75,7 +75,10 @@
     async function load(){
       try{
         const requestedAvatarRevision=avatarRevision;
-        profileData=await api('/me/profile');const user=profileData.user;
+        const loadedProfile=await api('/me/profile');
+        const user=loadedProfile.user;
+        if(requestedAvatarRevision!==avatarRevision)user.avatar_url=savedAvatarUrl;
+        profileData=loadedProfile;
         document.getElementById('greeting').textContent='欢迎回来，'+user.name;
         const counts=profileData.platform_counts||{};
         document.getElementById('stats').innerHTML=`<div class="card profile-stat-card"><div class="stat-icon">✦</div><div class="label">累计 AC</div><div class="value">${profileData.total_count||0}</div><small>跨平台去重题数</small></div><div class="card profile-stat-card"><div class="stat-icon stat-blue">CF</div><div class="label">Codeforces</div><div class="value">${counts.codeforces||0}</div><small>已通过题目</small></div><div class="card profile-stat-card"><div class="stat-icon stat-green">At</div><div class="label">AtCoder</div><div class="value">${counts.atcoder||0}</div><small>已通过题目</small></div><div class="card profile-stat-card"><div class="stat-icon stat-warm">＋</div><div class="label">其他平台</div><div class="value">${Object.entries(counts).filter(([key])=>!['codeforces','atcoder'].includes(key)).reduce((sum,[,count])=>sum+count,0)}</div><small>洛谷、牛客与校 OJ</small></div>`;
