@@ -455,8 +455,17 @@ async def api_auth_logout():
 async def api_auth_me():
     identity = await _session_identity()
     if not identity:
-        return jsonify({"authenticated": False, "csrf_token": None, "root": False, "role": None, "qq_id": None, "must_change_password": False})
-    return jsonify({"authenticated": True, "csrf_token": session.get("webui_csrf"), "root": identity["role"] == "root", "role": identity["role"], "qq_id": identity["qq_id"], "must_change_password": identity["must_change_password"]})
+        return jsonify({"authenticated": False, "csrf_token": None, "root": False, "role": None, "qq_id": None, "must_change_password": False, "avatar_url": None})
+    avatar_url = None
+    if identity.get("qq_id"):
+        db = await get_db()
+        try:
+            async with db.execute("SELECT avatar_url FROM users WHERE qq_id=?", (identity["qq_id"],)) as cursor:
+                user = await cursor.fetchone()
+            avatar_url = user["avatar_url"] if user else None
+        finally:
+            await db.close()
+    return jsonify({"authenticated": True, "csrf_token": session.get("webui_csrf"), "root": identity["role"] == "root", "role": identity["role"], "qq_id": identity["qq_id"], "must_change_password": identity["must_change_password"], "avatar_url": avatar_url})
 
 
 @api.route("/auth/change-password", methods=["POST"])
@@ -2278,13 +2287,13 @@ async def _fetch_leaderboard(db, days, page, page_size, sort_key, search, platfo
     where_sql, where_params = _leaderboard_user_filter(search)
     query = (
         "SELECT u.qq_id, COALESCE(NULLIF(u.cf_handle, ''), u.name, u.qq_id) AS name, "
-        "u.real_name, u.status, u.school, "
+        "u.real_name, u.status, u.school, u.avatar_url, "
         + ", ".join(platform_counts)
         + ", "
         + total_sql
         + " FROM users u LEFT JOIN submissions s ON u.qq_id = s.user_qq_id"
         + where_sql
-        + " GROUP BY u.qq_id, u.name, u.cf_handle, u.real_name, u.status, u.school"
+        + " GROUP BY u.qq_id, u.name, u.cf_handle, u.real_name, u.status, u.school, u.avatar_url"
         + f" ORDER BY {_LEADERBOARD_SORT_COLUMNS[sort_key]} DESC, name ASC, u.qq_id ASC"
     )
     params = select_params + where_params

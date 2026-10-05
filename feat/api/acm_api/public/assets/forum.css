@@ -812,6 +812,8 @@ body.forum-page[data-theme="dark"]::before,
 
 /* Member-uploaded profile images and the supplied community default avatar. */
 .user-avatar{flex:none;object-fit:cover;object-position:center;border-radius:50%;background:var(--bg)}
+.header-avatar-link{width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;outline-offset:2px}.header-avatar-link[hidden]{display:none}.header-avatar{width:32px;height:32px;border:1px solid var(--line)}
+.rank-member-cell{display:inline-flex;align-items:center;gap:10px}.rank-avatar{width:34px;height:34px;border:1px solid var(--line)}
 .forum-avatar.user-avatar{display:block;padding:0;color:transparent}
 .profile-avatar-editor{display:flex;align-items:center;gap:15px;margin:3px 0 15px;padding:13px;border:1px solid var(--line);border-radius:11px;background:var(--bg)}
 .profile-avatar-preview{width:68px;height:68px;border:2px solid var(--panel);box-shadow:0 0 0 1px var(--line)}
