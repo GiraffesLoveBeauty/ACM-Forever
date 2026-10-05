@@ -81,6 +81,15 @@ async function renderNav(){
   });
 }
 
+function mountHeaderAvatar(){
+  const link=$('#login-link');
+  if(!AUTH.authenticated||!link)return;
+  link.classList.add('account-avatar-button');
+  link.setAttribute('aria-label','个人中心');
+  link.title='个人中心';
+  link.innerHTML=avatarMarkup(AUTH.avatar_url,'个人中心','header-account-avatar');
+}
+
 function lockOwnerInputs(){
   if(AUTH.role!=='member'||!AUTH.qq_id)return;
   document.querySelectorAll('#owner').forEach(input=>{input.value=AUTH.qq_id;input.readOnly=true;input.setAttribute('aria-hidden','true');input.style.display='none'});
@@ -173,7 +182,9 @@ async function init(){
   if(page==='change-password.html')return;
   await renderNav();lockOwnerInputs();
   const requestedMember=new URLSearchParams(location.search).get('qq_id');
-  if(typeof window.PAGE_LOAD==='function')await window.PAGE_LOAD(AUTH.role==='member'?undefined:requestedMember);
+  const pageLoad=typeof window.PAGE_LOAD==='function'?window.PAGE_LOAD(AUTH.role==='member'?undefined:requestedMember):null;
+  if(document.querySelector('.forum-header-actions #login-link'))mountHeaderAvatar();
+  if(pageLoad)await pageLoad;
   if(document.querySelector('.profile-stat-card'))animateNumbers(document);
 }
 
