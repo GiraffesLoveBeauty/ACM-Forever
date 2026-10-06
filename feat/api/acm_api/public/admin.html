@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f4f7f3">
   <title>成员账号 · ACM Forever 管理后台</title>
   <link rel="stylesheet" href="/assets/app.css?v=palette-theme-4">
-  <link rel="stylesheet" href="/assets/admin.css?v=admin-center-2">
+  <link rel="stylesheet" href="/assets/admin.css?v=admin-center-3">
 </head>
 <body class="admin-console">
   <div class="admin-shell">
@@ -70,13 +70,15 @@
               <div class="admin-form-footer"><div id="account-message" class="admin-message muted" role="status" aria-live="polite"></div><button class="btn primary admin-button" id="create-account">创建账号</button></div>
             </div>
           </details>
+          <div id="account-list-message" class="admin-message muted" role="status" aria-live="polite"></div>
           <div id="accounts" class="admin-account-list"><div class="empty">正在加载账号…</div></div>
         </section>
       </div>
     </main>
   </div><script src="/assets/app.js?v=forum-header-avatar-6"></script>
   <script>
-    const accountMessage=document.getElementById('account-message');
+    const accountMessage=document.getElementById('account-list-message');
+    const accountCreateMessage=document.getElementById('account-message');
     const candidateMessage=document.getElementById('candidate-message');
     const selectedQQs=new Set();
     const candidateNames=new Map();
@@ -161,8 +163,8 @@
     }
     async function createAccount(){
       const body={qq_id:document.getElementById('account-qq').value.trim(),name:document.getElementById('account-name').value.trim(),initial_password:document.getElementById('account-password').value,status:document.getElementById('account-status').value,school:document.getElementById('account-school').value,role:document.getElementById('account-role').value};
-      try{const result=await api('/admin/web-accounts',{method:'POST',body:JSON.stringify(body)});notice(accountMessage,result.message);document.getElementById('account-password').value='';await Promise.all([loadCandidates(),loadAccounts()])}
-      catch(error){notice(accountMessage,error.message)}
+      try{const result=await api('/admin/web-accounts',{method:'POST',body:JSON.stringify(body)});notice(accountCreateMessage,result.message);document.getElementById('account-password').value='';await Promise.all([loadCandidates(),loadAccounts()])}
+      catch(error){notice(accountCreateMessage,error.message)}
     }
     async function resetPassword(qq){
       const password=prompt('设置新的初始密码（至少 12 位）。请通过安全渠道转交，系统不会再次显示。');if(!password)return;
