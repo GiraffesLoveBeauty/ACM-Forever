@@ -1,9 +1,9 @@
-:root{--admin-canvas:#f4f7f3;--admin-panel:#fff;--admin-ink:#1e302d;--admin-muted:#697a74;--admin-line:#d6e1da;--admin-pine:#174d43;--admin-pine-bg:#174d43;--admin-lime:#c9dc62;--admin-warn:#b85e47;--admin-soft:#eff4ee;--admin-soft-ink:#586b5e;--admin-font:"Microsoft YaHei UI","PingFang SC",system-ui,sans-serif}
+.admin-console{--admin-canvas:var(--bg);--admin-panel:var(--panel);--admin-ink:var(--text);--admin-muted:var(--muted);--admin-line:var(--line);--admin-pine:var(--brand);--admin-pine-bg:var(--brand-strong);--admin-lime:var(--brand2);--admin-warn:var(--accent-coral,#b85e47);--admin-soft:var(--subtle-bg);--admin-soft-ink:var(--brand-strong);--admin-font:"Microsoft YaHei UI","PingFang SC",system-ui,sans-serif}
 .admin-console{min-height:100vh;background:var(--admin-canvas);color:var(--admin-ink);font-family:var(--admin-font);font-size:14px;line-height:1.55}
-.admin-console[data-theme=dark]{--admin-canvas:#152522;--admin-panel:#1d302c;--admin-ink:#eef4ef;--admin-muted:#a8b8b0;--admin-line:#344b43;--admin-pine:#8ac2a6;--admin-pine-bg:#174d43;--admin-lime:#c9dc62;--admin-warn:#ef9a80;--admin-soft:#263a34;--admin-soft-ink:#c3d0c8}
+.admin-console[data-theme=dark]{--admin-pine-bg:color-mix(in srgb,var(--brand) 22%,var(--bg))}
 .admin-console button,.admin-console input,.admin-console select{font:inherit}
 .admin-console a{color:inherit;text-decoration:none}
-.admin-console button:focus-visible,.admin-console a:focus-visible,.admin-console input:focus-visible,.admin-console select:focus-visible,.admin-console summary:focus-visible{outline:3px solid color-mix(in srgb,var(--admin-pine) 35%,transparent);outline-offset:2px}
+.admin-console button:focus-visible,.admin-console a:focus-visible,.admin-console input:focus-visible,.admin-console select:focus-visible,.admin-console summary:focus-visible{outline:3px solid #fff;outline-offset:3px;box-shadow:0 0 0 6px #172a26}
 .admin-shell{display:grid;grid-template-columns:226px minmax(0,1fr);min-height:100vh}
 .admin-rail{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;padding:25px 14px 17px;background:var(--admin-pine-bg);color:#f5f8f1}
 .admin-brand{display:flex;align-items:center;gap:11px;padding:4px 10px 29px}
