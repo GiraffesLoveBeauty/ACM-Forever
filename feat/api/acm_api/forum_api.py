@@ -36,7 +36,7 @@ async def community_leaderboard():
         start = (page - 1) * page_size
         public_rows = [
             {key: row.get(key) for key in (
-                "name", "status", "cf_count", "luogu_count", "nowcoder_count",
+                "name", "avatar_url", "status", "cf_count", "luogu_count", "nowcoder_count",
                 "atcoder_count", "cjlu_count", "total_count",
             )}
             for row in rows[start:start + page_size]

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f0f4f1"><title>论坛 · ACM Forever</title>
-  <link rel="stylesheet" href="/assets/app.css?v=palette-theme-4"><link rel="stylesheet" href="/assets/forum.css?v=palette-theme-7">
+  <link rel="stylesheet" href="/assets/app.css?v=palette-theme-4"><link rel="stylesheet" href="/assets/forum.css?v=forum-header-avatar-4">
   <link rel="stylesheet" href="/assets/forum-graph.css?v=algorithm-graph-4">
   <script src="/assets/forum-graph.js?v=algorithm-graph-2" defer></script>
   <link rel="stylesheet" href="/assets/forum-pixel.css?v=pixel-ac-1">
@@ -35,7 +35,7 @@
     </aside>
   </main>
   <div class="forum-toast" id="forum-toast" role="status"></div>
-  <script src="/assets/app.js?v=avatar-webp-1"></script>
+  <script src="/assets/app.js?v=forum-header-avatar-6"></script>
   <script>
     const forumState={sort:'latest',category:'',query:'',page:1,pageSize:12,total:0,loading:false};
     const timeAgo=value=>{const seconds=Math.max(0,Math.floor(Date.now()/1000-Number(value||0)));if(seconds<60)return '刚刚';if(seconds<3600)return `${Math.floor(seconds/60)} 分钟前`;if(seconds<86400)return `${Math.floor(seconds/3600)} 小时前`;return `${Math.floor(seconds/86400)} 天前`};
