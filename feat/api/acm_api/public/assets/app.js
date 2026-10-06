@@ -82,8 +82,18 @@ async function renderNav(){
 }
 
 function mountHeaderAvatar(){
-  const link=$('#login-link');
-  if(!AUTH.authenticated||!link)return;
+  if(!AUTH.authenticated)return;
+  const actions=document.querySelector('.forum-header-actions');
+  if(!actions)return;
+  let link=$('#login-link');
+  if(!link){
+    link=document.createElement('a');
+    link.id='login-link';
+    link.className='btn';
+    const logout=$('#logout');
+    actions.insertBefore(link,logout||null);
+  }
+  link.href=AUTH.role==='member'?'/home.html':'/admin.html';
   const label=AUTH.role==='member'?'个人中心':'管理中心';
   link.classList.add('account-avatar-button');
   link.setAttribute('aria-label',label);
@@ -194,7 +204,7 @@ async function init(){
   await renderNav();lockOwnerInputs();
   const requestedMember=new URLSearchParams(location.search).get('qq_id');
   const pageLoad=typeof window.PAGE_LOAD==='function'?window.PAGE_LOAD(AUTH.role==='member'?undefined:requestedMember):null;
-  if(document.querySelector('.forum-header-actions #login-link'))mountHeaderAvatar();
+  if(document.querySelector('.forum-header-actions'))mountHeaderAvatar();
   if(pageLoad)await pageLoad;
   if(document.querySelector('.profile-stat-card'))animateNumbers(document);
 }
