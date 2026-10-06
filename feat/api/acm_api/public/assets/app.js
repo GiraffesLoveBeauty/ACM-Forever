@@ -84,10 +84,21 @@ async function renderNav(){
 function mountHeaderAvatar(){
   const link=$('#login-link');
   if(!AUTH.authenticated||!link)return;
+  const label=AUTH.role==='member'?'个人中心':'管理中心';
   link.classList.add('account-avatar-button');
-  link.setAttribute('aria-label','个人中心');
-  link.title='个人中心';
-  link.innerHTML=avatarMarkup(AUTH.avatar_url,'个人中心','header-account-avatar');
+  link.setAttribute('aria-label',label);
+  link.title=label;
+  link.innerHTML=avatarMarkup(AUTH.avatar_url,label,'header-account-avatar');
+}
+
+function setAccountAvatar(url){
+  const source=typeof url==='string'&&/^\/uploads\/avatars\/[a-f0-9]{32}\.(?:png|jpg|webp)$/.test(url)?url:null;
+  AUTH.avatar_url=source;
+  const label=AUTH.role==='member'?'个人中心':'管理中心';
+  document.querySelectorAll('.header-account-avatar').forEach(image=>{
+    image.src=source||'/assets/default-avatar.png';
+    image.alt=`${label} 的头像`;
+  });
 }
 
 function lockOwnerInputs(){
@@ -194,4 +205,4 @@ document.addEventListener('DOMContentLoaded',()=>{
   const exit=$('#logout');if(exit)exit.onclick=logout;
   init();
 });
-window.api=api;window.esc=esc;window.AUTH=AUTH;window.avatarMarkup=avatarMarkup;window.animateNumbers=animateNumbers;
+window.api=api;window.esc=esc;window.AUTH=AUTH;window.avatarMarkup=avatarMarkup;window.setAccountAvatar=setAccountAvatar;window.animateNumbers=animateNumbers;
