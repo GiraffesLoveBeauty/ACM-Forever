@@ -126,32 +126,8 @@ function avatarMarkup(url,name,classes=''){
   const source=typeof url==='string'&&/^\/uploads\/avatars\/[a-f0-9]{32}\.(?:png|jpg|webp)$/.test(url)?url:'/assets/default-avatar.png';
   return `<img class="user-avatar ${classes}" src="${source}" alt="${esc(name||'计量 ACMer')} 的头像" loading="lazy" onerror="this.onerror=null;this.src='/assets/default-avatar.png'">`;
 }
-const PALETTE_OPTIONS=[['mint','清绿'],['gray','白灰'],['sunshine','暖黄'],['rose','柔粉']];
-function applyPalette(palette){
-  const selected=PALETTE_OPTIONS.some(([key])=>key===palette)?palette:'mint';
-  document.documentElement.dataset.palette=selected;
-  localStorage.setItem('palette',selected);
-  document.querySelectorAll('.palette-option').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.palette===selected)));
-}
-function mountPalettePicker(){
-  applyPalette(localStorage.getItem('palette')||'mint');
-  const themeButton=$('#theme-toggle');
-  const host=themeButton?.parentElement||document.querySelector('.topbar .userbar')||document.querySelector('.login > .card')||$('#change-password-panel form');
-  if(!host||document.querySelector('.palette-picker'))return;
-  const picker=document.createElement('div');
-  picker.className='palette-picker';
-  picker.innerHTML=`<button class="btn palette-trigger" type="button" aria-label="选择整体配色" title="选择整体配色" aria-controls="palette-menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18h1.4a2.6 2.6 0 0 0 1.8-4.5 1.2 1.2 0 0 1 .8-2.1H18a3 3 0 0 0 3-3c0-4.6-4-8.4-9-8.4Z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7.5" r="1"/><circle cx="14.5" cy="7.5" r="1"/><circle cx="17" cy="11" r="1"/></svg></button><div id="palette-menu" class="palette-menu" hidden role="group" aria-label="整体配色">${PALETTE_OPTIONS.map(([key,label])=>`<button type="button" class="palette-option" data-palette="${key}" aria-pressed="false"><span class="palette-swatch palette-swatch-${key}" aria-hidden="true"></span><span>${label}</span><span class="palette-check" aria-hidden="true">✓</span></button>`).join('')}</div>`;
-  if(themeButton)themeButton.insertAdjacentElement('afterend',picker);else host.append(picker);
-  applyPalette(document.documentElement.dataset.palette);
-  const trigger=picker.querySelector('.palette-trigger');
-  const menu=picker.querySelector('.palette-menu');
-  const closeMenu=()=>{menu.hidden=true;trigger.setAttribute('aria-expanded','false')};
-  trigger.onclick=()=>{menu.hidden=!menu.hidden;trigger.setAttribute('aria-expanded',String(!menu.hidden))};
-  picker.querySelectorAll('.palette-option').forEach(button=>button.onclick=()=>{applyPalette(button.dataset.palette);closeMenu();trigger.focus()});
-  document.addEventListener('click',event=>{if(!picker.contains(event.target))closeMenu()});
-  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!menu.hidden){closeMenu();trigger.focus()}});
-}
-function toggleTheme(){const theme=document.body.dataset.theme==='dark'?'light':'dark';document.body.dataset.theme=theme;localStorage.theme=theme}
+function mountPalettePicker(){window.ACMTheme?.init()}
+function toggleTheme(){window.ACMTheme?.toggle()}
 function animateNumbers(root=document){
   if(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)return;
   root.querySelectorAll('.profile-stat-card .value,.rank-total').forEach((node,index)=>{
@@ -187,8 +163,14 @@ async function login(event){
 async function logout(){try{await api('/auth/logout',{method:'POST'})}catch{}location.href='/index.html'}
 
 async function init(){
-  mountPalettePicker();
-  document.body.dataset.theme=localStorage.theme||'light';
+  try{
+    if(!window.ACMTheme)await new Promise((resolve,reject)=>{
+      const script=document.createElement('script');
+      script.src='/assets/theme-editor.js?v=custom-theme-1';
+      script.onload=resolve;script.onerror=reject;document.head.append(script);
+    });
+    mountPalettePicker();
+  }catch(error){console.error('自助调色加载失败',error)}
   try{const response=await fetch('/api/auth/me',{credentials:'same-origin'});AUTH=await response.json();}catch{AUTH={authenticated:false}}
   window.AUTH=AUTH;
   const page=location.pathname.split('/').pop()||'index.html';
