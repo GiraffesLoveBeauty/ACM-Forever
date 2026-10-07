@@ -1,8 +1,28 @@
 # -*- coding: utf-8 -*-
 """数据库初始化、设置读写与排行榜查询。"""
 import time
+from contextlib import asynccontextmanager
 
 import aiosqlite
+
+
+@asynccontextmanager
+async def isolated_connection(connection):
+    """Own a transaction connection to the same initialized file database."""
+    async with connection.execute("PRAGMA database_list") as cursor:
+        databases = await cursor.fetchall()
+    path = next((row[2] for row in databases if row[1] == "main"), "")
+    if not path:
+        raise ValueError("独立事务需要文件数据库")
+    db = await aiosqlite.connect(path)
+    try:
+        db.row_factory = aiosqlite.Row
+        await db.execute("PRAGMA busy_timeout=5000")
+        await db.execute("PRAGMA foreign_keys=ON")
+        await db.execute("PRAGMA synchronous=NORMAL")
+        yield db
+    finally:
+        await db.close()
 
 
 async def connect_db(db_path):
@@ -69,6 +89,16 @@ async def connect_db(db_path):
         "updated_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_qq_id, platform))"
     )
     await db.execute("CREATE INDEX IF NOT EXISTS idx_sync_state_status ON user_platform_sync_state(last_status, next_retry_at)")
+    async with db.execute("PRAGMA table_info(user_platform_sync_state)") as cursor:
+        sync_cols = {row["name"] for row in await cursor.fetchall()}
+    for column, definition in (("binding_key", "TEXT"), ("full_history_at", "INTEGER NOT NULL DEFAULT 0"), ("coverage_through_at", "INTEGER NOT NULL DEFAULT 0")):
+        if column not in sync_cols:
+            await db.execute(f"ALTER TABLE user_platform_sync_state ADD COLUMN {column} {definition}")
+    await db.execute("CREATE TABLE IF NOT EXISTS cf_problem_cache (contest_id INTEGER NOT NULL, problem_index TEXT NOT NULL, name TEXT NOT NULL, rating INTEGER, tags TEXT NOT NULL DEFAULT '[]', verified_at INTEGER NOT NULL, PRIMARY KEY(contest_id,problem_index))")
+    await db.execute("CREATE TABLE IF NOT EXISTS cf_contest_cache (contest_id INTEGER PRIMARY KEY, problems TEXT NOT NULL, verified_at INTEGER NOT NULL)")
+    await db.execute("CREATE TABLE IF NOT EXISTS cf_practice_jobs (id TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL, payload TEXT NOT NULL, scope_fingerprint TEXT NOT NULL, created_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER, result TEXT, error_code TEXT, error_message TEXT)")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_cf_jobs_status ON cf_practice_jobs(status,created_at)")
+    await db.execute("CREATE TABLE IF NOT EXISTS cf_practice_job_members (job_id TEXT NOT NULL REFERENCES cf_practice_jobs(id) ON DELETE CASCADE, qq_id TEXT NOT NULL, handle TEXT, binding_key TEXT, status TEXT NOT NULL, error_code TEXT, error_message TEXT, finished_at INTEGER, PRIMARY KEY(job_id,qq_id))")
     await db.execute("CREATE TABLE IF NOT EXISTS workspace_items (id INTEGER PRIMARY KEY AUTOINCREMENT, owner_qq_id TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL, body_md TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'todo', priority INTEGER NOT NULL DEFAULT 0, due_at INTEGER, context_type TEXT, context_id TEXT, sort_order INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER)")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_workspace_owner_status ON workspace_items(owner_qq_id, status, sort_order)")
     await db.execute("CREATE TABLE IF NOT EXISTS user_problem_state (owner_qq_id TEXT NOT NULL, platform TEXT NOT NULL, problem_id TEXT NOT NULL, is_favorite INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'inbox', note_md TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL, PRIMARY KEY(owner_qq_id, platform, problem_id))")
@@ -107,6 +137,8 @@ async def connect_db(db_path):
         await db.execute("ALTER TABLE users ADD COLUMN real_name TEXT")
     if "avatar_url" not in user_cols:
         await db.execute("ALTER TABLE users ADD COLUMN avatar_url TEXT")
+    if "cf_binding_version" not in user_cols:
+        await db.execute("ALTER TABLE users ADD COLUMN cf_binding_version INTEGER NOT NULL DEFAULT 0")
     # 老库迁移：补充牛客 / AtCoder / 校OJ 列
     async with db.execute("PRAGMA table_info(users)") as cursor:
         user_cols = {row["name"] for row in await cursor.fetchall()}
@@ -212,6 +244,19 @@ async def connect_db(db_path):
         "CREATE TRIGGER IF NOT EXISTS users_prevent_duplicate_account_update "
         "BEFORE UPDATE OF cf_handle, luogu_id, nowcoder_id, atcoder_handle, cjlu_username ON users BEGIN "
         + "; ".join(duplicate_checks_update) + "; END"
+    )
+    # Every binding writer (Web and Bot included) invalidates CF evidence atomically.
+    # Sync writes compare this generation in their own write transaction, including ABA rebinds.
+    # Replace the old trigger in this transaction; personal learning records belong to QQ.
+    await db.execute("DROP TRIGGER IF EXISTS users_cf_binding_reset")
+    await db.execute(
+        "CREATE TRIGGER users_cf_binding_reset AFTER UPDATE OF cf_handle ON users "
+        "WHEN LOWER(TRIM(COALESCE(NEW.cf_handle,''))) <> LOWER(TRIM(COALESCE(OLD.cf_handle,''))) BEGIN "
+        "UPDATE users SET cf_binding_version=OLD.cf_binding_version+1,last_sync_timestamp=0 WHERE qq_id=NEW.qq_id; "
+        "DELETE FROM submissions WHERE user_qq_id=NEW.qq_id AND platform='codeforces'; "
+        "DELETE FROM submission_attempts WHERE owner_qq_id=NEW.qq_id AND platform='codeforces'; "
+        "DELETE FROM user_platform_sync_state WHERE user_qq_id=NEW.qq_id AND platform='codeforces'; "
+        "UPDATE random_challenges SET status='abandoned' WHERE qq_id=NEW.qq_id AND platform='codeforces' AND status='active'; END"
     )
     for platform, field in (("codeforces", "cf_handle"), ("luogu", "luogu_id"), ("nowcoder", "nowcoder_id"), ("atcoder", "atcoder_handle"), ("cjlu", "cjlu_username")):
         await db.execute(

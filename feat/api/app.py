@@ -13,6 +13,9 @@ from .acm_api.bot_api import bot_api
 from .acm_api.auth_service import hash_password, validate_password
 from .acm_api.database import connect_db
 from .acm_api.forum_api import forum_api
+from .acm_api.cf_practice import PracticeQuery
+from .acm_api.cf_practice_api import cf_practice_api
+from .acm_api.cf_practice_jobs import PracticeJobs
 from .service_runtime import SyncEngine, WebTaskManager, create_web_challenge
 
 
@@ -80,6 +83,14 @@ def create_app():
 
     sync_engine = SyncEngine(db_path, crawler_config)
     task_manager = WebTaskManager(sync_engine)
+    data_ttl_hours = int(os.getenv("ACM_CF_DATA_TTL_HOURS", "24"))
+    problem_ttl_hours = int(os.getenv("ACM_CF_PROBLEM_TTL_HOURS", "6"))
+    if not 1 <= data_ttl_hours <= 720 or not 1 <= problem_ttl_hours <= 720:
+        raise ValueError("CF data/problem TTL hours must be between 1 and 720")
+    practice_query = PracticeQuery(data_ttl_hours * 3600, problem_ttl_hours * 3600)
+    practice_jobs = PracticeJobs(db_path, sync_engine, practice_query)
+    app.config["CF_PRACTICE_QUERY"] = practice_query
+    app.config["CF_PRACTICE_JOBS"] = practice_jobs
 
     def admin_snapshot():
         return {
@@ -152,9 +163,11 @@ def create_app():
         finally:
             await db.close()
         await sync_engine.start()
+        await practice_jobs.start()
 
     @app.after_serving
     async def close_service():
+        await practice_jobs.close()
         await sync_engine.close()
 
     @app.get("/health")
@@ -248,6 +261,7 @@ def create_app():
     app.register_blueprint(api, url_prefix="/api")
     app.register_blueprint(bot_api, url_prefix="/internal/v1")
     app.register_blueprint(forum_api, url_prefix="/api")
+    app.register_blueprint(cf_practice_api, url_prefix="/api")
     app.sync_engine = sync_engine
     app.task_manager = task_manager
     return app
@@ -258,10 +272,10 @@ _PUBLIC_PAGES = {
     "change-password.html", "home.html", "admin.html",
     "leaderboard.html", "challenge.html", "reviews.html", "problem-bank.html",
     "submissions.html", "workspace.html", "contest-review.html", "member.html", "compose.html",
-    "tasks.html", "settings.html",
+    "tasks.html", "settings.html", "cf-practice.html",
 }
 _ANONYMOUS_PAGES = {"index.html", "login.html", "post.html", "leaderboard.html"}
-_ADMIN_PAGES = {"admin.html", "member.html", "tasks.html", "settings.html", "forum-moderation.html"}
+_ADMIN_PAGES = {"admin.html", "member.html", "tasks.html", "settings.html", "forum-moderation.html", "cf-practice.html"}
 
 
 app = create_app()

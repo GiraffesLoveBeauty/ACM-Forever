@@ -29,6 +29,7 @@ from .auth_service import (
     verify_password,
 )
 from .reporting import valid_contest_report_time
+from .cf_client import cf_request
 
 LOG = logging.getLogger("acm_api")
 api = Blueprint("api", __name__)
@@ -200,14 +201,18 @@ def _changed_account_platforms(account_values, existing=None):
 
 
 async def _clear_platform_records(db, qq_id, platform):
-    """账号变更后清理旧账号遗留的平台数据和同步游标。"""
-    for table, owner_field in (
+    """清理旧账号证据和同步游标；CF 个人学习记录随 QQ 保留。"""
+    tables = [
         ("submissions", "user_qq_id"),
         ("submission_attempts", "owner_qq_id"),
-        ("user_problem_state", "owner_qq_id"),
-        ("review_states", "owner_qq_id"),
-        ("study_plan_items", "owner_qq_id"),
-    ):
+    ]
+    if platform != "codeforces":
+        tables.extend([
+            ("user_problem_state", "owner_qq_id"),
+            ("review_states", "owner_qq_id"),
+            ("study_plan_items", "owner_qq_id"),
+        ])
+    for table, owner_field in tables:
         await db.execute(
             f"DELETE FROM {table} WHERE {owner_field}=? AND platform=?", (qq_id, platform)
         )
@@ -1015,27 +1020,24 @@ async def api_member_detail(qq_id):
         timeout = aiohttp.ClientTimeout(total=12)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             if user["cf_handle"]:
+                engine = getattr(current_app, "sync_engine", None)
+                cf_config = engine._crawler_config() if engine else {}
                 try:
-                    async with session.get("https://codeforces.com/api/user.rating", params={"handle": user["cf_handle"]}) as response:
-                        data = await response.json()
-                    if data.get("status") == "OK":
-                        records = data.get("result", [])
-                        result["cf"]["rating"] = records[-1].get("newRating") if records else None
-                        result["cf"]["contests"] = [{"name": item.get("contestName"), "rank": item.get("rank"), "rating": item.get("newRating"), "delta": item.get("newRating", 0) - item.get("oldRating", 0), "time": item.get("ratingUpdateTimeSeconds"), "url": f"https://codeforces.com/contest/{item.get('contestId')}" if item.get("contestId") else "https://codeforces.com/"} for item in records[-30:]]
+                    records = await cf_request(session, "user.rating", {"handle": user["cf_handle"]}, cf_config)
+                    result["cf"]["rating"] = records[-1].get("newRating") if records else None
+                    result["cf"]["contests"] = [{"name": item.get("contestName"), "rank": item.get("rank"), "rating": item.get("newRating"), "delta": item.get("newRating", 0) - item.get("oldRating", 0), "time": item.get("ratingUpdateTimeSeconds"), "url": f"https://codeforces.com/contest/{item.get('contestId')}" if item.get("contestId") else "https://codeforces.com/"} for item in records[-30:]]
                 except Exception:
                     LOG.warning("获取 CF 成员详情失败: %s", user["cf_handle"])
                 if any(item["platform"] == "codeforces" for item in recent_ac):
                     try:
-                        async with session.get("https://codeforces.com/api/user.status", params={"handle": user["cf_handle"], "from": 1, "count": 100}) as response:
-                            status_data = await response.json()
-                        if status_data.get("status") == "OK":
-                            for submission in status_data.get("result", []):
-                                problem = submission.get("problem") or {}
-                                contest_id = problem.get("contestId")
-                                problem_index = problem.get("index")
-                                tags = problem.get("tags")
-                                if contest_id and problem_index and isinstance(tags, list) and tags:
-                                    cf_tags[f"cf_{contest_id}{problem_index}"] = tags
+                        cf_submissions = await cf_request(session, "user.status", {"handle": user["cf_handle"], "from": 1, "count": 100}, cf_config)
+                        for submission in cf_submissions:
+                            problem = submission.get("problem") or {}
+                            contest_id = problem.get("contestId")
+                            problem_index = problem.get("index")
+                            tags = problem.get("tags")
+                            if contest_id and problem_index and isinstance(tags, list) and tags:
+                                cf_tags[f"cf_{contest_id}{problem_index}"] = tags
                     except Exception:
                         LOG.warning("获取 CF 题目标签失败: %s", user["cf_handle"])
             if user["atcoder_handle"]:

@@ -41,6 +41,10 @@ async function api(path,opt={}){
   const requestTimeoutMs=Number(opt.timeoutMs)||15000;
   const {timeoutMs,...fetchOptions}=opt;
   const controller=new AbortController();
+  const externalSignal=fetchOptions.signal;
+  const abort=()=>controller.abort();
+  if(externalSignal?.aborted)abort();
+  else externalSignal?.addEventListener('abort',abort,{once:true});
   const timer=setTimeout(()=>controller.abort(),requestTimeoutMs);
   try{
     const isMultipart=typeof FormData!=='undefined'&&fetchOptions.body instanceof FormData;
@@ -49,9 +53,9 @@ async function api(path,opt={}){
     const data=await response.json().catch(()=>({}));
     if(response.status===401&&!path.startsWith('/auth/login')){location.href='/login.html?next='+encodeURIComponent(location.pathname+location.search);throw Error('请先登录')}
     if(response.status===428){location.href='/change-password.html';throw Error('请先修改初始密码')}
-    if(!response.ok)throw Error(data.message||data.error||`HTTP ${response.status}`);
+    if(!response.ok){const error=Error(data.message||data.error||`HTTP ${response.status}`);error.status=response.status;error.code=data.code||data.error_code||null;error.details=data;throw error}
     return data;
-  }finally{clearTimeout(timer)}
+  }finally{clearTimeout(timer);externalSignal?.removeEventListener('abort',abort)}
 }
 
 function navItems(){
