@@ -3,81 +3,83 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>管理后台 · ACM Compass</title>
+  <meta name="theme-color" content="#f4f7f3">
+  <title>成员账号 · ACM Forever 管理后台</title>
   <link rel="stylesheet" href="/assets/app.css?v=palette-theme-4">
+  <link rel="stylesheet" href="/assets/admin.css?v=admin-center-5">
 </head>
-<body>
-  <div class="app">
-    <aside class="sidebar"><div class="brand"><b>✦</b> ACM Compass</div><nav class="nav"></nav></aside>
-    <main class="main">
-      <header class="topbar">
-        <div><div class="eyebrow">Administration</div><h1>管理后台</h1><span class="muted">成员账号、同步任务和全局配置</span></div>
-        <div class="userbar"><a class="btn" href="/change-password.html">修改密码</a><button class="btn" id="theme-toggle">◐</button><button class="btn" id="logout">退出</button></div>
+<body class="admin-console">
+  <div class="admin-shell">
+    <aside class="admin-rail" aria-label="管理后台导航">
+      <a class="admin-brand" href="/admin.html" aria-label="ACM Forever 管理后台首页">
+        <span class="admin-brand-mark" aria-hidden="true">A<span>C</span></span>
+        <span><b>ACM Forever</b><small>管理后台</small></span>
+      </a>
+      <div class="admin-rail-label">管理</div>
+      <nav class="admin-nav">
+        <a class="active" href="/admin.html" aria-current="page"><span class="admin-nav-icon">▤</span><span>成员账号</span></a>
+        <a href="/member.html"><span class="admin-nav-icon">◉</span><span>成员资料</span></a>
+        <a href="/tasks.html"><span class="admin-nav-icon">↻</span><span>同步任务</span></a>
+        <a href="/cf-practice.html"><span class="admin-nav-icon">⌘</span><span>CF 练习赛选题</span></a>
+        <a href="/forum-moderation.html"><span class="admin-nav-icon">☷</span><span>内容审核</span></a>
+        <a href="/settings.html"><span class="admin-nav-icon">⚙</span><span>全局设置</span></a>
+      </nav>
+      <div class="admin-rail-foot"><span class="admin-status-dot"></span> 管理操作即时生效</div>
+    </aside>
+    <main class="admin-main">
+      <header class="admin-topbar">
+        <div><p class="admin-page-path">管理后台 <span>/</span> 成员账号</p><h1>成员账号</h1><p class="admin-lede">发放社区账号，维护登录权限。</p></div>
+        <div class="admin-actions"><a class="admin-action-link" href="/change-password.html">修改密码</a><button class="admin-icon-button" id="theme-toggle" aria-label="切换主题" title="切换主题">◐</button><button class="admin-logout" id="logout">退出</button></div>
       </header>
-
-      <section class="card">
-        <h2>批量发放已有成员账号</h2>
-        <p class="muted">临时密码由服务端生成，为六位数字，有效期按配置默认 72 小时。密码只在成功响应中出现一次，请通过安全渠道交给成员。</p>
-        <div class="filters">
-          <input id="candidate-search" placeholder="按昵称、QQ 或学校搜索">
-          <label class="chip"><input id="include-issued" type="checkbox"> 同时显示已发放账号</label>
-          <button class="btn primary" id="search-candidates">搜索成员</button>
-        </div>
-        <div class="topbar" style="margin-top:12px">
-          <span id="candidate-summary" class="muted">正在加载成员…</span>
-          <span id="selected-count" class="muted">已选 0 / 20</span>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th><input id="select-page" type="checkbox" aria-label="选择本页未发号成员"></th><th>QQ</th><th>昵称</th><th>学校</th><th>身份/年级</th><th>Web 账号</th></tr></thead>
-            <tbody id="candidate-rows"><tr><td colspan="6" class="empty">正在加载成员…</td></tr></tbody>
-          </table>
-        </div>
-        <div class="topbar" style="margin-top:12px">
-          <button class="btn" id="candidate-prev">上一页</button>
-          <span id="candidate-page" class="muted">—</span>
-          <button class="btn" id="candidate-next">下一页</button>
-          <button class="btn primary" id="batch-issue">为已选成员生成账号</button>
-        </div>
-        <div id="candidate-message" class="muted" role="status"></div>
-        <section id="issuance-results" class="card" style="display:none;margin-top:16px">
-          <div class="topbar"><div><h2>本次发放结果</h2><p class="muted">离开此页面或刷新后，不会再次提供临时密码。</p></div>
-            <span class="chips"><button class="btn" id="copy-credentials">复制账密</button><button class="btn" id="download-credentials">下载 CSV</button></span>
+      <nav class="admin-section-nav" aria-label="账号管理分区"><a class="active" href="#issue">批量发放</a><a href="#account-management">账号管理</a></nav>
+      <div class="admin-content">
+        <section class="admin-section" id="issue" aria-labelledby="issue-heading">
+          <div class="admin-section-heading"><div><h2 id="issue-heading">给已有成员开通账号</h2><p>搜索成员并批量发放 Web 登录账号。</p></div><span class="admin-limit">每批最多 20 人</span></div>
+          <div class="admin-panel">
+            <div class="admin-filter-row">
+              <label class="admin-search"><span aria-hidden="true">⌕</span><input id="candidate-search" type="search" placeholder="搜索昵称、QQ 或学校"></label>
+              <label class="admin-toggle"><input id="include-issued" type="checkbox"><span>包括已有账号</span></label>
+              <button class="btn primary admin-button" id="search-candidates">搜索成员</button>
+            </div>
+            <div class="admin-table-meta"><span id="candidate-summary" class="muted">正在加载成员…</span><span id="selected-count" class="admin-selected">已选 0 / 20</span></div>
+            <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th><input id="select-page" type="checkbox" aria-label="选择本页未发号成员"></th><th>QQ</th><th>昵称</th><th>学校</th><th>身份 / 年级</th><th>账号状态</th></tr></thead><tbody id="candidate-rows"><tr><td colspan="6" class="empty">正在加载成员…</td></tr></tbody></table></div>
+            <div class="admin-table-footer"><div class="admin-pagination"><button class="btn admin-button" id="candidate-prev">上一页</button><span id="candidate-page" class="muted">—</span><button class="btn admin-button" id="candidate-next">下一页</button></div><button class="btn primary admin-button admin-issue-button" id="batch-issue">为已选成员生成账号</button></div>
+            <p class="admin-security-note">临时密码由服务端生成，有效期默认 72 小时。发放结果只显示一次，请及时复制或下载并通过安全渠道交给成员。</p>
+            <div id="candidate-message" class="admin-message muted" role="status" aria-live="polite"></div>
           </div>
-          <div id="issuance-summary" class="muted"></div>
-          <div class="table-wrap"><table><thead><tr><th>QQ</th><th>昵称</th><th>临时密码</th><th>过期时间</th></tr></thead><tbody id="issuance-rows"></tbody></table></div>
-          <div id="skipped-rows" class="list"></div>
+          <section id="issuance-results" class="admin-panel admin-results" style="display:none">
+            <div class="admin-section-heading"><div><h2>本次发放结果</h2><p>离开本页或刷新后，临时密码无法再次查看。</p></div><div class="admin-result-actions"><button class="btn admin-button" id="copy-credentials">复制账密</button><button class="btn admin-button" id="download-credentials">下载 CSV</button></div></div>
+            <div id="issuance-summary" class="admin-table-meta"></div>
+            <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>QQ</th><th>昵称</th><th>临时密码</th><th>过期时间</th></tr></thead><tbody id="issuance-rows"></tbody></table></div>
+            <div id="skipped-rows" class="list"></div>
+          </section>
         </section>
-      </section>
-
-      <section class="card" style="margin-top:18px">
-        <h2>单人创建账号（用于新增成员或管理员）</h2>
-        <p class="muted">管理员角色仍需使用符合正式密码强度要求的初始密码；创建普通成员时也可使用此入口。</p>
-        <div class="filters">
-          <input id="account-qq" inputmode="numeric" placeholder="成员 QQ 号">
-          <input id="account-name" placeholder="昵称（新成员必填）">
-          <input id="account-password" type="password" autocomplete="new-password" placeholder="初始密码（至少 12 位）">
-          <input id="account-status" placeholder="身份/年级（可选）">
-          <input id="account-school" placeholder="学校（可选）">
-          <select id="account-role"><option value="member">成员</option><option value="admin">Web 管理员</option><option value="root">Web root</option></select>
-          <button class="btn primary" id="create-account">创建账号</button>
-        </div>
-        <div id="account-message" class="muted" role="status"></div>
-        <div id="accounts" class="list"><div class="empty">正在加载账号…</div></div>
-      </section>
-
-      <section class="grid two" style="margin-top:18px">
-        <a class="card" href="/cf-practice.html"><h2>CF 练习赛选题</h2><p class="muted">按成员身份查看近期 AC，使用完整历史批量检查候选题。</p></a>
-        <a class="card" href="/member.html"><h2>成员及 OJ 资料</h2><p class="muted">编辑成员资料、绑定 OJ 账号并查看个人统计。</p></a>
-        <a class="card" href="/tasks.html"><h2>同步任务</h2><p class="muted">查看后台同步状态。</p></a>
-        <a class="card" href="/settings.html"><h2>全局设置与 QQ Bot 管理员</h2><p class="muted">播报、界面偏好和机器人命令权限。</p></a>
-        <a class="card" href="/leaderboard.html"><h2>排行榜</h2><p class="muted">查看成员训练统计。</p></a>
-      </section>
+        <section class="admin-section" id="account-management" aria-labelledby="accounts-heading">
+          <div class="admin-section-heading"><div><h2 id="accounts-heading">账号管理</h2><p>查看登录状态，修改权限或重置密码。</p></div><a class="admin-jump" href="#create-account-panel">创建账号 <span aria-hidden="true">＋</span></a></div>
+          <details class="admin-create" id="create-account-panel">
+            <summary><span><b>单个创建账号</b><small>新增成员账号或管理员账号</small></span><span class="admin-create-plus" aria-hidden="true">＋</span></summary>
+            <div class="admin-create-body">
+              <p class="admin-form-note">管理员请设置符合正式密码强度要求的初始密码。</p>
+              <div class="admin-create-grid">
+                <label>成员 QQ 号<input id="account-qq" inputmode="numeric" placeholder="输入 QQ 号"></label>
+                <label>昵称<input id="account-name" placeholder="新成员必填"></label>
+                <label>初始密码<input id="account-password" type="password" autocomplete="new-password" placeholder="至少 12 位"></label>
+                <label>身份 / 年级<input id="account-status" placeholder="选填"></label>
+                <label>学校<input id="account-school" placeholder="选填"></label>
+                <label>账号角色<select id="account-role"><option value="member">成员</option><option value="admin">Web 管理员</option><option value="root">Web Root</option></select></label>
+              </div>
+              <div class="admin-form-footer"><div id="account-message" class="admin-message muted" role="status" aria-live="polite"></div><button class="btn primary admin-button" id="create-account">创建账号</button></div>
+            </div>
+          </details>
+          <div id="account-list-message" class="admin-message muted" role="status" aria-live="polite"></div>
+          <div id="accounts" class="admin-account-list"><div class="empty">正在加载账号…</div></div>
+        </section>
+      </div>
     </main>
-  </div>
-  <script src="/assets/app.js?v=forum-header-avatar-6"></script>
+  </div><script src="/assets/app.js?v=forum-header-avatar-6"></script>
   <script>
-    const accountMessage=document.getElementById('account-message');
+    const accountMessage=document.getElementById('account-list-message');
+    const accountCreateMessage=document.getElementById('account-message');
     const candidateMessage=document.getElementById('candidate-message');
     const selectedQQs=new Set();
     const candidateNames=new Map();
@@ -162,8 +164,8 @@
     }
     async function createAccount(){
       const body={qq_id:document.getElementById('account-qq').value.trim(),name:document.getElementById('account-name').value.trim(),initial_password:document.getElementById('account-password').value,status:document.getElementById('account-status').value,school:document.getElementById('account-school').value,role:document.getElementById('account-role').value};
-      try{const result=await api('/admin/web-accounts',{method:'POST',body:JSON.stringify(body)});notice(accountMessage,result.message);document.getElementById('account-password').value='';await Promise.all([loadCandidates(),loadAccounts()])}
-      catch(error){notice(accountMessage,error.message)}
+      try{const result=await api('/admin/web-accounts',{method:'POST',body:JSON.stringify(body)});notice(accountCreateMessage,result.message);document.getElementById('account-password').value='';await Promise.all([loadCandidates(),loadAccounts()])}
+      catch(error){notice(accountCreateMessage,error.message)}
     }
     async function resetPassword(qq){
       const password=prompt('设置新的初始密码（至少 12 位）。请通过安全渠道转交，系统不会再次显示。');if(!password)return;
@@ -200,6 +202,10 @@
     document.getElementById('copy-credentials').onclick=copyCredentials;
     document.getElementById('download-credentials').onclick=downloadCredentials;
     document.getElementById('create-account').onclick=createAccount;
+    document.querySelectorAll('.admin-section-nav a').forEach(link=>link.addEventListener('click',()=>{
+      document.querySelectorAll('.admin-section-nav a').forEach(item=>item.classList.toggle('active',item===link));
+    }));
+    document.querySelector('.admin-jump').addEventListener('click',()=>{document.getElementById('create-account-panel').open=true});
     window.addEventListener('pagehide',()=>{
       visibleCredentials=[];
       document.getElementById('issuance-rows').replaceChildren();
