@@ -132,7 +132,7 @@ async function init(){
   try{
     if(!window.ACMTheme)await new Promise((resolve,reject)=>{
       const script=document.createElement('script');
-      script.src='/assets/theme-editor.js?v=custom-theme-1';
+      script.src='/assets/theme-editor.js?v=custom-theme-2';
       script.onload=resolve;script.onerror=reject;document.head.append(script);
     });
     mountPalettePicker();

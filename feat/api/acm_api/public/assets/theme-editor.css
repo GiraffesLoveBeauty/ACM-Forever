@@ -90,4 +90,16 @@ html[data-custom-theme] body dialog.theme-editor .theme-preview .theme-preview-a
 dialog.theme-editor .theme-preview-hero{margin-top:12px;padding:12px;border-radius:7px;background:var(--hero-bg);color:var(--hero-text)}
 dialog.theme-editor .theme-preview-hero p{color:var(--hero-muted);margin:5px 0 0}
 @media(max-width:600px){dialog.theme-editor{inset:0;width:100%;max-width:100%;height:100dvh;max-height:100dvh;border-radius:0;border:0}dialog.theme-editor .theme-editor-body{padding:14px}dialog.theme-editor .theme-editor-footer{padding:12px 14px max(12px,env(safe-area-inset-bottom))}.forum-header-actions{flex-wrap:wrap}.theme-controls>.theme-trigger.btn{padding:7px}}
+dialog.theme-editor .theme-preset-actions{display:grid;grid-template-columns:1fr 1fr;margin-bottom:12px}
+dialog.theme-editor .theme-preset{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+dialog.theme-editor .theme-preset-swatches{display:flex;gap:5px}
+dialog.theme-editor .theme-preset-swatch{width:18px;height:18px;border-radius:50%;border:1px solid #94a3b8}
+html[data-custom-theme] body dialog.theme-editor .theme-preset[aria-pressed=true]{border-color:#2563eb;box-shadow:0 0 0 1px #2563eb;background:#eff6ff;color:#172033}
+/* While the modal is open, immediate colors must not trail the picker through
+   overlapping legacy transitions. Normal page transitions return on close. */
+html[data-theme-editing="true"] body,
+html[data-theme-editing="true"] body *,
+html[data-theme-editing="true"] body *::before,
+html[data-theme-editing="true"] body *::after{transition:none!important}
+dialog.theme-editor .theme-contrast{font-variant-numeric:tabular-nums}
 @media(prefers-reduced-motion:reduce){dialog.theme-editor *{transition:none;animation:none}}
