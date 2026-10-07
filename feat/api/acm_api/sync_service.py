@@ -6,6 +6,7 @@ import time
 from .cjlu_api import fetch_cjlu_submissions
 from .constants import LOG, SYNC_USER_CONCURRENCY
 from .crawler import Crawler
+from .cf_client import binding_key
 
 
 def _sync_platform_label(platform):
@@ -26,7 +27,7 @@ class SyncMixin:
             (str(qq_id), platform, int(legacy_cursor or 0), int(time.time())),
         )
         async with self.db.execute(
-            "SELECT cursor_timestamp, last_status, next_retry_at "
+            "SELECT * "
             "FROM user_platform_sync_state WHERE user_qq_id=? AND platform=?",
             (str(qq_id), platform),
         ) as cursor:
@@ -41,6 +42,11 @@ class SyncMixin:
             )
             await self.db.commit()
         elif success:
+            if platform == "codeforces":
+                async with self.db.execute("SELECT coverage_through_at FROM user_platform_sync_state WHERE user_qq_id=? AND platform=?", (str(qq_id), platform)) as state_cursor:
+                    cf_state = await state_cursor.fetchone()
+                if cf_state and cf_state["coverage_through_at"]:
+                    cursor = cf_state["coverage_through_at"]
             await self.db.execute(
                 "UPDATE user_platform_sync_state SET cursor_timestamp=?, last_attempt_at=?, last_success_at=?, "
                 "last_status=?, last_error_code=NULL, last_error_message=NULL, consecutive_failures=0, "
@@ -93,7 +99,9 @@ class SyncMixin:
                 cursor_timestamp = int(state["cursor_timestamp"] or 0)
                 # 外部平台偶发延迟或请求异常时，游标可能先推进而漏掉记录。
                 # AtCoder 每轮回看 7 天，已有题目由爬虫集合去重，不会重复入库。
-                if platform == "atcoder" and cursor_timestamp:
+                if platform == "codeforces" and not state["full_history_at"]:
+                    start_timestamp = 0
+                elif platform == "atcoder" and cursor_timestamp:
                     start_timestamp = max(0, cursor_timestamp - 7 * 86400)
                 else:
                     start_timestamp = cursor_timestamp or seven_days_ago
@@ -171,7 +179,7 @@ class SyncMixin:
                 )
             LOG.info("[智能同步] 本次周期任务完成。")
 
-    async def sync_single_platform_for_days(self, qq_id: str, platform: str, days: int):
+    async def sync_single_platform_for_days(self, qq_id: str, platform: str, days: int, *, incremental=False):
         """仅同步指定用户的指定平台，不启动浏览器。"""
         lock = self._sync_user_locks.setdefault(str(qq_id), asyncio.Lock())
         if lock.locked():
@@ -198,8 +206,13 @@ class SyncMixin:
                 return -2
             normalized_platform = "codeforces" if platform == "cf" else platform
             start_timestamp = 0 if days == 0 else int(time.time()) - days * 24 * 60 * 60
-            LOG.info("  -> 为用户 %s 执行 %s 平台 [%s深度] 同步...", user["name"], platform, "全部历史" if days == 0 else f"近{days}天")
-            await self._get_platform_sync_state(qq_id, normalized_platform, user["last_sync_timestamp"] or 0)
+            state = await self._get_platform_sync_state(qq_id, normalized_platform, user["last_sync_timestamp"] or 0)
+            if incremental and normalized_platform == "codeforces":
+                start_timestamp = int(state["cursor_timestamp"] or 0) if (
+                    state["full_history_at"] and state["coverage_through_at"]
+                    and state["binding_key"] == binding_key(user)
+                ) else 0
+            LOG.info("  -> 为用户 %s 执行 %s 平台 [%s] 同步...", user["name"], platform, "增量刷新" if incremental and start_timestamp else "全部历史" if days == 0 else f"近{days}天")
             attempt_at = int(time.time())
             await self._mark_platform_sync(qq_id, normalized_platform, "running", attempt_at)
             session = self._http_session

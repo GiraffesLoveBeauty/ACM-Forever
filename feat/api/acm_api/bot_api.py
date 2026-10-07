@@ -7,6 +7,7 @@ import aiosqlite
 from quart import Blueprint, current_app, jsonify, request
 
 from .backend_api import _fetch_leaderboard, _leaderboard_options
+from .cf_client import cf_request
 from .database import validate_submission_data
 from .difficulty import challenge_filter, challenge_time_limit, neighboring_difficulties, normalize_platform
 from .training_logic import score_candidate
@@ -52,23 +53,7 @@ async def _codeforces_api_call(method, params):
     engine = getattr(current_app, "sync_engine", None)
     if not engine or not engine._http_session:
         raise ConnectionError("Codeforces API proxy is unavailable.")
-    from urllib.parse import urlencode
-    from .crawler import Crawler
-    query = dict(params)
-    config = engine._crawler_config()
-    api_key = config.get("cf_api_key", "")
-    api_secret = config.get("cf_api_secret", "")
-    if api_key and api_secret and method in {"user.info", "user.rating", "user.status"}:
-        query.update(apiKey=api_key, time=str(int(time.time())))
-        query["apiSig"] = Crawler._generate_cf_api_sig(method, query, api_key, api_secret)
-    async with engine._http_session.get(
-        "https://codeforces.com/api/" + method + "?" + urlencode(query), timeout=30
-    ) as response:
-        response.raise_for_status()
-        payload = await response.json()
-    if payload.get("status") != "OK":
-        raise ValueError(str(payload.get("comment") or "Codeforces request failed.")[:300])
-    return payload.get("result")
+    return await cf_request(engine._http_session, method, params, engine._crawler_config())
 
 
 def _qq(value):
