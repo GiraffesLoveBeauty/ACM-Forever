@@ -247,17 +247,15 @@ async def connect_db(db_path):
     )
     # Every binding writer (Web and Bot included) invalidates CF evidence atomically.
     # Sync writes compare this generation in their own write transaction, including ABA rebinds.
+    # Replace the old trigger in this transaction; personal learning records belong to QQ.
+    await db.execute("DROP TRIGGER IF EXISTS users_cf_binding_reset")
     await db.execute(
-        "CREATE TRIGGER IF NOT EXISTS users_cf_binding_reset AFTER UPDATE OF cf_handle ON users "
+        "CREATE TRIGGER users_cf_binding_reset AFTER UPDATE OF cf_handle ON users "
         "WHEN LOWER(TRIM(COALESCE(NEW.cf_handle,''))) <> LOWER(TRIM(COALESCE(OLD.cf_handle,''))) BEGIN "
         "UPDATE users SET cf_binding_version=OLD.cf_binding_version+1,last_sync_timestamp=0 WHERE qq_id=NEW.qq_id; "
         "DELETE FROM submissions WHERE user_qq_id=NEW.qq_id AND platform='codeforces'; "
         "DELETE FROM submission_attempts WHERE owner_qq_id=NEW.qq_id AND platform='codeforces'; "
         "DELETE FROM user_platform_sync_state WHERE user_qq_id=NEW.qq_id AND platform='codeforces'; "
-        "DELETE FROM user_problem_state WHERE owner_qq_id=NEW.qq_id AND platform='codeforces'; "
-        "DELETE FROM review_states WHERE owner_qq_id=NEW.qq_id AND platform='codeforces'; "
-        "DELETE FROM study_plan_items WHERE owner_qq_id=NEW.qq_id AND platform='codeforces'; "
-        "DELETE FROM contest_problem_reviews WHERE owner_qq_id=NEW.qq_id; "
         "UPDATE random_challenges SET status='abandoned' WHERE qq_id=NEW.qq_id AND platform='codeforces' AND status='active'; END"
     )
     for platform, field in (("codeforces", "cf_handle"), ("luogu", "luogu_id"), ("nowcoder", "nowcoder_id"), ("atcoder", "atcoder_handle"), ("cjlu", "cjlu_username")):

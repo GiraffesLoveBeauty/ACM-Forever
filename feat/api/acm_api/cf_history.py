@@ -48,6 +48,10 @@ async def _fetch_history(session, user, start_timestamp, db, config):
                 if type(submission.get("id")) is not int or type(submission.get("creationTimeSeconds")) is not int or submission["creationTimeSeconds"] <= 0:
                     raise CFUnavailable("CF 提交时间或标识异常")
                 problem = submission["problem"]
+                # contestId is optional for non-contest problems. Keep the raw page
+                # for pagination/time boundaries, but do not store unaddressable evidence.
+                if "contestId" not in problem:
+                    continue
                 try:
                     normalize_problem(f"{problem['contestId']}{problem['index']}")
                 except (PracticeError, KeyError):

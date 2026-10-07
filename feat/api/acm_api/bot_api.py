@@ -6,7 +6,7 @@ from functools import wraps
 import aiosqlite
 from quart import Blueprint, current_app, jsonify, request
 
-from .backend_api import _fetch_leaderboard, _leaderboard_options
+from .backend_api import _clear_platform_records, _fetch_leaderboard, _leaderboard_options
 from .cf_client import cf_request
 from .database import validate_submission_data
 from .difficulty import challenge_filter, challenge_time_limit, neighboring_difficulties, normalize_platform
@@ -483,26 +483,7 @@ async def remove_account_binding(qq_id, platform):
             await db.commit()
             return jsonify({"success": False, "message": "No account is bound for this platform."}), 404
         await db.execute(f"UPDATE users SET {field}=NULL WHERE qq_id=?", (qq_id,))
-        for table, owner_field in (
-            ("submissions", "user_qq_id"),
-            ("submission_attempts", "owner_qq_id"),
-            ("user_problem_state", "owner_qq_id"),
-            ("review_states", "owner_qq_id"),
-            ("study_plan_items", "owner_qq_id"),
-        ):
-            await db.execute(
-                f"DELETE FROM {table} WHERE {owner_field}=? AND platform=?",
-                (qq_id, normalized_platform),
-            )
-        await db.execute(
-            "UPDATE random_challenges SET status='abandoned' "
-            "WHERE qq_id=? AND platform=? AND status='active'",
-            (qq_id, normalized_platform),
-        )
-        await db.execute(
-            "DELETE FROM user_platform_sync_state WHERE user_qq_id=? AND platform=?",
-            (qq_id, normalized_platform),
-        )
+        await _clear_platform_records(db, qq_id, normalized_platform)
         await db.commit()
         return jsonify({"success": True})
     except Exception:

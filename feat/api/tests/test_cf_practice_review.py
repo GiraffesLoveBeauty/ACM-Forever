@@ -18,7 +18,46 @@ from feat.api.acm_api.crawler import Crawler
 from feat.api.acm_api.database import connect_db, validate_submission_data
 from feat.api.app import create_app
 from feat.api.service_runtime import SyncEngine
+from feat.api.tests import test_cf_practice as practice_fixtures
 from feat.api.tests.test_cf_practice import DatabaseCase
+
+
+LEARNING_TABLES = ("user_problem_state", "review_states", "study_plan_items", "contest_problem_reviews", "review_drafts")
+
+
+async def learning_snapshot(db, qq_id="10000001"):
+    return {table: [tuple(row) for row in await (await db.execute(
+        f"SELECT * FROM {table} WHERE owner_qq_id=? ORDER BY rowid", (qq_id,),
+    )).fetchall()] for table in LEARNING_TABLES}
+
+
+async def seed_learning_records(db, now, qq_id="10000001"):
+    for platform, pid in (("codeforces", "cf_1843A"), ("luogu", "P1001")):
+        await db.execute("INSERT INTO user_problem_state VALUES(?,?,?,1,'review','Keep my notes',?)", (qq_id, platform, pid, now))
+        await db.execute("INSERT INTO review_states VALUES(?,?,?,'good',14,2.7,?,4,?,3,2)", (qq_id, platform, pid, now + 86400, now - 86400))
+        await db.execute("INSERT INTO study_plan_items VALUES(?,?,?,'completed',7,?,?)", (qq_id, platform, pid, now - 1000, now - 500))
+    await db.execute("INSERT INTO contest_problem_reviews VALUES(?,'1843','cf_1843A','WRONG_ANSWER',800,'Keep contest notes','reviewed',?)", (qq_id, now))
+    await db.execute("INSERT INTO review_drafts(owner_qq_id,context_type,context_id,draft_md,created_at,updated_at) VALUES(?,'contest','1843','Keep draft',?,?)", (qq_id, now, now))
+    await db.commit()
+    return await learning_snapshot(db, qq_id)
+
+
+async def seed_binding_evidence(db, now):
+    for platform, pid, handle in (("codeforces", "cf_1843A", "alpha:0"), ("luogu", "P1001", None)):
+        await db.execute("INSERT OR IGNORE INTO submissions(user_qq_id,platform,problem_id,submit_time) VALUES('10000001',?,?,?)", (platform, pid, now))
+        await db.execute("INSERT INTO submission_attempts(owner_qq_id,platform,external_submission_id,problem_id,verdict,submitted_at,created_at) VALUES('10000001',?,?,?,'OK',?,?)", (platform, platform + '-binding-fixture', pid, now, now))
+        await db.execute("INSERT OR REPLACE INTO user_platform_sync_state(user_qq_id,platform,binding_key,full_history_at,coverage_through_at,last_success_at,last_status) VALUES('10000001',?,?,?,?,?,'success')", (platform, handle, now, now, now))
+    for platform, status in (("codeforces", "active"), ("codeforces", "completed"), ("luogu", "active")):
+        await db.execute("INSERT INTO random_challenges(qq_id,platform,problem_id,problem_url,challenge_rating,time_limit_minutes,status,created_at,expires_at) VALUES('10000001',?,'fixture','https://example.invalid/fixture',1000,60,?,?,?)", (platform, status, now, now + 3600))
+    await db.commit()
+
+
+async def assert_binding_evidence_cleared(testcase, db):
+    for table, owner in (("submissions", "user_qq_id"), ("submission_attempts", "owner_qq_id")):
+        rows = await (await db.execute(f"SELECT platform FROM {table} WHERE {owner}='10000001'")).fetchall()
+        testcase.assertEqual([row[0] for row in rows], ["luogu"])
+    challenges = await (await db.execute("SELECT platform,status FROM random_challenges WHERE qq_id='10000001' ORDER BY id")).fetchall()
+    testcase.assertEqual([tuple(row) for row in challenges], [("codeforces", "abandoned"), ("codeforces", "completed"), ("luogu", "active")])
 
 
 class ReviewHistoryTests(DatabaseCase):
@@ -37,6 +76,57 @@ class ReviewHistoryTests(DatabaseCase):
         with patch("feat.api.acm_api.cf_history.cf_request", AsyncMock(return_value=rows)):
             await self.engine.sync_account("10000001", ["codeforces"], task, days=0)
         self.assertEqual(task["status"], "completed")
+
+    async def test_optional_contest_id_skips_only_unaddressable_evidence(self):
+        non_contest = self.submission(2)
+        del non_contest["problem"]["contestId"]
+        await self.sync([non_contest, self.submission(1)])
+        attempts = await (await self.db.execute("SELECT external_submission_id FROM submission_attempts")).fetchall()
+        self.assertEqual([row[0] for row in attempts], ["10000001:1"])
+        self.assertEqual((await (await self.db.execute("SELECT COUNT(*) FROM submissions")).fetchone())[0], 1)
+        self.assertEqual((await (await self.db.execute("SELECT COUNT(*) FROM cf_problem_cache")).fetchone())[0], 1)
+        public = await self.query.overview(self.db, {"scope": self.scope})
+        self.assertEqual(public["scope"]["ready_member_count"], 1)
+
+    async def test_full_non_contest_page_does_not_terminate_before_valid_next_page(self):
+        first_page = [self.submission(sid) for sid in range(100)]
+        for submission in first_page:
+            del submission["problem"]["contestId"]
+        response = AsyncMock(side_effect=[first_page, [self.submission(100)]])
+        task = {}
+        with patch("feat.api.acm_api.cf_history.cf_request", response):
+            await self.engine.sync_account("10000001", ["codeforces"], task, days=0)
+        self.assertEqual(task["status"], "completed")
+        self.assertEqual([call.args[2]["from"] for call in response.await_args_list], [1, 101])
+        attempts = await (await self.db.execute("SELECT external_submission_id FROM submission_attempts")).fetchall()
+        self.assertEqual([row[0] for row in attempts], ["10000001:100"])
+        result, _ = await self.check(candidates=["1843A"])
+        self.assertEqual((result["scope"]["ready_member_count"], result["rows"][0]["decision"]), (1, "excluded_ac"))
+
+    async def test_incremental_time_boundary_includes_non_contest_records(self):
+        await self.sync([self.submission(100)])
+        page = [self.submission(sid, age=8 * 86400) for sid in range(100)]
+        for submission in page:
+            del submission["problem"]["contestId"]
+        response = AsyncMock(return_value=page)
+        task = {}
+        with patch("feat.api.acm_api.cf_history.cf_request", response):
+            await self.engine.sync_account("10000001", ["codeforces"], task, days=0, incremental=True)
+        self.assertEqual(task["status"], "completed")
+        self.assertEqual(response.await_count, 1)
+        self.assertEqual((await (await self.db.execute("SELECT COUNT(*) FROM submission_attempts")).fetchone())[0], 1)
+
+    async def test_malformed_addressable_problem_still_cannot_complete_history(self):
+        for problem in ({"contestId": 1843}, {"contestId": None, "index": "A"}, {"contestId": 1843, "index": "bad!"}):
+            with self.subTest(problem=problem):
+                row = {**self.submission(1), "problem": problem}
+                task = {}
+                with patch("feat.api.acm_api.cf_history.cf_request", AsyncMock(return_value=[row])):
+                    await self.engine.sync_account("10000001", ["codeforces"], task, days=0)
+                self.assertEqual(task["status"], "failed")
+                state = await (await self.db.execute("SELECT full_history_at FROM user_platform_sync_state WHERE platform='codeforces'")).fetchone()
+                self.assertEqual(state["full_history_at"], 0)
+        self.assertEqual((await (await self.db.execute("SELECT COUNT(*) FROM submission_attempts")).fetchone())[0], 0)
 
     async def test_repair_then_rejudge_removes_normalized_ac_and_recent_counts(self):
         await self.sync([self.submission(1)])
@@ -109,6 +199,55 @@ class ReviewMetadataTests(DatabaseCase):
         await self.jobs.close()
         await super().asyncTearDown()
 
+    async def contest_job(self, contest_id, credentials, response):
+        self.engine._crawler_config = lambda: credentials
+        session = practice_fixtures.CFRequestTests.Session([practice_fixtures.CFRequestTests.Response(response)] * 3)
+        self.engine._http_session = session
+        # Exercise the real adapter and inspect final HTTP parameters, including signing.
+        with patch("feat.api.acm_api.cf_client.asyncio.sleep", AsyncMock()):
+            job_id = await self.jobs.submit("check", await self.payload(contest_id=contest_id))
+            await asyncio.gather(*list(self.jobs.tasks))
+        return await self.jobs.get(job_id), session.requests
+
+    async def test_regular_contest_is_anonymous_with_or_without_configured_keys(self):
+        for credentials in ({}, {"cf_api_key": "fixture-key", "cf_api_secret": "fixture-secret"}, {"cf_api_key": "fixture-key"}):
+            with self.subTest(credentials=credentials):
+                await self.db.execute("DELETE FROM cf_contest_cache")
+                await self.db.execute("DELETE FROM cf_problem_cache")
+                await self.db.commit()
+                response = {"status": "OK", "result": {**self.catalog, "contest": {"id": 1843, "phase": "FINISHED"}, "rows": []}}
+                job, requests = await self.contest_job(1843, credentials, response)
+                self.assertEqual(job["status"], "completed")
+                self.assertEqual([row["display_id"] for row in job["result"]["rows"]], ["1843A", "1843B"])
+                self.assertTrue(all(row["eligible"] for row in job["result"]["rows"]))
+                self.assertEqual(len(requests), 1)
+                self.assertEqual(requests[0][0], "https://codeforces.com/api/contest.standings")
+                self.assertEqual(requests[0][1]["params"], {"contestId": 1843})
+                self.assertIsNotNone(await (await self.db.execute("SELECT 1 FROM cf_contest_cache WHERE contest_id=1843")).fetchone())
+
+    async def test_gym_contest_uses_signed_limited_request_when_credentials_are_complete(self):
+        response = {"status": "OK", "result": {"contest": {"id": 104123, "phase": "FINISHED"}, "problems": [{"contestId": 104123, "index": "A", "name": "Gym fixture", "tags": []}], "rows": []}}
+        job, requests = await self.contest_job(104123, {"cf_api_key": "fixture-key", "cf_api_secret": "fixture-secret"}, response)
+        self.assertEqual(job["status"], "completed")
+        self.assertTrue(job["result"]["rows"][0]["eligible"])
+        self.assertEqual(len(requests), 1)
+        params = requests[0][1]["params"]
+        self.assertEqual(set(params), {"contestId", "from", "count", "showUnofficial", "apiKey", "time", "apiSig"})
+        self.assertEqual({key: params[key] for key in ("contestId", "from", "count", "showUnofficial", "apiKey")}, {"contestId": 104123, "from": 1, "count": 1, "showUnofficial": "true", "apiKey": "fixture-key"})
+        self.assertEqual(len(params["apiSig"]), 134)
+
+    async def test_inaccessible_gym_remains_partial_without_false_eligibility(self):
+        for credentials in ({}, {"cf_api_key": "fixture-key"}, {"cf_api_key": "fixture-key", "cf_api_secret": "fixture-secret"}):
+            with self.subTest(credentials=credentials):
+                job, requests = await self.contest_job(104123, credentials, {"status": "FAILED", "comment": "access denied"})
+                self.assertEqual(job["status"], "partial")
+                self.assertEqual(job["result"]["rows"], [])
+                self.assertTrue(job["result"]["metadata_warnings"])
+                self.assertEqual(len(requests), 3)
+                if not credentials.get("cf_api_secret"):
+                    self.assertTrue(all(request[1]["params"] == {"contestId": 104123} for request in requests))
+                self.assertIsNone(await (await self.db.execute("SELECT 1 FROM cf_contest_cache WHERE contest_id=104123")).fetchone())
+
     async def test_concurrent_candidates_reuse_catalog_and_skip_redundant_contest(self):
         entered, release = asyncio.Event(), asyncio.Event()
         calls = []
@@ -159,6 +298,54 @@ class ReviewMetadataTests(DatabaseCase):
         self.assertEqual((await (await self.db.execute("SELECT COUNT(*) FROM cf_problem_cache")).fetchone())[0], 0)
 
 
+class ReviewBindingTests(DatabaseCase):
+    async def test_existing_destructive_trigger_is_upgraded_idempotently(self):
+        await self.member()
+        await self.member("10000002", "other_fixture", status="别组")
+        await self.legacy_ac("10000002", "1843B", 60)
+        personal = await seed_learning_records(self.db, self.now)
+        other_personal = await seed_learning_records(self.db, self.now, "10000002")
+        await seed_binding_evidence(self.db, self.now)
+        await self.db.execute("UPDATE users SET last_sync_timestamp=? WHERE qq_id='10000001'", (self.now,))
+        # Reproduce an already-deployed destructive trigger, not just a fresh schema.
+        await self.db.execute("DROP TRIGGER users_cf_binding_reset")
+        await self.db.execute(
+            "CREATE TRIGGER users_cf_binding_reset AFTER UPDATE OF cf_handle ON users "
+            "WHEN LOWER(TRIM(COALESCE(NEW.cf_handle,''))) <> LOWER(TRIM(COALESCE(OLD.cf_handle,''))) BEGIN "
+            "UPDATE users SET cf_binding_version=OLD.cf_binding_version+1,last_sync_timestamp=0 WHERE qq_id=NEW.qq_id; "
+            "DELETE FROM submissions WHERE user_qq_id=NEW.qq_id AND platform='codeforces'; "
+            "DELETE FROM submission_attempts WHERE owner_qq_id=NEW.qq_id AND platform='codeforces'; "
+            "DELETE FROM user_platform_sync_state WHERE user_qq_id=NEW.qq_id AND platform='codeforces'; "
+            "DELETE FROM user_problem_state WHERE owner_qq_id=NEW.qq_id AND platform='codeforces'; "
+            "DELETE FROM review_states WHERE owner_qq_id=NEW.qq_id AND platform='codeforces'; "
+            "DELETE FROM study_plan_items WHERE owner_qq_id=NEW.qq_id AND platform='codeforces'; "
+            "DELETE FROM contest_problem_reviews WHERE owner_qq_id=NEW.qq_id; "
+            "UPDATE random_challenges SET status='abandoned' WHERE qq_id=NEW.qq_id AND platform='codeforces' AND status='active'; END"
+        )
+        await self.db.commit()
+        for _ in range(2):
+            await self.db.close()
+            self.db = await connect_db(self.path)
+            self.assertEqual(await learning_snapshot(self.db), personal)
+            user = await (await self.db.execute("SELECT cf_binding_version,last_sync_timestamp FROM users WHERE qq_id='10000001'")).fetchone()
+            self.assertEqual(tuple(user), (0, self.now))
+            self.assertIsNotNone(await (await self.db.execute("SELECT 1 FROM submissions WHERE user_qq_id='10000001' AND platform='codeforces'")).fetchone())
+        # Case/whitespace edits preserve evidence; real changes (including ABA) invalidate it.
+        for handle, version in ((" ALPHA ", 0), ("new_fixture", 1), ("alpha", 2)):
+            await self.db.execute("UPDATE users SET cf_handle=? WHERE qq_id='10000001'", (handle,))
+            await self.db.commit()
+            user = await (await self.db.execute("SELECT cf_binding_version,last_sync_timestamp FROM users WHERE qq_id='10000001'")).fetchone()
+            self.assertEqual(tuple(user), (version, 0 if version else self.now))
+            self.assertEqual(await learning_snapshot(self.db), personal)
+            self.assertEqual(await learning_snapshot(self.db, "10000002"), other_personal)
+            if version:
+                await assert_binding_evidence_cleared(self, self.db)
+                self.assertIsNone(await (await self.db.execute("SELECT 1 FROM user_platform_sync_state WHERE user_qq_id='10000001' AND platform='codeforces'")).fetchone())
+            else:
+                self.assertIsNotNone(await (await self.db.execute("SELECT 1 FROM submissions WHERE user_qq_id='10000001' AND platform='codeforces'")).fetchone())
+        self.assertEqual((await (await self.db.execute("SELECT COUNT(*) FROM submissions WHERE user_qq_id='10000002'")).fetchone())[0], 1)
+
+
 class ReviewApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -184,6 +371,61 @@ class ReviewApiTests(unittest.IsolatedAsyncioTestCase):
             await db.close()
         response = await client.post("/api/auth/login", json={"qq_id": "10000001", "password": "review-password-123"})
         return {"X-CSRF-Token": (await response.get_json())["csrf_token"]}
+
+    async def test_web_rebind_preserves_learning_records_and_new_history_controls_eligibility(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            headers = await self.login(client)
+            db = await connect_db(self.path)
+            try:
+                personal = await seed_learning_records(db, int(time.time()))
+                await seed_binding_evidence(db, int(time.time()))
+            finally:
+                await db.close()
+            with patch("feat.api.acm_api.cf_history.cf_request", AsyncMock(return_value=[])):
+                response = await client.put("/api/user", headers=headers, json={"qq_id": "10000001", "name": "Rebound fixture", "status": "现役", "cf_handle": "new_empty_fixture"})
+                self.assertEqual(response.status_code, 202)
+                task_id = (await response.get_json())["task_id"]
+                await asyncio.wait_for(self.app.task_manager.tasks[task_id]["_task"], 10)
+                self.assertEqual(self.app.task_manager.tasks[task_id]["status"], "completed")
+            db = await connect_db(self.path)
+            try:
+                self.assertEqual(await learning_snapshot(db), personal)
+                await assert_binding_evidence_cleared(self, db)
+                state = await (await db.execute("SELECT binding_key,full_history_at FROM user_platform_sync_state WHERE user_qq_id='10000001' AND platform='codeforces'")).fetchone()
+                self.assertEqual(state["binding_key"], "new_empty_fixture:1")
+                self.assertGreater(state["full_history_at"], 0)
+            finally:
+                await db.close()
+            scope = {"statuses": ["现役"]}
+            overview = await (await client.post("/api/admin/cf/overview", headers=headers, json={"scope": scope})).get_json()
+            self.assertEqual(overview["scope"]["ready_member_count"], 1)
+            response = await client.post("/api/admin/cf/check", headers=headers, json={"scope": scope, "expected_scope_fingerprint": overview["scope"]["fingerprint"], "candidates": ["1843A"]})
+            self.assertEqual(response.status_code, 200)
+            row = (await response.get_json())["rows"][0]
+            self.assertEqual((row["decision"], row["ac_count"], row["attempt_count"]), ("eligible", 0, 0))
+
+    async def test_bot_unbind_preserves_learning_records_but_invalidates_cf_evidence(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            await self.login(client)
+            db = await connect_db(self.path)
+            try:
+                personal = await seed_learning_records(db, int(time.time()))
+                await seed_binding_evidence(db, int(time.time()))
+            finally:
+                await db.close()
+            response = await client.delete("/internal/v1/users/10000001/bindings/cf", headers={"Authorization": "Bearer review-concurrency-fixture-token"})
+            self.assertEqual(response.status_code, 200)
+            db = await connect_db(self.path)
+            try:
+                self.assertEqual(await learning_snapshot(db), personal)
+                await assert_binding_evidence_cleared(self, db)
+                user = await (await db.execute("SELECT cf_handle,cf_binding_version FROM users WHERE qq_id='10000001'")).fetchone()
+                self.assertEqual(tuple(user), (None, 1))
+                self.assertIsNone(await (await db.execute("SELECT 1 FROM user_platform_sync_state WHERE user_qq_id='10000001' AND platform='codeforces'")).fetchone())
+            finally:
+                await db.close()
 
     async def concurrent_rebind(self, bot_route, *, cancel_page=False):
         paused, resume = asyncio.Event(), asyncio.Event()

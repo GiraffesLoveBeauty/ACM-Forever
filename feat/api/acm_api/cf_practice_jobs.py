@@ -195,7 +195,14 @@ class PracticeJobs:
                 # A successful authoritative contest list can prove an index absent.
                 # CF FAILED/404/429 responses only leave the input unknown.
                 try:
-                    contest = await cf_request(self.engine._http_session, "contest.standings", {"contestId": contest_id, "from": 1, "count": 1, "showUnofficial": "true"}, self.engine._crawler_config())
+                    params, config = {"contestId": contest_id}, {}
+                    credentials = self.engine._crawler_config()
+                    # Regular public contests require an unsigned contestId-only request.
+                    # Gym/private access can use a signed, limited standings request.
+                    if contest_id >= 100000 and credentials.get("cf_api_key") and credentials.get("cf_api_secret"):
+                        params.update({"from": 1, "count": 1, "showUnofficial": "true"})
+                        config = credentials
+                    contest = await cf_request(self.engine._http_session, "contest.standings", params, config)
                     if not isinstance(contest, dict) or not isinstance(contest.get("contest"), dict) or not isinstance(contest.get("problems"), list) or not contest["problems"]:
                         raise CFUnavailable("CF 比赛题目列表格式异常")
                     if any(not isinstance(p, dict) or p.get("contestId") != contest_id for p in contest["problems"]):

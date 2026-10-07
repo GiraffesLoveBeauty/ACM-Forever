@@ -201,14 +201,18 @@ def _changed_account_platforms(account_values, existing=None):
 
 
 async def _clear_platform_records(db, qq_id, platform):
-    """账号变更后清理旧账号遗留的平台数据和同步游标。"""
-    for table, owner_field in (
+    """清理旧账号证据和同步游标；CF 个人学习记录随 QQ 保留。"""
+    tables = [
         ("submissions", "user_qq_id"),
         ("submission_attempts", "owner_qq_id"),
-        ("user_problem_state", "owner_qq_id"),
-        ("review_states", "owner_qq_id"),
-        ("study_plan_items", "owner_qq_id"),
-    ):
+    ]
+    if platform != "codeforces":
+        tables.extend([
+            ("user_problem_state", "owner_qq_id"),
+            ("review_states", "owner_qq_id"),
+            ("study_plan_items", "owner_qq_id"),
+        ])
+    for table, owner_field in tables:
         await db.execute(
             f"DELETE FROM {table} WHERE {owner_field}=? AND platform=?", (qq_id, platform)
         )
