@@ -20,8 +20,15 @@ with sync_playwright() as p:
     page.locator('.theme-trigger').click()
     assert page.locator('dialog.theme-editor').is_visible()
     original = page.evaluate("document.body.style.getPropertyValue('--brand')")
+    assert page.locator('.theme-preset').count() == 4
+    for preset in ['gray', 'sunshine', 'rose', 'mint']:
+        page.locator('[data-preset=' + preset + ']').click()
+        assert page.locator('[data-preset=' + preset + ']').get_attribute('aria-pressed') == 'true'
+    page.locator('.theme-restore-original').click()
+    assert page.evaluate("document.body.style.getPropertyValue('--brand')") == original
+    assert page.evaluate("getComputedStyle(document.body).transitionDuration") == '0s'
     page.locator('#theme-hex-primary').fill('#9342ac')
-    assert page.evaluate("document.body.style.getPropertyValue('--brand')") == '#9342ac'
+    page.wait_for_function("document.body.style.getPropertyValue('--brand') === '#9342ac'")
     assert page.evaluate("localStorage.getItem('acm.theme.v1')") is None
     page.keyboard.press('Escape')
     assert page.evaluate("document.body.style.getPropertyValue('--brand')") == original
@@ -32,7 +39,7 @@ with sync_playwright() as p:
     page.locator('.theme-save').click()
     page.reload()
     page.wait_for_function("window.ACMTheme && document.body.dataset.customTheme==='true'")
-    assert page.evaluate("document.body.style.getPropertyValue('--brand')") == '#9342ac'
+    page.wait_for_function("document.body.style.getPropertyValue('--brand') === '#9342ac'")
     page.goto(BASE + '/leaderboard.html')
     page.locator('.theme-trigger').click()
     assert page.locator('#theme-hex-primary').input_value() == '#9342ac'
@@ -45,7 +52,7 @@ with sync_playwright() as p:
     page.locator('.theme-trigger').click()
     page.locator('.theme-advanced summary').click()
     page.locator('#theme-hex-text').fill('#f8f3fa')
-    assert page.locator('.theme-contrast-item[data-pass=false]').count() > 0
+    page.locator('.theme-contrast-item[data-pass=false]').first.wait_for()
     page.locator('.theme-repair').click()
     assert page.locator('.theme-contrast-item[data-pass=false]').count() == 0
     page.locator('#theme-scheme-name').fill('我的测试配色')
@@ -68,6 +75,48 @@ with sync_playwright() as p:
     assert page.locator('.theme-save').is_visible()
     page.keyboard.press('Escape')
     page.set_viewport_size({'width':1440,'height':1000})
+    page.locator('.theme-trigger').click()
+    # One task emits 40 inputs: only the newest value paints; cancel must also
+    # prevent an old callback from touching a newly opened dialog session.
+    result = page.evaluate("""async () => {
+      const input=document.querySelector('#theme-color-primary');
+      const proto=CSSStyleDeclaration.prototype, original=proto.setProperty;
+      let writes=0;
+      proto.setProperty=function(...args){writes++;return original.apply(this,args)};
+      for(let i=0;i<40;i++) {
+        input.value='#'+(0x220000+i).toString(16);
+        input.dispatchEvent(new Event('input',{bubbles:true}));
+      }
+      const syncWrites=writes;
+      await new Promise(requestAnimationFrame);
+      const firstWrites=writes, final=document.body.style.getPropertyValue('--brand');
+      input.dispatchEvent(new Event('input',{bubbles:true}));
+      await new Promise(requestAnimationFrame);
+      const repeatedWrites=writes-firstWrites;
+      proto.setProperty=original;
+      input.value='#123456';input.dispatchEvent(new Event('input',{bubbles:true}));
+      document.querySelector('.theme-cancel').click();ACMTheme.open();
+      const restored=document.body.style.getPropertyValue('--brand');
+      await new Promise(requestAnimationFrame);
+      return {syncWrites,firstWrites,repeatedWrites,final,restored,
+        after:document.body.style.getPropertyValue('--brand')};
+    }""")
+    assert result['syncWrites'] == 0, result
+    assert 0 < result['firstWrites'] <= 160, result
+    assert result['repeatedWrites'] == 0, result
+    assert result['final'] == '#220027', result
+    assert result['restored'] == result['after'], result
+    page.locator('.theme-cancel').click()
+    assert page.evaluate("document.documentElement.dataset.themeEditing") == 'false'
+    assert page.evaluate("getComputedStyle(document.body).transitionDuration") != '0s'
+    # Saving within the input task must persist the newest draft even before RAF.
+    page.locator('.theme-trigger').click()
+    page.evaluate("""() => {
+      const input=document.querySelector('#theme-color-primary');
+      input.value='#345678';input.dispatchEvent(new Event('input',{bubbles:true}));
+      document.querySelector('.theme-save').click();
+    }""")
+    assert page.evaluate("JSON.parse(localStorage.getItem('acm.theme.v1')).light.colors.primary") == '#345678'
     page.locator('.theme-trigger').click()
     output = Path(__file__).resolve().parents[3] / 'data' / 'theme-preview.png'
     output.parent.mkdir(parents=True, exist_ok=True)
