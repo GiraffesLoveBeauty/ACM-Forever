@@ -10,7 +10,17 @@
   const LABELS = {primary:'主色', background:'页面背景', surface:'卡片背景', accent:'强调色', text:'正文', muted:'次要文字', border:'边框', link:'链接', selected:'选中项文字', hero:'欢迎横幅背景'};
   const OVERRIDE_TOKENS = {text:'--text', muted:'--muted', border:'--line', link:'--link', selected:'--selected-fg', hero:'--hero-bg'};
   const clone = value => JSON.parse(JSON.stringify(value));
-  const luminanceCache = new Map(), tokenCache = new Map();
+  const luminanceCache = new Map(), tokenCache = new Map(), readableCache = new Map(), candidateCache = new Map();
+  // 8-bit sRGB has only 256 channel values. Avoid repeated exponentiation and
+  // keep hot entries instead of periodically clearing all caches during a drag.
+  const linearChannels = Array.from({length:256}, (_, n) => {
+    const c = n / 255;
+    return c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4;
+  });
+  function cachePut(cache, key, value, limit) {
+    if (cache.size >= limit) cache.delete(cache.keys().next().value);
+    cache.set(key, value); return value;
+  }
 
   function normalizeColor(value) {
     if (typeof value !== 'string') return null;
@@ -37,14 +47,9 @@
   function luminance(color) {
     const key = colorValue(color);
     if (luminanceCache.has(key)) return luminanceCache.get(key);
-    const linear = rgb(key).map(n => {
-      const c = n / 255;
-      return c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4;
-    });
-    const result = linear[0] * .2126 + linear[1] * .7152 + linear[2] * .0722;
-    if (luminanceCache.size > 4096) luminanceCache.clear();
-    luminanceCache.set(key, result);
-    return result;
+    const packed = parseInt(key.slice(1), 16);
+    const result = linearChannels[packed >>> 16] * .2126 + linearChannels[(packed >>> 8) & 255] * .7152 + linearChannels[packed & 255] * .0722;
+    return cachePut(luminanceCache, key, result, 4096);
   }
   function getContrast(first, second) {
     const a = luminance(first), b = luminance(second);
@@ -53,23 +58,94 @@
   // Find an AA foreground, retaining the user's hue when possible. Opposite
   // surfaces may have no common safe color; report that instead of claiming AA.
   function readable(backgrounds, preferred, minimum = 4.5) {
-    const target = colorValue(preferred);
-    if (backgrounds.every(bg => getContrast(target, bg) >= minimum)) return target;
-    const candidates = new Set([target, '#000000', '#ffffff']);
-    for (let i = 0; i <= 50; i++) {
-      candidates.add(mix(target, '#000000', i / 50));
-      candidates.add(mix(target, '#ffffff', i / 50));
+    const key = backgrounds.join(',') + '|' + preferred + '|' + minimum;
+    if (readableCache.has(key)) {
+      const result = readableCache.get(key);
+      readableCache.delete(key); readableCache.set(key, result);
+      return result;
     }
-    for (let n = 0; n <= 255; n++) candidates.add(hex([n,n,n]));
-    const targetRgb = rgb(target);
-    let best = '#000000', bestRatio = -1, safe = null, distance = Infinity;
-    for (const candidate of candidates) {
-      const ratio = Math.min(...backgrounds.map(bg => getContrast(candidate, bg)));
+    return cachePut(readableCache, key, solveReadable(backgrounds, preferred, minimum), 512);
+  }
+  function solveReadable(backgrounds, preferred, minimum) {
+    const target = colorValue(preferred), targetRgb = rgb(target);
+    const levels = backgrounds.map(bg => luminance(bg));
+    const ratioOf = color => {
+      const value = luminance(color);
+      let ratio = Infinity;
+      for (const level of levels) ratio = Math.min(ratio, (Math.max(value, level) + .05) / (Math.min(value, level) + .05));
+      return ratio;
+    };
+    if (ratioOf(target) >= minimum) return target;
+    let intervals = [[0, 1]];
+    for (const level of levels) {
+      const next = [], lower = (level + .05) / minimum - .05, upper = minimum * (level + .05) - .05;
+      for (const [lo, hi] of intervals) {
+        if (lo <= Math.min(hi, lower)) next.push([lo, Math.min(hi, lower)]);
+        if (Math.max(lo, upper) <= hi) next.push([Math.max(lo, upper), hi]);
+      }
+      intervals = next;
+    }
+    let safe = null, distance = Infinity, best = '#000000', bestRatio = -1;
+    const consider = candidate => {
+      const ratio = ratioOf(candidate);
       if (ratio > bestRatio) { best = candidate; bestRatio = ratio; }
       if (ratio >= minimum) {
         const d = rgb(candidate).reduce((sum, n, i) => sum + (n - targetRgb[i]) ** 2, 0);
         if (d < distance) { safe = candidate; distance = d; }
       }
+    };
+    // Monotone RGB paths: locate a safe boundary instead of scanning every shade.
+    const pathEdge = (from, to, threshold, lastBelow) => {
+      const at = t => hex(from.map((n, i) => n * (1 - t) + to[i] * t));
+      let lo = 0, hi = 1;
+      for (let i = 0; i < 18; i++) {
+        const mid = (lo + hi) / 2, value = luminance(at(mid));
+        if (lastBelow ? value <= threshold : value < threshold) lo = mid;
+        else hi = mid;
+      }
+      consider(at(lastBelow ? lo : hi));
+    };
+    for (const [lo, hi] of intervals) {
+      pathEdge([0, 0, 0], targetRgb, hi, true);
+      pathEdge(targetRgb, [255, 255, 255], lo, false);
+      let left = 0, right = 256;
+      while (left < right) {
+        const mid = (left + right) >>> 1;
+        if (luminance(hex([mid, mid, mid])) < lo) left = mid + 1;
+        else right = mid;
+      }
+      const low = left; left = 0; right = 256;
+      while (left < right) {
+        const mid = (left + right) >>> 1;
+        if (luminance(hex([mid, mid, mid])) <= hi) left = mid + 1;
+        else right = mid;
+      }
+      const high = left - 1;
+      if (low <= high && low <= 255 && high >= 0) {
+        const gray = Math.max(low, Math.min(high, Math.round((targetRgb[0] + targetRgb[1] + targetRgb[2]) / 3)));
+        consider(hex([gray, gray, gray]));
+      }
+    }
+    if (safe) return safe;
+    // Preserve exact best-effort fallback for incompatible or discrete backgrounds.
+    best = '#000000'; bestRatio = -1;
+    let candidates = candidateCache.get(target);
+    if (!candidates) {
+      const colors = new Set([target, '#000000', '#ffffff']);
+      for (let i = 0; i <= 50; i++) {
+        colors.add(mix(target, '#000000', i / 50));
+        colors.add(mix(target, '#ffffff', i / 50));
+      }
+      for (let n = 0; n <= 255; n++) colors.add(hex([n,n,n]));
+      candidates = Array.from(colors, color => ({color, level:luminance(color),
+        distance:rgb(color).reduce((sum, n, i) => sum + (n - targetRgb[i]) ** 2, 0)}));
+      cachePut(candidateCache, target, candidates, 32);
+    }
+    for (const candidate of candidates) {
+      let ratio = Infinity;
+      for (const level of levels) ratio = Math.min(ratio, (Math.max(candidate.level, level) + .05) / (Math.min(candidate.level, level) + .05));
+      if (ratio > bestRatio) { best = candidate.color; bestRatio = ratio; }
+      if (ratio >= minimum && candidate.distance < distance) { safe = candidate.color; distance = candidate.distance; }
     }
     return safe || best;
   }
@@ -77,6 +153,18 @@
     return {version:1, mode:'system',
       light:{colors:{primary:'#16766a', background:'#edf3ef', surface:'#fbfdf9', accent:'#efcf63'}, overrides:{}},
       dark:{colors:{primary:'#70c3a6', background:'#122222', surface:'#1a302e', accent:'#edcb69'}, overrides:{}}};
+  }
+  // Legacy color families are optional starting points, never storage migrations.
+  const PRESETS = Object.freeze([
+    {id:'mint', name:'清绿', light:['#16766a','#edf3ef','#fbfdf9','#efcf63'], dark:['#70c3a6','#122222','#1a302e','#edcb69']},
+    {id:'gray', name:'白灰', light:['#68717a','#f0f1f3','#fcfcfd','#aab1b9'], dark:['#c0c6cd','#202327','#292d32','#c9cdd2']},
+    {id:'sunshine', name:'暖黄', light:['#98741f','#faf5e6','#fffdf6','#edc54d'], dark:['#e6c65e','#272317','#342e1e','#f2cf60']},
+    {id:'rose', name:'柔粉', light:['#b45178','#faf0f4','#fffafd','#f0c4af'], dark:['#e39ab8','#281e24','#352730','#f0c4af']}
+  ].map(item => Object.freeze({...item, light:Object.freeze(item.light), dark:Object.freeze(item.dark)})));
+  function presetProfile(id, mode) {
+    const preset = PRESETS.find(item => item.id === id);
+    if (!preset || !['light','dark'].includes(mode)) throw new TypeError('未知预设或模式');
+    return {colors:Object.fromEntries(BASE_KEYS.map((key,index) => [key,preset[mode][index]])), overrides:{}};
   }
   // Validate descriptors before reading values; reject unknown keys, getters,
   // symbols and custom prototypes. Ordinary records from other realms are OK.
@@ -162,11 +250,13 @@
       tokens['--' + name + '-bg'] = background;
       tokens['--' + name] = readable([background, c.surface, c.background], color);
     }
-    if (tokenCache.size > 80) tokenCache.clear();
-    const result = Object.freeze(tokens); tokenCache.set(cacheKey, result); return result;
+    return cachePut(tokenCache, cacheKey, Object.freeze(tokens), 80);
   }
   function contrastChecks(profile, dark) {
-    const t = deriveTokens(profile, dark), checks = [];
+    return checksFromTokens(deriveTokens(profile, dark));
+  }
+  function checksFromTokens(t) {
+    const checks = [];
     const add = (label, foreground, background, minimum = 4.5) => {
       const ratio = getContrast(t[foreground], t[background]);
       checks.push({label, foreground, background, ratio, minimum, pass:ratio >= minimum});
@@ -240,21 +330,48 @@
     }
   }
   function resolveMode(mode) { return mode === 'system' ? (media && media.matches ? 'dark' : 'light') : mode; }
+  // Coalesce a burst of native color-input events into one paint using the latest draft.
+  let previewFrame = null;
+  function cancelPreview() {
+    if (previewFrame !== null) window.cancelAnimationFrame(previewFrame);
+    previewFrame = null;
+  }
+  function schedulePreview() {
+    if (previewFrame !== null) return;
+    previewFrame = window.requestAnimationFrame(() => {
+      previewFrame = null;
+      if (!draft) return;
+      const tokens = apply(draft, editMode);
+      syncAutomaticFields(tokens); renderChecks(tokens);
+    });
+  }
+  const appliedTokens = new WeakMap();
   function setTokens(element, tokens) {
-    if (element && element.style) Object.entries(tokens).forEach(([key, value]) => element.style.setProperty(key, value));
+    if (!element || !element.style) return;
+    const previous = appliedTokens.get(element) || {};
+    for (const [key, value] of Object.entries(tokens)) {
+      if (previous[key] !== value) element.style.setProperty(key, value);
+    }
+    appliedTokens.set(element, tokens);
   }
   function apply(theme, forcedMode) {
     if (!document || !document.documentElement || !document.body) return;
     const resolved = forcedMode || resolveMode(theme.mode);
     const tokens = deriveTokens(theme[resolved], resolved === 'dark');
     const root = document.documentElement, body = document.body;
-    root.dataset.palette = 'custom'; root.dataset.customTheme = 'true'; root.dataset.theme = resolved;
-    body.dataset.theme = resolved; body.dataset.customTheme = 'true';
-    root.style.colorScheme = resolved; body.style.colorScheme = resolved;
+    if (root.dataset.palette !== 'custom') root.dataset.palette = 'custom';
+    for (const node of [root, body]) {
+      if (node.dataset.customTheme !== 'true') node.dataset.customTheme = 'true';
+      if (node.dataset.theme !== resolved) node.dataset.theme = resolved;
+      if (node.style.colorScheme !== resolved) node.style.colorScheme = resolved;
+    }
+    const editing = String(!!draft);
+    if (root.dataset.themeEditing !== editing) root.dataset.themeEditing = editing;
     setTokens(root, tokens); setTokens(body, tokens);
     if (draft && ui.preview) setTokens(ui.preview, tokens);
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', tokens['--bg']);
+    if (meta && meta.getAttribute('content') !== tokens['--bg']) meta.setAttribute('content', tokens['--bg']);
+    return tokens;
   }
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -275,7 +392,7 @@
   function ensureStylesheet() {
     if (!document.head) return;
     let link = document.getElementById('acm-theme-editor-styles');
-    if (!link) { link = element('link'); link.id = 'acm-theme-editor-styles'; link.rel = 'stylesheet'; link.href = '/assets/theme-editor.css?v=custom-theme-1'; }
+    if (!link) { link = element('link'); link.id = 'acm-theme-editor-styles'; link.rel = 'stylesheet'; link.href = '/assets/theme-editor.css?v=custom-theme-2'; }
     document.head.append(link);
   }
   function notify(message, error = false) {
@@ -332,6 +449,28 @@
     const mode = labeledSelect('theme-mode', '保存后的主题模式', [['light','浅色'], ['dark','深色'], ['system','跟随系统']]);
     const edit = labeledSelect('theme-edit-mode', '正在编辑并预览', [['light','浅色颜色'], ['dark','深色颜色']]);
     ui.mode = mode.select; ui.editMode = edit.select; selectors.append(mode.wrapper, edit.wrapper);
+    const presets = element('section', 'theme-section theme-presets');
+    presets.append(element('h3', '', '快速配色'));
+    const presetActions = element('div', 'theme-actions theme-preset-actions');
+    for (const preset of PRESETS) {
+      const choice = button(preset.name, () => {
+        if (!draft) return;
+        draft[editMode] = presetProfile(preset.id, editMode);
+        renderDraft(); notify('已预览「' + preset.name + '」的' + (editMode === 'dark' ? '深色' : '浅色') + '配色；仅修改当前模式草稿，尚未保存。');
+      }, 'theme-preset');
+      choice.dataset.preset = preset.id;
+      choice.setAttribute('aria-pressed', 'false');
+      const swatches = element('span', 'theme-preset-swatches'); swatches.setAttribute('aria-hidden', 'true');
+      for (const color of preset.light) {
+        const dot = element('span', 'theme-preset-swatch'); dot.style.backgroundColor = color; swatches.append(dot);
+      }
+      choice.append(swatches); presetActions.append(choice);
+    }
+    presets.append(presetActions, element('p', 'theme-help', '仅替换正在编辑模式的颜色；另一模式、已保存主题和命名方案保持不变。可继续自定义，保存后才生效。'),
+      button('恢复打开前的配色', () => {
+        if (!draft || !snapshot) return;
+        draft[editMode] = clone(snapshot[editMode]); renderDraft(); notify('当前模式已恢复打开面板前的配色；保存模式和另一颜色模式保持不变。');
+      }, 'theme-restore-original'));
     const base = element('section', 'theme-section theme-basic'); base.append(element('h3', '', '基础颜色'));
     ui.baseFields = element('div', 'theme-color-fields'); base.append(ui.baseFields);
     const advanced = element('details', 'theme-section theme-advanced'); advanced.append(element('summary', '', '高级调色 · 文字与细节'));
@@ -358,33 +497,36 @@
     const transferActions = element('div', 'theme-actions'); transferActions.append(button('导入 JSON 至草稿', () => ui.file.click(), 'theme-import'), button('导出当前草稿', exportDraft, 'theme-export'), ui.file);
     transfer.append(transferActions, element('p', 'theme-help', '最多 32 KB，仅导入颜色数据，不接受 CSS、脚本或资源地址。导入后仍需保存。'));
     ui.status = element('p', 'theme-status'); ui.status.setAttribute('role', 'status'); ui.status.setAttribute('aria-live', 'polite');
-    body.append(help, selectors, base, advanced, ui.preview, checks, librarySection, transfer, ui.status);
+    body.append(help, selectors, presets, base, advanced, ui.preview, checks, librarySection, transfer, ui.status);
     const footer = element('div', 'theme-editor-footer');
     footer.append(button('恢复当前模式默认颜色', resetDraft, 'theme-reset'), button('取消', cancelChanges, 'theme-cancel'), button('仅本页应用', applyForPage, 'theme-apply-page'), button('保存主题', saveDraft, 'primary theme-save'));
     dialog.append(header, body, footer); document.body.append(dialog);
     ui.mode.addEventListener('change', () => { if (!draft) return; draft.mode = ui.mode.value; apply(draft, editMode); notify('保存模式已修改；当前仍预览正在编辑的 ' + (editMode === 'dark' ? '深色' : '浅色') + '。'); });
     ui.editMode.addEventListener('change', () => { if (!draft) return; editMode = ui.editMode.value; renderDraft(); notify('已切换编辑颜色；保存模式未改变。'); });
     dialog.addEventListener('cancel', event => { event.preventDefault(); cancelChanges(); });
-    dialog.addEventListener('close', () => { if (draft) cancelChanges(); });
+    // Native close events are queued: an old event must not cancel a newly
+    // reopened modal in the same task. A genuinely closed dialog still restores.
+    dialog.addEventListener('close', () => { if (draft && !dialog.open) cancelChanges(); });
     dialog.addEventListener('click', event => {
       if (event.target !== dialog) return;
       const rect = dialog.getBoundingClientRect();
       if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) cancelChanges();
     });
   }
-  function syncAutomaticFields() {
+  function syncAutomaticFields(tokens) {
     if (!draft || !ui.advancedFields) return;
-    const profile = draft[editMode], tokens = deriveTokens(profile, editMode === 'dark');
+    const profile = draft[editMode];
     for (const key of OVERRIDE_KEYS) {
       if (Object.prototype.hasOwnProperty.call(profile.overrides, key)) continue;
       const picker = document.getElementById('theme-color-' + key), input = document.getElementById('theme-hex-' + key);
-      if (picker) picker.value = tokens[OVERRIDE_TOKENS[key]];
-      if (input) input.placeholder = '自动 ' + tokens[OVERRIDE_TOKENS[key]];
+      const value = tokens[OVERRIDE_TOKENS[key]], placeholder = '自动 ' + value;
+      if (picker && picker.value !== value) picker.value = value;
+      if (input && input.placeholder !== placeholder) input.placeholder = placeholder;
     }
   }
-  function renderFields() {
+  function renderFields(tokens) {
     invalidFields.clear(); ui.baseFields.replaceChildren(); ui.advancedFields.replaceChildren();
-    const profile = draft[editMode], tokens = deriveTokens(profile, editMode === 'dark');
+    const profile = draft[editMode];
     for (const key of BASE_KEYS.concat(OVERRIDE_KEYS)) {
       const advanced = OVERRIDE_KEYS.includes(key), manual = advanced && Object.prototype.hasOwnProperty.call(profile.overrides, key);
       const effective = advanced ? (profile.overrides[key] || tokens[OVERRIDE_TOKENS[key]]) : profile.colors[key];
@@ -411,7 +553,7 @@
           if (source === picker) input.value = normalized;
           if (advanced) { marker.textContent = '手动覆盖'; row.dataset.overridden = 'true'; }
         }
-        apply(draft, editMode); syncAutomaticFields(); renderChecks();
+        schedulePreview();
       };
       picker.addEventListener('input', () => update(picker)); input.addEventListener('input', () => update(input));
       input.addEventListener('blur', () => { const normalized = normalizeColor(input.value); if (normalized) input.value = normalized; });
@@ -422,12 +564,27 @@
       (advanced ? ui.advancedFields : ui.baseFields).append(row);
     }
   }
-  function renderChecks() {
+  function renderChecks(tokens) {
     if (!draft) return;
-    ui.checks.replaceChildren(); const checks = contrastChecks(draft[editMode], editMode === 'dark');
-    for (const check of checks) {
-      const item = element('li', 'theme-contrast-item', (check.pass ? '通过 ' : '低对比 ') + check.label + '：' + check.ratio.toFixed(2) + ':1');
-      item.dataset.pass = String(check.pass); ui.checks.append(item);
+    const checks = checksFromTokens(tokens);
+    for (const [index, check] of checks.entries()) {
+      let item = ui.checks.children[index];
+      if (!item) { item = element('li', 'theme-contrast-item'); ui.checks.append(item); }
+      const text = (check.pass ? '通过 ' : '低对比 ') + check.label + '：' + check.ratio.toFixed(2) + ':1';
+      if (item.textContent !== text) item.textContent = text;
+      if (item.dataset.pass !== String(check.pass)) item.dataset.pass = String(check.pass);
+    }
+    const activeProfile = draft[editMode];
+    for (const choice of ui.dialog.querySelectorAll('.theme-preset')) {
+      const profile = presetProfile(choice.dataset.preset, editMode);
+      const selected = !Object.keys(activeProfile.overrides).length && BASE_KEYS.every(key => activeProfile.colors[key] === profile.colors[key]);
+      if (choice.getAttribute('aria-pressed') !== String(selected)) choice.setAttribute('aria-pressed', String(selected));
+      if (choice.dataset.swatchMode !== editMode) {
+        choice.dataset.swatchMode = editMode;
+        choice.querySelectorAll('.theme-preset-swatch').forEach((dot, index) => {
+          dot.style.backgroundColor = profile.colors[BASE_KEYS[index]];
+        });
+      }
     }
     ui.checks.setAttribute('aria-label', checks.every(check => check.pass) ? '所有已检查色对通过' : '存在低对比色对；可手动保存或一键修复');
   }
@@ -447,9 +604,11 @@
     });
   }
   function renderDraft() {
+    cancelPreview();
     if (!draft) return;
     ui.mode.value = draft.mode; ui.editMode.value = editMode;
-    apply(draft, editMode); renderFields(); renderChecks(); renderLibrary();
+    const tokens = apply(draft, editMode);
+    renderFields(tokens); renderChecks(tokens); renderLibrary();
   }
   function validInputs() {
     if (!invalidFields.size) return true;
@@ -468,6 +627,7 @@
     if (ui.trigger) ui.trigger.setAttribute('aria-expanded', 'true'); ui.mode.focus(); return true;
   }
   function closePanel() {
+    cancelPreview();
     invalidFields.clear(); if (ui.trigger) ui.trigger.setAttribute('aria-expanded', 'false');
     if (ui.dialog && ui.dialog.open) ui.dialog.close();
     const focus = returnFocus && returnFocus.isConnected !== false ? returnFocus : ui.trigger;
@@ -537,5 +697,5 @@
     } catch (error) { notify('导出失败：' + error.message, true); }
     finally { if (url) { const revoke = () => window.URL.revokeObjectURL(url); if (typeof window.setTimeout === 'function') window.setTimeout(revoke, 1000); else revoke(); } }
   }
-  window.ACMTheme = Object.freeze({init, toggle, open, deriveTokens, getContrast, normalizeColor, validateTheme, createDefaultTheme, parseThemeJSON, contrastChecks, repairProfile});
+  window.ACMTheme = Object.freeze({init, toggle, open, presetProfile, deriveTokens, getContrast, normalizeColor, validateTheme, createDefaultTheme, parseThemeJSON, contrastChecks, repairProfile});
 })(window);

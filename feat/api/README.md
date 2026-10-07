@@ -135,7 +135,7 @@ CF 历史同步为每次调用打开独立的数据库连接，覆盖自动同�
 
 ## 自助调色
 
-所有使用共享 `app.js` 的页面均提供“自助调色”入口。基础颜色为主色、页面背景、卡片背景和强调色；高级设置可覆盖正文、次要文字、边框、链接、选中项文字及横幅背景。衍生状态和按钮前景自动计算，不再从固定模板中选择。
+所有使用共享 `app.js` 的页面均提供“自助调色”入口。基础颜色为主色、页面背景、卡片背景和强调色；高级设置可覆盖正文、次要文字、边框、链接、选中项文字及横幅背景。衍生状态和按钮前景自动计算。可选择清绿、白灰、暖黄、柔粉四个预设作为起点，也可继续完全自定义。预设仅替换正在编辑模式的草稿；另一模式、已保存主题和命名方案库保持不变。“恢复打开前的配色”可恢复当前模式，取消则恢复整个主题。
 
 - 浅色和深色独立编辑；可选择固定模式或跟随系统。正在预览的模式与保存后的模式分别设置。
 - 实时预览不写入存储；保存才写入 `localStorage` 的 `acm.theme.v1`。取消、Esc、关闭及点击面板外部恢复打开前的主题。
@@ -147,7 +147,7 @@ CF 历史同步为每次调用打开独立的数据库连接，覆盖自动同�
 前端测试（需要 Node.js）：
 
 ```powershell
-node --test feat/api/tests/theme-colors.test.cjs
+node --test feat/api/tests/theme-colors.test.cjs feat/api/tests/theme-performance.test.cjs
 ```
 
 可选浏览器验收使用 Python Playwright 和已安装的 Edge，针对单独的本地预览实例执行，不连接生产：
@@ -157,6 +157,20 @@ python feat/api/tests/theme_browser_smoke.py
 ```
 
 默认访问 `http://127.0.0.1:8088`，可用 `ACM_THEME_TEST_URL` 指定另一本地端口，浏览器通道可用 `ACM_THEME_BROWSER_CHANNEL` 更改。截图写入根目录被忽略的 `data/theme-preview.png`。前端测试尚未加入现有 GitHub Actions。
+
+### 实时调色性能
+
+连续输入按 `requestAnimationFrame` 合并，每帧只预览最新草稿；保存直接读取最新数据，不等待绘制。对比度搜索使用可行亮度区间与二分查找，无共同安全色时保留尽力选择并如实提示。亮度查表与有界缓存复用未变化的计算；同一帧的预览、字段和检查共享 tokens，样式变量仅在值改变时写入。调色面板打开期间暂停 CSS 过渡，关闭后恢复，避免颜色拖尾。无需 Web Worker，也不会对正文安全检查降精度。
+
+可选性能测量（本机 Edge，预览必须在 `127.0.0.1:8088` 运行）：
+
+```powershell
+python feat/api/tests/theme_benchmark.py
+# 若事先保存了修改前的 JS/CSS，可交错运行两个版本作对照：
+python feat/api/tests/theme_benchmark.py --baseline-js data/theme-before-perf.js --baseline-css data/theme-before-perf.css
+```
+
+基线文件只是本地忽略的快照，不随仓库分发；没有快照时运行第一条命令即可。报告写入 `data/theme-benchmark.json`，区分颜色派生、主题帧回调 CPU、CDP 样式/布局耗时和帧间隔。每轮模拟 400 次输入，合并成 100 次预览；结果受设备、页面内容和后台负载影响，帧间隔不是 GPU 绘制耗时，也不代表固定 FPS 保证。
 
 ## 开发验证
 
