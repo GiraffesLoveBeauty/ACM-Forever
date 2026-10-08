@@ -6,6 +6,7 @@
   <title>写话题 · ACM Forever</title>
   <link rel="stylesheet" href="/assets/app.css?v=local-css-mime-fix-1">
   <link rel="stylesheet" href="/assets/forum.css?v=forum-composer-3">
+  <link rel="stylesheet" href="/assets/vendor/katex/katex.min.css?v=0.19.0">
 </head>
 <body class="forum-page compose-page">
   <header class="forum-header">
@@ -61,8 +62,8 @@
         </section>
         <section class="compose-side-card compose-markdown-guide">
           <span class="panel-eyebrow">QUICK GUIDE</span><h2>Markdown 小抄</h2>
-          <div><code># 一级标题</code><code>## 二级标题</code><code>**重点内容**</code><code>*强调内容*</code><code>`代码片段`</code><code>- 列表项目</code></div>
-          <p>编辑时随时切换到“预览”，确认格式后再提交。</p>
+          <div><code># 一级标题</code><code>## 二级标题</code><code>**重点内容**</code><code>*强调内容*</code><code>`代码片段`</code><code>- 列表项目</code><code>$E=mc^2$</code><code>$$\sum_{i=1}^{n} i$$</code></div>
+          <p>支持行内与独立 LaTeX 公式；编辑时切换到“预览”确认效果。</p>
         </section>
       </aside>
     </div>
@@ -70,7 +71,9 @@
 
   <script src="/assets/vendor/marked.min.js"></script>
   <script src="/assets/vendor/purify.min.js"></script>
-  <script src="/assets/forum-markdown.js?v=markdown-composer-1"></script>
+  <script src="/assets/vendor/katex/katex.min.js?v=0.19.0"></script>
+  <script src="/assets/vendor/katex/auto-render.min.js?v=0.19.0"></script>
+  <script src="/assets/forum-markdown.js?v=forum-math-1"></script>
   <script src="/assets/app.js?v=forum-composer-1"></script>
   <script>
     const titleInput=document.getElementById('draft-title');
@@ -89,7 +92,7 @@
     function recoveryKey(id=draftId){return `acm-forum-compose:${recoveryOwner}:${id===null?'new':id}`}
     function setSaveState(text,kind=''){saveState.textContent=text;saveState.dataset.state=kind}
     function limitCodePoints(input,limit){const value=input.value,points=Array.from(value);if(points.length<=limit)return;const cursor=input.selectionStart??value.length;const next=points.slice(0,limit).join('');const nextCursor=Array.from(value.slice(0,cursor)).slice(0,limit).join('').length;input.value=next;input.setSelectionRange(nextCursor,nextCursor)}
-    function updatePreview(){document.getElementById('draft-preview').innerHTML=window.renderForumMarkdown(bodyInput.value);document.getElementById('body-count').textContent=`${Array.from(bodyInput.value).length} / 20000`;document.getElementById('title-count').textContent=`${Array.from(titleInput.value).length} / 120`}
+    function updatePreview(){const preview=document.getElementById('draft-preview');preview.innerHTML=window.renderForumMarkdown(bodyInput.value);window.renderForumMath(preview);document.getElementById('body-count').textContent=`${Array.from(bodyInput.value).length} / 20000`;document.getElementById('title-count').textContent=`${Array.from(titleInput.value).length} / 120`}
     function formatTime(value){if(!value)return '刚刚';return new Date(Number(value)*1000).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
     function samePayload(a,b){return a&&b&&a.title===b.title&&a.body===b.body&&String(a.category_id||'')===String(b.category_id||'')}
     function persistRecovery(payload=draftPayload()){try{localStorage.setItem(recoveryKey(),JSON.stringify({payload,updated_at:Date.now()}))}catch{}}

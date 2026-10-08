@@ -714,6 +714,7 @@ body.forum-page[data-theme="dark"]::before,
 .compose-markdown-guide p{margin:12px 0 0;color:var(--muted);font-size:10px;line-height:1.65}
 .forum-page .forum-write{display:block;text-align:center}
 .forum-markdown{overflow-wrap:anywhere;color:var(--text);font-size:14px;line-height:1.85}
+.forum-markdown .katex-display{overflow-x:auto;overflow-y:hidden;padding:.2em 0}
 .forum-markdown>:first-child{margin-top:0}
 .forum-markdown>:last-child{margin-bottom:0}
 .forum-markdown h1,.forum-markdown h2,.forum-markdown h3,.forum-markdown h4{margin:1.15em 0 .55em;color:var(--text);line-height:1.4}
