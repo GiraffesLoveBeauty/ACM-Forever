@@ -12,17 +12,10 @@ function mapMemberRequest(path,opt={}){
     ['/challenge/list','/me/training/challenges'],
     ['/challenge/start','/me/challenge/start'],
     ['/challenge/rating','/me/challenge/rating'],
-    ['/workspace/items','/me/workspace/items'],
     ['/problems','/me/problems'],
-    ['/submissions/attempts','/me/submissions/attempts'],
-    ['/submissions/analytics','/me/submissions/analytics'],
-    ['/reviews/drafts','/me/reviews/drafts'],
-    ['/review/queue','/me/reviews'],
-    ['/review/feedback','/me/reviews/feedback'],
     ['/training/weak-tags','/me/reviews/weak-tags'],
     ['/training/summary','/me/training/summary'],
-    ['/contest/reviews','/me/contest/reviews'],
-    ['/study-plan','/me/study-plan']
+    ['/contest/reviews','/me/contest/reviews']
   ];
   let mapped=pathname;
   for(const [from,to] of routes){
@@ -52,24 +45,24 @@ async function api(path,opt={}){
     const response=await fetch('/api'+path,{credentials:'same-origin',...fetchOptions,signal:controller.signal,headers:requestHeaders});
     const data=await response.json().catch(()=>({}));
     if(response.status===401&&!path.startsWith('/auth/login')){location.href='/login.html?next='+encodeURIComponent(location.pathname+location.search);throw Error('请先登录')}
-    if(response.status===428){location.href='/change-password.html';throw Error('请先修改初始密码')}
+    if(response.status===428){location.href='/change-password.html?next='+encodeURIComponent(location.pathname+location.search);throw Error('请先修改初始密码')}
     if(!response.ok){const error=Error(data.message||data.error||`HTTP ${response.status}`);error.status=response.status;error.code=data.code||data.error_code||null;error.details=data;throw error}
     return data;
   }finally{clearTimeout(timer);externalSignal?.removeEventListener('abort',abort)}
 }
 
 function navItems(){
-  const common=[['forum','⌂ 论坛','/index.html'],['leaderboard','♛ 排行榜','/leaderboard.html'],['home','◉ 个人中心','/home.html'],['challenge','◎ 今日训练','/challenge.html'],['reviews','✓ 待复盘','/reviews.html'],['problem-bank','▦ 题库','/problem-bank.html'],['submissions','◷ 提交时间线','/submissions.html'],['workspace','✎ 笔记与计划','/workspace.html'],['contest-review','◈ 赛事复盘','/contest-review.html']];
+  const common=[['forum','⌂ 论坛','/index.html'],['leaderboard','♛ 排行榜','/leaderboard.html'],['home','◉ 个人中心','/home.html']];
   if(!AUTH.authenticated)return [...common.slice(0,2),['login','登录','/login.html']];
   if(AUTH.role==='member')return common;
-  return [...common,['forum-moderation','☷ 内容审核','/forum-moderation.html'],['admin','⚙ 管理后台','/admin.html']];
+  return [...common,['admin','⚙ 管理后台','/admin.html']];
 }
 
 async function renderNav(){
   const items=navItems();
   let order=items.map(item=>item[0]),hidden=new Set();
   if(AUTH.role==='admin'||AUTH.role==='root'){
-    try{const preferences=await api('/ui/preferences');if(Array.isArray(preferences.nav_order)&&preferences.nav_order.length)order=preferences.nav_order;hidden=new Set(Array.isArray(preferences.nav_hidden)?preferences.nav_hidden:[]);if(preferences.font_scale)document.documentElement.style.setProperty('--font-scale',preferences.font_scale)}catch{}
+    try{const preferences=await api('/ui/preferences');if(preferences.font_scale)document.documentElement.style.setProperty('--font-scale',preferences.font_scale)}catch{}
     if(!order.includes('admin'))order.push('admin');
   }
   const byId=new Map(items.map(item=>[item[0],item]));
@@ -156,8 +149,8 @@ async function login(event){
     const data=await api('/auth/login',{method:'POST',body:JSON.stringify({qq_id:/^\d{4,12}$/.test(identifier)?identifier:'',username:identifier,password})});
     csrf=data.csrf_token||'';
     const next=new URLSearchParams(location.search).get('next')||'/index.html';
-    const safeNext=next.startsWith('/')&&!next.startsWith('//')?next:'/index.html';
-    location.href=data.must_change_password?'/change-password.html':safeNext;
+    const safeNext=localNext(next,'/index.html');
+    location.href=data.must_change_password?'/change-password.html?next='+encodeURIComponent(safeNext):safeNext;
   }catch(error){const message=$('#login-message');if(message)message.textContent=error.message}
 }
 async function logout(){try{await api('/auth/logout',{method:'POST'})}catch{}location.href='/index.html'}
@@ -184,8 +177,8 @@ async function init(){
     location.replace('/login.html?next='+encodeURIComponent(location.pathname+location.search));return;
   }
   csrf=AUTH.csrf_token||'';
-  if(AUTH.must_change_password&&page!=='change-password.html'){location.replace('/change-password.html');return}
-  if(page==='login.html'){location.replace('/index.html');return}
+  if(AUTH.must_change_password&&page!=='change-password.html'){const target=page==='login.html'?localNext(new URLSearchParams(location.search).get('next'),'/home.html'):location.pathname+location.search;location.replace('/change-password.html?next='+encodeURIComponent(target));return}
+  if(page==='login.html'){location.replace(localNext(new URLSearchParams(location.search).get('next'),'/index.html'));return}
   if(page==='change-password.html')return;
   await renderNav();lockOwnerInputs();
   const requestedMember=new URLSearchParams(location.search).get('qq_id');
@@ -201,4 +194,5 @@ document.addEventListener('DOMContentLoaded',()=>{
   const exit=$('#logout');if(exit)exit.onclick=logout;
   init();
 });
-window.api=api;window.esc=esc;window.AUTH=AUTH;window.avatarMarkup=avatarMarkup;window.setAccountAvatar=setAccountAvatar;window.animateNumbers=animateNumbers;
+function localNext(value,fallback='/home.html'){return typeof value==='string'&&value.startsWith('/')&&!value.startsWith('//')&&!/[\\\x00-\x1f]/.test(value)&&new URL(value,location.origin).origin===location.origin?value:fallback}
+window.api=api;window.esc=esc;window.AUTH=AUTH;window.avatarMarkup=avatarMarkup;window.setAccountAvatar=setAccountAvatar;window.animateNumbers=animateNumbers;window.localNext=localNext;
