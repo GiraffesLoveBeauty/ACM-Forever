@@ -113,6 +113,41 @@ response.raise_for_status()
 
 浏览器同源调用时，Cookie 由浏览器管理。跨域 Web 前端还需要在服务端配置精确的 `ACM_WEB_ALLOWED_ORIGINS`；不要用通配来源开放带 Cookie 的请求。
 
+## 统一后台及保留的业务接口
+
+后台唯一入口为 `/admin.html`，通过 `section` 选择 `accounts`（默认）、`members`、`training`、`problems`、`cf-practice`、`contests`、`tasks`、`moderation`、`settings`。CF 使用 `tab=recent/check`，审核使用 `tab=posts/reports`，成员详情使用 `qq_id`。浏览器刷新、前进后退和登录 / 强制改密均保留模块参数；原管理页地址由服务端转入对应模块，共用的训练 / 题库 / 赛事路径则按 Web 角色分别进入后台或成员前台。
+
+| 方法与路径 | 权限 / 契约 |
+| --- | --- |
+| `GET /api/admin/members` | admin/root；`search` 搜 QQ、昵称、身份、学校和 OJ 账号；`page` 默认 1，`page_size` 默认 20、上限 100；返回 `items/total/page/page_size`，含正确的 Web `role` 与 `is_active` |
+| `GET /api/member/<qq_id>`、`PUT /api/user` | admin/root；详情、资料与绑定编辑，Web 角色只读 |
+| `/api/admin/web-accounts/*` | admin/root；Web 账号管理，角色授予仍要求 root，与 QQBot 名单独立 |
+| `GET/PUT /api/admins` | 查询 QQBot Root / 管理员配置；仅 Web root 可写，不修改 `web_accounts.role` |
+| `GET/PUT /api/ui/preferences` | admin/root；只返回 / 更新 `font_scale`，旧导航隐藏、排序、复习配置不再参与页面生成 |
+| `GET /api/problems`、`GET /api/me/problems` | 管理员可附 `owner_qq_id`，成员接口始终使用会话 QQ；支持 `platform/tag/state=favorite/page/page_size`；题目按平台和 ID 去重，优先目录元数据；分页返回 `items/total/returned/page/page_size`，默认 500、上限 500；不返回笔记 |
+| `PUT /api/problems/<platform>/<problem_id>/state`、`PUT /api/me/problems/<platform>/<problem_id>/state` | 正文 `is_favorite` 为必填布尔，管理员另传 `owner_qq_id`；只更新收藏与时间，不覆盖历史状态 / 笔记；提交 `note_md` 返回 410 |
+| `GET /api/contest/reviews`、`GET /api/me/contest/reviews` | 管理员传 `owner_qq_id/contest_id`，成员仅 `contest_id`；返回比赛题目、verdict、rating、status，不暴露自由笔记 |
+| `PUT /api/contest/reviews`、`PUT /api/me/contest/reviews` | 正文 `contest_id/problem_id` 必填，管理员另传 `owner_qq_id`；`status/verdict/rating` 至少一个，只更新提供的字段；省略字段及历史 `note_md` 原值保留 |
+| `/api/challenge/*`、`/api/me/challenge/*`、`/api/me/training/*` | 保留原训练推荐、挑战历史和统计；前台成员请求锁定会话身份 |
+| `GET /api/tasks`、`POST /api/tasks/<id>/cancel` | admin/root；同步任务与原始结果，刷新 / 取消保留 |
+
+赛事状态统一为 `todo/unsolved/queued/solved/reviewed/ignored`，其中 `reviewed` 可正常保存，`queued` 仅表示待补题状态，不创建复习或计划队列。`rating` 接受整数或 null。任何赛事 `note_md` 写请求均返回 410。所有写请求继续执行 CSRF 校验，模块路由不是权限边界。
+
+## 已下线的 Web 功能
+
+待复习 / 待复盘、提交时间线、笔记与计划工作区及其 Web 专属接口已下线。旧页面 `reviews.html/submissions.html/workspace.html` 显示“功能已下线”，可返回个人中心或管理中心。以下路由保留原身份及 CSRF 守卫，已授权调用统一返回 `410`、`code=feature_retired`，不读写历史学习数据：
+
+| 功能 | 管理员路径 | 成员路径 |
+| --- | --- | --- |
+| 工作区 | `/api/workspace/items`、`/api/workspace/items/<id>` | `/api/me/workspace/items`、`/api/me/workspace/items/<id>` |
+| 复习队列 / 反馈 | `/api/review/queue`、`/api/review/feedback` | `/api/me/reviews`、`/api/me/reviews/feedback` |
+| 复盘草稿 | `/api/reviews/drafts` | `/api/me/reviews/drafts` |
+| 计划 | `/api/study-plan` | `/api/me/study-plan` |
+| 提交时间线 / 分析 | `/api/submissions/attempts`、`/api/submissions/analytics` | `/api/me/submissions/attempts`、`/api/me/submissions/analytics` |
+| 成员详情中的 Web 权限修改 | `/api/member/<qq_id>/permissions`，改用成员账号 PATCH 接口 | 无 |
+
+`workspace_items/user_problem_state/review_states/study_plan_items/contest_problem_reviews` 表及历史记录保留存档，不删除表。提交同步继续写入 `submissions/submission_attempts`，内部 `/internal/v1/*` 的提交读写、同步、统计、训练与机器人接口保持可用；CF 近期、证据、候选查重继续使用完整提交历史。训练弱项的 `/api/training/weak-tags`、`/api/me/reviews/weak-tags` 虽含旧命名仍保留，作为训练统计保留，只读取已有提交和归档的错误统计，不提供复习队列或反馈操作。同步和赛事状态写入解除学习队列联动。
+
 ## 公开论坛 API
 
 公开读取不需要登录：
@@ -156,7 +191,7 @@ page = response.json()  # rows、total、page、page_size
 
 ## CF 练习赛选题管理员接口
 
-页面入口：管理中心 → CF 练习赛选题（`/cf-practice.html`）。以下接口仅支持 Web `admin/root` 会话，所有 POST 均要求 `X-CSRF-Token`；普通成员返回 403，未登录返回 401，首次改密流程沿用 428。成员身份取 `users.status`，与权限角色分开。
+页面入口：管理中心 → CF 练习赛选题（`/admin.html?section=cf-practice`，旧 `/cf-practice.html` 自动转入）。以下接口仅支持 Web `admin/root` 会话，所有 POST 均要求 `X-CSRF-Token`；普通成员返回 403，未登录返回 401，首次改密流程沿用 428。成员身份取 `users.status`，与权限角色分开。
 
 | 方法与路径 | 请求 / 返回 |
 | --- | --- |
@@ -246,6 +281,7 @@ else:
 | `403` | 权限不足或 CSRF 校验失败；确认角色并提供 CSRF Token |
 | `404` | 资源不存在或当前调用方不可见 |
 | `409` | 当前状态冲突，例如 CF 成员范围变化（`scope_changed`），需刷新并重新查询 |
+| `410` | 专属 Web 功能已下线（`feature_retired`），历史资料保留存档 |
 | `429` | 登录请求过于频繁或后台任务队列已满；等待后重试 |
 | `503` | 服务或必要配置不可用；稍后重试或联系服务维护者 |
 

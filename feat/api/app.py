@@ -5,6 +5,7 @@ import os
 import re
 import sqlite3
 from pathlib import Path
+from urllib.parse import urlencode
 
 from quart import Quart, abort, jsonify, redirect, request, send_from_directory
 
@@ -186,7 +187,7 @@ def create_app():
 
         identity = await _session_identity()
         if identity and identity["must_change_password"]:
-            return redirect("/change-password.html")
+            return redirect("/change-password.html?" + urlencode({"next": "/"}))
         return await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], "index.html")
 
     @app.get("/<path:filename>")
@@ -203,21 +204,34 @@ def create_app():
         from .acm_api.backend_api import _session_identity
 
         identity = await _session_identity()
+        target = request.full_path.rstrip("?")
+        legacy = _LEGACY_ADMIN_PAGES.get(filename)
+        if legacy and (filename in _ADMIN_PAGES or identity and identity["role"] in {"admin", "root"}):
+            params = request.args.to_dict()
+            params["section"] = legacy
+            target = "/admin.html?" + urlencode(params)
+        if filename in _RETIRED_PAGES:
+            return await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], filename)
         if identity and identity["must_change_password"] and filename != "change-password.html":
-            return redirect("/change-password.html")
+            return redirect("/change-password.html?" + urlencode({"next": target}))
         if filename in _ADMIN_PAGES:
             if not identity:
-                return redirect("/login.html")
+                return redirect("/login.html?" + urlencode({"next": target}))
             if identity["role"] not in {"admin", "root"}:
                 abort(403)
         elif filename == "change-password.html":
             if not identity:
-                return redirect("/login.html")
+                return redirect("/login.html?" + urlencode({"next": target}))
         elif filename == "login.html":
             if identity:
-                return redirect("/index.html")
+                next_url = request.args.get("next", "/index.html")
+                if not next_url.startswith("/") or next_url.startswith("//") or "\\" in next_url or any(ord(char) < 32 for char in next_url):
+                    next_url = "/index.html"
+                return redirect(next_url)
         elif filename not in _ANONYMOUS_PAGES and not identity:
-            return redirect("/login.html?next=/" + filename)
+            return redirect("/login.html?" + urlencode({"next": target}))
+        if target != request.full_path.rstrip("?"):
+            return redirect(target)
         return await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], filename)
 
     @app.get("/uploads/avatars/<filename>")
@@ -276,6 +290,8 @@ _PUBLIC_PAGES = {
 }
 _ANONYMOUS_PAGES = {"index.html", "login.html", "post.html", "leaderboard.html"}
 _ADMIN_PAGES = {"admin.html", "member.html", "tasks.html", "settings.html", "forum-moderation.html", "cf-practice.html"}
+_RETIRED_PAGES = {"reviews.html", "submissions.html", "workspace.html"}
+_LEGACY_ADMIN_PAGES = {"member.html": "members", "challenge.html": "training", "problem-bank.html": "problems", "contest-review.html": "contests", "tasks.html": "tasks", "settings.html": "settings", "forum-moderation.html": "moderation", "cf-practice.html": "cf-practice"}
 
 
 app = create_app()

@@ -82,8 +82,9 @@ WebUI API 以原 WebUI 路由为兼容基线。常用路由包括：
 - `/api/admin/web-accounts`、`/api/admin/web-accounts/<qq_id>`、`/api/admins`
 - `/api/member/<qq_id>`、`/api/user`、`/api/me/profile`
 - `POST /api/me/avatar`、`DELETE /api/me/avatar`：当前成员头像上传与重置
-- `/api/problems`、`/api/me/problems`、`/api/submissions/attempts`
-- `/api/training/*`、`/api/me/training/*`、`/api/study-plan`、`/api/me/study-plan`
+- `/api/admin/members`：成员搜索与分页
+- `/api/problems`、`/api/me/problems`：题库查询和收藏
+- `/api/training/*`、`/api/me/training/*`、`/api/contest/reviews`、`/api/me/contest/reviews`
 - `/api/stats`、`/api/leaderboard`、`/api/me/leaderboard`
 - `/api/admin/cf/*`：管理员近期 AC 汇总、全量历史候选查重与持久化刷新任务
 
@@ -109,9 +110,42 @@ Bot 服务接口包括：
 
 `/api/*` 面向 Web 会话用户，`/internal/v1/*` 是受信任服务之间的接口。内部 Token 只应保存在 API 服务和梓喵服务端的环境变量中，不能放进网页代码、桌面或移动客户端、公开示例和 Git 仓库。修改接口时，应同步更新调用指南与相关自动化测试。
 
+## 统一管理后台
+
+管理员统一从 `/admin.html` 进入。左侧菜单和顶部修改密码、主题、退出、自助调色保持固定，原生 JavaScript 路由只替换右侧内容。后台菜单不读取历史 `nav_order` / `nav_hidden` 配置，字号设置仍可使用。
+
+| 地址 | 功能 |
+| --- | --- |
+| `/admin.html` | 成员账号：批量发放、创建、启停、密码重置、Web 角色 |
+| `/admin.html?section=members` | 成员搜索和分页；附 `qq_id` 进入详情，保留 `search/page` 返回列表 |
+| `/admin.html?section=training` | 按成员、平台、难度生成训练和查看挑战历史 |
+| `/admin.html?section=problems` | 题目查询、筛选、分页、收藏和打开题目 |
+| `/admin.html?section=cf-practice&tab=check` | CF 候选查重；`tab=recent` 为近期刷题 |
+| `/admin.html?section=contests` | 比赛题目和逐题状态；可附 `qq_id/contest_id` |
+| `/admin.html?section=tasks` | 同步队列、执行结果、失败原因、取消和刷新 |
+| `/admin.html?section=moderation&tab=reports` | 举报处理；`tab=posts` 为话题审核 |
+| `/admin.html?section=settings` | 外观、比赛播报、QQBot 管理员 |
+
+直接打开、刷新、前进后退均按地址恢复模块。CF 默认分区初始化只替换当前历史项；主动点击或用键盘切换分区才新增历史项，从侧栏进入 CF 后按一次后退可回到原模块。未知 `section` 回到成员账号并提示；不合法的 `tab/qq_id` 清理后显示默认分区或列表。Web 角色仅在成员账号维护；成员详情显示 Web 角色，不再修改权限。QQBot 管理员名单在全局设置维护，与 Web 角色分别存储，只有 Web root 可写。
+
+每个功能模块通过 `assets/admin/common.js` 获得独立内容根节点、API、AbortSignal、监听器和定时器，在进入 / 退出时管理生命周期。离开时取消页面查询和轮询，旧响应不会替换新模块。账号发放结果切换前提示复制，离开后清除临时密码，不写入模块缓存、浏览历史或浏览器存储。CF 已提交的后台任务继续运行；`assets/admin/cf-sync.js` 在模块内存中保存待确认提交，提交确认请求独立于模块生命周期，最多等待 30 秒，沿用公共 API 的会话与 CSRF 校验。确认回调只保存任务编号或错误；同一后台页面内切换模块后返回，恢复同一个任务的轮询并重新核验候选结果，等待确认与执行期间禁用重复同步和候选操作。任务即使在返回前已完成也不会重新提交；确认失败在当前或返回后的 CF 模块显示错误并允许重试。该内存不跨整页刷新或关闭保存。
+
+普通成员导航仅保留论坛、排行榜、个人中心。个人中心保留最近 AC 摘要和今日训练、题库、赛事复盘入口；管理员打开这些共用旧路径会转入后台对应模块，普通成员继续使用前台。旧成员详情地址保留 `qq_id`；登录、强制改密保留目标路径及参数。普通成员访问后台页面仍由服务端返回 403，各业务接口保持权限和 CSRF 校验。
+
+待复习 / 待复盘、提交时间线、笔记与计划工作区已下线。旧 `reviews.html/submissions.html/workspace.html` 显示“功能已下线”，提供个人中心和管理中心入口；专属 Web API 返回 410，详见 [api.md（API 调用指南）](../../docs/api.md#已下线的-web-功能)。历史笔记、复习、计划表保留存档，无删除表或数据迁移；换绑清理提交证据时也保留学习资料。提交记录与提交尝试继续保存和同步，供排行榜、训练统计、CF 查重及机器人使用。CF 同步和赛事状态更新不再创建复习队列或计划条目。
+
+验收应覆盖九个模块、成员列表 / 详情、地址刷新和前进后退、登录 / 改密回跳、账号发放退出清理、同步轮询停止 / 恢复、CF 复制前复核、两种角色的旧入口、窄屏深浅主题。CF 回归还应验证默认菜单入口一次后退离开、用户分区切换的前进后退，以及同步已接受但确认延迟期间反复退出 / 返回、返回前任务完成、确认失败后重试。核心接口与 Web 单元测试命令如下，现有 API 自动检查同时运行这些 Web 单元测试：
+
+```powershell
+python -m unittest discover -s feat/api/tests -p "test_*.py"
+node --test feat/api/tests/admin-history.test.cjs feat/api/tests/cf-sync.test.cjs feat/api/tests/theme-colors.test.cjs feat/api/tests/theme-performance.test.cjs
+```
+
+本地浏览器联调、演示数据库和截图应置于仓库外，使用合成数据和模拟 OJ 响应。当前服务器工作流在 `feat/**` 改动合并 `main` 后自动部署，合并前仍需跨人评审、联调验收及运维确认。
+
 ## CF 练习赛选题
 
-管理中心的“CF 练习赛选题”入口打开 `/cf-practice.html`，仅 `admin/root` 可访问，全部 POST 沿用 Cookie 会话和 CSRF 校验。页面共用实际 `users.status` 身份范围，可排除不参赛成员；未绑定成员仍显示为待处理。近期 AC 支持日期、Rating、标签、搜索及题目 / 成员视图；候选查重使用全部历史，支持题号、CF 链接和整场比赛。
+管理中心的“CF 练习赛选题”入口打开 `/admin.html?section=cf-practice`，旧 `/cf-practice.html` 自动转入该模块，仅 `admin/root` 可访问，全部 POST 沿用 Cookie 会话和 CSRF 校验。页面共用实际 `users.status` 身份范围，可排除不参赛成员；未绑定成员仍显示为待处理。近期 AC 支持日期、Rating、标签、搜索及题目 / 成员视图；候选查重使用全部历史，支持题号、CF 链接和整场比赛。
 
 默认排除所有提交过的题，也可切换为仅排除已 AC。只有题目已核实、全员完整数据仍有效且无相应历史证据时才判为可用；其他结果分为已 AC 排除、有提交排除、未知、无效。人数按成员去重，旧 AC 也计入提交人数。只可勾选可用题目，复制前再次查重；候选清单保留在页面内，不创建比赛。详细字段与调用顺序见 [api.md（API 调用指南）](../../docs/api.md#cf-练习赛选题管理员接口)。
 

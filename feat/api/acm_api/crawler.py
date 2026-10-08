@@ -39,7 +39,7 @@ _LUOGU_MIN_INTERVAL = 1.2
 _LUOGU_403_COOLDOWN = 300.0
 _LUOGU_429_COOLDOWN = 60.0
 async def _store_cf_attempts(db, qq_id, submissions, *, commit=True):
-    """Persist CF submission evidence and enqueue attempted-but-unsolved contest problems."""
+    """Persist submission evidence and record unsolved contest problems without learning queues."""
     now = int(time.time())
     contest_problems = set()
     values = []
@@ -68,8 +68,6 @@ async def _store_cf_attempts(db, qq_id, submissions, *, commit=True):
         if not latest:
             continue
         await db.execute("INSERT OR IGNORE INTO contest_problem_reviews(owner_qq_id,contest_id,problem_id,verdict,status,updated_at) VALUES(?,?,?,?,?,?)", (str(qq_id), contest_id, problem_id, latest["verdict"], "unsolved", now))
-        await db.execute("INSERT OR IGNORE INTO study_plan_items(owner_qq_id,platform,problem_id,status,position,added_at) VALUES(?,?,?,?,?,?)", (str(qq_id), "codeforces", problem_id, "pending", 0, now))
-        await db.execute("INSERT OR IGNORE INTO review_states(owner_qq_id,platform,problem_id,grade,due_at,mistakes) VALUES(?,?,?,?,?,1)", (str(qq_id), "codeforces", problem_id, "again", now))
     if values and commit:
         await db.commit()
 
