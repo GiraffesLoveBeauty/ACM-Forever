@@ -80,10 +80,10 @@
     const messageBox=document.getElementById('compose-message');
     const draftList=document.getElementById('draft-list');
     const recoveryBox=document.getElementById('compose-recovery');
-    let recoveryOwner='member',pageReady=false;
+    let recoveryOwner='member',pageReady=false,localOnly=false,categoriesLoaded=false;
     const queryDraftId=new URLSearchParams(location.search).get('draft_id');
     let draftId=queryDraftId&&/^\d+$/.test(queryDraftId)?Number(queryDraftId):null;
-    let revision=0,savedRevision=-1,saveTimer=null,savePromise=null,recoveryCandidate=null;
+    let revision=0,savedRevision=-1,saveTimer=null,savePromise=null,recoveryCandidate=null,recoveryCandidateKey=null;
 
     function draftPayload(){return {title:titleInput.value,body:bodyInput.value,category_id:categoryInput.value||null}}
     function recoveryKey(id=draftId){return `acm-forum-compose:${recoveryOwner}:${id===null?'new':id}`}
@@ -92,12 +92,13 @@
     function updatePreview(){document.getElementById('draft-preview').innerHTML=window.renderForumMarkdown(bodyInput.value);document.getElementById('body-count').textContent=`${Array.from(bodyInput.value).length} / 20000`;document.getElementById('title-count').textContent=`${Array.from(titleInput.value).length} / 120`}
     function formatTime(value){if(!value)return '刚刚';return new Date(Number(value)*1000).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
     function samePayload(a,b){return a&&b&&a.title===b.title&&a.body===b.body&&String(a.category_id||'')===String(b.category_id||'')}
-    function persistRecovery(){try{localStorage.setItem(recoveryKey(),JSON.stringify({payload:draftPayload(),updated_at:Date.now()}))}catch{}}
+    function persistRecovery(payload=draftPayload()){try{localStorage.setItem(recoveryKey(),JSON.stringify({payload,updated_at:Date.now()}))}catch{}}
     function clearRecovery(...keys){try{keys.forEach(key=>localStorage.removeItem(key))}catch{}}
-    function offerRecovery(serverPayload){
-      try{recoveryCandidate=JSON.parse(localStorage.getItem(recoveryKey())||'null')}catch{recoveryCandidate=null}
-      if(!recoveryCandidate?.payload){recoveryCandidate=null;return}
-      if(samePayload(recoveryCandidate.payload,serverPayload)){clearRecovery(recoveryKey());recoveryCandidate=null;return}
+    function offerRecovery(serverPayload,key=recoveryKey()){
+      recoveryCandidateKey=key;
+      try{recoveryCandidate=JSON.parse(localStorage.getItem(key)||'null')}catch{recoveryCandidate=null}
+      if(!recoveryCandidate?.payload){recoveryCandidate=null;recoveryCandidateKey=null;return}
+      if(samePayload(recoveryCandidate.payload,serverPayload)){clearRecovery(key);recoveryCandidate=null;recoveryCandidateKey=null;return}
       recoveryBox.hidden=false;
     }
     async function loadDraftList(){
@@ -111,6 +112,7 @@
       if(!force&&draftId===null&&revision===0)return null;
       if(draftId!==null&&savedRevision===revision)return draftId;
       clearTimeout(saveTimer);
+      if(localOnly)throw Error('服务器草稿状态尚未确认；本地内容已保留，请恢复连接并重新加载后再保存。');
       const currentRevision=revision,payload=draftPayload(),oldRecoveryKey=recoveryKey();
       setSaveState('正在保存…','saving');messageBox.textContent='';messageBox.classList.remove('success');
       savePromise=(async()=>{
@@ -121,7 +123,7 @@
         savedRevision=currentRevision;
         document.getElementById('delete-draft').hidden=false;
         history.replaceState(null,'',`/compose.html?draft_id=${draftId}`);
-        if(savedRevision===revision){clearRecovery(oldRecoveryKey,recoveryKey());recoveryBox.hidden=true;recoveryCandidate=null}
+        if(savedRevision===revision){clearRecovery(oldRecoveryKey,recoveryKey(),recoveryCandidateKey);recoveryBox.hidden=true;recoveryCandidate=null;recoveryCandidateKey=null}
         else{persistRecovery();clearRecovery(oldRecoveryKey)}
         setSaveState(`已保存 · ${formatTime(result.updated_at)}`,'saved');
         loadDraftList();
@@ -130,7 +132,7 @@
       if(savedRevision<revision)return saveDraft(force);
       return draftId;
     }
-    function scheduleSave(){if(!pageReady)return;limitCodePoints(titleInput,120);limitCodePoints(bodyInput,20000);revision++;persistRecovery();setSaveState('有未保存的修改','dirty');messageBox.textContent='';messageBox.classList.remove('success');updatePreview();clearTimeout(saveTimer);saveTimer=setTimeout(()=>saveDraft().catch(()=>{}),900)}
+    function scheduleSave(){if(!pageReady)return;limitCodePoints(titleInput,120);limitCodePoints(bodyInput,20000);revision++;const payload=draftPayload();if(localOnly&&!categoriesLoaded&&recoveryCandidate?.payload)payload.category_id=recoveryCandidate.payload.category_id||null;persistRecovery(payload);setSaveState(localOnly?'仅保存在此浏览器':'有未保存的修改',localOnly?'error':'dirty');messageBox.textContent=localOnly?'服务器暂不可用，内容已保存在此浏览器。恢复连接后请重新加载再保存。':'';messageBox.classList.remove('success');updatePreview();clearTimeout(saveTimer);if(!localOnly)saveTimer=setTimeout(()=>saveDraft().catch(()=>{}),900)}
     function applyMarkdown(kind){
       const start=bodyInput.selectionStart,end=bodyInput.selectionEnd;
       const selected=bodyInput.value.slice(start,end);
@@ -147,10 +149,19 @@
     async function loadCategories(){
       const rows=await api('/forum/categories');
       categoryInput.innerHTML='<option value="">选择一个版块</option>'+rows.map(item=>`<option value="${Number(item.id)}">${esc(item.name)}</option>`).join('');
+      categoriesLoaded=true;
     }
     async function loadCurrentDraft(){
       if(draftId===null){savedRevision=0;document.getElementById('delete-draft').hidden=true;setSaveState('新话题尚未保存');offerRecovery({title:'',body:'',category_id:null});return}
-      const draft=await api(`/forum/drafts/${draftId}`);
+      let draft;
+      try{draft=await api(`/forum/drafts/${draftId}`)}catch(error){
+        if(error.message!=='草稿不存在。')throw error;
+        const staleDraftId=draftId,staleRecoveryKey=recoveryKey(staleDraftId);
+        draftId=null;revision=0;savedRevision=0;titleInput.value='';bodyInput.value='';categoryInput.value='';
+        document.getElementById('delete-draft').hidden=true;history.replaceState(null,'','/compose.html');
+        setSaveState('原草稿不存在，可恢复本地内容');offerRecovery({title:'',body:'',category_id:null},staleRecoveryKey);updatePreview();
+        return;
+      }
       titleInput.value=draft.title||'';bodyInput.value=draft.body||'';categoryInput.value=draft.category_id||'';
       revision=0;savedRevision=0;document.getElementById('delete-draft').hidden=false;
       setSaveState(`已保存 · ${formatTime(draft.updated_at)}`,'saved');offerRecovery({title:titleInput.value,body:bodyInput.value,category_id:categoryInput.value});updatePreview();
@@ -208,7 +219,17 @@
     window.PAGE_LOAD=async()=>{
       recoveryOwner=String(window.AUTH?.qq_id||'member');
       try{await loadCategories();await loadCurrentDraft();await loadDraftList();pageReady=true;document.querySelectorAll('.compose-editor-panel input,.compose-editor-panel select,.compose-editor-panel textarea,.compose-editor-panel button').forEach(control=>control.disabled=false)}
-      catch(error){messageBox.textContent=error.message;setSaveState('编辑器加载失败','error')}
+      catch(error){
+        messageBox.textContent=error.message;setSaveState('服务器加载失败，本地编辑可继续','error');
+        if(!['请先登录','请先修改初始密码'].includes(error.message)){
+          localOnly=true;pageReady=true;
+          offerRecovery({title:'',body:'',category_id:null},recoveryKey());
+          document.querySelectorAll('.compose-editor-panel input,.compose-editor-panel select,.compose-editor-panel textarea,.compose-editor-panel button').forEach(control=>control.disabled=false);
+          document.getElementById('save-draft').disabled=true;document.getElementById('submit-draft').disabled=true;document.getElementById('delete-draft').disabled=true;
+          if(!categoriesLoaded)categoryInput.disabled=true;
+          await loadDraftList();
+        }
+      }
       updatePreview();
     };
     [titleInput,bodyInput].forEach(input=>{
@@ -228,7 +249,7 @@
       titleInput.value=recoveryCandidate.payload.title||'';bodyInput.value=recoveryCandidate.payload.body||'';categoryInput.value=recoveryCandidate.payload.category_id||'';
       recoveryBox.hidden=true;scheduleSave();
     });
-    document.getElementById('discard-recovery').addEventListener('click',()=>{clearRecovery(recoveryKey());recoveryCandidate=null;recoveryBox.hidden=true});
+    document.getElementById('discard-recovery').addEventListener('click',()=>{clearRecovery(recoveryCandidateKey||recoveryKey());recoveryCandidate=null;recoveryCandidateKey=null;recoveryBox.hidden=true});
     bodyInput.addEventListener('keydown',event=>{
       if(!(event.ctrlKey||event.metaKey)||event.altKey)return;
       const key=event.key.toLowerCase(),kind=key==='b'?'bold':key==='i'?'italic':key==='k'?'link':null;
@@ -241,16 +262,20 @@
       if(target.origin!==location.origin||!target.pathname.endsWith('/compose.html'))return;
       if(target.pathname===location.pathname&&target.search===location.search&&savedRevision===revision&&!savePromise)return;
       event.preventDefault();
+      if(localOnly){location.href=target.href;return}
       saveDraft().catch(()=>{}).then(()=>{if(!saveState.dataset.state||saveState.dataset.state!=='error')location.href=target.href});
     });
     document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&savedRevision!==revision)saveDraft().catch(()=>{})});
     window.addEventListener('pagehide',()=>{
       clearTimeout(saveTimer);
       if(!pageReady||savedRevision===revision||(!draftId&&revision===0))return;
-      persistRecovery();
+      const payload=draftPayload();
+      if(localOnly&&!categoriesLoaded&&recoveryCandidate?.payload)payload.category_id=recoveryCandidate.payload.category_id||null;
+      persistRecovery(payload);
+      if(localOnly)return;
       if(savePromise)return;
       const method=draftId?'PUT':'POST',path=draftId?`/forum/drafts/${draftId}`:'/forum/drafts';
-      api(path,{method,body:JSON.stringify(draftPayload()),keepalive:true}).then(()=>clearRecovery(recoveryKey())).catch(()=>{});
+      api(path,{method,body:JSON.stringify(payload),keepalive:true}).then(()=>clearRecovery(recoveryKey())).catch(()=>{});
     });
   </script>
 </body>
