@@ -52,14 +52,14 @@
 
       <section class="card" style="margin-top:18px">
         <h2>单人创建账号（用于新增成员或管理员）</h2>
-        <p class="muted">管理员角色仅 root 可创建；所有账号都必须设置符合密码强度要求的初始密码，并在首次登录时修改。</p>
+        <p class="muted">管理员角色仍需使用符合正式密码强度要求的初始密码；创建普通成员时也可使用此入口。</p>
         <div class="filters">
           <input id="account-qq" inputmode="numeric" placeholder="成员 QQ 号">
           <input id="account-name" placeholder="昵称（新成员必填）">
           <input id="account-password" type="password" autocomplete="new-password" placeholder="初始密码（至少 12 位）">
           <input id="account-status" placeholder="身份/年级（可选）">
           <input id="account-school" placeholder="学校（可选）">
-          <select id="account-role" disabled><option value="member">成员</option><option value="admin">Web 管理员</option><option value="root">Web root</option></select>
+          <select id="account-role"><option value="member">成员</option><option value="admin">Web 管理员</option><option value="root">Web root</option></select>
           <button class="btn primary" id="create-account">创建账号</button>
         </div>
         <div id="account-message" class="muted" role="status"></div>
@@ -82,12 +82,10 @@
     const candidateNames=new Map();
     let candidateData={items:[],page:1,page_size:20,total:0};
     let visibleCredentials=[];
-    let lastSkipped=[],batchIssuing=false;
 
     function notice(element,text){element.textContent=text;setTimeout(()=>{if(element.textContent===text)element.textContent=''},6000)}
     function expiryLabel(timestamp){return timestamp?new Date(Number(timestamp)*1000).toLocaleString():'—'}
     function reasonLabel(reason){return ({already_exists:'已有账号',member_not_found:'成员不存在',duplicate_in_request:'请求中重复',invalid_qq:'QQ号格式无效',account_conflict:'账号创建冲突'})[reason]||reason}
-    function roleLabel(role){return ({member:'成员',admin:'Web 管理员',root:'Web root'})[role]||'已有账号'}
     function refreshSelectionUi(){
       document.getElementById('selected-count').textContent=`已选 ${selectedQQs.size} / 20`;
       const selectable=[...document.querySelectorAll('.candidate-select:not(:disabled)')];
@@ -96,9 +94,7 @@
       selectPage.checked=selectable.length>0&&checked===selectable.length;
       selectPage.indeterminate=checked>0&&checked<selectable.length;
       document.querySelectorAll('.candidate-select:not(:disabled)').forEach(box=>{box.disabled=!box.checked&&selectedQQs.size>=20});
-      const issueButton=document.getElementById('batch-issue');
-      issueButton.disabled=batchIssuing||selectedQQs.size===0;
-      issueButton.textContent=batchIssuing?'正在发放…':'为已选成员生成账号';
+      document.getElementById('batch-issue').disabled=selectedQQs.size===0;
     }
     function renderCandidates(){
       const rows=document.getElementById('candidate-rows');
@@ -107,7 +103,7 @@
         candidateNames.set(item.qq_id,item.name||'未命名');
         const issued=item.has_web_account;
         const checked=selectedQQs.has(item.qq_id);
-        const status=issued?`${esc(roleLabel(item.role))} · ${item.is_active?'启用':'停用'}${item.must_change_password?' · 待改密':''}`:'未发放';
+        const status=issued?`${esc(item.role||'已有账号')} · ${item.is_active?'启用':'停用'}${item.must_change_password?' · 待改密':''}`:'未发放';
         return `<tr><td><input class="candidate-select" type="checkbox" data-qq="${esc(item.qq_id)}" ${checked?'checked':''} ${issued?'disabled':''}></td><td>${esc(item.qq_id)}</td><td>${esc(item.name||'未命名')}</td><td>${esc(item.school||'—')}</td><td>${esc(item.status||'—')}</td><td>${status}</td></tr>`;
       }).join('');
       const pages=Math.max(1,Math.ceil(candidateData.total/candidateData.page_size));
@@ -128,48 +124,33 @@
       try{
         const rows=await api('/admin/web-accounts');
         rows.forEach(row=>candidateNames.set(row.qq_id,row.name||'未命名'));
-        document.getElementById('accounts').innerHTML=rows.map(row=>{
-          const isRoot=AUTH.role==='root',canManage= isRoot||row.role==='member',qq=esc(row.qq_id);
-          const actions=canManage?[
-            row.role==='member'&&row.must_change_password&&row.is_active?`<button class="btn" onclick="resetTemporaryPassword('${qq}')">重发临时密码</button>`:'',
-            `<button class="btn" onclick="resetPassword('${qq}')">设置初始密码</button>`,
-            `<button class="btn" onclick="toggleAccount('${qq}',${!row.is_active})">${row.is_active?'停用':'启用'}</button>`,
-          ].join(''):'<span class="muted">需要 root 权限</span>';
-          const roleControl=isRoot?`<select aria-label="设置 QQ ${qq} 的角色" onchange="setRole('${qq}',this.value)"><option value="member"${row.role==='member'?' selected':''}>成员</option><option value="admin"${row.role==='admin'?' selected':''}>管理员</option><option value="root"${row.role==='root'?' selected':''}>Root</option></select>`:'';
-          return `<article class="list-item"><span><b>${esc(row.name||'未命名')} · QQ ${qq}</b><br><small class="muted">${esc(roleLabel(row.role))} · ${row.is_active?'启用':'停用'} · ${row.must_change_password?'需首次改密':'已完成改密'} · 临时密码期限 ${row.must_change_password?expiryLabel(row.temporary_password_expires_at):'—'} · 最近登录 ${row.last_login_at?new Date(row.last_login_at*1000).toLocaleString():'从未'}</small></span><span class="chips">${actions}${roleControl}</span></article>`;
-        }).join('')||'<div class="empty">尚未建立 Web 成员账号</div>'
+        document.getElementById('accounts').innerHTML=rows.map(row=>`<article class="list-item"><span><b>${esc(row.name||'未命名')} · QQ ${esc(row.qq_id)}</b><br><small class="muted">${esc(row.role)} · ${row.is_active?'启用':'停用'} · ${row.must_change_password?'需首次改密':'已完成改密'} · 临时密码期限 ${row.must_change_password?expiryLabel(row.temporary_password_expires_at):'—'} · 最近登录 ${row.last_login_at?new Date(row.last_login_at*1000).toLocaleString():'从未'}</small></span><span class="chips">${row.role==='member'&&row.must_change_password&&row.is_active?`<button class="btn" onclick="resetTemporaryPassword('${esc(row.qq_id)}')">重发临时密码</button>`:''}<button class="btn" onclick="resetPassword('${esc(row.qq_id)}')">设置初始密码</button><button class="btn" onclick="toggleAccount('${esc(row.qq_id)}',${!row.is_active})">${row.is_active?'停用':'启用'}</button>${AUTH.role==='root'?`<select onchange="setRole('${esc(row.qq_id)}',this.value)"><option value="member"${row.role==='member'?' selected':''}>成员</option><option value="admin"${row.role==='admin'?' selected':''}>管理员</option><option value="root"${row.role==='root'?' selected':''}>Root</option></select>`:''}</span></article>`).join('')||'<div class="empty">尚未建立 Web 成员账号</div>'
       }catch(error){document.getElementById('accounts').innerHTML=`<div class="empty">${esc(error.message)}</div>`}
     }
     function renderIssuanceResults(result){
-      const created=(result.created||[]).map(item=>({qq_id:item.qq_id,name:item.name||candidateNames.get(item.qq_id)||'未命名',temporary_password:item.temporary_password,expires_at:item.expires_at}));
-      for(const item of created){const index=visibleCredentials.findIndex(current=>current.qq_id===item.qq_id);if(index<0)visibleCredentials.push(item);else visibleCredentials[index]=item}
-      lastSkipped=result.skipped||[];
+      visibleCredentials=(result.created||[]).map(item=>({qq_id:item.qq_id,name:item.name||candidateNames.get(item.qq_id)||'未命名',temporary_password:item.temporary_password,expires_at:item.expires_at}));
       const box=document.getElementById('issuance-results');box.style.display='block';
-      document.getElementById('issuance-summary').textContent=`本页暂存 ${visibleCredentials.length} 个当前有效密码；本次新发放 ${created.length} 个，跳过 ${lastSkipped.length} 个。请复制或下载，离开页面后不会保留明文。`;
+      document.getElementById('issuance-summary').textContent=`成功发放 ${visibleCredentials.length} 个，跳过 ${(result.skipped||[]).length} 个。请现在复制或下载；离开页面后无法恢复明文。`;
       document.getElementById('issuance-rows').innerHTML=visibleCredentials.map(item=>`<tr><td>${esc(item.qq_id)}</td><td>${esc(item.name)}</td><td><code>${esc(item.temporary_password)}</code></td><td>${esc(expiryLabel(item.expires_at))}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">本次没有新发放账号</td></tr>';
-      document.getElementById('skipped-rows').innerHTML=lastSkipped.map(item=>`<div class="list-item"><span>QQ ${esc(item.qq_id||'—')}</span><span class="muted">${esc(reasonLabel(item.reason))}</span></div>`).join('');
+      document.getElementById('skipped-rows').innerHTML=(result.skipped||[]).map(item=>`<div class="list-item"><span>QQ ${esc(item.qq_id||'—')}</span><span class="muted">${esc(reasonLabel(item.reason))}</span></div>`).join('');
       box.scrollIntoView({behavior:'smooth',block:'nearest'});
     }
     async function issueSelected(){
-      if(batchIssuing)return;
       const qqIds=[...selectedQQs];
       if(!qqIds.length||qqIds.length>20)return;
       const names=qqIds.map(qq=>`${candidateNames.get(qq)||'未命名'}（${qq}）`).join('\n');
       if(!confirm(`将为以下 ${qqIds.length} 位成员生成 Web 成员账号和六位临时密码：\n\n${names}\n\n确认继续？`))return;
-      batchIssuing=true;refreshSelectionUi();
       try{
         const result=await api('/admin/web-accounts/batch',{method:'POST',timeoutMs:30000,body:JSON.stringify({qq_ids:qqIds})});
         for(const item of [...(result.created||[]),...(result.skipped||[]).filter(x=>['already_exists','member_not_found'].includes(x.reason))])selectedQQs.delete(item.qq_id);
         renderIssuanceResults(result);await Promise.all([loadCandidates(),loadAccounts()]);refreshSelectionUi();
-      }catch(error){notice(candidateMessage,error.message)}finally{batchIssuing=false;refreshSelectionUi()}
+      }catch(error){notice(candidateMessage,error.message)}
     }
     async function copyCredentials(){
       if(!visibleCredentials.length)return;
       const text=visibleCredentials.map(item=>`${item.qq_id}\t${item.name}\t${item.temporary_password}\t${expiryLabel(item.expires_at)}`).join('\n');
-      let copied=false;
-      try{await navigator.clipboard.writeText(text);copied=true}
-      catch{const area=document.createElement('textarea');area.value=text;document.body.appendChild(area);area.select();copied=document.execCommand('copy');area.remove()}
-      notice(candidateMessage,copied?'已复制当前暂存的账号和密码。':'复制失败，请在表格中手动复制。')
+      try{await navigator.clipboard.writeText(text);notice(candidateMessage,'已复制本次成功发放的 QQ、昵称、临时密码和过期时间。')}
+      catch{const area=document.createElement('textarea');area.value=text;document.body.appendChild(area);area.select();document.execCommand('copy');area.remove();notice(candidateMessage,'已尝试复制账密。')}
     }
     function csvCell(value){let text=String(value??'');if(/^[=+@\-]/.test(text))text="'"+text;return '"'+text.replace(/"/g,'""')+'"'}
     function downloadCredentials(){
@@ -224,16 +205,7 @@
       document.getElementById('skipped-rows').replaceChildren();
       document.getElementById('issuance-results').style.display='none';
     });
-    window.PAGE_LOAD=async()=>{
-      const roleSelect=document.getElementById('account-role');
-      if(AUTH.role==='root')roleSelect.disabled=false;
-      else{
-        roleSelect.innerHTML='<option value="member">成员</option>';
-        roleSelect.disabled=true;
-        roleSelect.title='只有 Web root 可以创建管理员账号。';
-      }
-      await Promise.all([loadCandidates(),loadAccounts()]);
-    };
+    window.PAGE_LOAD=async()=>{await Promise.all([loadCandidates(),loadAccounts()])};
   </script>
 </body>
 </html>
