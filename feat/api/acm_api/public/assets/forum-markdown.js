@@ -9,10 +9,14 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
   while (text.includes(placeholderPrefix)) {
     placeholderPrefix = `FORUMMATH${Date.now().toString(36)}${Math.random().toString(36).slice(2)}END`;
   }
-  const protectedText = text.replace(/(\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$[^$\n]+\$)/g, (formula, _match, offset, original) => {
-    let slashCount = 0;
-    for (let index = offset - 1; index >= 0 && original[index] === "\\"; index--) slashCount++;
-    if (slashCount % 2) return formula;
+  const escapedDollars = [];
+  const markdownSafeText = text.replace(/(\\*)\$/g, (delimiter, slashes) => {
+    if (slashes.length % 2 === 0) return delimiter;
+    const placeholder = `${placeholderPrefix}${escapedDollars.length}LITERALDOLLAR`;
+    escapedDollars.push(placeholder);
+    return `${slashes.slice(0, -1)}${placeholder}`;
+  });
+  const protectedText = markdownSafeText.replace(/(\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$[^$\n]+\$)/g, formula => {
     const placeholder = `${placeholderPrefix}${formulas.length}TOKEN`;
     formulas.push({ placeholder, formula });
     return placeholder;
@@ -30,7 +34,35 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
   const escapeHtml = value => value.replace(/[&<>"']/g, character => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   })[character]);
-  return formulas.reduce((result, item) => result.split(item.placeholder).join(escapeHtml(item.formula)), safeHtml);
+  const withFormulas = formulas.reduce((result, item) => result.split(item.placeholder).join(escapeHtml(item.formula)), safeHtml);
+  if (!escapedDollars.length) return withFormulas;
+  const container = document.createElement("div");
+  container.innerHTML = withFormulas;
+  const literalDollarPlaceholders = new Set(escapedDollars);
+  const placeholderPattern = new RegExp(`(${escapedDollars.join("|")})`, "g");
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  const textNodes = [];
+  while (walker.nextNode()) textNodes.push(walker.currentNode);
+  textNodes.forEach(node => {
+    if (!placeholderPattern.test(node.nodeValue)) {
+      placeholderPattern.lastIndex = 0;
+      return;
+    }
+    placeholderPattern.lastIndex = 0;
+    const fragment = document.createDocumentFragment();
+    node.nodeValue.split(placeholderPattern).forEach(part => {
+      if (literalDollarPlaceholders.has(part)) {
+        const dollar = document.createElement("span");
+        dollar.className = "tex2jax_ignore";
+        dollar.textContent = "$";
+        fragment.appendChild(dollar);
+      } else if (part) {
+        fragment.appendChild(document.createTextNode(part));
+      }
+    });
+    node.parentNode.replaceChild(fragment, node);
+  });
+  return container.innerHTML;
 };
 
 window.renderForumMath = function renderForumMath(root) {
@@ -46,5 +78,6 @@ window.renderForumMath = function renderForumMath(root) {
     strict: "ignore",
     trust: false,
     maxExpand: 1000,
+    ignoredClasses: ["tex2jax_ignore"],
   });
 };
