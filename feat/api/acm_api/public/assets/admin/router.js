@@ -35,11 +35,11 @@ async function open(url,{replace=false,pop=false}={}){
   const memory=memories.get(target.section)||{};memories.set(target.section,memory);
   const ctx=context(root,target.params,memory,{notice,navigate:(changes)=>{
     const params=new URLSearchParams(target.params);for(const [key,value] of Object.entries(changes)){if(value==null)params.delete(key);else params.set(key,String(value))}return open('/admin.html'+(params.size?'?'+params:''));
-  },updateParams:(changes)=>{
+  },updateParams:(changes,{replace=false}={})=>{
     if(version!==sequence)return;
     for(const [key,value] of Object.entries(changes)){if(value==null)target.params.delete(key);else target.params.set(key,String(value))}
     const next='/admin.html'+(target.params.size?'?'+target.params:'');
-    if(next!==location.pathname+location.search)history.pushState({},'',next);
+    if(next!==location.pathname+location.search)history[replace?'replaceState':'pushState']({},'',next);
     active.url=next;chrome(target.section,target.params);
   }});
   active={ctx,url:target.url,exit:()=>ctx.cleanup?.(),beforeLeave:()=>ctx.beforeLeave?.()??true};

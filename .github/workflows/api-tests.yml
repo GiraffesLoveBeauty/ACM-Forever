@@ -35,3 +35,11 @@ jobs:
 
       - name: Run API contract tests
         run: python -m unittest discover -s feat/api/tests -p "test_*.py"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run Web unit tests
+        run: node --test feat/api/tests/admin-history.test.cjs feat/api/tests/cf-sync.test.cjs feat/api/tests/theme-colors.test.cjs feat/api/tests/theme-performance.test.cjs

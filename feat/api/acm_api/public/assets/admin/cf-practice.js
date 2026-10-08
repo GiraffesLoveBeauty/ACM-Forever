@@ -1,3 +1,5 @@
+import {submitSync, releaseSync} from './cf-sync.js';
+
 export async function enter(ctx) {
   const {root, $, api, esc, auth: AUTH, document, setTimeout, clearTimeout} = ctx;
   root.innerHTML = `<div class="cf-intro"><div><span class="cf-eyebrow">CODEFORCES · PRACTICE</span><h2>先了解进度，再确认候选。</h2><p>近期 AC 帮助了解成员进度；候选题使用全部历史查重。仅“可用”题目可以加入本页候选清单。</p></div><span class="cf-intro-mark" aria-hidden="true">{ AC }</span></div>
@@ -55,9 +57,9 @@ export async function enter(ctx) {
   function wait(ms,signal){return new Promise((resolve,reject)=>{if(signal.aborted)return reject(abortError());const abort=()=>{clearTimeout(timer);reject(abortError())};const timer=setTimeout(()=>{signal.removeEventListener('abort',abort);resolve()},ms);signal.addEventListener('abort',abort,{once:true})})}
   function post(path,body,signal){return api('/admin/cf/'+path,{method:'POST',body:JSON.stringify(body),signal})}
   function controls(){
-    const members=Boolean(state.scope?.member_count),busy=state.overviewBusy||state.syncBusy||state.checkBusy||state.copyBusy;
+    const members=Boolean(state.scope?.member_count),syncBusy=state.syncBusy||Boolean(ctx.memory.syncSubmission),busy=state.overviewBusy||syncBusy||state.checkBusy||state.copyBusy;
     $('#sync-cf').disabled=!members||busy;
-    $('#start-check').disabled=!members||state.overviewBusy||state.syncBusy||state.copyBusy;
+    $('#start-check').disabled=!members||state.overviewBusy||syncBusy||state.copyBusy;
     $('#copy-ids').disabled=$('#copy-links').disabled=!state.selected.size||!state.result||busy;
     $('#selected-count').textContent=`已选 ${state.selected.size} 题`;
   }
@@ -160,7 +162,7 @@ export async function enter(ctx) {
     while(true){
       const job=await api('/admin/cf/jobs/'+encodeURIComponent(jobId),{signal});
       if(!current()||signal.aborted)throw abortError();showJob(job);
-      if(terminal.has(job.status)){ctx.memory.job=null;return job;}
+      if(terminal.has(job.status)){if(ctx.memory.job?.id===jobId)ctx.memory.job=null;return job;}
       await wait(2500,signal);
     }
   }
@@ -168,6 +170,7 @@ export async function enter(ctx) {
     let data=await post('check',payload,signal);
     if(!current()||signal.aborted)throw abortError();
     if(data.status==='queued'){
+      state.jobKind='check';
       const job=await pollJob(data.job_id,signal,current);
       if(!job.result){const error=Error(job.message||'题目核实未完成，请重试。');error.code=job.error_code;throw error}
       data=job.result;
@@ -187,18 +190,32 @@ export async function enter(ctx) {
     finally{if(version===state.checkVersion){state.checkBusy=false;controls()}}
   }
   async function syncData(){
-    const recheck=Boolean(state.result),version=++state.syncVersion,request=controller('sync');
-    invalidateCheck('数据更新中，旧查重结果已失效。');state.syncBusy=true;controls();
+    if(state.syncBusy||ctx.memory.syncSubmission||!state.scope?.member_count)return;
+    const recheck=Boolean(state.result);
+    invalidateCheck('数据更新中，旧查重结果已失效。');
     ctx.memory.recheckOnReturn=recheck;
+    const operation=submitSync(ctx.memory,{scope:scopeSpec(),expected_scope_fingerprint:state.scope.fingerprint});
+    await followSync(operation);
+  }
+  async function followSync(operation){
+    const version=++state.syncVersion,request=controller('sync');
+    const current=()=>version===state.syncVersion&&!ctx.signal.aborted&&!request.signal.aborted;
+    state.syncBusy=true;state.jobKind='sync';controls();
+    if(!operation.id){$('#job-panel').hidden=false;$('#job-heading').textContent='CF 历史补齐 / 刷新';$('#job-message').textContent='正在确认同步提交…';$('#job-progress').removeAttribute('value');$('#job-members').innerHTML='';}
     const checkVersion=state.checkVersion;
     try{
-      const data=await post('sync',{scope:scopeSpec(),expected_scope_fingerprint:state.scope.fingerprint},request.signal);
-      const job=await pollJob(data.job_id,request.signal,()=>version===state.syncVersion);
+      // The bounded POST survives module exit; only the current page follows it.
+      await operation.ready;
+      if(!current())throw abortError();
+      if(operation.error){releaseSync(ctx.memory,operation);$('#job-panel').hidden=true;throw operation.error;}
+      const job=await pollJob(operation.id,request.signal,current);
+      releaseSync(ctx.memory,operation);
       await loadOverview(false);
+      if(!current())throw abortError();
       notice(job.status==='completed'?'CF 历史刷新完成。':'刷新结束，仍有需处理成员或未核实资料，请查看任务详情。');
-      if(recheck&&checkVersion===state.checkVersion&&version===state.syncVersion&&state.scope?.member_count)await checkCandidates();
-    }catch(error){if(version===state.syncVersion)await handleError(error)}
-    finally{if(version===state.syncVersion){state.syncBusy=false;controls()}}
+      if(ctx.memory.recheckOnReturn&&checkVersion===state.checkVersion&&state.scope?.member_count)await checkCandidates();
+    }catch(error){if(current())await handleError(error)}
+    finally{if(current()){state.syncBusy=false;controls()}}
   }
   async function copySelection(kind){
     if(!state.result||!state.selected.size)return;
@@ -229,14 +246,14 @@ export async function enter(ctx) {
       $('#evidence-prev').disabled=data.page<=1;$('#evidence-next').disabled=data.page>=pages;
     }catch(error){if(version===state.detailVersion){$('#evidence-results').innerHTML=`<p class="empty">${esc(error.message)}</p>`;await handleError(error)}}
   }
-  function switchTab(id){
-    ctx.updateParams({tab:id});
+  function switchTab(id,options){
+    ctx.updateParams({tab:id},options);
     for(const name of ['recent','check']){const active=name===id;$('#tab-'+name).setAttribute('aria-selected',String(active));$('#tab-'+name).tabIndex=active?0:-1;$('#panel-'+name).hidden=!active}
   }
-  function scopeChanged(){state.syncVersion++;stop('sync');state.syncBusy=false;state.scope=null;invalidateCheck();$('#job-panel').hidden=true;state.jobKind=null;$('#evidence-dialog').close();state.detailVersion++;stop('details');loadOverview(true)}
+  async function scopeChanged(){state.syncVersion++;stop('sync');state.syncBusy=false;state.scope=null;invalidateCheck();$('#job-panel').hidden=true;state.jobKind=null;$('#evidence-dialog').close();state.detailVersion++;stop('details');await loadOverview(true);if(!ctx.signal.aborted&&ctx.memory.syncSubmission)await followSync(ctx.memory.syncSubmission)}
   ctx.on($('#status-options'),'change',()=>{state.statuses=new Set([...$('#status-options').querySelectorAll('input:checked')].map(input=>input.value));state.excluded.clear();scopeChanged()});
   ctx.on($('#scope-members'),'change',event=>{const input=event.target.closest('.cf-member-include');if(!input)return;if(input.checked)state.excluded.delete(input.dataset.qq);else state.excluded.add(input.dataset.qq);scopeChanged()});
-  $('#refresh-scope').onclick=async()=>{try{await loadOptions();await loadOverview(true)}catch(error){await handleError(error)}};
+  $('#refresh-scope').onclick=async()=>{try{await loadOptions();await loadOverview(true);if(ctx.memory.syncSubmission)await followSync(ctx.memory.syncSubmission)}catch(error){await handleError(error)}};
   $('#recent-form').onsubmit=event=>{event.preventDefault();loadOverview(true)};
   $('#recent-days').onchange=()=>{$('#custom-dates').hidden=$('#recent-days').value!=='custom'};
   $('#recent-prev').onclick=()=>{state.recentPage--;loadOverview()};$('#recent-next').onclick=()=>{state.recentPage++;loadOverview()};
@@ -268,7 +285,17 @@ for(const key of ['candidate-input','contest-id','candidate-kind','check-mode'])
 $('#candidate-list-label').hidden=$('#candidate-kind').value==='contest';$('#contest-id-label').hidden=!$('#candidate-list-label').hidden;
 state.statuses=new Set(remembered.statuses||[]);state.excluded=new Set(remembered.excluded||[]);
 const initial=ctx.load;
-ctx.load=async()=>{switchTab(ctx.params.get('tab')==='check'?'check':'recent');await initial();if(remembered.job){try{const request=controller('resume');const job=await pollJob(remembered.job.id,request.signal,()=>!ctx.signal.aborted);await loadOverview();if(job.kind==='check'&&job.result||remembered.recheckOnReturn)await checkCandidates()}catch(error){await handleError(error)}}else if(remembered.recheckOnReturn&&state.scope?.member_count)await checkCandidates();};
+ctx.load=async()=>{
+  switchTab(ctx.params.get('tab')==='check'?'check':'recent',{replace:true});
+  state.syncBusy=Boolean(remembered.syncSubmission||remembered.job?.kind==='sync');controls();
+  await initial();if(ctx.signal.aborted)return;
+  if(remembered.syncSubmission)await followSync(remembered.syncSubmission);
+  else if(remembered.job){
+    try{const request=controller('resume');state.jobKind=remembered.job.kind;state.checkBusy=state.jobKind==='check';controls();const job=await pollJob(remembered.job.id,request.signal,()=>!ctx.signal.aborted);await loadOverview();if(job.kind==='check'&&job.result||remembered.recheckOnReturn)await checkCandidates()}
+    catch(error){await handleError(error)}
+    finally{if(!ctx.signal.aborted){state.syncBusy=false;state.checkBusy=false;controls()}}
+  }else if(remembered.recheckOnReturn&&state.scope?.member_count)await checkCandidates();
+};
 ctx.cleanup=()=>{for(const key of ['candidate-input','contest-id','candidate-kind','check-mode'])remembered[key]=$('#'+key).value;remembered.statuses=[...state.statuses];remembered.excluded=[...state.excluded];$('#evidence-dialog').close();for(const value of controllers.values())value.abort();controllers.clear();state.overviewVersion++;state.checkVersion++;state.detailVersion++;state.syncVersion++;};
 
   await ctx.load?.();
