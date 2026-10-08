@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>个人中心 · ACM Forever</title><link rel="stylesheet" href="/assets/app.css?v=palette-theme-4"><link rel="stylesheet" href="/assets/forum.css?v=forum-header-avatar-4"><link rel="stylesheet" href="/assets/community-art.css?v=community-art-3"><script src="/assets/community-art.js?v=community-art-1" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>个人中心 · ACM Forever</title><link rel="stylesheet" href="/assets/app.css?v=local-css-mime-fix-1"><link rel="stylesheet" href="/assets/forum.css?v=forum-delete-post-2"><link rel="stylesheet" href="/assets/community-art.css?v=community-art-3"><script src="/assets/community-art.js?v=community-art-1" defer></script></head>
 <body class="forum-page personal-page">
   <header class="forum-header"><a class="forum-brand" href="/index.html"><img class="icpc-brand-logo" src="/assets/icpc-logo.png" alt="ICPC 官方标志"><span>ACM <b>Forever</b><small>计量 ACMer 学习社区</small></span></a><nav class="nav primary-nav" aria-label="主导航"></nav><div class="forum-header-actions"><button class="btn" id="theme-toggle" aria-label="切换主题">◐</button><button class="btn" id="logout">退出</button></div></header>
   <main class="community-main personal-main">
@@ -70,7 +70,18 @@
       const box=document.getElementById('my-forum-content');
       try{
         const rows=await api(tab==='posts'?'/forum/mine/posts':'/forum/mine/bookmarks');
-        box.innerHTML=rows.map(item=>`<a class="personal-community-item" href="/post.html?id=${item.id}"><span class="personal-community-icon">${tab==='posts'?'↗':'☆'}</span><span class="personal-community-copy"><b>${esc(item.title)}</b><small>${esc(item.category_name||'')} · ${tab==='posts'?({pending:'待审核',published:'已发布',rejected:'未通过'}[item.status]||item.status):esc(item.author_name||'')}</small></span><span class="personal-community-status ${item.status==='pending'?'is-pending':''}">${tab==='posts'?({pending:'审核中',published:'已发布',rejected:'未通过'}[item.status]||'查看'): '查看'}</span></a>`).join('')||'<div class="empty">这里还没有内容，去论坛看看吧。</div>';
+        box.innerHTML=rows.map(item=>{
+          const state=tab==='posts'?({pending:'待审核',published:'已发布',rejected:'未通过'}[item.status]||item.status):esc(item.author_name||'');
+          const status=tab==='posts'?({pending:'审核中',published:'已发布',rejected:'未通过'}[item.status]||'查看'):'查看';
+          const content=`<span class="personal-community-icon">${tab==='posts'?'↗':'☆'}</span><span class="personal-community-copy"><b>${esc(item.title)}</b><small>${esc(item.category_name||'')} · ${state}</small></span><span class="personal-community-status ${item.status==='pending'?'is-pending':''}">${status}</span>`;
+          return tab==='posts'?`<div class="personal-community-item"><a class="personal-community-link" href="/post.html?id=${Number(item.id)}">${content}</a><button class="btn personal-community-delete" type="button" data-delete-own-post="${Number(item.id)}" aria-label="删除帖子：${esc(item.title)}">删除</button></div>`:`<a class="personal-community-item" href="/post.html?id=${Number(item.id)}">${content}</a>`;
+        }).join('')||'<div class="empty">这里还没有内容，去论坛看看吧。</div>';
+        box.querySelectorAll('[data-delete-own-post]').forEach(button=>button.onclick=async()=>{
+          if(!confirm('确定删除这篇帖子吗？删除后会从论坛中移除。'))return;
+          button.disabled=true;
+          try{await api(`/forum/posts/${Number(button.dataset.deleteOwnPost)}`,{method:'DELETE'});await loadForumContent('posts')}
+          catch(error){button.disabled=false;alert(error.message)}
+        });
       }catch(error){box.innerHTML=`<div class="empty">${esc(error.message)}</div>`}
     }
     async function load(){

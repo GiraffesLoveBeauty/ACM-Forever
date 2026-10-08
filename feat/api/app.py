@@ -183,7 +183,10 @@ def create_app():
         if filename.startswith("assets/") and extension in {
             ".css", ".js", ".png", ".jpg", ".jpeg", ".svg", ".woff", ".woff2", ".otf", ".ico",
         }:
-            return await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], filename)
+            response = await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], filename)
+            if extension == ".css":
+                response.headers["Content-Type"] = "text/css; charset=utf-8"
+            return response
         if filename not in _PUBLIC_PAGES:
             abort(404)
 

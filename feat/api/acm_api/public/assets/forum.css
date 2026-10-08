@@ -661,17 +661,24 @@ body.forum-page[data-theme="dark"]::before,
 .compose-grid{display:grid;grid-template-columns:minmax(0,1fr) 292px;gap:20px;align-items:start}
 .compose-editor-panel,.compose-side-card{background:var(--panel);border:1px solid var(--line);border-radius:15px;box-shadow:0 12px 32px rgba(19,57,51,.07)}
 .compose-editor-panel{padding:clamp(20px,3vw,34px)}
+.compose-recovery{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 20px;padding:12px 14px;border:1px solid #d5a647;border-radius:10px;background:rgba(235,184,75,.12);color:var(--text);font-size:12px}
+.compose-recovery[hidden]{display:none}
+.compose-recovery>div{display:flex;gap:7px;flex:none}
+.compose-recovery button{padding:6px 9px;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--text);font:inherit;font-weight:650;cursor:pointer}
+.compose-recovery button:first-child{border-color:var(--brand-strong);background:var(--brand-strong);color:#fff}
 .compose-heading{margin-bottom:24px}
 .compose-heading h1{margin:4px 0 5px;font-size:clamp(25px,3vw,34px);letter-spacing:-.035em}
 .compose-heading p{margin:0;color:var(--muted);font-size:13px}
 .compose-field{display:grid;gap:7px;margin:15px 0;color:var(--text);font-size:12px;font-weight:700}
 .compose-field input,.compose-field select{width:100%;min-width:0;height:44px;background:var(--bg);font:inherit;font-size:13px;font-weight:400}
+.compose-title-count{justify-self:end;color:var(--muted);font-size:10px;font-weight:500}
 .compose-body-field{margin-top:20px;border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--bg)}
 .compose-body-label{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 13px;border-bottom:1px solid var(--line);font-size:12px;font-weight:700}
 .compose-body-label small{margin-left:6px;color:var(--muted);font-size:10px;font-weight:500}
 .compose-view-tabs{display:flex;gap:3px;padding:3px;background:var(--panel);border:1px solid var(--line);border-radius:8px}
 .compose-view-tabs button{border:0;border-radius:5px;background:transparent;color:var(--muted);padding:5px 10px;font:inherit;font-size:10px;cursor:pointer}
 .compose-view-tabs button.active{background:var(--brand-strong);color:#fff}
+.compose-view-tabs button:focus-visible,.compose-recovery button:focus-visible,.markdown-toolbar button:focus-visible{outline:2px solid var(--brand-strong);outline-offset:2px}
 .markdown-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:5px;padding:9px 11px;border-bottom:1px solid var(--line);background:var(--panel)}
 .markdown-toolbar button{min-height:30px;padding:5px 8px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--text);font:600 11px/1 var(--font-body);cursor:pointer}
 .markdown-toolbar button:hover,.markdown-toolbar button:focus-visible{border-color:var(--line);background:var(--bg)}
@@ -728,11 +735,14 @@ body.forum-page[data-theme="dark"]::before,
 @media(max-width:900px){.compose-grid{grid-template-columns:minmax(0,1fr) 255px;gap:14px}.compose-main{width:calc(100% - 42px)}}
 @media(max-width:720px){
   .compose-main{width:calc(100% - 28px);margin:18px auto 42px}
+  .compose-topline{align-items:flex-start;flex-direction:column;gap:7px}
+  .compose-recovery{align-items:flex-start;flex-direction:column}
   .compose-grid{grid-template-columns:1fr}
   .compose-editor-panel{padding:18px 14px}
   .compose-side{position:static;grid-row:2}
   .compose-body-field textarea,.compose-preview{min-height:300px}
-  .compose-actions{flex-wrap:wrap}
+  .compose-actions{position:sticky;bottom:0;z-index:3;flex-wrap:wrap;margin:10px -14px -18px;padding:10px 14px max(10px,env(safe-area-inset-bottom));border-top:1px solid var(--line);background:var(--panel)}
+  .compose-actions .btn{min-height:42px}
   .compose-actions .compose-delete{margin-right:auto}
   .compose-editor-foot{align-items:flex-start;flex-direction:column;gap:3px}
 }
@@ -903,3 +913,8 @@ html[data-palette="rose"]{--art-shade:#4c2939}
   .forum-brand>span{font-size:12px}
   .forum-brand small{font-size:8px;letter-spacing:0}
 }
+
+.compose-markdown-file{display:none}
+.forum-detail-actions .forum-delete-post,.personal-community-delete{color:#a64c41}
+.personal-community-item .personal-community-link{display:flex;align-items:center;gap:11px;min-width:0;flex:1;color:var(--text)}
+.personal-community-delete{flex:none;padding:7px 10px;font-size:10px}

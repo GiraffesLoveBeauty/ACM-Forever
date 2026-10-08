@@ -40,18 +40,18 @@ async function api(path,opt={}){
   ({path,opt}=mapMemberRequest(path,opt));
   const requestTimeoutMs=Number(opt.timeoutMs)||15000;
   const {timeoutMs,...fetchOptions}=opt;
-  const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),requestTimeoutMs);
+  const controller=fetchOptions.keepalive?null:new AbortController();
+  const timer=controller?setTimeout(()=>controller.abort(),requestTimeoutMs):null;
   try{
     const isMultipart=typeof FormData!=='undefined'&&fetchOptions.body instanceof FormData;
     const requestHeaders={...(isMultipart?{}:{'Content-Type':'application/json'}),'X-CSRF-Token':csrf,...(fetchOptions.headers||{})};
-    const response=await fetch('/api'+path,{credentials:'same-origin',...fetchOptions,signal:controller.signal,headers:requestHeaders});
+    const response=await fetch('/api'+path,{credentials:'same-origin',...fetchOptions,...(controller?{signal:controller.signal}:{}),headers:requestHeaders});
     const data=await response.json().catch(()=>({}));
     if(response.status===401&&!path.startsWith('/auth/login')){location.href='/login.html?next='+encodeURIComponent(location.pathname+location.search);throw Error('请先登录')}
     if(response.status===428){location.href='/change-password.html';throw Error('请先修改初始密码')}
     if(!response.ok)throw Error(data.message||data.error||`HTTP ${response.status}`);
     return data;
-  }finally{clearTimeout(timer)}
+  }finally{if(timer)clearTimeout(timer)}
 }
 
 function navItems(){
