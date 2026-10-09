@@ -545,7 +545,7 @@ async def moderation_reports():
     db = await get_db()
     try:
         async with db.execute(
-            "SELECT r.id,r.post_id,r.reason,r.created_at,p.title,"
+            "SELECT r.id,r.post_id,r.reason,r.created_at,p.title,p.body,p.status AS post_status,"
             "CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS reporter_name "
             "FROM forum_reports r JOIN forum_posts p ON p.id=r.post_id "
             "JOIN users u ON u.qq_id=r.reporter_qq_id WHERE r.status='pending' ORDER BY r.created_at LIMIT 200"

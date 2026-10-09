@@ -88,8 +88,13 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
     }
     placeholderPattern.lastIndex = 0;
     const fragment = document.createDocumentFragment();
+    const insideCode = Boolean(node.parentElement?.closest("code, pre"));
     node.nodeValue.split(placeholderPattern).forEach(part => {
       if (literalDollarPlaceholders.has(part)) {
+        if (insideCode) {
+          fragment.appendChild(document.createTextNode("\\$"));
+          return;
+        }
         const dollar = document.createElement("span");
         dollar.className = "tex2jax_ignore";
         dollar.textContent = "$";
@@ -115,6 +120,7 @@ window.renderForumMath = function renderForumMath(root) {
     throwOnError: false,
     strict: "ignore",
     trust: false,
+    maxSize: 20,
     maxExpand: 1000,
     ignoredClasses: ["tex2jax_ignore"],
   });
