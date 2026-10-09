@@ -9,19 +9,57 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
   while (text.includes(placeholderPrefix)) {
     placeholderPrefix = `FORUMMATH${Date.now().toString(36)}${Math.random().toString(36).slice(2)}END`;
   }
+  const isEscapedAt = (value, index) => {
+    let slashCount = 0;
+    for (let cursor = index - 1; cursor >= 0 && value[cursor] === "\\"; cursor--) slashCount++;
+    return slashCount % 2 === 1;
+  };
+  const findClosingDelimiter = (value, start, delimiter, singleLine) => {
+    for (let cursor = start; cursor < value.length; cursor++) {
+      if (singleLine && value[cursor] === "\n") return -1;
+      if (value.startsWith(delimiter, cursor) && !isEscapedAt(value, cursor)) return cursor;
+    }
+    return -1;
+  };
+  let protectedText = "";
+  for (let index = 0; index < text.length;) {
+    let openingDelimiter = null;
+    let closingDelimiter = null;
+    let singleLine = false;
+    if (text.startsWith("$$", index) && !isEscapedAt(text, index)) {
+      openingDelimiter = closingDelimiter = "$$";
+    } else if (text[index] === "$" && !isEscapedAt(text, index)) {
+      openingDelimiter = closingDelimiter = "$";
+      singleLine = true;
+    } else if (text.startsWith("\\[", index) && !isEscapedAt(text, index)) {
+      openingDelimiter = "\\[";
+      closingDelimiter = "\\]";
+    } else if (text.startsWith("\\(", index) && !isEscapedAt(text, index)) {
+      openingDelimiter = "\\(";
+      closingDelimiter = "\\)";
+    }
+    if (openingDelimiter) {
+      const closingIndex = findClosingDelimiter(text, index + openingDelimiter.length, closingDelimiter, singleLine);
+      if (closingIndex > index + openingDelimiter.length) {
+        const formula = text.slice(index, closingIndex + closingDelimiter.length);
+        const placeholder = `${placeholderPrefix}${formulas.length}TOKEN`;
+        formulas.push({ placeholder, formula });
+        protectedText += placeholder;
+        index = closingIndex + closingDelimiter.length;
+        continue;
+      }
+    }
+    protectedText += text[index];
+    index++;
+  }
   const escapedDollars = [];
-  const markdownSafeText = text.replace(/(\\*)\$/g, (delimiter, slashes) => {
+  const markdownSafeText = protectedText.replace(/(\\*)\$/g, (delimiter, slashes) => {
     if (slashes.length % 2 === 0) return delimiter;
     const placeholder = `${placeholderPrefix}${escapedDollars.length}LITERALDOLLAR`;
     escapedDollars.push(placeholder);
     return `${slashes.slice(0, -1)}${placeholder}`;
   });
-  const protectedText = markdownSafeText.replace(/(\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$[^$\n]+\$)/g, formula => {
-    const placeholder = `${placeholderPrefix}${formulas.length}TOKEN`;
-    formulas.push({ placeholder, formula });
-    return placeholder;
-  });
-  const html = window.marked.parse(protectedText, { gfm: true, breaks: true });
+  const html = window.marked.parse(markdownSafeText, { gfm: true, breaks: true });
   const safeHtml = window.DOMPurify.sanitize(html, {
     ALLOWED_TAGS: [
       "a", "blockquote", "br", "code", "del", "em", "h1", "h2", "h3", "h4", "h5", "h6",
