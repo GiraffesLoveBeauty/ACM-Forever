@@ -127,7 +127,7 @@
         document.getElementById('delete-draft').hidden=false;
         history.replaceState(null,'',`/compose.html?draft_id=${draftId}`);
         if(savedRevision===revision){clearRecovery(oldRecoveryKey,recoveryKey(),recoveryCandidateKey);recoveryBox.hidden=true;recoveryCandidate=null;recoveryCandidateKey=null}
-        else{persistRecovery();clearRecovery(oldRecoveryKey)}
+        else{persistRecovery();const currentRecoveryKey=recoveryKey();if(oldRecoveryKey!==currentRecoveryKey)clearRecovery(oldRecoveryKey)}
         setSaveState(`已保存 · ${formatTime(result.updated_at)}`,'saved');
         loadDraftList();
       })();
