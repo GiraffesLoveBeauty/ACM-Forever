@@ -238,7 +238,7 @@
       const button=document.getElementById('delete-draft');button.disabled=true;clearTimeout(saveTimer);
       try{
         if(savePromise)try{await savePromise}catch{}
-        const oldKey=recoveryKey(),oldLegacyKey=legacyRecoveryKey();await api(`/forum/drafts/${draftId}`,{method:'DELETE'});clearRecovery(oldKey,oldLegacyKey,recoveryKey(null),legacyNewRecoveryKey());clearRecoveryCandidateSource();
+        const oldKey=recoveryKey(),oldLegacyKey=legacyRecoveryKey();await api(`/forum/drafts/${draftId}`,{method:'DELETE'});clearRecovery(oldKey,oldLegacyKey,recoveryCandidateKey);clearRecoveryCandidateSource();recoveryCandidate=null;recoveryCandidateKey=null;recoveryBox.hidden=true;
         draftId=null;revision=0;savedRevision=0;titleInput.value='';bodyInput.value='';categoryInput.value='';history.replaceState(null,'','/compose.html');button.hidden=true;setSaveState('新话题尚未保存');updatePreview();await loadDraftList()
       }catch(error){messageBox.textContent=error.message;button.disabled=false}
     }
