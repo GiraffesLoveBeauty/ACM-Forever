@@ -61,12 +61,16 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
     protectedText += text[index];
     index++;
   }
-  const escapedDollars = [];
+  const escapedLiterals = [];
   const markdownSafeText = protectedText.replace(/(\\*)\$/g, (delimiter, slashes) => {
     if (slashes.length % 2 === 0) return delimiter;
-    const placeholder = `${placeholderPrefix}${escapedDollars.length}LITERALDOLLAR`;
-    escapedDollars.push(placeholder);
+    const placeholder = `${placeholderPrefix}${escapedLiterals.length}LITERAL`;
+    escapedLiterals.push({ placeholder, text: "$", codeText: "\\$" });
     return `${slashes.slice(0, -1)}${placeholder}`;
+  }).replace(/\\\\([()[\]])/g, (delimiter, bracket) => {
+    const placeholder = `${placeholderPrefix}${escapedLiterals.length}LITERAL`;
+    escapedLiterals.push({ placeholder, text: `\\${bracket}`, codeText: delimiter });
+    return placeholder;
   });
   const html = window.marked.parse(markdownSafeText, { gfm: true, breaks: true });
   const safeHtml = window.DOMPurify.sanitize(html, {
@@ -82,11 +86,11 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   })[character]);
   const withFormulas = formulas.reduce((result, item) => result.split(item.placeholder).join(escapeHtml(item.formula)), safeHtml);
-  if (!escapedDollars.length) return withFormulas;
+  if (!escapedLiterals.length) return withFormulas;
   const container = document.createElement("div");
   container.innerHTML = withFormulas;
-  const literalDollarPlaceholders = new Set(escapedDollars);
-  const placeholderPattern = new RegExp(`(${escapedDollars.join("|")})`, "g");
+  const literalPlaceholders = new Map(escapedLiterals.map(item => [item.placeholder, item]));
+  const placeholderPattern = new RegExp(`(${escapedLiterals.map(item => item.placeholder).join("|")})`, "g");
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   const textNodes = [];
   while (walker.nextNode()) textNodes.push(walker.currentNode);
@@ -99,14 +103,15 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
     const fragment = document.createDocumentFragment();
     const insideCode = Boolean(node.parentElement?.closest("code, pre"));
     node.nodeValue.split(placeholderPattern).forEach(part => {
-      if (literalDollarPlaceholders.has(part)) {
+      const literal = literalPlaceholders.get(part);
+      if (literal) {
         if (insideCode) {
-          fragment.appendChild(document.createTextNode("\\$"));
+          fragment.appendChild(document.createTextNode(literal.codeText));
           return;
         }
         const dollar = document.createElement("span");
         dollar.className = "tex2jax_ignore";
-        dollar.textContent = "$";
+        dollar.textContent = literal.text;
         fragment.appendChild(dollar);
       } else if (part) {
         fragment.appendChild(document.createTextNode(part));
