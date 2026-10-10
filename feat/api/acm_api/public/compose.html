@@ -86,7 +86,7 @@
     let recoveryOwner='member',recoveryTabId='',recoveryTabInstanceId='',recoveryTabStartedAt=0,recoveryTabChannel=null,pageReady=false,localOnly=false,categoriesLoaded=false;
     const queryDraftId=new URLSearchParams(location.search).get('draft_id');
     let draftId=queryDraftId&&/^\d+$/.test(queryDraftId)?Number(queryDraftId):null;
-    let revision=0,savedRevision=-1,saveTimer=null,savePromise=null,recoveryCandidate=null,recoveryCandidateKey=null;
+    let revision=0,savedRevision=-1,saveTimer=null,savePromise=null,recoveryCandidate=null,recoveryCandidateKey=null,recoveryCandidateSourceKey=null,recoveryCandidateSourceValue=null;
 
     function draftPayload(){return {title:titleInput.value,body:bodyInput.value,category_id:categoryInput.value||null}}
     function createRecoveryToken(){return window.crypto?.randomUUID?.()||`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}
@@ -101,18 +101,35 @@
     function updatePreview(){const preview=document.getElementById('draft-preview');preview.innerHTML=window.renderForumMarkdown(bodyInput.value);window.renderForumMath(preview);document.getElementById('body-count').textContent=`${Array.from(bodyInput.value).length} / 20000`;document.getElementById('title-count').textContent=`${Array.from(titleInput.value).length} / 120`}
     function formatTime(value){if(!value)return '刚刚';return new Date(Number(value)*1000).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
     function samePayload(a,b){return a&&b&&a.title===b.title&&a.body===b.body&&String(a.category_id||'')===String(b.category_id||'')}
-    function persistRecovery(payload=draftPayload()){try{localStorage.setItem(recoveryKey(),JSON.stringify({payload,updated_at:Date.now()}))}catch{}}
-    function clearRecovery(...keys){try{keys.forEach(key=>localStorage.removeItem(key))}catch{}}
+    function recoveryHandledKey(key){return `acm-forum-compose-handled:${key}`}
+    function recoveryFingerprint(value){let first=2166136261,second=5381;for(let index=0;index<value.length;index++){const code=value.charCodeAt(index);first=Math.imul(first^code,16777619);second=Math.imul(second,33)^code}return `${value.length}:${first>>>0}:${second>>>0}`}
+    function persistRecovery(payload=draftPayload()){try{const key=recoveryKey();localStorage.setItem(key,JSON.stringify({payload,updated_at:Date.now()}));localStorage.removeItem(recoveryHandledKey(key))}catch{}}
+    function clearRecovery(...keys){try{keys.forEach(key=>{localStorage.removeItem(key);localStorage.removeItem(recoveryHandledKey(key))})}catch{}}
+    function clearRecoveryCandidateSource(){if(!recoveryCandidateSourceKey||!recoveryCandidateSourceValue)return;try{if(localStorage.getItem(recoveryCandidateSourceKey)===recoveryCandidateSourceValue)localStorage.setItem(recoveryHandledKey(recoveryCandidateSourceKey),recoveryFingerprint(recoveryCandidateSourceValue))}catch{}recoveryCandidateSourceKey=null;recoveryCandidateSourceValue=null}
     function findRecoveryCopy(id,excludeKey){
-      const prefix=recoveryKeyPrefix(id);let latest=null;
-      try{for(let index=0;index<localStorage.length;index++){const key=localStorage.key(index);if(!key||key===excludeKey||!key.startsWith(prefix))continue;const stored=localStorage.getItem(key);if(!stored)continue;const recovery=JSON.parse(stored);if(!recovery?.payload)continue;if(!latest||Number(recovery.updated_at||0)>Number(latest.recovery.updated_at||0))latest={key,stored,recovery}}}catch{return null}
+      const prefix=recoveryKeyPrefix(id);let latest=null;const keys=[];
+      try{for(let index=0;index<localStorage.length;index++)keys.push(localStorage.key(index))}catch{return null}
+      for(const key of keys){
+        if(!key||key===excludeKey||!key.startsWith(prefix))continue;
+        try{
+          const stored=localStorage.getItem(key);if(!stored)continue;
+          const handledKey=recoveryHandledKey(key),handledValue=localStorage.getItem(handledKey);
+          if(handledValue===recoveryFingerprint(stored))continue;
+          if(handledValue)localStorage.removeItem(handledKey);
+          const recovery=JSON.parse(stored);if(!recovery?.payload)continue;
+          if(!latest||Number(recovery.updated_at||0)>Number(latest.recovery.updated_at||0))latest={key,stored,recovery};
+        }catch{continue}
+      }
       return latest;
     }
     function offerRecovery(serverPayload,key=recoveryKey(),legacyKey=legacyRecoveryKey(draftId),scopeId=draftId){
-      try{let stored=localStorage.getItem(key);if(!stored&&legacyKey&&legacyKey!==key){stored=localStorage.getItem(legacyKey);if(stored){try{localStorage.setItem(key,stored);localStorage.removeItem(legacyKey)}catch{}}}if(!stored){const nearby=findRecoveryCopy(scopeId,key);if(nearby){stored=nearby.stored;try{localStorage.setItem(key,stored)}catch{}}}recoveryCandidate=JSON.parse(stored||'null')}catch{recoveryCandidate=null}
+      let copiedFromKey=null,copiedSourceValue=null;
+      try{let stored=localStorage.getItem(key);if(stored){const handledKey=recoveryHandledKey(key),handledValue=localStorage.getItem(handledKey);if(handledValue===recoveryFingerprint(stored)){clearRecovery(key);stored=null}else if(handledValue)localStorage.removeItem(handledKey)}if(!stored&&legacyKey&&legacyKey!==key){stored=localStorage.getItem(legacyKey);if(stored){try{localStorage.setItem(key,stored);localStorage.removeItem(legacyKey)}catch{}}}if(!stored){const nearby=findRecoveryCopy(scopeId,key);if(nearby){stored=nearby.stored;try{localStorage.setItem(key,stored);copiedFromKey=nearby.key;copiedSourceValue=nearby.stored}catch{}}}recoveryCandidate=JSON.parse(stored||'null')}catch{recoveryCandidate=null}
       recoveryCandidateKey=key;
-      if(!recoveryCandidate?.payload){recoveryCandidate=null;recoveryCandidateKey=null;return}
-      if(samePayload(recoveryCandidate.payload,serverPayload)){clearRecovery(key);recoveryCandidate=null;recoveryCandidateKey=null;return}
+      recoveryCandidateSourceKey=copiedFromKey;
+      recoveryCandidateSourceValue=copiedSourceValue;
+      if(!recoveryCandidate?.payload){recoveryCandidate=null;recoveryCandidateKey=null;recoveryCandidateSourceKey=null;recoveryCandidateSourceValue=null;return}
+      if(samePayload(recoveryCandidate.payload,serverPayload)){clearRecovery(key);clearRecoveryCandidateSource();recoveryCandidate=null;recoveryCandidateKey=null;return}
       recoveryBox.hidden=false;
     }
     async function loadDraftList(){
@@ -137,7 +154,7 @@
         savedRevision=currentRevision;
         document.getElementById('delete-draft').hidden=false;
         history.replaceState(null,'',`/compose.html?draft_id=${draftId}`);
-        if(savedRevision===revision){clearRecovery(oldRecoveryKey,recoveryKey(),recoveryCandidateKey);recoveryBox.hidden=true;recoveryCandidate=null;recoveryCandidateKey=null}
+        if(savedRevision===revision){clearRecovery(oldRecoveryKey,recoveryKey(),recoveryCandidateKey);clearRecoveryCandidateSource();recoveryBox.hidden=true;recoveryCandidate=null;recoveryCandidateKey=null}
         else{persistRecovery();const currentRecoveryKey=recoveryKey();if(oldRecoveryKey!==currentRecoveryKey)clearRecovery(oldRecoveryKey)}
         setSaveState(`已保存 · ${formatTime(result.updated_at)}`,'saved');
         loadDraftList();
@@ -212,7 +229,7 @@
       const button=document.getElementById('submit-draft'),actions=[...document.querySelectorAll('.compose-actions button')],error=validateForSubmit();
       if(error){messageBox.classList.remove('success');messageBox.textContent=error;return}
       actions.forEach(control=>control.disabled=true);[titleInput,bodyInput,categoryInput,...document.querySelectorAll('[data-markdown],[data-compose-view]')].forEach(control=>control.disabled=true);messageBox.textContent='';
-      try{const id=await saveDraft(true);const result=await api(`/forum/drafts/${id}/submit`,{method:'POST',body:JSON.stringify({})});clearRecovery(recoveryKey(),legacyRecoveryKey());setSaveState('已提交审核','saved');messageBox.classList.add('success');messageBox.textContent=result.message;setTimeout(()=>location.href='/index.html',1100)}
+      try{const id=await saveDraft(true);const result=await api(`/forum/drafts/${id}/submit`,{method:'POST',body:JSON.stringify({})});clearRecovery(recoveryKey(),legacyRecoveryKey());clearRecoveryCandidateSource();setSaveState('已提交审核','saved');messageBox.classList.add('success');messageBox.textContent=result.message;setTimeout(()=>location.href='/index.html',1100)}
       catch(error){messageBox.classList.remove('success');messageBox.textContent=error.message;actions.forEach(control=>control.disabled=false);[titleInput,bodyInput,categoryInput,...document.querySelectorAll('[data-markdown],[data-compose-view]')].forEach(control=>control.disabled=false)}
     }
     async function deleteDraft(){
@@ -221,7 +238,7 @@
       const button=document.getElementById('delete-draft');button.disabled=true;clearTimeout(saveTimer);
       try{
         if(savePromise)try{await savePromise}catch{}
-        const oldKey=recoveryKey(),oldLegacyKey=legacyRecoveryKey();await api(`/forum/drafts/${draftId}`,{method:'DELETE'});clearRecovery(oldKey,oldLegacyKey,recoveryKey(null),legacyNewRecoveryKey());
+        const oldKey=recoveryKey(),oldLegacyKey=legacyRecoveryKey();await api(`/forum/drafts/${draftId}`,{method:'DELETE'});clearRecovery(oldKey,oldLegacyKey,recoveryKey(null),legacyNewRecoveryKey());clearRecoveryCandidateSource();
         draftId=null;revision=0;savedRevision=0;titleInput.value='';bodyInput.value='';categoryInput.value='';history.replaceState(null,'','/compose.html');button.hidden=true;setSaveState('新话题尚未保存');updatePreview();await loadDraftList()
       }catch(error){messageBox.textContent=error.message;button.disabled=false}
     }
@@ -264,7 +281,7 @@
       titleInput.value=recoveryCandidate.payload.title||'';bodyInput.value=recoveryCandidate.payload.body||'';categoryInput.value=recoveryCandidate.payload.category_id||'';
       recoveryBox.hidden=true;scheduleSave();
     });
-    document.getElementById('discard-recovery').addEventListener('click',()=>{clearRecovery(recoveryCandidateKey||recoveryKey());recoveryCandidate=null;recoveryCandidateKey=null;recoveryBox.hidden=true});
+    document.getElementById('discard-recovery').addEventListener('click',()=>{clearRecovery(recoveryCandidateKey||recoveryKey());clearRecoveryCandidateSource();recoveryCandidate=null;recoveryCandidateKey=null;recoveryBox.hidden=true});
     bodyInput.addEventListener('keydown',event=>{
       if(!(event.ctrlKey||event.metaKey)||event.altKey)return;
       const key=event.key.toLowerCase(),kind=key==='b'?'bold':key==='i'?'italic':key==='k'?'link':null;
@@ -290,7 +307,7 @@
       if(localOnly)return;
       if(savePromise)return;
       const method=draftId?'PUT':'POST',path=draftId?`/forum/drafts/${draftId}`:'/forum/drafts';
-      api(path,{method,body:JSON.stringify(payload),keepalive:true}).then(()=>clearRecovery(recoveryKey())).catch(()=>{});
+      api(path,{method,body:JSON.stringify(payload),keepalive:true}).then(()=>{clearRecovery(recoveryKey());clearRecoveryCandidateSource()}).catch(()=>{});
     });
   </script>
 </body>

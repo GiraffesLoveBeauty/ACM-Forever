@@ -95,6 +95,12 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
   container.innerHTML = withFormulas;
   const literalPlaceholders = new Map(escapedLiterals.map(item => [item.placeholder, item]));
   const placeholderPattern = new RegExp(`(${escapedLiterals.map(item => item.placeholder).join("|")})`, "g");
+  const restoreLiteralAttribute = value => value.replace(placeholderPattern, placeholder => literalPlaceholders.get(placeholder)?.text ?? placeholder);
+  container.querySelectorAll("[href], [title]").forEach(element => {
+    ["href", "title"].forEach(attribute => {
+      if (element.hasAttribute(attribute)) element.setAttribute(attribute, restoreLiteralAttribute(element.getAttribute(attribute)));
+    });
+  });
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   const textNodes = [];
   while (walker.nextNode()) textNodes.push(walker.currentNode);
