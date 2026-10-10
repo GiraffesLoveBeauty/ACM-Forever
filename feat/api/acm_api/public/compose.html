@@ -93,6 +93,7 @@
     function persistRecoveryTabId(){try{sessionStorage.setItem('acm-forum-compose-tab-id',recoveryTabId)}catch{}}
     async function initializeRecoveryTabId(){try{recoveryTabId=sessionStorage.getItem('acm-forum-compose-tab-id')||''}catch{}if(!recoveryTabId){recoveryTabId=createRecoveryToken();persistRecoveryTabId()}recoveryTabInstanceId=createRecoveryToken();recoveryTabStartedAt=Number(window.performance?.timeOrigin)||Date.now();const messageKey='acm-forum-compose-recovery-tab-announcement';const handleAnnouncement=message=>{if(message?.owner!==recoveryOwner||message.tabId!==recoveryTabId||message.instanceId===recoveryTabInstanceId)return;const thisTabStartedFirst=recoveryTabStartedAt<Number(message.startedAt)||recoveryTabStartedAt===Number(message.startedAt)&&recoveryTabInstanceId<String(message.instanceId);if(!thisTabStartedFirst){recoveryTabId=createRecoveryToken();persistRecoveryTabId()}announce()};const announce=()=>{const message={owner:recoveryOwner,tabId:recoveryTabId,instanceId:recoveryTabInstanceId,startedAt:recoveryTabStartedAt};try{recoveryTabChannel?.postMessage(message)}catch{}try{localStorage.setItem(messageKey,JSON.stringify({...message,nonce:createRecoveryToken()}))}catch{}};if('BroadcastChannel'in window){try{recoveryTabChannel=new BroadcastChannel('acm-forum-compose-recovery-tabs');recoveryTabChannel.addEventListener('message',event=>handleAnnouncement(event.data))}catch{recoveryTabChannel=null}}window.addEventListener('storage',event=>{if(event.key!==messageKey||!event.newValue)return;try{handleAnnouncement(JSON.parse(event.newValue))}catch{}});announce();await new Promise(resolve=>setTimeout(resolve,100))}
     function recoveryKey(id=draftId){return `acm-forum-compose:${recoveryOwner}:${id===null?`new:${recoveryTabId||'tab'}`:`${id}:tab:${recoveryTabId||'tab'}`}`}
+    function recoveryKeyPrefix(id=draftId){return `acm-forum-compose:${recoveryOwner}:${id===null?'new:':`${id}:tab:`}`}
     function legacyRecoveryKey(id=draftId){return `acm-forum-compose:${recoveryOwner}:${id===null?'new':id}`}
     function legacyNewRecoveryKey(){return `acm-forum-compose:${recoveryOwner}:new`}
     function setSaveState(text,kind=''){saveState.textContent=text;saveState.dataset.state=kind}
@@ -102,9 +103,14 @@
     function samePayload(a,b){return a&&b&&a.title===b.title&&a.body===b.body&&String(a.category_id||'')===String(b.category_id||'')}
     function persistRecovery(payload=draftPayload()){try{localStorage.setItem(recoveryKey(),JSON.stringify({payload,updated_at:Date.now()}))}catch{}}
     function clearRecovery(...keys){try{keys.forEach(key=>localStorage.removeItem(key))}catch{}}
-    function offerRecovery(serverPayload,key=recoveryKey(),legacyKey=legacyRecoveryKey(draftId)){
+    function findRecoveryCopy(id,excludeKey){
+      const prefix=recoveryKeyPrefix(id);let latest=null;
+      try{for(let index=0;index<localStorage.length;index++){const key=localStorage.key(index);if(!key||key===excludeKey||!key.startsWith(prefix))continue;const stored=localStorage.getItem(key);if(!stored)continue;const recovery=JSON.parse(stored);if(!recovery?.payload)continue;if(!latest||Number(recovery.updated_at||0)>Number(latest.recovery.updated_at||0))latest={key,stored,recovery}}}catch{return null}
+      return latest;
+    }
+    function offerRecovery(serverPayload,key=recoveryKey(),legacyKey=legacyRecoveryKey(draftId),scopeId=draftId){
+      try{let stored=localStorage.getItem(key);if(!stored&&legacyKey&&legacyKey!==key){stored=localStorage.getItem(legacyKey);if(stored){try{localStorage.setItem(key,stored);localStorage.removeItem(legacyKey)}catch{}}}if(!stored){const nearby=findRecoveryCopy(scopeId,key);if(nearby){stored=nearby.stored;try{localStorage.setItem(key,stored)}catch{}}}recoveryCandidate=JSON.parse(stored||'null')}catch{recoveryCandidate=null}
       recoveryCandidateKey=key;
-      try{let stored=localStorage.getItem(key);if(!stored&&legacyKey&&legacyKey!==key){stored=localStorage.getItem(legacyKey);if(stored){localStorage.setItem(key,stored);localStorage.removeItem(legacyKey)}}recoveryCandidate=JSON.parse(stored||'null')}catch{recoveryCandidate=null}
       if(!recoveryCandidate?.payload){recoveryCandidate=null;recoveryCandidateKey=null;return}
       if(samePayload(recoveryCandidate.payload,serverPayload)){clearRecovery(key);recoveryCandidate=null;recoveryCandidateKey=null;return}
       recoveryBox.hidden=false;
@@ -167,7 +173,7 @@
         const staleDraftId=draftId,staleRecoveryKey=recoveryKey(staleDraftId),staleLegacyRecoveryKey=legacyRecoveryKey(staleDraftId);
         draftId=null;revision=0;savedRevision=0;titleInput.value='';bodyInput.value='';categoryInput.value='';
         document.getElementById('delete-draft').hidden=true;history.replaceState(null,'','/compose.html');
-        setSaveState('原草稿不存在，可恢复本地内容');offerRecovery({title:'',body:'',category_id:null},staleRecoveryKey,staleLegacyRecoveryKey);updatePreview();
+        setSaveState('原草稿不存在，可恢复本地内容');offerRecovery({title:'',body:'',category_id:null},staleRecoveryKey,staleLegacyRecoveryKey,staleDraftId);updatePreview();
         return;
       }
       titleInput.value=draft.title||'';bodyInput.value=draft.body||'';categoryInput.value=draft.category_id||'';

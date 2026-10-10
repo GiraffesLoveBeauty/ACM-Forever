@@ -85,7 +85,11 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
   const escapeHtml = value => value.replace(/[&<>"']/g, character => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   })[character]);
-  const withFormulas = formulas.reduce((result, item) => result.split(item.placeholder).join(escapeHtml(item.formula)), safeHtml);
+  const formulaPattern = new RegExp(`${placeholderPrefix}(\\d+)TOKEN`, "g");
+  const withFormulas = safeHtml.replace(formulaPattern, (placeholder, index) => {
+    const formula = formulas[Number(index)];
+    return formula ? escapeHtml(formula.formula) : placeholder;
+  });
   if (!escapedLiterals.length) return withFormulas;
   const container = document.createElement("div");
   container.innerHTML = withFormulas;
