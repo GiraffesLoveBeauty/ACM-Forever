@@ -73,7 +73,7 @@
   <script src="/assets/vendor/purify.min.js"></script>
   <script src="/assets/vendor/katex/katex.min.js?v=0.19.0"></script>
   <script src="/assets/vendor/katex/auto-render.min.js?v=0.19.0"></script>
-  <script src="/assets/forum-markdown.js?v=forum-math-4"></script>
+  <script src="/assets/forum-markdown.js?v=forum-math-5"></script>
   <script src="/assets/app.js?v=forum-composer-1"></script>
   <script>
     const titleInput=document.getElementById('draft-title');
@@ -83,13 +83,17 @@
     const messageBox=document.getElementById('compose-message');
     const draftList=document.getElementById('draft-list');
     const recoveryBox=document.getElementById('compose-recovery');
-    let recoveryOwner='member',pageReady=false,localOnly=false,categoriesLoaded=false;
+    let recoveryOwner='member',recoveryTabId='',recoveryTabInstanceId='',recoveryTabStartedAt=0,recoveryTabChannel=null,pageReady=false,localOnly=false,categoriesLoaded=false;
     const queryDraftId=new URLSearchParams(location.search).get('draft_id');
     let draftId=queryDraftId&&/^\d+$/.test(queryDraftId)?Number(queryDraftId):null;
     let revision=0,savedRevision=-1,saveTimer=null,savePromise=null,recoveryCandidate=null,recoveryCandidateKey=null;
 
     function draftPayload(){return {title:titleInput.value,body:bodyInput.value,category_id:categoryInput.value||null}}
-    function recoveryKey(id=draftId){return `acm-forum-compose:${recoveryOwner}:${id===null?'new':id}`}
+    function createRecoveryToken(){return window.crypto?.randomUUID?.()||`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}
+    function persistRecoveryTabId(){try{sessionStorage.setItem('acm-forum-compose-tab-id',recoveryTabId)}catch{}}
+    async function initializeRecoveryTabId(){try{recoveryTabId=sessionStorage.getItem('acm-forum-compose-tab-id')||''}catch{}if(!recoveryTabId){recoveryTabId=createRecoveryToken();persistRecoveryTabId()}recoveryTabInstanceId=createRecoveryToken();recoveryTabStartedAt=Number(window.performance?.timeOrigin)||Date.now();const messageKey='acm-forum-compose-recovery-tab-announcement';const handleAnnouncement=message=>{if(message?.owner!==recoveryOwner||message.tabId!==recoveryTabId||message.instanceId===recoveryTabInstanceId)return;const thisTabStartedFirst=recoveryTabStartedAt<Number(message.startedAt)||recoveryTabStartedAt===Number(message.startedAt)&&recoveryTabInstanceId<String(message.instanceId);if(!thisTabStartedFirst){recoveryTabId=createRecoveryToken();persistRecoveryTabId()}announce()};const announce=()=>{const message={owner:recoveryOwner,tabId:recoveryTabId,instanceId:recoveryTabInstanceId,startedAt:recoveryTabStartedAt};try{recoveryTabChannel?.postMessage(message)}catch{}try{localStorage.setItem(messageKey,JSON.stringify({...message,nonce:createRecoveryToken()}))}catch{}};if('BroadcastChannel'in window){try{recoveryTabChannel=new BroadcastChannel('acm-forum-compose-recovery-tabs');recoveryTabChannel.addEventListener('message',event=>handleAnnouncement(event.data))}catch{recoveryTabChannel=null}}window.addEventListener('storage',event=>{if(event.key!==messageKey||!event.newValue)return;try{handleAnnouncement(JSON.parse(event.newValue))}catch{}});announce();await new Promise(resolve=>setTimeout(resolve,100))}
+    function recoveryKey(id=draftId){return `acm-forum-compose:${recoveryOwner}:${id===null?`new:${recoveryTabId||'tab'}`:id}`}
+    function legacyNewRecoveryKey(){return `acm-forum-compose:${recoveryOwner}:new`}
     function setSaveState(text,kind=''){saveState.textContent=text;saveState.dataset.state=kind}
     function limitCodePoints(input,limit){const value=input.value,points=Array.from(value);if(points.length<=limit)return;const cursor=input.selectionStart??value.length;const next=points.slice(0,limit).join('');const nextCursor=Array.from(value.slice(0,cursor)).slice(0,limit).join('').length;input.value=next;input.setSelectionRange(nextCursor,nextCursor)}
     function updatePreview(){const preview=document.getElementById('draft-preview');preview.innerHTML=window.renderForumMarkdown(bodyInput.value);window.renderForumMath(preview);document.getElementById('body-count').textContent=`${Array.from(bodyInput.value).length} / 20000`;document.getElementById('title-count').textContent=`${Array.from(titleInput.value).length} / 120`}
@@ -99,7 +103,7 @@
     function clearRecovery(...keys){try{keys.forEach(key=>localStorage.removeItem(key))}catch{}}
     function offerRecovery(serverPayload,key=recoveryKey()){
       recoveryCandidateKey=key;
-      try{recoveryCandidate=JSON.parse(localStorage.getItem(key)||'null')}catch{recoveryCandidate=null}
+      try{let stored=localStorage.getItem(key);if(!stored&&draftId===null&&key===recoveryKey(null)){const legacyKey=legacyNewRecoveryKey();stored=localStorage.getItem(legacyKey);if(stored){localStorage.setItem(key,stored);localStorage.removeItem(legacyKey)}}recoveryCandidate=JSON.parse(stored||'null')}catch{recoveryCandidate=null}
       if(!recoveryCandidate?.payload){recoveryCandidate=null;recoveryCandidateKey=null;return}
       if(samePayload(recoveryCandidate.payload,serverPayload)){clearRecovery(key);recoveryCandidate=null;recoveryCandidateKey=null;return}
       recoveryBox.hidden=false;
@@ -221,6 +225,7 @@
     }
     window.PAGE_LOAD=async()=>{
       recoveryOwner=String(window.AUTH?.qq_id||'member');
+      await initializeRecoveryTabId();
       try{await loadCategories();await loadCurrentDraft();await loadDraftList();pageReady=true;document.querySelectorAll('.compose-editor-panel input,.compose-editor-panel select,.compose-editor-panel textarea,.compose-editor-panel button').forEach(control=>control.disabled=false)}
       catch(error){
         messageBox.textContent=error.message;setSaveState('服务器加载失败，本地编辑可继续','error');

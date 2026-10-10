@@ -21,6 +21,7 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
     }
     return -1;
   };
+  const noCloserThrough = new Map();
   let protectedText = "";
   for (let index = 0; index < text.length;) {
     let openingDelimiter = null;
@@ -39,14 +40,22 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
       closingDelimiter = "\\)";
     }
     if (openingDelimiter) {
-      const closingIndex = findClosingDelimiter(text, index + openingDelimiter.length, closingDelimiter, singleLine);
+      const cachedBoundary = noCloserThrough.get(closingDelimiter);
+      const closingIndex = cachedBoundary !== undefined && index < cachedBoundary
+        ? -1
+        : findClosingDelimiter(text, index + openingDelimiter.length, closingDelimiter, singleLine);
       if (closingIndex > index + openingDelimiter.length) {
         const formula = text.slice(index, closingIndex + closingDelimiter.length);
         const placeholder = `${placeholderPrefix}${formulas.length}TOKEN`;
         formulas.push({ placeholder, formula });
         protectedText += placeholder;
+        noCloserThrough.delete(closingDelimiter);
         index = closingIndex + closingDelimiter.length;
         continue;
+      }
+      if (closingIndex < 0) {
+        const newlineIndex = singleLine ? text.indexOf("\n", index + openingDelimiter.length) : -1;
+        noCloserThrough.set(closingDelimiter, newlineIndex < 0 ? text.length : newlineIndex);
       }
     }
     protectedText += text[index];
