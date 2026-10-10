@@ -83,7 +83,7 @@
     const messageBox=document.getElementById('compose-message');
     const draftList=document.getElementById('draft-list');
     const recoveryBox=document.getElementById('compose-recovery');
-    let recoveryOwner='member',recoveryTabId='',recoveryTabInstanceId='',recoveryTabStartedAt=0,recoveryTabChannel=null,pageReady=false,localOnly=false,categoriesLoaded=false;
+    let recoveryOwner='member',recoveryTabId='',recoveryTabInstanceId='',recoveryTabStartedAt=0,recoveryTabChannel=null,pageReady=false,localOnly=false,categoriesLoaded=false,deletingDraft=false;
     const queryDraftId=new URLSearchParams(location.search).get('draft_id');
     let draftId=queryDraftId&&/^\d+$/.test(queryDraftId)?Number(queryDraftId):null;
     let revision=0,savedRevision=-1,saveTimer=null,savePromise=null,recoveryCandidate=null,recoveryCandidateKey=null,recoveryCandidateSourceKey=null,recoveryCandidateSourceValue=null;
@@ -152,7 +152,7 @@
           :await api(`/forum/drafts/${draftId}`,{method:'PUT',body:JSON.stringify(payload)});
         draftId=Number(result.id);
         savedRevision=currentRevision;
-        document.getElementById('delete-draft').hidden=false;
+        document.getElementById('delete-draft').hidden=false;document.getElementById('delete-draft').disabled=deletingDraft;
         history.replaceState(null,'',`/compose.html?draft_id=${draftId}`);
         if(savedRevision===revision){clearRecovery(oldRecoveryKey,recoveryKey(),recoveryCandidateKey);clearRecoveryCandidateSource();recoveryBox.hidden=true;recoveryCandidate=null;recoveryCandidateKey=null}
         else{persistRecovery();const currentRecoveryKey=recoveryKey();if(oldRecoveryKey!==currentRecoveryKey)clearRecovery(oldRecoveryKey)}
@@ -206,6 +206,62 @@
       if(Array.from(body).length>20000)return '正文不能超过 20000 个字符。';
       return '';
     }
+    function findFirstMarkdownH1(lines){
+      let firstLine=0;
+      if(lines[0]?.trim()==='---'){const closingIndex=lines.findIndex((line,index)=>index>0&&/^\s*(?:---|\.\.\.)\s*$/.test(line));if(closingIndex>0)firstLine=closingIndex+1}
+      function hasInlineCodeCloser(startLine,runLength){
+        const delimiter='`'.repeat(runLength);
+        for(let lineIndex=startLine;lineIndex<lines.length;lineIndex++){
+          const candidate=lines[lineIndex];
+          if(!candidate.trim()||/^ {0,3}(?:#{1,6}(?:[\t ]|$)|`{3,}|~{3,})/.test(candidate)||/^ {0,3}<!--/.test(candidate))return false;
+          for(let cursor=0;cursor<candidate.length;){
+            if(candidate[cursor]==='`'){let runEnd=cursor+1;while(candidate[runEnd]==='`')runEnd++;if(runEnd-cursor===runLength)return true;cursor=runEnd;continue}
+            cursor++;
+          }
+        }
+        return false;
+      }
+      let fenceCharacter='',fenceLength=0,inHtmlComment=false,inlineCodeLength=0;
+      for(let index=firstLine;index<lines.length;index++){
+        const line=lines[index];
+        if(inlineCodeLength&&(!line.trim()||/^ {0,3}(?:#{1,6}(?:[\t ]|$)|`{3,}|~{3,})/.test(line)||/^ {0,3}<!--/.test(line)))inlineCodeLength=0;
+        const fence=line.match(/^ {0,3}(`{3,}|~{3,})([\t ]*)$/);
+        if(fenceCharacter){
+          if(fence&&fence[1][0]===fenceCharacter&&fence[1].length>=fenceLength)fenceCharacter='';
+          continue;
+        }
+        const fenceOpen=line.match(/^ {0,3}(`{3,}|~{3,})/);
+        if(!inHtmlComment&&fenceOpen){fenceCharacter=fenceOpen[1][0];fenceLength=fenceOpen[1].length;continue}
+        const lineStartsInCodeSpan=inlineCodeLength>0;
+        let commentCursor=0,commentState=inHtmlComment,hadComment=inHtmlComment;
+        while(commentCursor<line.length){
+          if(inlineCodeLength){
+            if(line[commentCursor]==='`'){let runEnd=commentCursor+1;while(line[runEnd]==='`')runEnd++;if(runEnd-commentCursor===inlineCodeLength)inlineCodeLength=0;commentCursor=runEnd;continue}
+            commentCursor++;continue;
+          }
+          if(commentState){
+            const close=line.indexOf('-->',commentCursor);
+            if(close<0)break;
+            hadComment=true;commentCursor=close+3;commentState=false;continue;
+          }
+          if(line[commentCursor]==='`'){
+            let runEnd=commentCursor+1;while(line[runEnd]==='`')runEnd++;
+            const runLength=runEnd-commentCursor;
+            const delimiter='`'.repeat(runLength),close=line.indexOf(delimiter,runEnd);
+            if(close>=0){commentCursor=close+runLength;continue}
+            if(hasInlineCodeCloser(index+1,runLength))inlineCodeLength=runLength;
+            commentCursor=runEnd;continue;
+          }
+          if(line.startsWith('<!--',commentCursor)){hadComment=true;commentState=true;commentCursor+=4;continue}
+          commentCursor++;
+        }
+        if(hadComment){inHtmlComment=commentState;continue}
+        if(lineStartsInCodeSpan)continue;
+        const heading=line.match(/^ {0,3}#\s+(.+?)\s*#*\s*$/);
+        if(heading)return {index,title:heading[1].trim()};
+      }
+      return null;
+    }
     async function importMarkdown(file){
       if(!file)return;
       if(!/\.(md|markdown)$/i.test(file.name)){messageBox.classList.remove('success');messageBox.textContent='请选择 .md 或 .markdown 文件。';return}
@@ -213,12 +269,11 @@
       if(bodyInput.value.trim()&&!confirm('导入 Markdown 会替换当前正文，确定继续吗？'))return;
       try{
         const text=(await file.text()).replace(/^\uFEFF/,'').replace(/\r\n?/g,'\n');
-        const lines=text.split('\n'),firstContent=lines.findIndex(line=>line.trim());
-        const heading=firstContent>=0?lines[firstContent].match(/^ {0,3}#\s+(.+?)\s*#*\s*$/):null;
+        const lines=text.split('\n'),heading=findFirstMarkdownH1(lines);
         let body=text,title=Array.from(file.name.replace(/\.(md|markdown)$/i,'')).slice(0,120).join('');
         if(heading){
-          title=Array.from(heading[1].trim()).slice(0,120).join('');
-          lines.splice(firstContent,1);body=lines.join('\n').replace(/^\n+/, '');
+          title=Array.from(heading.title).slice(0,120).join('');
+          lines.splice(heading.index,1);body=lines.join('\n').replace(/^\n+/, '');
         }
         if(Array.from(body).length>20000)throw Error('Markdown 正文超过 20000 个字符，请精简后再导入。');
         titleInput.value=title;bodyInput.value=body;scheduleSave();messageBox.classList.add('success');messageBox.textContent='Markdown 已导入，草稿正在自动保存。';
@@ -235,12 +290,12 @@
     async function deleteDraft(){
       if(draftId===null)return;
       if(!confirm('确定删除这篇草稿吗？'))return;
-      const button=document.getElementById('delete-draft');button.disabled=true;clearTimeout(saveTimer);
+      const button=document.getElementById('delete-draft'),editorControls=[...document.querySelectorAll('.compose-editor-panel input,.compose-editor-panel select,.compose-editor-panel textarea,.compose-editor-panel button')];deletingDraft=true;editorControls.forEach(control=>control.disabled=true);clearTimeout(saveTimer);
       try{
-        if(savePromise)try{await savePromise}catch{}
+        if(savePromise||savedRevision<revision)await saveDraft(true);
         const oldKey=recoveryKey(),oldLegacyKey=legacyRecoveryKey();await api(`/forum/drafts/${draftId}`,{method:'DELETE'});clearRecovery(oldKey,oldLegacyKey,recoveryCandidateKey);clearRecoveryCandidateSource();recoveryCandidate=null;recoveryCandidateKey=null;recoveryBox.hidden=true;
-        draftId=null;revision=0;savedRevision=0;titleInput.value='';bodyInput.value='';categoryInput.value='';history.replaceState(null,'','/compose.html');button.hidden=true;setSaveState('新话题尚未保存');updatePreview();await loadDraftList()
-      }catch(error){messageBox.textContent=error.message;button.disabled=false}
+        draftId=null;revision=0;savedRevision=0;titleInput.value='';bodyInput.value='';categoryInput.value='';history.replaceState(null,'','/compose.html');button.hidden=true;deletingDraft=false;editorControls.forEach(control=>{control.disabled=control===button});setSaveState('新话题尚未保存');updatePreview();await loadDraftList()
+      }catch(error){deletingDraft=false;messageBox.textContent=error.message;editorControls.forEach(control=>control.disabled=false)}
     }
     function showView(view){
       const writing=view==='write';bodyInput.hidden=!writing;document.getElementById('draft-preview').hidden=writing;
