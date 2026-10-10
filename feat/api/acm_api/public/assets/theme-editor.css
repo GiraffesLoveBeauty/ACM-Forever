@@ -1,7 +1,8 @@
 /* Custom color adapters; loaded after legacy sheets. No layout changes. */
 html[data-custom-theme] body{background:var(--bg);color:var(--text)}
 html[data-custom-theme] body.forum-page::before{background:var(--page-backdrop)}
-html[data-custom-theme] body :is(.forum-header,.forum-layout,.community-main,.forum-post-layout,.card,.sidebar,.forum-community-card,.forum-rail-card,.forum-directory,.forum-post-card,.community-panel,.compose-editor-panel,.compose-side-card){background:var(--panel);color:var(--text);border-color:var(--line)}
+html[data-custom-theme] body :is(.forum-header,.forum-layout,.community-main,.forum-post-layout,.card,.sidebar,.forum-community-card,.forum-rail-card,.forum-directory,.community-panel,.compose-editor-panel,.compose-side-card){background:var(--panel);color:var(--text);border-color:var(--line)}
+html[data-custom-theme] body .forum-page .forum-post-card{background:var(--panel);color:var(--text);border-color:var(--line);border-left-color:var(--thread-accent)}
 html[data-custom-theme] body :is(input,select,textarea){color:var(--text);border-color:var(--line);accent-color:var(--brand)}
 html[data-custom-theme] body :is(input,textarea)::placeholder{color:var(--muted);opacity:1}
 html[data-custom-theme] body .btn{background:var(--panel);color:var(--text);border-color:var(--line)}

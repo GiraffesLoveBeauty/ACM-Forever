@@ -392,7 +392,7 @@
   function ensureStylesheet() {
     if (!document.head) return;
     let link = document.getElementById('acm-theme-editor-styles');
-    if (!link) { link = element('link'); link.id = 'acm-theme-editor-styles'; link.rel = 'stylesheet'; link.href = '/assets/theme-editor.css?v=custom-theme-2'; }
+    if (!link) { link = element('link'); link.id = 'acm-theme-editor-styles'; link.rel = 'stylesheet'; link.href = '/assets/theme-editor.css?v=custom-theme-3'; }
     document.head.append(link);
   }
   function notify(message, error = false) {

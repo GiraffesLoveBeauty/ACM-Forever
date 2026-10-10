@@ -302,6 +302,8 @@
 .forum-search button{background:var(--brand-strong);transition:background-color .16s ease,transform .16s ease}
 .forum-search button:hover{background:var(--brand);transform:translateY(-1px)}
 .forum-feed-toolbar{border-color:var(--line)}
+.forum-feed{position:relative}
+.forum-feed-refresh{position:absolute;top:10px;right:10px;z-index:2;display:flex;align-items:center;padding:8px 11px;border:1px solid var(--line);border-radius:9px;background:var(--panel);box-shadow:0 4px 14px rgba(19,57,51,.1);color:var(--muted);font-size:12px}
 .forum-tab.active{color:var(--brand-strong);border-color:var(--accent-coral)}
 .forum-post-card{
   --thread-accent:var(--brand);
