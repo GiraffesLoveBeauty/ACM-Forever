@@ -86,7 +86,7 @@
     let recoveryOwner='member',recoveryTabId='',recoveryTabInstanceId='',recoveryTabStartedAt=0,recoveryTabChannel=null,pageReady=false,localOnly=false,categoriesLoaded=false,deletingDraft=false;
     const queryDraftId=new URLSearchParams(location.search).get('draft_id');
     let draftId=queryDraftId&&/^\d+$/.test(queryDraftId)?Number(queryDraftId):null;
-    let revision=0,savedRevision=-1,saveTimer=null,savePromise=null,recoveryCandidate=null,recoveryCandidateKey=null,recoveryCandidateSourceKey=null,recoveryCandidateSourceValue=null;
+    let revision=0,savedRevision=-1,saveTimer=null,savePromise=null,recoveryCandidate=null,recoveryCandidateKey=null,recoveryCandidateSourceKey=null,recoveryCandidateSourceValue=null,recoveryWorkingKey=null;
 
     function draftPayload(){return {title:titleInput.value,body:bodyInput.value,category_id:categoryInput.value||null}}
     function createRecoveryToken(){return window.crypto?.randomUUID?.()||`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}
@@ -103,7 +103,11 @@
     function samePayload(a,b){return a&&b&&a.title===b.title&&a.body===b.body&&String(a.category_id||'')===String(b.category_id||'')}
     function recoveryHandledKey(key){return `acm-forum-compose-handled:${key}`}
     function recoveryFingerprint(value){let first=2166136261,second=5381;for(let index=0;index<value.length;index++){const code=value.charCodeAt(index);first=Math.imul(first^code,16777619);second=Math.imul(second,33)^code}return `${value.length}:${first>>>0}:${second>>>0}`}
-    function persistRecovery(payload=draftPayload()){try{const key=recoveryKey();localStorage.setItem(key,JSON.stringify({payload,updated_at:Date.now()}));localStorage.removeItem(recoveryHandledKey(key))}catch{}}
+    function persistRecovery(payload=draftPayload(),keyOverride=null){
+      const key=keyOverride||(recoveryCandidate?.payload&&!recoveryBox.hidden?(recoveryWorkingKey||=`${recoveryKey()}:pending:${recoveryTabInstanceId||recoveryTabId||'tab'}`):(recoveryWorkingKey||recoveryKey()));
+      try{localStorage.setItem(key,JSON.stringify({payload,updated_at:Date.now()}));localStorage.removeItem(recoveryHandledKey(key));return true}catch{return false}
+    }
+    function clearRecoveryWorkingCopy(){if(recoveryWorkingKey)clearRecovery(recoveryWorkingKey);recoveryWorkingKey=null}
     function clearRecovery(...keys){try{keys.forEach(key=>{localStorage.removeItem(key);localStorage.removeItem(recoveryHandledKey(key))})}catch{}}
     function clearRecoveryCandidateSource(){if(!recoveryCandidateSourceKey||!recoveryCandidateSourceValue)return;try{if(localStorage.getItem(recoveryCandidateSourceKey)===recoveryCandidateSourceValue)localStorage.setItem(recoveryHandledKey(recoveryCandidateSourceKey),recoveryFingerprint(recoveryCandidateSourceValue))}catch{}recoveryCandidateSourceKey=null;recoveryCandidateSourceValue=null}
     function findRecoveryCopy(id,excludeKey){
@@ -143,7 +147,7 @@
       if(!force&&draftId===null&&revision===0)return null;
       if(draftId!==null&&savedRevision===revision)return draftId;
       clearTimeout(saveTimer);
-      if(localOnly)throw Error('服务器草稿状态尚未确认；本地内容已保留，请恢复连接并重新加载后再保存。');
+      if(localOnly){const recoverySaved=persistRecovery(draftPayload());throw Error(recoverySaved?'服务器草稿状态尚未确认；本地内容已保留，请恢复连接并重新加载后再保存。':'服务器不可用，且浏览器本地恢复保存失败，请立即复制正文。')}
       const currentRevision=revision,payload=draftPayload(),oldRecoveryKey=recoveryKey();
       setSaveState('正在保存…','saving');messageBox.textContent='';messageBox.classList.remove('success');
       savePromise=(async()=>{
@@ -154,16 +158,19 @@
         savedRevision=currentRevision;
         document.getElementById('delete-draft').hidden=false;document.getElementById('delete-draft').disabled=deletingDraft;
         history.replaceState(null,'',`/compose.html?draft_id=${draftId}`);
-        if(savedRevision===revision){clearRecovery(oldRecoveryKey,recoveryKey(),recoveryCandidateKey);clearRecoveryCandidateSource();recoveryBox.hidden=true;recoveryCandidate=null;recoveryCandidateKey=null}
-        else{persistRecovery();const currentRecoveryKey=recoveryKey();if(oldRecoveryKey!==currentRecoveryKey)clearRecovery(oldRecoveryKey)}
+        if(savedRevision===revision){
+          if(recoveryCandidate?.payload&&!recoveryBox.hidden)clearRecoveryWorkingCopy();
+          else{clearRecovery(oldRecoveryKey,recoveryKey(),recoveryCandidateKey);clearRecoveryCandidateSource();clearRecoveryWorkingCopy();recoveryBox.hidden=true;recoveryCandidate=null;recoveryCandidateKey=null}
+        }
+        else{persistRecovery();const currentRecoveryKey=recoveryKey();if(oldRecoveryKey!==currentRecoveryKey&&!(recoveryCandidate?.payload&&!recoveryBox.hidden))clearRecovery(oldRecoveryKey)}
         setSaveState(`已保存 · ${formatTime(result.updated_at)}`,'saved');
         loadDraftList();
       })();
-      try{await savePromise}catch(error){setSaveState('保存失败，内容已保存在此浏览器','error');messageBox.textContent=`${error.message}。网络恢复后可重试，或稍后恢复本地内容。`;throw error}finally{savePromise=null}
+      try{await savePromise}catch(error){const recoverySaved=persistRecovery(draftPayload());setSaveState(recoverySaved?'保存失败，内容已保存在此浏览器':'服务器和浏览器本地保存均失败','error');messageBox.textContent=recoverySaved?`${error.message}。内容已写入浏览器本地恢复副本，网络恢复后可重试。`:`${error.message}。浏览器本地恢复也失败，请立即复制正文以免丢失。`;throw error}finally{savePromise=null}
       if(savedRevision<revision)return saveDraft(force);
       return draftId;
     }
-    function scheduleSave(){if(!pageReady)return;limitCodePoints(titleInput,120);limitCodePoints(bodyInput,20000);revision++;const payload=draftPayload();if(localOnly&&!categoriesLoaded&&recoveryCandidate?.payload)payload.category_id=recoveryCandidate.payload.category_id||null;persistRecovery(payload);setSaveState(localOnly?'仅保存在此浏览器':'有未保存的修改',localOnly?'error':'dirty');messageBox.textContent=localOnly?'服务器暂不可用，内容已保存在此浏览器。恢复连接后请重新加载再保存。':'';messageBox.classList.remove('success');updatePreview();clearTimeout(saveTimer);if(!localOnly)saveTimer=setTimeout(()=>saveDraft().catch(()=>{}),900)}
+    function scheduleSave(){if(!pageReady)return false;limitCodePoints(titleInput,120);limitCodePoints(bodyInput,20000);revision++;const payload=draftPayload();if(localOnly&&!categoriesLoaded&&recoveryCandidate?.payload)payload.category_id=recoveryCandidate.payload.category_id||null;const recoverySaved=persistRecovery(payload);setSaveState(!recoverySaved?'本地恢复保存失败，请复制内容':localOnly?'仅保存在此浏览器':'有未保存的修改',!recoverySaved||localOnly?'error':'dirty');messageBox.textContent=!recoverySaved?'浏览器无法保存本地恢复副本，请立即复制正文。':localOnly?'服务器暂不可用，内容已保存在此浏览器。恢复连接后请重新加载再保存。':'';messageBox.classList.remove('success');updatePreview();clearTimeout(saveTimer);if(!localOnly)saveTimer=setTimeout(()=>saveDraft().catch(()=>{}),900);return recoverySaved}
     function applyMarkdown(kind){
       const start=bodyInput.selectionStart,end=bodyInput.selectionEnd;
       const selected=bodyInput.value.slice(start,end);
@@ -221,17 +228,18 @@
         }
         return false;
       }
-      let fenceCharacter='',fenceLength=0,inHtmlComment=false,inlineCodeLength=0;
+      let fenceCharacter='',fenceLength=0,inHtmlComment=false,inlineCodeLength=0,previousContentLine=-1;
       for(let index=firstLine;index<lines.length;index++){
         const line=lines[index];
         if(inlineCodeLength&&(!line.trim()||/^ {0,3}(?:#{1,6}(?:[\t ]|$)|`{3,}|~{3,})/.test(line)||/^ {0,3}<!--/.test(line)))inlineCodeLength=0;
         const fence=line.match(/^ {0,3}(`{3,}|~{3,})([\t ]*)$/);
         if(fenceCharacter){
           if(fence&&fence[1][0]===fenceCharacter&&fence[1].length>=fenceLength)fenceCharacter='';
+          previousContentLine=-1;
           continue;
         }
         const fenceOpen=line.match(/^ {0,3}(`{3,}|~{3,})/);
-        if(!inHtmlComment&&fenceOpen){fenceCharacter=fenceOpen[1][0];fenceLength=fenceOpen[1].length;continue}
+        if(!inHtmlComment&&fenceOpen){fenceCharacter=fenceOpen[1][0];fenceLength=fenceOpen[1].length;previousContentLine=-1;continue}
         const lineStartsInCodeSpan=inlineCodeLength>0;
         let commentCursor=0,commentState=inHtmlComment,hadComment=inHtmlComment;
         while(commentCursor<line.length){
@@ -255,10 +263,15 @@
           if(line.startsWith('<!--',commentCursor)){hadComment=true;commentState=true;commentCursor+=4;continue}
           commentCursor++;
         }
-        if(hadComment){inHtmlComment=commentState;continue}
-        if(lineStartsInCodeSpan)continue;
+        if(hadComment){inHtmlComment=commentState;previousContentLine=-1;continue}
+        if(lineStartsInCodeSpan){previousContentLine=-1;continue}
+        if(!line.trim()){previousContentLine=-1;continue}
+        const setext=line.match(/^ {0,3}(=+)[\t ]*$/);
+        if(setext&&previousContentLine>=0)return {index:previousContentLine,title:lines[previousContentLine].trim(),removeCount:2};
         const heading=line.match(/^ {0,3}#\s+(.+?)\s*#*\s*$/);
-        if(heading)return {index,title:heading[1].trim()};
+        if(heading)return {index,title:heading[1].trim(),removeCount:1};
+        if(/^ {0,3}#{1,6}(?:[\t ]|$)/.test(line)){previousContentLine=-1;continue}
+        previousContentLine=index;
       }
       return null;
     }
@@ -273,22 +286,24 @@
         let body=text,title=Array.from(file.name.replace(/\.(md|markdown)$/i,'')).slice(0,120).join('');
         if(heading){
           title=Array.from(heading.title).slice(0,120).join('');
-          lines.splice(heading.index,1);body=lines.join('\n').replace(/^\n+/, '');
+          lines.splice(heading.index,heading.removeCount||1);body=lines.join('\n').replace(/^\n+/, '');
         }
         if(Array.from(body).length>20000)throw Error('Markdown 正文超过 20000 个字符，请精简后再导入。');
-        titleInput.value=title;bodyInput.value=body;scheduleSave();messageBox.classList.add('success');messageBox.textContent='Markdown 已导入，草稿正在自动保存。';
+        titleInput.value=title;bodyInput.value=body;const recoverySaved=scheduleSave();if(recoverySaved){messageBox.classList.add('success');messageBox.textContent='Markdown 已导入，草稿正在自动保存。'}else{messageBox.classList.remove('success');messageBox.textContent='Markdown 已导入，但浏览器本地恢复保存失败，请立即复制正文。'}
       }catch(error){messageBox.classList.remove('success');messageBox.textContent=error.message||'无法读取这个文件。'}
       finally{document.getElementById('markdown-file').value=''}
     }
     async function submitDraft(){
       const button=document.getElementById('submit-draft'),actions=[...document.querySelectorAll('.compose-actions button')],error=validateForSubmit();
+      if(recoveryCandidate?.payload&&!recoveryBox.hidden){messageBox.classList.remove('success');messageBox.textContent='请先恢复或丢弃本地恢复内容，再提交草稿。';return}
       if(error){messageBox.classList.remove('success');messageBox.textContent=error;return}
       actions.forEach(control=>control.disabled=true);[titleInput,bodyInput,categoryInput,...document.querySelectorAll('[data-markdown],[data-compose-view]')].forEach(control=>control.disabled=true);messageBox.textContent='';
-      try{const id=await saveDraft(true);const result=await api(`/forum/drafts/${id}/submit`,{method:'POST',body:JSON.stringify({})});clearRecovery(recoveryKey(),legacyRecoveryKey());clearRecoveryCandidateSource();setSaveState('已提交审核','saved');messageBox.classList.add('success');messageBox.textContent=result.message;setTimeout(()=>location.href='/index.html',1100)}
+      try{const id=await saveDraft(true);const result=await api(`/forum/drafts/${id}/submit`,{method:'POST',body:JSON.stringify({})});if(recoveryCandidate?.payload&&!recoveryBox.hidden)clearRecoveryWorkingCopy();else{clearRecovery(recoveryKey(),legacyRecoveryKey());clearRecoveryCandidateSource();clearRecoveryWorkingCopy()}setSaveState('已提交审核','saved');messageBox.classList.add('success');messageBox.textContent=result.message;setTimeout(()=>location.href='/index.html',1100)}
       catch(error){messageBox.classList.remove('success');messageBox.textContent=error.message;actions.forEach(control=>control.disabled=false);[titleInput,bodyInput,categoryInput,...document.querySelectorAll('[data-markdown],[data-compose-view]')].forEach(control=>control.disabled=false)}
     }
     async function deleteDraft(){
       if(draftId===null)return;
+      if(recoveryCandidate?.payload&&!recoveryBox.hidden){messageBox.classList.remove('success');messageBox.textContent='请先恢复或丢弃本地恢复内容，再删除草稿。';return}
       if(!confirm('确定删除这篇草稿吗？'))return;
       const button=document.getElementById('delete-draft'),editorControls=[...document.querySelectorAll('.compose-editor-panel input,.compose-editor-panel select,.compose-editor-panel textarea,.compose-editor-panel button')];deletingDraft=true;editorControls.forEach(control=>control.disabled=true);clearTimeout(saveTimer);
       try{
@@ -334,9 +349,10 @@
     document.getElementById('restore-recovery').addEventListener('click',()=>{
       if(!recoveryCandidate?.payload)return;
       titleInput.value=recoveryCandidate.payload.title||'';bodyInput.value=recoveryCandidate.payload.body||'';categoryInput.value=recoveryCandidate.payload.category_id||'';
-      recoveryBox.hidden=true;scheduleSave();
+      const candidateKey=recoveryCandidateKey;if(!persistRecovery(draftPayload(),recoveryKey())){messageBox.classList.remove('success');messageBox.textContent='恢复内容已载入，但浏览器本地恢复保存失败，请立即复制正文。';return}
+      recoveryBox.hidden=true;recoveryCandidate=null;recoveryCandidateKey=null;clearRecoveryCandidateSource();clearRecoveryWorkingCopy();if(candidateKey&&candidateKey!==recoveryKey())clearRecovery(candidateKey);scheduleSave();
     });
-    document.getElementById('discard-recovery').addEventListener('click',()=>{clearRecovery(recoveryCandidateKey||recoveryKey());clearRecoveryCandidateSource();recoveryCandidate=null;recoveryCandidateKey=null;recoveryBox.hidden=true});
+    document.getElementById('discard-recovery').addEventListener('click',()=>{clearRecovery(recoveryCandidateKey||recoveryKey());clearRecoveryCandidateSource();clearRecoveryWorkingCopy();recoveryCandidate=null;recoveryCandidateKey=null;recoveryBox.hidden=true});
     bodyInput.addEventListener('keydown',event=>{
       if(!(event.ctrlKey||event.metaKey)||event.altKey)return;
       const key=event.key.toLowerCase(),kind=key==='b'?'bold':key==='i'?'italic':key==='k'?'link':null;
@@ -362,7 +378,7 @@
       if(localOnly)return;
       if(savePromise)return;
       const method=draftId?'PUT':'POST',path=draftId?`/forum/drafts/${draftId}`:'/forum/drafts';
-      api(path,{method,body:JSON.stringify(payload),keepalive:true}).then(()=>{clearRecovery(recoveryKey());clearRecoveryCandidateSource()}).catch(()=>{});
+      api(path,{method,body:JSON.stringify(payload),keepalive:true}).then(()=>{if(recoveryCandidate?.payload&&!recoveryBox.hidden)clearRecoveryWorkingCopy();else{clearRecovery(recoveryKey());clearRecoveryCandidateSource();clearRecoveryWorkingCopy()}}).catch(()=>{});
     });
   </script>
 </body>
