@@ -47,7 +47,8 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
       if (closingIndex > index + openingDelimiter.length) {
         const formula = text.slice(index, closingIndex + closingDelimiter.length);
         const placeholder = `${placeholderPrefix}${formulas.length}TOKEN`;
-        formulas.push({ placeholder, formula });
+        const normalizedFormula = formula.replace(/(^|\n)(?:[\t ]{0,3}>[\t ]?)+/g, "$1");
+        formulas.push({ placeholder, formula: normalizedFormula });
         protectedText += placeholder;
         noCloserThrough.delete(closingDelimiter);
         index = closingIndex + closingDelimiter.length;
