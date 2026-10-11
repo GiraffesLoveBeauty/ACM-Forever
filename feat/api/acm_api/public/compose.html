@@ -108,6 +108,15 @@
       try{localStorage.setItem(key,JSON.stringify({payload,updated_at:Date.now()}));localStorage.removeItem(recoveryHandledKey(key));return true}catch{return false}
     }
     function clearRecoveryWorkingCopy(){if(recoveryWorkingKey)clearRecovery(recoveryWorkingKey);recoveryWorkingKey=null}
+    function migrateRecoveryWorkingCopy(previousKey,nextKey){
+      const sourceKey=recoveryWorkingKey||previousKey;
+      if(sourceKey===nextKey){recoveryWorkingKey=nextKey;return true}
+      try{
+        const stored=localStorage.getItem(sourceKey);
+        if(stored){localStorage.setItem(nextKey,stored);localStorage.removeItem(recoveryHandledKey(nextKey))}
+        clearRecovery(sourceKey);recoveryWorkingKey=nextKey;return true;
+      }catch{recoveryWorkingKey=sourceKey;return false}
+    }
     function clearRecovery(...keys){try{keys.forEach(key=>{localStorage.removeItem(key);localStorage.removeItem(recoveryHandledKey(key))})}catch{}}
     function clearRecoveryCandidateSource(){if(!recoveryCandidateSourceKey||!recoveryCandidateSourceValue)return;try{if(localStorage.getItem(recoveryCandidateSourceKey)===recoveryCandidateSourceValue)localStorage.setItem(recoveryHandledKey(recoveryCandidateSourceKey),recoveryFingerprint(recoveryCandidateSourceValue))}catch{}recoveryCandidateSourceKey=null;recoveryCandidateSourceValue=null}
     function findRecoveryCopy(id,excludeKey){
@@ -155,6 +164,7 @@
           ?await api('/forum/drafts',{method:'POST',body:JSON.stringify(payload)})
           :await api(`/forum/drafts/${draftId}`,{method:'PUT',body:JSON.stringify(payload)});
         draftId=Number(result.id);
+        const currentRecoveryKey=recoveryKey();if(oldRecoveryKey!==currentRecoveryKey)migrateRecoveryWorkingCopy(oldRecoveryKey,currentRecoveryKey);
         savedRevision=currentRevision;
         document.getElementById('delete-draft').hidden=false;document.getElementById('delete-draft').disabled=deletingDraft;
         history.replaceState(null,'',`/compose.html?draft_id=${draftId}`);
@@ -162,7 +172,7 @@
           if(recoveryCandidate?.payload&&!recoveryBox.hidden)clearRecoveryWorkingCopy();
           else{clearRecovery(oldRecoveryKey,recoveryKey(),recoveryCandidateKey);clearRecoveryCandidateSource();clearRecoveryWorkingCopy();recoveryBox.hidden=true;recoveryCandidate=null;recoveryCandidateKey=null}
         }
-        else{persistRecovery();const currentRecoveryKey=recoveryKey();if(oldRecoveryKey!==currentRecoveryKey&&!(recoveryCandidate?.payload&&!recoveryBox.hidden))clearRecovery(oldRecoveryKey)}
+        else persistRecovery();
         setSaveState(`已保存 · ${formatTime(result.updated_at)}`,'saved');
         loadDraftList();
       })();
