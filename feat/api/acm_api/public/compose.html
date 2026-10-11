@@ -108,8 +108,21 @@
       try{localStorage.setItem(key,JSON.stringify({payload,updated_at:Date.now()}));localStorage.removeItem(recoveryHandledKey(key));return true}catch{return false}
     }
     function clearRecoveryWorkingCopy(){if(recoveryWorkingKey)clearRecovery(recoveryWorkingKey);recoveryWorkingKey=null}
+    function migrateRecoveryCandidate(previousKey,nextKey){
+      if(!recoveryCandidate?.payload||recoveryBox.hidden)return true;
+      const sourceKey=recoveryCandidateKey||previousKey,candidateKey=`${nextKey}:candidate:${recoveryTabInstanceId||recoveryTabId||'tab'}`;
+      if(sourceKey===candidateKey)return true;
+      try{
+        const stored=localStorage.getItem(sourceKey)||JSON.stringify(recoveryCandidate);
+        localStorage.setItem(candidateKey,stored);localStorage.removeItem(recoveryHandledKey(candidateKey));
+        try{if(localStorage.getItem(sourceKey)===stored)localStorage.setItem(recoveryHandledKey(sourceKey),recoveryFingerprint(stored))}catch{}
+        clearRecoveryCandidateSource();recoveryCandidateKey=candidateKey;return true;
+      }catch{return false}
+    }
     function migrateRecoveryWorkingCopy(previousKey,nextKey){
-      const sourceKey=recoveryWorkingKey||previousKey;
+      const candidatePending=recoveryCandidate?.payload&&!recoveryBox.hidden;
+      const sourceKey=recoveryWorkingKey||(candidatePending?null:previousKey);
+      if(!sourceKey)return true;
       if(sourceKey===nextKey){recoveryWorkingKey=nextKey;return true}
       try{
         const stored=localStorage.getItem(sourceKey);
@@ -164,7 +177,7 @@
           ?await api('/forum/drafts',{method:'POST',body:JSON.stringify(payload)})
           :await api(`/forum/drafts/${draftId}`,{method:'PUT',body:JSON.stringify(payload)});
         draftId=Number(result.id);
-        const currentRecoveryKey=recoveryKey();if(oldRecoveryKey!==currentRecoveryKey)migrateRecoveryWorkingCopy(oldRecoveryKey,currentRecoveryKey);
+        const currentRecoveryKey=recoveryKey();if(oldRecoveryKey!==currentRecoveryKey){migrateRecoveryCandidate(oldRecoveryKey,currentRecoveryKey);migrateRecoveryWorkingCopy(oldRecoveryKey,currentRecoveryKey)}
         savedRevision=currentRevision;
         document.getElementById('delete-draft').hidden=false;document.getElementById('delete-draft').disabled=deletingDraft;
         history.replaceState(null,'',`/compose.html?draft_id=${draftId}`);
