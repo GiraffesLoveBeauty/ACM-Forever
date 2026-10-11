@@ -47,7 +47,11 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
       if (closingIndex > index + openingDelimiter.length) {
         const formula = text.slice(index, closingIndex + closingDelimiter.length);
         const placeholder = `${placeholderPrefix}${formulas.length}TOKEN`;
-        const normalizedFormula = formula.replace(/(^|\n)(?:[\t ]{0,3}>[\t ]?)+/g, "$1");
+        const lineStart = text.lastIndexOf("\n", index - 1) + 1;
+        const formulaIsInBlockquote = /^(?:[\t ]{0,3}>[\t ]?)+/.test(text.slice(lineStart, index));
+        const normalizedFormula = formulaIsInBlockquote
+          ? formula.replace(/(^|\n)(?:[\t ]{0,3}>[\t ]?)+/g, "$1")
+          : formula;
         formulas.push({ placeholder, formula: normalizedFormula });
         protectedText += placeholder;
         noCloserThrough.delete(closingDelimiter);

@@ -238,7 +238,13 @@
         }
         return false;
       }
-      let fenceCharacter='',fenceLength=0,inHtmlComment=false,inlineCodeLength=0,previousContentLine=-1,inNestedBlock=false,inHtmlBlock=false;
+      function parseAtxHeading(line){
+        const heading=line.match(/^ {0,3}#[\t ]+(.+?)[\t ]*$/);
+        if(!heading)return null;
+        const title=heading[1].replace(/[\t ]+#+[\t ]*$/,'').trim().replace(/\\+#/g,slashesAndHash=>'\\'.repeat(Math.floor((slashesAndHash.length-1)/2))+'#');
+        return {title};
+      }
+      let fenceCharacter='',fenceLength=0,inHtmlComment=false,inlineCodeLength=0,previousContentLine=-1,previousContentStartLine=-1,inNestedBlock=false,inHtmlBlock=false;
       for(let index=firstLine;index<lines.length;index++){
         const line=lines[index];
         if(!line.trim()){previousContentLine=-1;inNestedBlock=false;inHtmlBlock=false;inlineCodeLength=0;continue}
@@ -260,11 +266,11 @@
           if(/^ {0,3}<(?:address|article|aside|base|blockquote|body|caption|center|col|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:\s|\/?>)/i.test(line)){inHtmlBlock=true;previousContentLine=-1;continue}
         }
         const lineStartsInCodeSpan=inlineCodeLength>0;
-        let commentCursor=0,commentState=inHtmlComment,hadComment=inHtmlComment;
+        let commentCursor=0,commentState=inHtmlComment,hadComment=inHtmlComment,commentFreeLine='';
         while(commentCursor<line.length){
           if(inlineCodeLength){
-            if(line[commentCursor]==='`'){let runEnd=commentCursor+1;while(line[runEnd]==='`')runEnd++;if(runEnd-commentCursor===inlineCodeLength)inlineCodeLength=0;commentCursor=runEnd;continue}
-            commentCursor++;continue;
+            if(line[commentCursor]==='`'){let runEnd=commentCursor+1;while(line[runEnd]==='`')runEnd++;if(runEnd-commentCursor===inlineCodeLength)inlineCodeLength=0;commentFreeLine+=line.slice(commentCursor,runEnd);commentCursor=runEnd;continue}
+            commentFreeLine+=line[commentCursor++];continue;
           }
           if(commentState){
             const close=line.indexOf('-->',commentCursor);
@@ -275,24 +281,27 @@
             let runEnd=commentCursor+1;while(line[runEnd]==='`')runEnd++;
             const runLength=runEnd-commentCursor;
             const delimiter='`'.repeat(runLength),close=line.indexOf(delimiter,runEnd);
-            if(close>=0){commentCursor=close+runLength;continue}
+            if(close>=0){commentFreeLine+=line.slice(commentCursor,close+runLength);commentCursor=close+runLength;continue}
             if(hasInlineCodeCloser(index+1,runLength))inlineCodeLength=runLength;
-            commentCursor=runEnd;continue;
+            commentFreeLine+=line.slice(commentCursor,runEnd);commentCursor=runEnd;continue;
           }
           if(line.startsWith('<!--',commentCursor)){hadComment=true;commentState=true;commentCursor+=4;continue}
-          commentCursor++;
+          commentFreeLine+=line[commentCursor++];
         }
-        if(hadComment){inHtmlComment=commentState;previousContentLine=-1;continue}
+        if(hadComment){
+          inHtmlComment=commentState;
+          const heading=!commentState&&atxHeadingLine?parseAtxHeading(commentFreeLine):null;
+          if(heading)return {index,title:heading.title,removeCount:1};
+          previousContentLine=-1;continue;
+        }
         if(lineStartsInCodeSpan){previousContentLine=-1;continue}
         const setext=line.match(/^ {0,3}(=+)[\t ]*$/);
-        if(setext&&previousContentLine>=0)return {index:previousContentLine,title:lines[previousContentLine].trim(),removeCount:2};
+        if(setext&&previousContentLine>=0)return {index:previousContentStartLine,title:lines.slice(previousContentStartLine,index).map(part=>part.trim()).join(' ').trim(),removeCount:index-previousContentStartLine+1};
         if(setext){previousContentLine=-1;continue}
-        const heading=line.match(/^ {0,3}#[\t ]+(.+?)[\t ]*$/);
-        if(heading){
-          const title=heading[1].replace(/[\t ]+#+[\t ]*$/,'').trim().replace(/\\+#/g,slashesAndHash=>'\\'.repeat(Math.floor((slashesAndHash.length-1)/2))+'#');
-          return {index,title,removeCount:1};
-        }
+        const heading=parseAtxHeading(line);
+        if(heading)return {index,title:heading.title,removeCount:1};
         if(atxHeadingLine){previousContentLine=-1;continue}
+        if(previousContentLine<0)previousContentStartLine=index;
         previousContentLine=index;
       }
       return null;
