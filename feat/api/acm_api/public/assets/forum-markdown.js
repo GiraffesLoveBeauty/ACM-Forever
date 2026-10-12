@@ -21,6 +21,36 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
     }
     return -1;
   };
+  const fencedCodeRanges = [];
+  let fenceCharacter = "";
+  let fenceLength = 0;
+  let fenceStart = -1;
+  for (let lineStart = 0; lineStart < text.length;) {
+    const newlineIndex = text.indexOf("\n", lineStart);
+    const lineEnd = newlineIndex < 0 ? text.length : newlineIndex;
+    const line = text.slice(lineStart, lineEnd);
+    const fence = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (fenceCharacter) {
+      if (fence && fence[1][0] === fenceCharacter && fence[1].length >= fenceLength && /^[\t ]*$/.test(line.slice(fence[0].length))) {
+        fencedCodeRanges.push([fenceStart, newlineIndex < 0 ? text.length : newlineIndex + 1]);
+        fenceCharacter = "";
+        fenceStart = -1;
+      }
+    } else if (fence) {
+      fenceCharacter = fence[1][0];
+      fenceLength = fence[1].length;
+      fenceStart = lineStart;
+    }
+    if (newlineIndex < 0) break;
+    lineStart = newlineIndex + 1;
+  }
+  if (fenceCharacter) fencedCodeRanges.push([fenceStart, text.length]);
+  let fencedRangeIndex = 0;
+  const isInsideFencedCode = index => {
+    while (fencedRangeIndex < fencedCodeRanges.length && fencedCodeRanges[fencedRangeIndex][1] <= index) fencedRangeIndex++;
+    const range = fencedCodeRanges[fencedRangeIndex];
+    return Boolean(range && range[0] <= index && index < range[1]);
+  };
   const noCloserThrough = new Map();
   let protectedText = "";
   for (let index = 0; index < text.length;) {
@@ -49,7 +79,7 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
         const placeholder = `${placeholderPrefix}${formulas.length}TOKEN`;
         const lineStart = text.lastIndexOf("\n", index - 1) + 1;
         const formulaIsInBlockquote = /^(?:[\t ]{0,3}>[\t ]?)+/.test(text.slice(lineStart, index));
-        const normalizedFormula = formulaIsInBlockquote
+        const normalizedFormula = formulaIsInBlockquote && !isInsideFencedCode(index)
           ? formula.replace(/(^|\n)(?:[\t ]{0,3}>[\t ]?)+/g, "$1")
           : formula;
         formulas.push({ placeholder, formula: normalizedFormula });

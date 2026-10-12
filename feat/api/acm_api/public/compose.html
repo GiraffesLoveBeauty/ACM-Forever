@@ -86,9 +86,9 @@
     let recoveryOwner='member',recoveryTabId='',recoveryTabInstanceId='',recoveryTabStartedAt=0,recoveryTabChannel=null,pageReady=false,localOnly=false,categoriesLoaded=false,deletingDraft=false,submitting=false,markdownImportPromises=new Set();
     const queryDraftId=new URLSearchParams(location.search).get('draft_id');
     let draftId=queryDraftId&&/^\d+$/.test(queryDraftId)?Number(queryDraftId):null;
-    let revision=0,savedRevision=-1,saveTimer=null,savePromise=null,recoveryCandidate=null,recoveryCandidateKey=null,recoveryCandidateSourceKey=null,recoveryCandidateSourceValue=null,recoveryWorkingKey=null;
+    let revision=0,savedRevision=-1,saveTimer=null,savePromise=null,recoveryCandidate=null,recoveryCandidateKey=null,recoveryCandidateSourceKey=null,recoveryCandidateSourceValue=null,recoveryWorkingKey=null,recoveryCategoryId=null;
 
-    function draftPayload(){return {title:titleInput.value,body:bodyInput.value,category_id:categoryInput.value||null}}
+    function draftPayload(){return {title:titleInput.value,body:bodyInput.value,category_id:categoryInput.value||(!categoriesLoaded?recoveryCategoryId:null)}}
     function createRecoveryToken(){return window.crypto?.randomUUID?.()||`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}
     function persistRecoveryTabId(){try{sessionStorage.setItem('acm-forum-compose-tab-id',recoveryTabId)}catch{}}
     async function initializeRecoveryTabId(){try{recoveryTabId=sessionStorage.getItem('acm-forum-compose-tab-id')||''}catch{}if(!recoveryTabId){recoveryTabId=createRecoveryToken();persistRecoveryTabId()}recoveryTabInstanceId=createRecoveryToken();recoveryTabStartedAt=Number(window.performance?.timeOrigin)||Date.now();const messageKey='acm-forum-compose-recovery-tab-announcement';const handleAnnouncement=message=>{if(message?.owner!==recoveryOwner||message.tabId!==recoveryTabId||message.instanceId===recoveryTabInstanceId)return;const thisTabStartedFirst=recoveryTabStartedAt<Number(message.startedAt)||recoveryTabStartedAt===Number(message.startedAt)&&recoveryTabInstanceId<String(message.instanceId);if(!thisTabStartedFirst){recoveryTabId=createRecoveryToken();persistRecoveryTabId()}announce()};const announce=()=>{const message={owner:recoveryOwner,tabId:recoveryTabId,instanceId:recoveryTabInstanceId,startedAt:recoveryTabStartedAt};try{recoveryTabChannel?.postMessage(message)}catch{}try{localStorage.setItem(messageKey,JSON.stringify({...message,nonce:createRecoveryToken()}))}catch{}};if('BroadcastChannel'in window){try{recoveryTabChannel=new BroadcastChannel('acm-forum-compose-recovery-tabs');recoveryTabChannel.addEventListener('message',event=>handleAnnouncement(event.data))}catch{recoveryTabChannel=null}}window.addEventListener('storage',event=>{if(event.key!==messageKey||!event.newValue)return;try{handleAnnouncement(JSON.parse(event.newValue))}catch{}});announce();await new Promise(resolve=>setTimeout(resolve,100))}
@@ -268,7 +268,7 @@
           previousContentLine=-1;
           continue;
         }
-        if(!inHtmlComment&&inHtmlBlock){previousContentLine=-1;if(/<\/(?:address|article|aside|blockquote|body|div|dl|fieldset|footer|form|h[1-6]|header|html|main|nav|ol|p|pre|section|table|ul)\s*>/i.test(line))inHtmlBlock=false;continue}
+        if(!inHtmlComment&&inHtmlBlock){previousContentLine=-1;if(/<\/(?:address|article|aside|blockquote|body|div|dl|fieldset|footer|form|h[1-6]|header|html|main|nav|ol|p|pre|script|section|style|table|textarea|ul)\s*>/i.test(line))inHtmlBlock=false;continue}
         const fenceOpen=line.match(/^ {0,3}(`{3,}|~{3,})/);
         if(!inHtmlComment&&fenceOpen){fenceCharacter=fenceOpen[1][0];fenceLength=fenceOpen[1].length;previousContentLine=-1;continue}
         const atxHeadingLine=/^ {0,3}#{1,6}(?:[\t ]|$)/.test(line);
@@ -276,7 +276,7 @@
           if(inNestedBlock){if(atxHeadingLine)inNestedBlock=false;else{previousContentLine=-1;continue}}
           if(/^ {0,3}>/.test(line)||/^ {0,3}(?:[-+*]|\d+[.)])[\t ]+/.test(line)){inNestedBlock=true;previousContentLine=-1;continue}
           if(/^(?: {4}|\t)/.test(line)||/^ {0,3}(?:\*[\t ]*){3,}$/.test(line)||/^ {0,3}(?:-[\t ]*){3,}$/.test(line)||/^ {0,3}(?:_[\t ]*){3,}$/.test(line)){previousContentLine=-1;continue}
-          if(/^ {0,3}<(?:address|article|aside|base|blockquote|body|caption|center|col|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:\s|\/?>)/i.test(line)){inHtmlBlock=true;previousContentLine=-1;continue}
+          if(/^ {0,3}<(?:address|article|aside|base|blockquote|body|caption|center|col|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|ol|optgroup|option|p|param|pre|search|script|section|style|summary|table|tbody|td|tfoot|th|thead|textarea|title|tr|track|ul)(?:\s|\/?>)/i.test(line)){inHtmlBlock=true;previousContentLine=-1;continue}
         }
         const lineStartsInCodeSpan=inlineCodeLength>0;
         let commentCursor=0,commentState=inHtmlComment,hadComment=inHtmlComment,commentFreeLine='';
@@ -356,6 +356,7 @@
       if(!confirm('确定删除这篇草稿吗？'))return;
       const button=document.getElementById('delete-draft'),editorControls=[...document.querySelectorAll('.compose-editor-panel input,.compose-editor-panel select,.compose-editor-panel textarea,.compose-editor-panel button')];deletingDraft=true;editorControls.forEach(control=>control.disabled=true);clearTimeout(saveTimer);
       try{
+        if(markdownImportPromises.size)await Promise.all([...markdownImportPromises]);
         if(savePromise||savedRevision<revision)await saveDraft(true);
         const oldKey=recoveryKey(),oldLegacyKey=legacyRecoveryKey();await api(`/forum/drafts/${draftId}`,{method:'DELETE'});clearRecovery(oldKey,oldLegacyKey,recoveryCandidateKey);clearRecoveryCandidateSource();recoveryCandidate=null;recoveryCandidateKey=null;recoveryBox.hidden=true;
         draftId=null;revision=0;savedRevision=0;titleInput.value='';bodyInput.value='';categoryInput.value='';history.replaceState(null,'','/compose.html');button.hidden=true;deletingDraft=false;editorControls.forEach(control=>{control.disabled=control===button});setSaveState('新话题尚未保存');updatePreview();await loadDraftList()
@@ -387,7 +388,7 @@
       input.addEventListener('input',event=>{if(event.isComposing){updatePreview();return}scheduleSave()});
       input.addEventListener('compositionend',scheduleSave);
     });
-    categoryInput.addEventListener('change',scheduleSave);
+    categoryInput.addEventListener('change',()=>{recoveryCategoryId=categoryInput.value||null;scheduleSave()});
     document.querySelectorAll('[data-markdown]').forEach(button=>button.addEventListener('click',()=>{showView('write');applyMarkdown(button.dataset.markdown)}));
     document.querySelectorAll('[data-compose-view]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.composeView)));
     document.getElementById('save-draft').addEventListener('click',()=>saveDraft(true).catch(()=>{}));
@@ -397,7 +398,7 @@
     document.getElementById('markdown-file').addEventListener('change',event=>{const task=importMarkdown(event.target.files?.[0]);markdownImportPromises.add(task);task.finally(()=>markdownImportPromises.delete(task))});
     document.getElementById('restore-recovery').addEventListener('click',()=>{
       if(!recoveryCandidate?.payload)return;
-      titleInput.value=recoveryCandidate.payload.title||'';bodyInput.value=recoveryCandidate.payload.body||'';categoryInput.value=recoveryCandidate.payload.category_id||'';
+      titleInput.value=recoveryCandidate.payload.title||'';bodyInput.value=recoveryCandidate.payload.body||'';categoryInput.value=recoveryCandidate.payload.category_id||'';if(!categoriesLoaded)recoveryCategoryId=recoveryCandidate.payload.category_id||null;
       const candidateKey=recoveryCandidateKey;if(!persistRecovery(draftPayload(),recoveryKey())){messageBox.classList.remove('success');messageBox.textContent='恢复内容已载入，但浏览器本地恢复保存失败，请立即复制正文。';return}
       recoveryBox.hidden=true;recoveryCandidate=null;recoveryCandidateKey=null;clearRecoveryCandidateSource();clearRecoveryWorkingCopy();if(candidateKey&&candidateKey!==recoveryKey())clearRecovery(candidateKey);scheduleSave();
     });
