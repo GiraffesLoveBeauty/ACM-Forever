@@ -8,19 +8,20 @@
   <script src="/assets/forum-graph.js?v=algorithm-graph-2" defer></script>
   <link rel="stylesheet" href="/assets/forum-pixel.css?v=pixel-ac-1">
   <script src="/assets/forum-pixel.js?v=pixel-ac-1" defer></script>
+  <link rel="stylesheet" href="/assets/forum-home-layout.css?v=sidebars-1">
 </head>
-<body class="forum-page">
+<body class="forum-page forum-home">
   <header class="forum-header">
     <a class="forum-brand" href="/index.html"><img class="icpc-brand-logo" src="/assets/icpc-logo.png" alt="ICPC 官方标志"><span>ACM <b>Forever</b><small>计量 ACMer 学习社区</small></span></a>
     <nav class="nav primary-nav" aria-label="主导航"></nav>
     <div class="forum-header-actions"><button class="btn" id="theme-toggle" aria-label="切换主题">◐</button><a class="btn primary" id="login-link" href="/login.html">登录后发帖</a><button class="btn" id="logout" style="display:none">退出</button></div>
   </header>
-  <main class="forum-layout">
-    <aside class="forum-rail forum-left-rail">
+  <main class="forum-home-layout">
+    <aside class="forum-rail forum-left-rail" aria-label="社区介绍与快捷入口">
       <div class="forum-community-card"><span class="community-spark" aria-hidden="true">✦</span><h2>让每一次思考<br>都被看见</h2><p>和计量 ACMer 一起提问、讨论、进步。</p></div>
       <div class="forum-side-links"><a href="/leaderboard.html">♛　查看刷题排行榜</a><a href="/home.html">◉　进入个人中心</a></div>
     </aside>
-    <section class="forum-feed-column">
+    <section class="forum-feed-column" aria-label="社区讨论">
       <div class="forum-welcome"><div><span class="forum-kicker">计量 ACMer · 学习与交流</span><h1>今天想聊点什么？</h1><p>提问、分享题解，或者记录你的学习进度。</p></div><figure class="forum-algorithm-art" aria-label="空间算法图谱"><div class="algorithm-disc" aria-hidden="true"></div><div class="algorithm-square" aria-hidden="true"></div><div class="algorithm-slice" aria-hidden="true"></div><div class="algorithm-arch" aria-hidden="true"></div><div class="algorithm-aura" aria-hidden="true"></div><div class="algorithm-layer"><div class="algorithm-grid" aria-hidden="true"></div><svg class="algorithm-graph" viewBox="0 0 400 300" role="group" aria-describedby="forum-graph-help" aria-label="十二个节点的加权图，最短路径 s → v → d → t，总权重 9"></svg><span id="forum-graph-help" class="graph-sr-only">点选节点查看从 s 出发的最短路径。键盘可用 Tab 切换节点，Enter 或空格选中，Esc 恢复默认路径。</span><span class="graph-status graph-sr-only" role="status" aria-live="polite" aria-atomic="true"></span><span class="algorithm-code" aria-hidden="true">relax(u, v, w);</span></div><figcaption>一起写 · 一起想 · 一起 AC</figcaption></figure><a class="forum-hero-cta" href="/compose.html">写一个新话题 <span aria-hidden="true">＋</span></a></div>
       <section class="forum-directory" aria-labelledby="forum-directory-title"><div class="forum-directory-heading"><div><span class="forum-kicker">FIND YOUR CORNER</span><h2 id="forum-directory-title">逛逛版块</h2></div><span id="directory-summary" class="muted">正在整理讨论版块…</span></div><div id="category-list" class="forum-directory-grid"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div></section>
       <form class="forum-search" id="forum-search"><label class="visually-hidden" for="search-query">搜索话题</label><span aria-hidden="true">⌕</span><input id="search-query" type="search" placeholder="搜索问题、题解或学习经验"><button type="submit">搜索</button></form>
@@ -28,7 +29,7 @@
       <div id="forum-feed" class="forum-feed"><div class="forum-loading"><span class="spinner"></span>正在加载社区话题…</div></div>
       <button id="load-more" class="btn forum-load-more" style="display:none">加载更多</button>
     </section>
-    <aside class="forum-rail forum-right-rail">
+    <aside class="forum-rail forum-right-rail" aria-label="热门话题与社区公约">
       <section class="forum-rail-card"><div class="forum-side-title">热门话题 <span>↗</span></div><div id="hot-topics" class="hot-topic-list"><div class="skeleton-line"></div><div class="skeleton-line"></div></div></section>
       <section class="forum-rail-card forum-community-note"><div class="forum-side-title">社区公约</div><p>友善交流，清楚描述问题，分享自己的尝试。题解请注明来源，一起维护适合每位同学学习的讨论氛围。</p><a href="/index.html#community-guidelines">了解社区规则 →</a></section>
       <footer class="forum-footer">ACM Forever · 为计量 ACMer 的学习与交流而建</footer>
