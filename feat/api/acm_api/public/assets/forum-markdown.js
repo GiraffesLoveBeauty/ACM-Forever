@@ -21,36 +21,6 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
     }
     return -1;
   };
-  const fencedCodeRanges = [];
-  let fenceCharacter = "";
-  let fenceLength = 0;
-  let fenceStart = -1;
-  for (let lineStart = 0; lineStart < text.length;) {
-    const newlineIndex = text.indexOf("\n", lineStart);
-    const lineEnd = newlineIndex < 0 ? text.length : newlineIndex;
-    const line = text.slice(lineStart, lineEnd);
-    const fence = line.match(/^ {0,3}(`{3,}|~{3,})/);
-    if (fenceCharacter) {
-      if (fence && fence[1][0] === fenceCharacter && fence[1].length >= fenceLength && /^[\t ]*$/.test(line.slice(fence[0].length))) {
-        fencedCodeRanges.push([fenceStart, newlineIndex < 0 ? text.length : newlineIndex + 1]);
-        fenceCharacter = "";
-        fenceStart = -1;
-      }
-    } else if (fence) {
-      fenceCharacter = fence[1][0];
-      fenceLength = fence[1].length;
-      fenceStart = lineStart;
-    }
-    if (newlineIndex < 0) break;
-    lineStart = newlineIndex + 1;
-  }
-  if (fenceCharacter) fencedCodeRanges.push([fenceStart, text.length]);
-  let fencedRangeIndex = 0;
-  const isInsideFencedCode = index => {
-    while (fencedRangeIndex < fencedCodeRanges.length && fencedCodeRanges[fencedRangeIndex][1] <= index) fencedRangeIndex++;
-    const range = fencedCodeRanges[fencedRangeIndex];
-    return Boolean(range && range[0] <= index && index < range[1]);
-  };
   const noCloserThrough = new Map();
   let protectedText = "";
   for (let index = 0; index < text.length;) {
@@ -79,10 +49,7 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
         const placeholder = `${placeholderPrefix}${formulas.length}TOKEN`;
         const lineStart = text.lastIndexOf("\n", index - 1) + 1;
         const formulaIsInBlockquote = /^(?:[\t ]{0,3}>[\t ]?)+/.test(text.slice(lineStart, index));
-        const normalizedFormula = formulaIsInBlockquote && !isInsideFencedCode(index)
-          ? formula.replace(/(^|\n)(?:[\t ]{0,3}>[\t ]?)+/g, "$1")
-          : formula;
-        formulas.push({ placeholder, formula: normalizedFormula });
+        formulas.push({ placeholder, formula, formulaIsInBlockquote });
         protectedText += placeholder;
         noCloserThrough.delete(closingDelimiter);
         index = closingIndex + closingDelimiter.length;
@@ -121,9 +88,28 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   })[character]);
   const formulaPattern = new RegExp(`${placeholderPrefix}(\\d+)TOKEN`, "g");
+  const formulaInCode = new Set();
+  if (formulas.length) {
+    const formulaProbe = document.createElement("div");
+    formulaProbe.innerHTML = safeHtml;
+    const walker = document.createTreeWalker(formulaProbe, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      if (!node.parentElement?.closest("code, pre")) continue;
+      formulaPattern.lastIndex = 0;
+      let match;
+      while ((match = formulaPattern.exec(node.nodeValue))) formulaInCode.add(Number(match[1]));
+    }
+  }
+  formulaPattern.lastIndex = 0;
   const withFormulas = safeHtml.replace(formulaPattern, (placeholder, index) => {
     const formula = formulas[Number(index)];
-    return formula ? escapeHtml(formula.formula) : placeholder;
+    if (!formula) return placeholder;
+    const code = formulaInCode.has(Number(index));
+    const normalizedFormula = formula.formulaIsInBlockquote && !code
+      ? formula.formula.replace(/(^|\n)(?:[\t ]{0,3}>[\t ]?)+/g, "$1")
+      : formula.formula;
+    return escapeHtml(normalizedFormula);
   });
   if (!escapedLiterals.length) return withFormulas;
   const container = document.createElement("div");
