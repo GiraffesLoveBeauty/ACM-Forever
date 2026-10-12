@@ -114,9 +114,8 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
   if (!escapedLiterals.length) return withFormulas;
   const container = document.createElement("div");
   container.innerHTML = withFormulas;
-  const literalPlaceholders = new Map(escapedLiterals.map(item => [item.placeholder, item]));
-  const placeholderPattern = new RegExp(`(${escapedLiterals.map(item => item.placeholder).join("|")})`, "g");
-  const restoreLiteralAttribute = value => value.replace(placeholderPattern, placeholder => literalPlaceholders.get(placeholder)?.text ?? placeholder);
+  const placeholderPattern = new RegExp(`${placeholderPrefix}(\\d+)LITERAL`, "g");
+  const restoreLiteralAttribute = value => value.replace(placeholderPattern, (placeholder, index) => escapedLiterals[Number(index)]?.text ?? placeholder);
   container.querySelectorAll("[href], [title]").forEach(element => {
     ["href", "title"].forEach(attribute => {
       if (element.hasAttribute(attribute)) element.setAttribute(attribute, restoreLiteralAttribute(element.getAttribute(attribute)));
@@ -126,28 +125,35 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
   const textNodes = [];
   while (walker.nextNode()) textNodes.push(walker.currentNode);
   textNodes.forEach(node => {
-    if (!placeholderPattern.test(node.nodeValue)) {
-      placeholderPattern.lastIndex = 0;
-      return;
-    }
     placeholderPattern.lastIndex = 0;
+    let match;
+    let previousIndex = 0;
+    let foundPlaceholder = false;
     const fragment = document.createDocumentFragment();
     const insideCode = Boolean(node.parentElement?.closest("code, pre"));
-    node.nodeValue.split(placeholderPattern).forEach(part => {
-      const literal = literalPlaceholders.get(part);
+    while ((match = placeholderPattern.exec(node.nodeValue))) {
+      const literal = escapedLiterals[Number(match[1])];
+      if (!literal) continue;
+      foundPlaceholder = true;
+      if (match.index > previousIndex) {
+        fragment.appendChild(document.createTextNode(node.nodeValue.slice(previousIndex, match.index)));
+      }
       if (literal) {
         if (insideCode) {
           fragment.appendChild(document.createTextNode(literal.codeText));
-          return;
+        } else {
+          const dollar = document.createElement("span");
+          dollar.className = "tex2jax_ignore";
+          dollar.textContent = literal.text;
+          fragment.appendChild(dollar);
         }
-        const dollar = document.createElement("span");
-        dollar.className = "tex2jax_ignore";
-        dollar.textContent = literal.text;
-        fragment.appendChild(dollar);
-      } else if (part) {
-        fragment.appendChild(document.createTextNode(part));
       }
-    });
+      previousIndex = placeholderPattern.lastIndex;
+    }
+    if (!foundPlaceholder) return;
+    if (previousIndex < node.nodeValue.length) {
+      fragment.appendChild(document.createTextNode(node.nodeValue.slice(previousIndex)));
+    }
     node.parentNode.replaceChild(fragment, node);
   });
   return container.innerHTML;
