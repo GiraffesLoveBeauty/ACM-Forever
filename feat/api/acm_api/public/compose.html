@@ -308,6 +308,7 @@
           previousContentLine=-1;continue;
         }
         if(lineStartsInCodeSpan){previousContentLine=-1;continue}
+        if(/^ {0,3}\[[^\n]+\]:[\t ]+(?:<[^>\n]*>|[^\t <]+)/.test(commentFreeLine)){previousContentLine=-1;continue}
         const setext=line.match(/^ {0,3}(=+)[\t ]*$/);
         if(setext&&previousContentLine>=0)return {index:previousContentStartLine,title:lines.slice(previousContentStartLine,index).map(part=>part.trim()).join(' ').trim(),removeCount:index-previousContentStartLine+1};
         if(setext){previousContentLine=-1;continue}
