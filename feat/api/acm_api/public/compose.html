@@ -236,87 +236,18 @@
       if(Array.from(body).length>20000)return '正文不能超过 20000 个字符。';
       return '';
     }
-    function findFirstMarkdownH1(lines){
-      let firstLine=0;
-      if(lines[0]?.trim()==='---'){const closingIndex=lines.findIndex((line,index)=>index>0&&/^\s*(?:---|\.\.\.)\s*$/.test(line));if(closingIndex>0)firstLine=closingIndex+1}
-      function hasInlineCodeCloser(startLine,runLength){
-        const delimiter='`'.repeat(runLength);
-        for(let lineIndex=startLine;lineIndex<lines.length;lineIndex++){
-          const candidate=lines[lineIndex];
-          if(!candidate.trim()||/^ {0,3}(?:#{1,6}(?:[\t ]|$)|`{3,}|~{3,})/.test(candidate)||/^ {0,3}<!--/.test(candidate))return false;
-          for(let cursor=0;cursor<candidate.length;){
-            if(candidate[cursor]==='`'){let runEnd=cursor+1;while(candidate[runEnd]==='`')runEnd++;if(runEnd-cursor===runLength)return true;cursor=runEnd;continue}
-            cursor++;
-          }
+    function findFirstMarkdownH1(source){
+      const tokens=window.marked.lexer(source,{gfm:true});
+      let offset=0;
+      for(const token of tokens){
+        const raw=String(token.raw||'');
+        if(token.type==='heading'&&token.depth===1&&raw){
+          const inlineHtml=window.marked.parseInline(token.text||'',{gfm:true});
+          const titleNode=document.createElement('div');
+          titleNode.innerHTML=window.DOMPurify.sanitize(inlineHtml);
+          return {startOffset:offset,endOffset:offset+raw.length,title:titleNode.textContent.trim()};
         }
-        return false;
-      }
-      function parseAtxHeading(line){
-        const heading=line.match(/^ {0,3}#[\t ]+(.+?)[\t ]*$/);
-        if(!heading)return null;
-        const title=heading[1].replace(/[\t ]+#+[\t ]*$/,'').trim().replace(/\\+#/g,slashesAndHash=>'\\'.repeat(Math.floor((slashesAndHash.length-1)/2))+'#');
-        return {title};
-      }
-      let fenceCharacter='',fenceLength=0,inHtmlComment=false,inlineCodeLength=0,previousContentLine=-1,previousContentStartLine=-1,inNestedBlock=false,inHtmlBlock=false;
-      for(let index=firstLine;index<lines.length;index++){
-        const line=lines[index];
-        if(!line.trim()){previousContentLine=-1;inNestedBlock=false;inHtmlBlock=false;inlineCodeLength=0;continue}
-        if(inlineCodeLength&&(!line.trim()||/^ {0,3}(?:#{1,6}(?:[\t ]|$)|`{3,}|~{3,})/.test(line)||/^ {0,3}<!--/.test(line)))inlineCodeLength=0;
-        const fence=line.match(/^ {0,3}(`{3,}|~{3,})([\t ]*)$/);
-        if(fenceCharacter){
-          if(fence&&fence[1][0]===fenceCharacter&&fence[1].length>=fenceLength)fenceCharacter='';
-          previousContentLine=-1;
-          continue;
-        }
-        if(!inHtmlComment&&inHtmlBlock){previousContentLine=-1;if(/<\/(?:address|article|aside|blockquote|body|div|dl|fieldset|footer|form|h[1-6]|header|html|main|nav|ol|p|pre|script|section|style|table|textarea|ul)\s*>/i.test(line))inHtmlBlock=false;continue}
-        const fenceOpen=line.match(/^ {0,3}(`{3,}|~{3,})/);
-        if(!inHtmlComment&&fenceOpen){fenceCharacter=fenceOpen[1][0];fenceLength=fenceOpen[1].length;previousContentLine=-1;continue}
-        const atxHeadingLine=/^ {0,3}#{1,6}(?:[\t ]|$)/.test(line);
-        if(!inHtmlComment){
-          if(inNestedBlock){if(atxHeadingLine)inNestedBlock=false;else{previousContentLine=-1;continue}}
-          if(/^ {0,3}>/.test(line)||/^ {0,3}(?:[-+*]|\d+[.)])[\t ]+/.test(line)){inNestedBlock=true;previousContentLine=-1;continue}
-          if(/^(?: {4}|\t)/.test(line)||/^ {0,3}(?:\*[\t ]*){3,}$/.test(line)||/^ {0,3}(?:-[\t ]*){3,}$/.test(line)||/^ {0,3}(?:_[\t ]*){3,}$/.test(line)){previousContentLine=-1;continue}
-          if(/^ {0,3}<(?:address|article|aside|base|blockquote|body|caption|center|col|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|ol|optgroup|option|p|param|pre|search|script|section|style|summary|table|tbody|td|tfoot|th|thead|textarea|title|tr|track|ul)(?:\s|\/?>)/i.test(line)){inHtmlBlock=true;previousContentLine=-1;continue}
-        }
-        const lineStartsInCodeSpan=inlineCodeLength>0;
-        let commentCursor=0,commentState=inHtmlComment,hadComment=inHtmlComment,commentFreeLine='';
-        while(commentCursor<line.length){
-          if(inlineCodeLength){
-            if(line[commentCursor]==='`'){let runEnd=commentCursor+1;while(line[runEnd]==='`')runEnd++;if(runEnd-commentCursor===inlineCodeLength)inlineCodeLength=0;commentFreeLine+=line.slice(commentCursor,runEnd);commentCursor=runEnd;continue}
-            commentFreeLine+=line[commentCursor++];continue;
-          }
-          if(commentState){
-            const close=line.indexOf('-->',commentCursor);
-            if(close<0)break;
-            hadComment=true;commentCursor=close+3;commentState=false;continue;
-          }
-          if(line[commentCursor]==='`'){
-            let runEnd=commentCursor+1;while(line[runEnd]==='`')runEnd++;
-            const runLength=runEnd-commentCursor;
-            const delimiter='`'.repeat(runLength),close=line.indexOf(delimiter,runEnd);
-            if(close>=0){commentFreeLine+=line.slice(commentCursor,close+runLength);commentCursor=close+runLength;continue}
-            if(hasInlineCodeCloser(index+1,runLength))inlineCodeLength=runLength;
-            commentFreeLine+=line.slice(commentCursor,runEnd);commentCursor=runEnd;continue;
-          }
-          if(line.startsWith('<!--',commentCursor)){hadComment=true;commentState=true;commentCursor+=4;continue}
-          commentFreeLine+=line[commentCursor++];
-        }
-        if(hadComment){
-          inHtmlComment=commentState;
-          const heading=!commentState&&atxHeadingLine?parseAtxHeading(commentFreeLine):null;
-          if(heading)return {index,title:heading.title,removeCount:1};
-          previousContentLine=-1;continue;
-        }
-        if(lineStartsInCodeSpan){previousContentLine=-1;continue}
-        if(/^ {0,3}\[[^\n]+\]:[\t ]+(?:<[^>\n]*>|[^\t <]+)/.test(commentFreeLine)){previousContentLine=-1;continue}
-        const setext=line.match(/^ {0,3}(=+)[\t ]*$/);
-        if(setext&&previousContentLine>=0)return {index:previousContentStartLine,title:lines.slice(previousContentStartLine,index).map(part=>part.trim()).join(' ').trim(),removeCount:index-previousContentStartLine+1};
-        if(setext){previousContentLine=-1;continue}
-        const heading=parseAtxHeading(line);
-        if(heading)return {index,title:heading.title,removeCount:1};
-        if(atxHeadingLine){previousContentLine=-1;continue}
-        if(previousContentLine<0)previousContentStartLine=index;
-        previousContentLine=index;
+        offset+=raw.length;
       }
       return null;
     }
@@ -328,11 +259,11 @@
       if(bodyInput.value.trim()&&!confirm('导入 Markdown 会替换当前正文，确定继续吗？'))return;
       try{
         const text=(await file.text()).replace(/^\uFEFF/,'').replace(/\r\n?/g,'\n');
-        const lines=text.split('\n'),heading=findFirstMarkdownH1(lines);
+        const heading=findFirstMarkdownH1(text);
         let body=text,title=Array.from(file.name.replace(/\.(md|markdown)$/i,'')).slice(0,120).join('');
         if(heading){
           title=Array.from(heading.title).slice(0,120).join('');
-          lines.splice(heading.index,heading.removeCount||1);body=lines.join('\n').replace(/^\n+/, '');
+          body=(text.slice(0,heading.startOffset)+text.slice(heading.endOffset)).replace(/^\n+/, '');
         }
         if(Array.from(body).length>20000)throw Error('Markdown 正文超过 20000 个字符，请精简后再导入。');
         titleInput.value=title;bodyInput.value=body;const recoverySaved=scheduleSave();if(recoverySaved){messageBox.classList.add('success');messageBox.textContent='Markdown 已导入，草稿正在自动保存。'}else{messageBox.classList.remove('success');messageBox.textContent='Markdown 已导入，但浏览器本地恢复保存失败，请立即复制正文。'}
