@@ -1,0 +1,110 @@
+.cf-practice-page [hidden]{display:none!important}
+.cf-main{min-width:0;max-width:1480px}
+.cf-main h1{font-size:clamp(23px,2.4vw,32px);line-height:1.4;margin:9px 0}
+.cf-main .card{margin-bottom:20px;min-width:0}
+.cf-intro{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:28px 30px;margin:12px 0 24px;border-radius:14px;background:#153f3b;color:#f3f6e8;overflow:hidden}
+.cf-intro h2{font-size:25px;margin:8px 0}
+.cf-intro p{max-width:680px;margin:0;color:#d3e4db;line-height:1.8}
+.cf-eyebrow{font:11px Consolas,monospace;letter-spacing:.16em;color:#cde484}
+.cf-intro-mark{font:40px Consolas,monospace;color:#cde484;white-space:nowrap;opacity:.85}
+.cf-message:empty{display:none}
+.cf-message{padding:12px 16px;border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:8px;background:var(--panel);line-height:1.6;overflow-wrap:anywhere}
+.cf-section-heading,.cf-result-heading,.cf-check-submit,.cf-copy-bar{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap}
+.cf-section-heading h2,.cf-result-heading h2{margin:0 0 6px;font-size:19px}
+.cf-section-heading p{margin:0;line-height:1.7}
+.cf-actions{display:flex;gap:8px;flex-wrap:wrap}
+.cf-fieldset{border:0;padding:0;margin:20px 0}
+.cf-fieldset legend{font-size:12px;color:var(--muted);margin-bottom:10px}
+.cf-status-options{display:flex;gap:8px;flex-wrap:wrap}
+.cf-status-option{display:flex;gap:8px;align-items:center;padding:8px 12px;background:var(--bg);border:1px solid var(--line);border-radius:7px;cursor:pointer}
+.cf-status-option:has(input:checked){border-color:var(--brand);background:var(--panel)}
+.cf-status-option input,.cf-member-list input,.cf-main table input{width:16px;min-width:16px;height:16px;padding:0;accent-color:var(--brand)}
+.cf-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.cf-metric{padding:13px 16px;background:var(--bg);border:1px solid var(--line);border-radius:8px}
+.cf-metric strong{display:block;font:600 26px Consolas,monospace;margin-bottom:5px;color:var(--brand)}
+.cf-metric span{font-size:12px;color:var(--muted)}
+.cf-coverage{font-size:12px;line-height:1.7}
+.cf-members{border-top:1px solid var(--line);padding-top:13px}
+.cf-members summary{cursor:pointer;font-weight:600;font-size:13px}
+.cf-member-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:14px;max-height:340px;overflow:auto}
+.cf-member-row{display:flex;align-items:start;gap:10px;padding:10px;border:1px solid var(--line);border-radius:7px;font-size:12px;overflow-wrap:anywhere;cursor:pointer}
+.cf-member-row>span{min-width:0;display:grid;gap:5px}
+.cf-member-row small{color:var(--muted);line-height:1.5}
+.cf-state{display:inline-block;padding:4px 7px;font-size:11px;border-radius:5px;border:1px solid var(--line);color:var(--text);background:var(--bg)}
+.cf-state-eligible{background:#dcebc8;color:#254b34;border-color:#98ba8c}
+.cf-state-unknown{background:#f8edcc;color:#715617;border-color:#d5bd7d}
+.cf-state-excluded_ac,.cf-state-excluded_attempted,.cf-state-invalid{background:#f1dfda;color:#784537;border-color:#d6aaa0}
+.cf-job progress{width:100%;accent-color:var(--brand);height:10px}
+.cf-job-members{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:12px;font-size:12px}
+.cf-job-members>div{padding:9px;background:var(--bg);border-radius:6px;overflow-wrap:anywhere}
+.cf-tabs{display:flex;gap:22px;border-bottom:1px solid var(--line);margin:8px 0 18px}
+.cf-tabs button{padding:13px 1px;border:0;border-bottom:3px solid transparent;background:transparent;color:var(--muted);font:600 15px var(--font-body);cursor:pointer}
+.cf-tabs button[aria-selected=true]{color:var(--brand);border-bottom-color:var(--brand)}
+.cf-recent-filters,.cf-check-controls{display:flex;align-items:end;flex-wrap:wrap;gap:12px;margin-bottom:18px}
+.cf-main label:not(.cf-status-option):not(.cf-member-row){display:grid;gap:7px;font-size:12px;color:var(--muted)}
+.cf-recent-filters>label{flex:1 1 120px;min-width:0}
+.cf-main input:not([type=checkbox]),.cf-main select,.cf-main textarea{width:100%;min-width:0;background:var(--bg);color:var(--text);font:inherit}
+.cf-recent-filters .cf-search{flex-basis:200px}
+.cf-custom-dates{display:flex;gap:10px;flex:1 1 290px}
+.cf-custom-dates label{flex:1;min-width:0}
+.cf-check-controls label{flex:1;min-width:180px}
+.cf-input-label{margin:14px 0}
+.cf-main textarea{padding:12px;resize:vertical;line-height:1.8;font-family:Consolas,monospace}
+.cf-check-submit p{flex:1;min-width:160px;line-height:1.7;font-size:12px}
+.cf-result-heading{margin:20px 0 12px}
+.cf-main table{width:100%;border-collapse:collapse;font-size:12px;min-width:630px}
+.cf-main th,.cf-main td{padding:12px 11px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;line-height:1.65}
+.cf-main td{white-space:normal;overflow-wrap:anywhere}
+.cf-main td small{display:block;color:var(--muted);max-width:360px}
+.cf-main th{background:var(--bg);font-size:11px;white-space:nowrap}
+.cf-main td .btn{padding:5px 8px;font-size:11px}
+.cf-main td a{color:var(--brand);text-decoration:underline;text-underline-offset:3px}
+.cf-main .table-wrap{max-width:100%;overflow:auto;border:1px solid var(--line);border-radius:8px}
+.cf-pagination{display:flex;align-items:center;justify-content:center;gap:16px;margin:16px 0}
+.cf-pagination span{font-size:12px}
+.cf-footnote{font-size:12px;line-height:1.8;margin:12px 0 0}
+.cf-copy-bar{margin-top:18px;padding:13px 16px;border:1px solid var(--line);border-radius:9px;background:var(--panel);box-shadow:0 7px 24px #123f3b10;font-size:13px}
+.cf-member-results{padding:12px 16px;margin:0;list-style:none}
+.cf-member-results>li{padding:13px 0;border-bottom:1px solid var(--line)}
+.cf-member-results summary{cursor:pointer;line-height:1.7;overflow-wrap:anywhere}
+.cf-mobile-results{display:none;list-style:none;margin:0;padding:0}
+.cf-mobile-results>li{padding:14px;border-bottom:1px solid var(--line);font-size:12px;overflow-wrap:anywhere}
+.cf-mobile-results>li:last-child{border-bottom:0}
+.cf-mobile-results summary{cursor:pointer;line-height:1.8}
+.cf-mobile-results summary small{display:block;color:var(--muted);margin-top:6px}
+.cf-mobile-card{display:flex;gap:12px;align-items:start}
+.cf-mobile-card>input{width:16px;min-width:16px;height:16px;margin-top:5px;accent-color:var(--brand)}
+.cf-mobile-card details{flex:1;min-width:0}
+.cf-mobile-card .cf-state{display:table;margin:7px 0 0}
+.cf-mobile-detail{margin-top:14px;line-height:1.8}
+.cf-mobile-detail a{color:var(--brand);text-decoration:underline}
+.cf-member-problems{display:grid;gap:10px;padding:12px 0;font-size:12px}
+.cf-member-problems>div{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.cf-dialog{width:min(92vw,960px);max-height:85vh;overflow:auto;padding:22px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text)}
+.cf-dialog::backdrop{background:#10262599}
+.cf-dialog .table-wrap{overflow:auto}
+.cf-dialog table{width:100%;min-width:650px;font-size:12px;border-collapse:collapse}
+.cf-dialog th,.cf-dialog td{padding:10px;border-bottom:1px solid var(--line);line-height:1.7;text-align:left}
+.cf-dialog td{white-space:normal;overflow-wrap:anywhere}
+.cf-dialog a{color:var(--brand);text-decoration:underline}
+.cf-practice-page :focus-visible{outline:3px solid var(--brand);outline-offset:3px}
+@media(max-width:720px){
+ .cf-main{padding:18px 14px 40px!important;width:100%;box-sizing:border-box}
+ .cf-main .topbar{align-items:start;flex-direction:column;gap:12px}
+ .cf-main .card{padding:17px 14px!important}
+ .cf-intro{padding:22px 18px;margin-top:18px}
+ .cf-intro h2{font-size:21px}
+ .cf-intro p{font-size:12px}
+ .cf-intro-mark{display:none}
+ .cf-section-heading{align-items:start;gap:13px}
+ .cf-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+ .cf-member-list,.cf-job-members{grid-template-columns:1fr}
+ .cf-check-controls{display:grid;grid-template-columns:1fr;align-items:stretch}
+ .cf-check-controls label{min-width:0}
+ .cf-recent-filters,.cf-custom-dates{display:grid;grid-template-columns:1fr;align-items:stretch}
+ .cf-copy-bar{padding:11px;gap:10px}
+ .cf-copy-bar .btn{padding:8px 10px;font-size:12px}
+ .cf-desktop-results{display:none}
+ .cf-mobile-results{display:block}
+ .cf-dialog{padding:17px 13px}
+}

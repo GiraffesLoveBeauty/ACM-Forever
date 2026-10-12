@@ -12,17 +12,10 @@ function mapMemberRequest(path,opt={}){
     ['/challenge/list','/me/training/challenges'],
     ['/challenge/start','/me/challenge/start'],
     ['/challenge/rating','/me/challenge/rating'],
-    ['/workspace/items','/me/workspace/items'],
     ['/problems','/me/problems'],
-    ['/submissions/attempts','/me/submissions/attempts'],
-    ['/submissions/analytics','/me/submissions/analytics'],
-    ['/reviews/drafts','/me/reviews/drafts'],
-    ['/review/queue','/me/reviews'],
-    ['/review/feedback','/me/reviews/feedback'],
     ['/training/weak-tags','/me/reviews/weak-tags'],
     ['/training/summary','/me/training/summary'],
-    ['/contest/reviews','/me/contest/reviews'],
-    ['/study-plan','/me/study-plan']
+    ['/contest/reviews','/me/contest/reviews']
   ];
   let mapped=pathname;
   for(const [from,to] of routes){
@@ -40,7 +33,11 @@ async function api(path,opt={}){
   ({path,opt}=mapMemberRequest(path,opt));
   const requestTimeoutMs=Number(opt.timeoutMs)||15000;
   const {timeoutMs,...fetchOptions}=opt;
+  const externalSignal=fetchOptions.signal;
   const controller=fetchOptions.keepalive?null:new AbortController();
+  const abort=()=>controller?.abort();
+  if(controller&&externalSignal?.aborted)abort();
+  else if(controller)externalSignal?.addEventListener('abort',abort,{once:true});
   const timer=controller?setTimeout(()=>controller.abort(),requestTimeoutMs):null;
   try{
     const isMultipart=typeof FormData!=='undefined'&&fetchOptions.body instanceof FormData;
@@ -48,24 +45,24 @@ async function api(path,opt={}){
     const response=await fetch('/api'+path,{credentials:'same-origin',...fetchOptions,...(controller?{signal:controller.signal}:{}),headers:requestHeaders});
     const data=await response.json().catch(()=>({}));
     if(response.status===401&&!path.startsWith('/auth/login')){location.href='/login.html?next='+encodeURIComponent(location.pathname+location.search);throw Error('请先登录')}
-    if(response.status===428){location.href='/change-password.html';throw Error('请先修改初始密码')}
-    if(!response.ok)throw Error(data.message||data.error||`HTTP ${response.status}`);
+    if(response.status===428){location.href='/change-password.html?next='+encodeURIComponent(location.pathname+location.search);throw Error('请先修改初始密码')}
+    if(!response.ok){const error=Error(data.message||data.error||`HTTP ${response.status}`);error.status=response.status;error.code=data.code||data.error_code||null;error.details=data;throw error}
     return data;
-  }finally{if(timer)clearTimeout(timer)}
+  }finally{if(timer)clearTimeout(timer);if(controller)externalSignal?.removeEventListener('abort',abort)}
 }
 
 function navItems(){
-  const common=[['forum','⌂ 论坛','/index.html'],['leaderboard','♛ 排行榜','/leaderboard.html'],['home','◉ 个人中心','/home.html'],['challenge','◎ 今日训练','/challenge.html'],['reviews','✓ 待复盘','/reviews.html'],['problem-bank','▦ 题库','/problem-bank.html'],['submissions','◷ 提交时间线','/submissions.html'],['workspace','✎ 笔记与计划','/workspace.html'],['contest-review','◈ 赛事复盘','/contest-review.html']];
+  const common=[['forum','⌂ 论坛','/index.html'],['leaderboard','♛ 排行榜','/leaderboard.html'],['home','◉ 个人中心','/home.html']];
   if(!AUTH.authenticated)return [...common.slice(0,2),['login','登录','/login.html']];
   if(AUTH.role==='member')return common;
-  return [...common,['forum-moderation','☷ 内容审核','/forum-moderation.html'],['admin','⚙ 管理后台','/admin.html']];
+  return [...common,['admin','⚙ 管理后台','/admin.html']];
 }
 
 async function renderNav(){
   const items=navItems();
   let order=items.map(item=>item[0]),hidden=new Set();
   if(AUTH.role==='admin'||AUTH.role==='root'){
-    try{const preferences=await api('/ui/preferences');if(Array.isArray(preferences.nav_order)&&preferences.nav_order.length)order=preferences.nav_order;hidden=new Set(Array.isArray(preferences.nav_hidden)?preferences.nav_hidden:[]);if(preferences.font_scale)document.documentElement.style.setProperty('--font-scale',preferences.font_scale)}catch{}
+    try{const preferences=await api('/ui/preferences');if(preferences.font_scale)document.documentElement.style.setProperty('--font-scale',preferences.font_scale)}catch{}
     if(!order.includes('admin'))order.push('admin');
   }
   const byId=new Map(items.map(item=>[item[0],item]));
@@ -122,32 +119,8 @@ function avatarMarkup(url,name,classes=''){
   const source=typeof url==='string'&&/^\/uploads\/avatars\/[a-f0-9]{32}\.(?:png|jpg|webp)$/.test(url)?url:'/assets/default-avatar.png';
   return `<img class="user-avatar ${classes}" src="${source}" alt="${esc(name||'计量 ACMer')} 的头像" loading="lazy" onerror="this.onerror=null;this.src='/assets/default-avatar.png'">`;
 }
-const PALETTE_OPTIONS=[['mint','清绿'],['gray','白灰'],['sunshine','暖黄'],['rose','柔粉']];
-function applyPalette(palette){
-  const selected=PALETTE_OPTIONS.some(([key])=>key===palette)?palette:'mint';
-  document.documentElement.dataset.palette=selected;
-  localStorage.setItem('palette',selected);
-  document.querySelectorAll('.palette-option').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.palette===selected)));
-}
-function mountPalettePicker(){
-  applyPalette(localStorage.getItem('palette')||'mint');
-  const themeButton=$('#theme-toggle');
-  const host=themeButton?.parentElement||document.querySelector('.topbar .userbar')||document.querySelector('.login > .card')||$('#change-password-panel form');
-  if(!host||document.querySelector('.palette-picker'))return;
-  const picker=document.createElement('div');
-  picker.className='palette-picker';
-  picker.innerHTML=`<button class="btn palette-trigger" type="button" aria-label="选择整体配色" title="选择整体配色" aria-controls="palette-menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18h1.4a2.6 2.6 0 0 0 1.8-4.5 1.2 1.2 0 0 1 .8-2.1H18a3 3 0 0 0 3-3c0-4.6-4-8.4-9-8.4Z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7.5" r="1"/><circle cx="14.5" cy="7.5" r="1"/><circle cx="17" cy="11" r="1"/></svg></button><div id="palette-menu" class="palette-menu" hidden role="group" aria-label="整体配色">${PALETTE_OPTIONS.map(([key,label])=>`<button type="button" class="palette-option" data-palette="${key}" aria-pressed="false"><span class="palette-swatch palette-swatch-${key}" aria-hidden="true"></span><span>${label}</span><span class="palette-check" aria-hidden="true">✓</span></button>`).join('')}</div>`;
-  if(themeButton)themeButton.insertAdjacentElement('afterend',picker);else host.append(picker);
-  applyPalette(document.documentElement.dataset.palette);
-  const trigger=picker.querySelector('.palette-trigger');
-  const menu=picker.querySelector('.palette-menu');
-  const closeMenu=()=>{menu.hidden=true;trigger.setAttribute('aria-expanded','false')};
-  trigger.onclick=()=>{menu.hidden=!menu.hidden;trigger.setAttribute('aria-expanded',String(!menu.hidden))};
-  picker.querySelectorAll('.palette-option').forEach(button=>button.onclick=()=>{applyPalette(button.dataset.palette);closeMenu();trigger.focus()});
-  document.addEventListener('click',event=>{if(!picker.contains(event.target))closeMenu()});
-  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!menu.hidden){closeMenu();trigger.focus()}});
-}
-function toggleTheme(){const theme=document.body.dataset.theme==='dark'?'light':'dark';document.body.dataset.theme=theme;localStorage.theme=theme}
+function mountPalettePicker(){window.ACMTheme?.init()}
+function toggleTheme(){window.ACMTheme?.toggle()}
 function animateNumbers(root=document){
   if(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)return;
   root.querySelectorAll('.profile-stat-card .value,.rank-total').forEach((node,index)=>{
@@ -176,15 +149,21 @@ async function login(event){
     const data=await api('/auth/login',{method:'POST',body:JSON.stringify({qq_id:/^\d{4,12}$/.test(identifier)?identifier:'',username:identifier,password})});
     csrf=data.csrf_token||'';
     const next=new URLSearchParams(location.search).get('next')||'/index.html';
-    const safeNext=next.startsWith('/')&&!next.startsWith('//')?next:'/index.html';
-    location.href=data.must_change_password?'/change-password.html':safeNext;
+    const safeNext=localNext(next,'/index.html');
+    location.href=data.must_change_password?'/change-password.html?next='+encodeURIComponent(safeNext):safeNext;
   }catch(error){const message=$('#login-message');if(message)message.textContent=error.message}
 }
 async function logout(){try{await api('/auth/logout',{method:'POST'})}catch{}location.href='/index.html'}
 
 async function init(){
-  mountPalettePicker();
-  document.body.dataset.theme=localStorage.theme||'light';
+  try{
+    if(!window.ACMTheme)await new Promise((resolve,reject)=>{
+      const script=document.createElement('script');
+      script.src='/assets/theme-editor.js?v=custom-theme-2';
+      script.onload=resolve;script.onerror=reject;document.head.append(script);
+    });
+    mountPalettePicker();
+  }catch(error){console.error('自助调色加载失败',error)}
   try{const response=await fetch('/api/auth/me',{credentials:'same-origin'});AUTH=await response.json();}catch{AUTH={authenticated:false}}
   window.AUTH=AUTH;
   const page=location.pathname.split('/').pop()||'index.html';
@@ -198,8 +177,8 @@ async function init(){
     location.replace('/login.html?next='+encodeURIComponent(location.pathname+location.search));return;
   }
   csrf=AUTH.csrf_token||'';
-  if(AUTH.must_change_password&&page!=='change-password.html'){location.replace('/change-password.html');return}
-  if(page==='login.html'){location.replace('/index.html');return}
+  if(AUTH.must_change_password&&page!=='change-password.html'){const target=page==='login.html'?localNext(new URLSearchParams(location.search).get('next'),'/home.html'):location.pathname+location.search;location.replace('/change-password.html?next='+encodeURIComponent(target));return}
+  if(page==='login.html'){location.replace(localNext(new URLSearchParams(location.search).get('next'),'/index.html'));return}
   if(page==='change-password.html')return;
   await renderNav();lockOwnerInputs();
   const requestedMember=new URLSearchParams(location.search).get('qq_id');
@@ -215,4 +194,5 @@ document.addEventListener('DOMContentLoaded',()=>{
   const exit=$('#logout');if(exit)exit.onclick=logout;
   init();
 });
-window.api=api;window.esc=esc;window.AUTH=AUTH;window.avatarMarkup=avatarMarkup;window.setAccountAvatar=setAccountAvatar;window.animateNumbers=animateNumbers;
+function localNext(value,fallback='/home.html'){return typeof value==='string'&&value.startsWith('/')&&!value.startsWith('//')&&!/[\\\x00-\x1f]/.test(value)&&new URL(value,location.origin).origin===location.origin?value:fallback}
+window.api=api;window.esc=esc;window.AUTH=AUTH;window.avatarMarkup=avatarMarkup;window.setAccountAvatar=setAccountAvatar;window.animateNumbers=animateNumbers;window.localNext=localNext;

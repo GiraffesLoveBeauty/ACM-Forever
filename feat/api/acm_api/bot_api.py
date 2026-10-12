@@ -6,7 +6,8 @@ from functools import wraps
 import aiosqlite
 from quart import Blueprint, current_app, jsonify, request
 
-from .backend_api import _fetch_leaderboard, _leaderboard_options
+from .backend_api import _clear_platform_records, _fetch_leaderboard, _leaderboard_options
+from .cf_client import cf_request
 from .database import validate_submission_data
 from .difficulty import challenge_filter, challenge_time_limit, neighboring_difficulties, normalize_platform
 from .training_logic import score_candidate
@@ -52,23 +53,7 @@ async def _codeforces_api_call(method, params):
     engine = getattr(current_app, "sync_engine", None)
     if not engine or not engine._http_session:
         raise ConnectionError("Codeforces API proxy is unavailable.")
-    from urllib.parse import urlencode
-    from .crawler import Crawler
-    query = dict(params)
-    config = engine._crawler_config()
-    api_key = config.get("cf_api_key", "")
-    api_secret = config.get("cf_api_secret", "")
-    if api_key and api_secret and method in {"user.info", "user.rating", "user.status"}:
-        query.update(apiKey=api_key, time=str(int(time.time())))
-        query["apiSig"] = Crawler._generate_cf_api_sig(method, query, api_key, api_secret)
-    async with engine._http_session.get(
-        "https://codeforces.com/api/" + method + "?" + urlencode(query), timeout=30
-    ) as response:
-        response.raise_for_status()
-        payload = await response.json()
-    if payload.get("status") != "OK":
-        raise ValueError(str(payload.get("comment") or "Codeforces request failed.")[:300])
-    return payload.get("result")
+    return await cf_request(engine._http_session, method, params, engine._crawler_config())
 
 
 def _qq(value):
@@ -498,26 +483,7 @@ async def remove_account_binding(qq_id, platform):
             await db.commit()
             return jsonify({"success": False, "message": "No account is bound for this platform."}), 404
         await db.execute(f"UPDATE users SET {field}=NULL WHERE qq_id=?", (qq_id,))
-        for table, owner_field in (
-            ("submissions", "user_qq_id"),
-            ("submission_attempts", "owner_qq_id"),
-            ("user_problem_state", "owner_qq_id"),
-            ("review_states", "owner_qq_id"),
-            ("study_plan_items", "owner_qq_id"),
-        ):
-            await db.execute(
-                f"DELETE FROM {table} WHERE {owner_field}=? AND platform=?",
-                (qq_id, normalized_platform),
-            )
-        await db.execute(
-            "UPDATE random_challenges SET status='abandoned' "
-            "WHERE qq_id=? AND platform=? AND status='active'",
-            (qq_id, normalized_platform),
-        )
-        await db.execute(
-            "DELETE FROM user_platform_sync_state WHERE user_qq_id=? AND platform=?",
-            (qq_id, normalized_platform),
-        )
+        await _clear_platform_records(db, qq_id, normalized_platform)
         await db.commit()
         return jsonify({"success": True})
     except Exception:

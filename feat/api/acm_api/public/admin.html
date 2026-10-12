@@ -3,209 +3,45 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>管理后台 · ACM Compass</title>
+  <meta name="theme-color" content="#f4f7f3">
+  <title>成员账号 · ACM Forever 管理后台</title>
   <link rel="stylesheet" href="/assets/app.css?v=palette-theme-4">
+  <link rel="stylesheet" href="/assets/admin.css?v=unified-admin-1">
+  <link rel="stylesheet" href="/assets/cf-practice.css?v=unified-admin-1">
+  <link rel="stylesheet" href="/assets/forum.css?v=unified-admin-1">
+  <script src="/assets/vendor/marked.min.js" defer></script><script src="/assets/vendor/purify.min.js" defer></script><script src="/assets/forum-markdown.js?v=unified-admin-1" defer></script>
 </head>
-<body>
-  <div class="app">
-    <aside class="sidebar"><div class="brand"><b>✦</b> ACM Compass</div><nav class="nav"></nav></aside>
-    <main class="main">
-      <header class="topbar">
-        <div><div class="eyebrow">Administration</div><h1>管理后台</h1><span class="muted">成员账号、同步任务和全局配置</span></div>
-        <div class="userbar"><a class="btn" href="/change-password.html">修改密码</a><button class="btn" id="theme-toggle">◐</button><button class="btn" id="logout">退出</button></div>
+<body class="admin-console">
+  <div class="admin-shell">
+    <aside class="admin-rail" aria-label="管理后台导航">
+      <a class="admin-brand" href="/admin.html" aria-label="ACM Forever 管理后台首页">
+        <span class="admin-brand-mark" aria-hidden="true">A<span>C</span></span>
+        <span><b>ACM Forever</b><small>管理后台</small></span>
+      </a>
+      <nav class="admin-nav" aria-label="功能模块">
+<div class="admin-rail-label">账户与成员</div>
+<a href="/admin.html" data-section="accounts"><span class="admin-nav-icon">▤</span>成员账号</a>
+<a href="/admin.html?section=members" data-section="members"><span class="admin-nav-icon">◉</span>成员资料</a>
+<div class="admin-rail-label">训练与题目</div>
+<a href="/admin.html?section=training" data-section="training"><span class="admin-nav-icon">◎</span>训练管理</a>
+<a href="/admin.html?section=problems" data-section="problems"><span class="admin-nav-icon">▦</span>题库管理</a>
+<a href="/admin.html?section=cf-practice" data-section="cf-practice"><span class="admin-nav-icon">⌘</span>CF 练习赛选题</a>
+<a href="/admin.html?section=contests" data-section="contests"><span class="admin-nav-icon">◈</span>赛事复盘</a>
+<a href="/admin.html?section=tasks" data-section="tasks"><span class="admin-nav-icon">↻</span>同步任务</a>
+<div class="admin-rail-label">社区与系统</div>
+<a href="/admin.html?section=moderation" data-section="moderation"><span class="admin-nav-icon">☷</span>内容审核</a>
+<a href="/admin.html?section=settings" data-section="settings"><span class="admin-nav-icon">⚙</span>全局设置</a>
+</nav>
+      <div class="admin-rail-foot"><a class="admin-return" href="/index.html">← 返回社区</a><span class="admin-rail-status"><span class="admin-status-dot"></span> 管理操作即时生效</span></div>
+    </aside>
+    <main class="admin-main">
+      <header class="admin-topbar">
+        <div><p class="admin-page-path" id="admin-breadcrumb">管理后台 <span>/</span> 成员账号</p><h1 id="admin-title">成员账号</h1><p class="admin-lede" id="admin-lede">发放社区账号，维护登录权限。</p></div>
+        <div class="admin-actions"><a class="admin-action-link" id="admin-password" href="/change-password.html?next=%2Fadmin.html">修改密码</a><button class="admin-icon-button" id="theme-toggle" aria-label="切换主题" title="切换主题">◐</button><button class="admin-logout" id="logout">退出</button></div>
       </header>
-
-      <section class="card">
-        <h2>批量发放已有成员账号</h2>
-        <p class="muted">临时密码由服务端生成，为六位数字，有效期按配置默认 72 小时。密码只在成功响应中出现一次，请通过安全渠道交给成员。</p>
-        <div class="filters">
-          <input id="candidate-search" placeholder="按昵称、QQ 或学校搜索">
-          <label class="chip"><input id="include-issued" type="checkbox"> 同时显示已发放账号</label>
-          <button class="btn primary" id="search-candidates">搜索成员</button>
-        </div>
-        <div class="topbar" style="margin-top:12px">
-          <span id="candidate-summary" class="muted">正在加载成员…</span>
-          <span id="selected-count" class="muted">已选 0 / 20</span>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th><input id="select-page" type="checkbox" aria-label="选择本页未发号成员"></th><th>QQ</th><th>昵称</th><th>学校</th><th>身份/年级</th><th>Web 账号</th></tr></thead>
-            <tbody id="candidate-rows"><tr><td colspan="6" class="empty">正在加载成员…</td></tr></tbody>
-          </table>
-        </div>
-        <div class="topbar" style="margin-top:12px">
-          <button class="btn" id="candidate-prev">上一页</button>
-          <span id="candidate-page" class="muted">—</span>
-          <button class="btn" id="candidate-next">下一页</button>
-          <button class="btn primary" id="batch-issue">为已选成员生成账号</button>
-        </div>
-        <div id="candidate-message" class="muted" role="status"></div>
-        <section id="issuance-results" class="card" style="display:none;margin-top:16px">
-          <div class="topbar"><div><h2>本次发放结果</h2><p class="muted">离开此页面或刷新后，不会再次提供临时密码。</p></div>
-            <span class="chips"><button class="btn" id="copy-credentials">复制账密</button><button class="btn" id="download-credentials">下载 CSV</button></span>
-          </div>
-          <div id="issuance-summary" class="muted"></div>
-          <div class="table-wrap"><table><thead><tr><th>QQ</th><th>昵称</th><th>临时密码</th><th>过期时间</th></tr></thead><tbody id="issuance-rows"></tbody></table></div>
-          <div id="skipped-rows" class="list"></div>
-        </section>
-      </section>
-
-      <section class="card" style="margin-top:18px">
-        <h2>单人创建账号（用于新增成员或管理员）</h2>
-        <p class="muted">管理员角色仍需使用符合正式密码强度要求的初始密码；创建普通成员时也可使用此入口。</p>
-        <div class="filters">
-          <input id="account-qq" inputmode="numeric" placeholder="成员 QQ 号">
-          <input id="account-name" placeholder="昵称（新成员必填）">
-          <input id="account-password" type="password" autocomplete="new-password" placeholder="初始密码（至少 12 位）">
-          <input id="account-status" placeholder="身份/年级（可选）">
-          <input id="account-school" placeholder="学校（可选）">
-          <select id="account-role"><option value="member">成员</option><option value="admin">Web 管理员</option><option value="root">Web root</option></select>
-          <button class="btn primary" id="create-account">创建账号</button>
-        </div>
-        <div id="account-message" class="muted" role="status"></div>
-        <div id="accounts" class="list"><div class="empty">正在加载账号…</div></div>
-      </section>
-
-      <section class="grid two" style="margin-top:18px">
-        <a class="card" href="/member.html"><h2>成员及 OJ 资料</h2><p class="muted">编辑成员资料、绑定 OJ 账号并查看个人统计。</p></a>
-        <a class="card" href="/tasks.html"><h2>同步任务</h2><p class="muted">查看后台同步状态。</p></a>
-        <a class="card" href="/settings.html"><h2>全局设置与 QQ Bot 管理员</h2><p class="muted">播报、界面偏好和机器人命令权限。</p></a>
-        <a class="card" href="/leaderboard.html"><h2>排行榜</h2><p class="muted">查看成员训练统计。</p></a>
-      </section>
+<p id="admin-notice" class="admin-message" role="status" aria-live="polite"></p><div id="admin-content" class="admin-content"><div class="empty">正在加载模块…</div></div>
     </main>
-  </div>
-  <script src="/assets/app.js?v=forum-header-avatar-6"></script>
-  <script>
-    const accountMessage=document.getElementById('account-message');
-    const candidateMessage=document.getElementById('candidate-message');
-    const selectedQQs=new Set();
-    const candidateNames=new Map();
-    let candidateData={items:[],page:1,page_size:20,total:0};
-    let visibleCredentials=[];
+  </div><script src="/assets/app.js?v=unified-admin-1"></script>
 
-    function notice(element,text){element.textContent=text;setTimeout(()=>{if(element.textContent===text)element.textContent=''},6000)}
-    function expiryLabel(timestamp){return timestamp?new Date(Number(timestamp)*1000).toLocaleString():'—'}
-    function reasonLabel(reason){return ({already_exists:'已有账号',member_not_found:'成员不存在',duplicate_in_request:'请求中重复',invalid_qq:'QQ号格式无效',account_conflict:'账号创建冲突'})[reason]||reason}
-    function refreshSelectionUi(){
-      document.getElementById('selected-count').textContent=`已选 ${selectedQQs.size} / 20`;
-      const selectable=[...document.querySelectorAll('.candidate-select:not(:disabled)')];
-      const checked=selectable.filter(box=>box.checked).length;
-      const selectPage=document.getElementById('select-page');
-      selectPage.checked=selectable.length>0&&checked===selectable.length;
-      selectPage.indeterminate=checked>0&&checked<selectable.length;
-      document.querySelectorAll('.candidate-select:not(:disabled)').forEach(box=>{box.disabled=!box.checked&&selectedQQs.size>=20});
-      document.getElementById('batch-issue').disabled=selectedQQs.size===0;
-    }
-    function renderCandidates(){
-      const rows=document.getElementById('candidate-rows');
-      if(!candidateData.items.length){rows.innerHTML='<tr><td colspan="6" class="empty">没有匹配成员</td></tr>'}
-      else rows.innerHTML=candidateData.items.map(item=>{
-        candidateNames.set(item.qq_id,item.name||'未命名');
-        const issued=item.has_web_account;
-        const checked=selectedQQs.has(item.qq_id);
-        const status=issued?`${esc(item.role||'已有账号')} · ${item.is_active?'启用':'停用'}${item.must_change_password?' · 待改密':''}`:'未发放';
-        return `<tr><td><input class="candidate-select" type="checkbox" data-qq="${esc(item.qq_id)}" ${checked?'checked':''} ${issued?'disabled':''}></td><td>${esc(item.qq_id)}</td><td>${esc(item.name||'未命名')}</td><td>${esc(item.school||'—')}</td><td>${esc(item.status||'—')}</td><td>${status}</td></tr>`;
-      }).join('');
-      const pages=Math.max(1,Math.ceil(candidateData.total/candidateData.page_size));
-      document.getElementById('candidate-summary').textContent=`共 ${candidateData.total} 位成员${document.getElementById('include-issued').checked?'（含已发放账号）':'（仅未发放账号）'}`;
-      document.getElementById('candidate-page').textContent=`第 ${candidateData.page} / ${pages} 页`;
-      document.getElementById('candidate-prev').disabled=candidateData.page<=1;
-      document.getElementById('candidate-next').disabled=candidateData.page>=pages;
-      refreshSelectionUi();
-    }
-    async function loadCandidates(resetPage=false){
-      if(resetPage)candidateData.page=1;
-      const params=new URLSearchParams({search:document.getElementById('candidate-search').value.trim(),page:String(candidateData.page),page_size:String(candidateData.page_size)});
-      if(document.getElementById('include-issued').checked)params.set('include_issued','1');
-      try{candidateData=await api('/admin/web-account-candidates?'+params.toString());renderCandidates()}
-      catch(error){document.getElementById('candidate-rows').innerHTML=`<tr><td colspan="6" class="empty">${esc(error.message)}</td></tr>`}
-    }
-    async function loadAccounts(){
-      try{
-        const rows=await api('/admin/web-accounts');
-        rows.forEach(row=>candidateNames.set(row.qq_id,row.name||'未命名'));
-        document.getElementById('accounts').innerHTML=rows.map(row=>`<article class="list-item"><span><b>${esc(row.name||'未命名')} · QQ ${esc(row.qq_id)}</b><br><small class="muted">${esc(row.role)} · ${row.is_active?'启用':'停用'} · ${row.must_change_password?'需首次改密':'已完成改密'} · 临时密码期限 ${row.must_change_password?expiryLabel(row.temporary_password_expires_at):'—'} · 最近登录 ${row.last_login_at?new Date(row.last_login_at*1000).toLocaleString():'从未'}</small></span><span class="chips">${row.role==='member'&&row.must_change_password&&row.is_active?`<button class="btn" onclick="resetTemporaryPassword('${esc(row.qq_id)}')">重发临时密码</button>`:''}<button class="btn" onclick="resetPassword('${esc(row.qq_id)}')">设置初始密码</button><button class="btn" onclick="toggleAccount('${esc(row.qq_id)}',${!row.is_active})">${row.is_active?'停用':'启用'}</button>${AUTH.role==='root'?`<select onchange="setRole('${esc(row.qq_id)}',this.value)"><option value="member"${row.role==='member'?' selected':''}>成员</option><option value="admin"${row.role==='admin'?' selected':''}>管理员</option><option value="root"${row.role==='root'?' selected':''}>Root</option></select>`:''}</span></article>`).join('')||'<div class="empty">尚未建立 Web 成员账号</div>'
-      }catch(error){document.getElementById('accounts').innerHTML=`<div class="empty">${esc(error.message)}</div>`}
-    }
-    function renderIssuanceResults(result){
-      visibleCredentials=(result.created||[]).map(item=>({qq_id:item.qq_id,name:item.name||candidateNames.get(item.qq_id)||'未命名',temporary_password:item.temporary_password,expires_at:item.expires_at}));
-      const box=document.getElementById('issuance-results');box.style.display='block';
-      document.getElementById('issuance-summary').textContent=`成功发放 ${visibleCredentials.length} 个，跳过 ${(result.skipped||[]).length} 个。请现在复制或下载；离开页面后无法恢复明文。`;
-      document.getElementById('issuance-rows').innerHTML=visibleCredentials.map(item=>`<tr><td>${esc(item.qq_id)}</td><td>${esc(item.name)}</td><td><code>${esc(item.temporary_password)}</code></td><td>${esc(expiryLabel(item.expires_at))}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">本次没有新发放账号</td></tr>';
-      document.getElementById('skipped-rows').innerHTML=(result.skipped||[]).map(item=>`<div class="list-item"><span>QQ ${esc(item.qq_id||'—')}</span><span class="muted">${esc(reasonLabel(item.reason))}</span></div>`).join('');
-      box.scrollIntoView({behavior:'smooth',block:'nearest'});
-    }
-    async function issueSelected(){
-      const qqIds=[...selectedQQs];
-      if(!qqIds.length||qqIds.length>20)return;
-      const names=qqIds.map(qq=>`${candidateNames.get(qq)||'未命名'}（${qq}）`).join('\n');
-      if(!confirm(`将为以下 ${qqIds.length} 位成员生成 Web 成员账号和六位临时密码：\n\n${names}\n\n确认继续？`))return;
-      try{
-        const result=await api('/admin/web-accounts/batch',{method:'POST',timeoutMs:30000,body:JSON.stringify({qq_ids:qqIds})});
-        for(const item of [...(result.created||[]),...(result.skipped||[]).filter(x=>['already_exists','member_not_found'].includes(x.reason))])selectedQQs.delete(item.qq_id);
-        renderIssuanceResults(result);await Promise.all([loadCandidates(),loadAccounts()]);refreshSelectionUi();
-      }catch(error){notice(candidateMessage,error.message)}
-    }
-    async function copyCredentials(){
-      if(!visibleCredentials.length)return;
-      const text=visibleCredentials.map(item=>`${item.qq_id}\t${item.name}\t${item.temporary_password}\t${expiryLabel(item.expires_at)}`).join('\n');
-      try{await navigator.clipboard.writeText(text);notice(candidateMessage,'已复制本次成功发放的 QQ、昵称、临时密码和过期时间。')}
-      catch{const area=document.createElement('textarea');area.value=text;document.body.appendChild(area);area.select();document.execCommand('copy');area.remove();notice(candidateMessage,'已尝试复制账密。')}
-    }
-    function csvCell(value){let text=String(value??'');if(/^[=+@\-]/.test(text))text="'"+text;return '"'+text.replace(/"/g,'""')+'"'}
-    function downloadCredentials(){
-      if(!visibleCredentials.length)return;
-      const lines=[['QQ','昵称','临时密码','过期时间'],...visibleCredentials.map(item=>[item.qq_id,item.name,item.temporary_password,expiryLabel(item.expires_at)])].map(row=>row.map(csvCell).join(','));
-      const url=URL.createObjectURL(new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'}));
-      const link=document.createElement('a');link.href=url;link.download='web-member-accounts.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
-    }
-    async function createAccount(){
-      const body={qq_id:document.getElementById('account-qq').value.trim(),name:document.getElementById('account-name').value.trim(),initial_password:document.getElementById('account-password').value,status:document.getElementById('account-status').value,school:document.getElementById('account-school').value,role:document.getElementById('account-role').value};
-      try{const result=await api('/admin/web-accounts',{method:'POST',body:JSON.stringify(body)});notice(accountMessage,result.message);document.getElementById('account-password').value='';await Promise.all([loadCandidates(),loadAccounts()])}
-      catch(error){notice(accountMessage,error.message)}
-    }
-    async function resetPassword(qq){
-      const password=prompt('设置新的初始密码（至少 12 位）。请通过安全渠道转交，系统不会再次显示。');if(!password)return;
-      try{await api('/admin/web-accounts/'+encodeURIComponent(qq)+'/reset-password',{method:'POST',body:JSON.stringify({initial_password:password})});notice(accountMessage,'已设置初始密码，成员必须在有效期内登录并修改。');await loadAccounts()}
-      catch(error){notice(accountMessage,error.message)}
-    }
-    async function resetTemporaryPassword(qq){
-      if(!confirm(`为 QQ ${qq} 重新生成临时密码？旧临时密码将立即失效。`))return;
-      try{const result=await api(`/admin/web-accounts/${encodeURIComponent(qq)}/reset-temporary-password`,{method:'POST'});renderIssuanceResults({created:[{...result,name:candidateNames.get(qq)||''}],skipped:[]});await loadAccounts()}
-      catch(error){notice(accountMessage,error.message)}
-    }
-    async function toggleAccount(qq,is_active){try{await api('/admin/web-accounts/'+encodeURIComponent(qq),{method:'PATCH',body:JSON.stringify({is_active})});notice(accountMessage,is_active?'账号已启用。':'账号已停用，旧会话已失效。');await Promise.all([loadCandidates(),loadAccounts()])}catch(error){notice(accountMessage,error.message)}}
-    async function setRole(qq,role){try{await api('/admin/web-accounts/'+encodeURIComponent(qq),{method:'PATCH',body:JSON.stringify({role})});notice(accountMessage,'账号角色已更新，旧会话已失效。');await Promise.all([loadCandidates(),loadAccounts()])}catch(error){notice(accountMessage,error.message);await loadAccounts()}}
-
-    document.getElementById('candidate-rows').addEventListener('change',event=>{
-      const box=event.target.closest('.candidate-select');if(!box)return;
-      if(box.checked){if(selectedQQs.size>=20){box.checked=false;notice(candidateMessage,'每批最多选择 20 位成员。');return}selectedQQs.add(box.dataset.qq)}else selectedQQs.delete(box.dataset.qq);
-      refreshSelectionUi();
-    });
-    document.getElementById('select-page').addEventListener('change',event=>{
-      for(const box of document.querySelectorAll('.candidate-select:not(:disabled)')){
-        if(event.target.checked&&selectedQQs.size>=20&&!selectedQQs.has(box.dataset.qq)){notice(candidateMessage,'每批最多选择 20 位成员。');break}
-        box.checked=event.target.checked;
-        if(box.checked)selectedQQs.add(box.dataset.qq);else selectedQQs.delete(box.dataset.qq);
-      }
-      renderCandidates();
-    });
-    document.getElementById('search-candidates').onclick=()=>loadCandidates(true);
-    document.getElementById('candidate-search').addEventListener('keydown',event=>{if(event.key==='Enter')loadCandidates(true)});
-    document.getElementById('include-issued').onchange=()=>loadCandidates(true);
-    document.getElementById('candidate-prev').onclick=()=>{if(candidateData.page>1){candidateData.page--;loadCandidates()}};
-    document.getElementById('candidate-next').onclick=()=>{if(candidateData.page<Math.ceil(candidateData.total/candidateData.page_size)){candidateData.page++;loadCandidates()}};
-    document.getElementById('batch-issue').onclick=issueSelected;
-    document.getElementById('copy-credentials').onclick=copyCredentials;
-    document.getElementById('download-credentials').onclick=downloadCredentials;
-    document.getElementById('create-account').onclick=createAccount;
-    window.addEventListener('pagehide',()=>{
-      visibleCredentials=[];
-      document.getElementById('issuance-rows').replaceChildren();
-      document.getElementById('skipped-rows').replaceChildren();
-      document.getElementById('issuance-results').style.display='none';
-    });
-    window.PAGE_LOAD=async()=>{await Promise.all([loadCandidates(),loadAccounts()])};
-  </script>
-</body>
+<script type="module" src="/assets/admin/router.js?v=unified-admin-1"></script></body>
 </html>

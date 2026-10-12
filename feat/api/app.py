@@ -5,6 +5,7 @@ import os
 import re
 import sqlite3
 from pathlib import Path
+from urllib.parse import urlencode
 
 from quart import Quart, abort, jsonify, redirect, request, send_from_directory
 
@@ -13,6 +14,9 @@ from .acm_api.bot_api import bot_api
 from .acm_api.auth_service import hash_password, validate_password
 from .acm_api.database import connect_db
 from .acm_api.forum_api import forum_api
+from .acm_api.cf_practice import PracticeQuery
+from .acm_api.cf_practice_api import cf_practice_api
+from .acm_api.cf_practice_jobs import PracticeJobs
 from .service_runtime import SyncEngine, WebTaskManager, create_web_challenge
 
 
@@ -80,6 +84,14 @@ def create_app():
 
     sync_engine = SyncEngine(db_path, crawler_config)
     task_manager = WebTaskManager(sync_engine)
+    data_ttl_hours = int(os.getenv("ACM_CF_DATA_TTL_HOURS", "24"))
+    problem_ttl_hours = int(os.getenv("ACM_CF_PROBLEM_TTL_HOURS", "6"))
+    if not 1 <= data_ttl_hours <= 720 or not 1 <= problem_ttl_hours <= 720:
+        raise ValueError("CF data/problem TTL hours must be between 1 and 720")
+    practice_query = PracticeQuery(data_ttl_hours * 3600, problem_ttl_hours * 3600)
+    practice_jobs = PracticeJobs(db_path, sync_engine, practice_query)
+    app.config["CF_PRACTICE_QUERY"] = practice_query
+    app.config["CF_PRACTICE_JOBS"] = practice_jobs
 
     def admin_snapshot():
         return {
@@ -152,9 +164,11 @@ def create_app():
         finally:
             await db.close()
         await sync_engine.start()
+        await practice_jobs.start()
 
     @app.after_serving
     async def close_service():
+        await practice_jobs.close()
         await sync_engine.close()
 
     @app.get("/health")
@@ -173,7 +187,7 @@ def create_app():
 
         identity = await _session_identity()
         if identity and identity["must_change_password"]:
-            return redirect("/change-password.html")
+            return redirect("/change-password.html?" + urlencode({"next": "/"}))
         return await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], "index.html")
 
     @app.get("/<path:filename>")
@@ -193,21 +207,34 @@ def create_app():
         from .acm_api.backend_api import _session_identity
 
         identity = await _session_identity()
+        target = request.full_path.rstrip("?")
+        legacy = _LEGACY_ADMIN_PAGES.get(filename)
+        if legacy and (filename in _ADMIN_PAGES or identity and identity["role"] in {"admin", "root"}):
+            params = request.args.to_dict()
+            params["section"] = legacy
+            target = "/admin.html?" + urlencode(params)
+        if filename in _RETIRED_PAGES:
+            return await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], filename)
         if identity and identity["must_change_password"] and filename != "change-password.html":
-            return redirect("/change-password.html")
+            return redirect("/change-password.html?" + urlencode({"next": target}))
         if filename in _ADMIN_PAGES:
             if not identity:
-                return redirect("/login.html")
+                return redirect("/login.html?" + urlencode({"next": target}))
             if identity["role"] not in {"admin", "root"}:
                 abort(403)
         elif filename == "change-password.html":
             if not identity:
-                return redirect("/login.html")
+                return redirect("/login.html?" + urlencode({"next": target}))
         elif filename == "login.html":
             if identity:
-                return redirect("/index.html")
+                next_url = request.args.get("next", "/index.html")
+                if not next_url.startswith("/") or next_url.startswith("//") or "\\" in next_url or any(ord(char) < 32 for char in next_url):
+                    next_url = "/index.html"
+                return redirect(next_url)
         elif filename not in _ANONYMOUS_PAGES and not identity:
-            return redirect("/login.html?next=/" + filename)
+            return redirect("/login.html?" + urlencode({"next": target}))
+        if target != request.full_path.rstrip("?"):
+            return redirect(target)
         return await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], filename)
 
     @app.get("/uploads/avatars/<filename>")
@@ -251,6 +278,7 @@ def create_app():
     app.register_blueprint(api, url_prefix="/api")
     app.register_blueprint(bot_api, url_prefix="/internal/v1")
     app.register_blueprint(forum_api, url_prefix="/api")
+    app.register_blueprint(cf_practice_api, url_prefix="/api")
     app.sync_engine = sync_engine
     app.task_manager = task_manager
     return app
@@ -261,10 +289,12 @@ _PUBLIC_PAGES = {
     "change-password.html", "home.html", "admin.html",
     "leaderboard.html", "challenge.html", "reviews.html", "problem-bank.html",
     "submissions.html", "workspace.html", "contest-review.html", "member.html", "compose.html",
-    "tasks.html", "settings.html",
+    "tasks.html", "settings.html", "cf-practice.html",
 }
 _ANONYMOUS_PAGES = {"index.html", "login.html", "post.html", "leaderboard.html"}
-_ADMIN_PAGES = {"admin.html", "member.html", "tasks.html", "settings.html", "forum-moderation.html"}
+_ADMIN_PAGES = {"admin.html", "member.html", "tasks.html", "settings.html", "forum-moderation.html", "cf-practice.html"}
+_RETIRED_PAGES = {"reviews.html", "submissions.html", "workspace.html"}
+_LEGACY_ADMIN_PAGES = {"member.html": "members", "challenge.html": "training", "problem-bank.html": "problems", "contest-review.html": "contests", "tasks.html": "tasks", "settings.html": "settings", "forum-moderation.html": "moderation", "cf-practice.html": "cf-practice"}
 
 
 app = create_app()

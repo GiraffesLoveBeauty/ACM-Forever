@@ -29,6 +29,7 @@ from .auth_service import (
     verify_password,
 )
 from .reporting import valid_contest_report_time
+from .cf_client import cf_request
 
 LOG = logging.getLogger("acm_api")
 api = Blueprint("api", __name__)
@@ -200,14 +201,12 @@ def _changed_account_platforms(account_values, existing=None):
 
 
 async def _clear_platform_records(db, qq_id, platform):
-    """账号变更后清理旧账号遗留的平台数据和同步游标。"""
-    for table, owner_field in (
+    """清理旧账号证据和同步游标，历史学习资料保留存档。"""
+    tables = [
         ("submissions", "user_qq_id"),
         ("submission_attempts", "owner_qq_id"),
-        ("user_problem_state", "owner_qq_id"),
-        ("review_states", "owner_qq_id"),
-        ("study_plan_items", "owner_qq_id"),
-    ):
+    ]
+    for table, owner_field in tables:
         await db.execute(
             f"DELETE FROM {table} WHERE {owner_field}=? AND platform=?", (qq_id, platform)
         )
@@ -990,6 +989,33 @@ async def api_register_user():
         await db.close()
 
 
+@api.route("/admin/members", methods=["GET"])
+@admin_required
+async def api_admin_members():
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+        size = max(1, min(100, int(request.args.get("page_size", 20))))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "message": "分页参数必须为整数。"}), 400
+    search = _field(request.args, "search", 100)
+    fields = ("qq_id", "name", "school", "status", "cf_handle", "luogu_id", "nowcoder_id", "atcoder_handle", "cjlu_username")
+    where = " WHERE (" + " OR ".join(f"LOWER(COALESCE(u.{field},'')) LIKE ?" for field in fields) + ")" if search else ""
+    values = ["%" + search.lower() + "%"] * len(fields) if search else []
+    db = await get_db()
+    try:
+        async with db.execute("SELECT COUNT(*) FROM users u" + where, values) as cursor:
+            total = (await cursor.fetchone())[0]
+        async with db.execute(
+            "SELECT " + ",".join("u." + field for field in fields) + ",a.role,a.is_active "
+            "FROM users u LEFT JOIN web_accounts a ON a.qq_id=u.qq_id" + where +
+            " ORDER BY u.name COLLATE NOCASE,u.qq_id LIMIT ? OFFSET ?", values + [size, (page - 1) * size],
+        ) as cursor:
+            items = [dict(row) for row in await cursor.fetchall()]
+        return jsonify({"items": items, "total": total, "page": page, "page_size": size})
+    finally:
+        await db.close()
+
+
 @api.route("/member/<qq_id>", methods=["GET"])
 @admin_required
 async def api_member_detail(qq_id):
@@ -1010,32 +1036,29 @@ async def api_member_detail(qq_id):
             difficulty = [dict(row) for row in await cursor.fetchall()]
         async with db.execute("SELECT role FROM web_accounts WHERE qq_id=?", (qq_id,)) as cursor:
             web_account = await cursor.fetchone()
-        result = {"user": dict(user), "recent_ac": recent_ac, "challenge_rating": user["challenge_rating"] if "challenge_rating" in user.keys() else 1000, "platform_counts": platform_counts, "permissions": {"role": web_account["role"] if web_account else "member", "can_manage": _webui_is_root()}, "cf": {"rating": None, "contests": []}, "atcoder": {"rating": None, "contests": []}, "nowcoder": {"contests": []}}
+        result = {"user": dict(user), "recent_ac": recent_ac, "challenge_rating": user["challenge_rating"] if "challenge_rating" in user.keys() else 1000, "platform_counts": platform_counts, "permissions": {"role": web_account["role"] if web_account else None, "can_manage": _webui_is_root()}, "cf": {"rating": None, "contests": []}, "atcoder": {"rating": None, "contests": []}, "nowcoder": {"contests": []}}
         cf_tags = {}
         timeout = aiohttp.ClientTimeout(total=12)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             if user["cf_handle"]:
+                engine = getattr(current_app, "sync_engine", None)
+                cf_config = engine._crawler_config() if engine else {}
                 try:
-                    async with session.get("https://codeforces.com/api/user.rating", params={"handle": user["cf_handle"]}) as response:
-                        data = await response.json()
-                    if data.get("status") == "OK":
-                        records = data.get("result", [])
-                        result["cf"]["rating"] = records[-1].get("newRating") if records else None
-                        result["cf"]["contests"] = [{"name": item.get("contestName"), "rank": item.get("rank"), "rating": item.get("newRating"), "delta": item.get("newRating", 0) - item.get("oldRating", 0), "time": item.get("ratingUpdateTimeSeconds"), "url": f"https://codeforces.com/contest/{item.get('contestId')}" if item.get("contestId") else "https://codeforces.com/"} for item in records[-30:]]
+                    records = await cf_request(session, "user.rating", {"handle": user["cf_handle"]}, cf_config)
+                    result["cf"]["rating"] = records[-1].get("newRating") if records else None
+                    result["cf"]["contests"] = [{"name": item.get("contestName"), "rank": item.get("rank"), "rating": item.get("newRating"), "delta": item.get("newRating", 0) - item.get("oldRating", 0), "time": item.get("ratingUpdateTimeSeconds"), "url": f"https://codeforces.com/contest/{item.get('contestId')}" if item.get("contestId") else "https://codeforces.com/"} for item in records[-30:]]
                 except Exception:
                     LOG.warning("获取 CF 成员详情失败: %s", user["cf_handle"])
                 if any(item["platform"] == "codeforces" for item in recent_ac):
                     try:
-                        async with session.get("https://codeforces.com/api/user.status", params={"handle": user["cf_handle"], "from": 1, "count": 100}) as response:
-                            status_data = await response.json()
-                        if status_data.get("status") == "OK":
-                            for submission in status_data.get("result", []):
-                                problem = submission.get("problem") or {}
-                                contest_id = problem.get("contestId")
-                                problem_index = problem.get("index")
-                                tags = problem.get("tags")
-                                if contest_id and problem_index and isinstance(tags, list) and tags:
-                                    cf_tags[f"cf_{contest_id}{problem_index}"] = tags
+                        cf_submissions = await cf_request(session, "user.status", {"handle": user["cf_handle"], "from": 1, "count": 100}, cf_config)
+                        for submission in cf_submissions:
+                            problem = submission.get("problem") or {}
+                            contest_id = problem.get("contestId")
+                            problem_index = problem.get("index")
+                            tags = problem.get("tags")
+                            if contest_id and problem_index and isinstance(tags, list) and tags:
+                                cf_tags[f"cf_{contest_id}{problem_index}"] = tags
                     except Exception:
                         LOG.warning("获取 CF 题目标签失败: %s", user["cf_handle"])
             if user["atcoder_handle"]:
@@ -1066,32 +1089,7 @@ async def api_member_detail(qq_id):
 @api.route("/member/<qq_id>/permissions", methods=["PUT"])
 @admin_required
 async def api_update_member_permissions(qq_id):
-    root_error = _root_required_response()
-    if root_error:
-        return root_error
-    qq_id = str(qq_id).strip()
-    if not _valid_qq(qq_id):
-        return jsonify({"success": False, "message": "QQ号必须为4-12位数字。"}), 400
-    data = await request.get_json(silent=True) or {}
-    if not isinstance(data, dict):
-        return jsonify({"success": False, "message": "请求数据格式错误。"}), 400
-    role = str(data.get("role", "member")).strip().lower()
-    if role not in {"admin", "member"}:
-        return jsonify({"success": False, "message": "Web 权限只能设置为 admin 或 member；root 仅能通过 Web 账号创建流程授予。"}), 400
-    db = await get_db()
-    try:
-        async with db.execute("SELECT role FROM web_accounts WHERE qq_id=?", (qq_id,)) as cursor:
-            account = await cursor.fetchone()
-        if not account:
-            return jsonify({"success": False, "message": "该成员尚无 Web 账号，请先创建账号。"}), 404
-        if account["role"] == "root":
-            return jsonify({"success": False, "message": "Web root 不可从成员资料页降级。"}), 409
-        await db.execute("UPDATE web_accounts SET role=?,credential_version=credential_version+1,updated_at=? WHERE qq_id=?", (role,int(time.time()),qq_id))
-        await db.commit()
-    finally:
-        await db.close()
-    LOG.info("WebUI root 更新 Web 账号 QQ %s 权限为 %s", qq_id, role)
-    return jsonify({"success": True, "role": role})
+    return jsonify({"success": False, "code": "feature_retired", "message": "该 Web 功能已下线，历史资料保留存档。"}), 410
 
 
 @api.route("/stats", methods=["GET"])
@@ -1277,49 +1275,95 @@ async def api_update_real_name():
 @api.route("/workspace/items", methods=["GET", "POST"])
 @admin_required
 async def api_workspace_items():
-    db = await get_db()
-    try:
-        if request.method == "GET":
-            owner = _field(request.args, "owner_qq_id", 32)
-            query = "SELECT * FROM workspace_items WHERE owner_qq_id=? ORDER BY sort_order, updated_at DESC LIMIT 500"
-            async with db.execute(query, (owner,)) as cursor:
-                return jsonify([dict(row) for row in await cursor.fetchall()])
-        data = await request.get_json(silent=True) or {}
-        owner = _field(data, "owner_qq_id", 32)
-        title = _field(data, "title", 240)
-        if not owner or not title:
-            return jsonify({"success": False, "message": "owner_qq_id 和 title 必填。"}), 400
-        now = int(time.time())
-        cursor = await db.execute(
-            "INSERT INTO workspace_items(owner_qq_id,kind,title,body_md,status,priority,due_at,context_type,context_id,sort_order,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-            (owner, _field(data, "kind", 20) or "note", title, _field(data, "body_md", 12000), _field(data, "status", 20) or "todo", int(data.get("priority", 0) or 0), int(data.get("due_at") or 0) or None, _field(data, "context_type", 40) or None, _field(data, "context_id", 160) or None, int(data.get("sort_order", 0) or 0), now, now),
-        )
-        item_id = cursor.lastrowid
-        await db.commit()
-        return jsonify({"success": True, "id": item_id}), 201
-    finally:
-        await db.close()
+    return jsonify({"success": False, "code": "feature_retired", "message": "该 Web 功能已下线，历史资料保留存档。"}), 410
 
 
 @api.route("/workspace/items/<int:item_id>", methods=["PATCH", "DELETE"])
 @admin_required
 async def api_workspace_item(item_id):
+    return jsonify({"success": False, "code": "feature_retired", "message": "该 Web 功能已下线，历史资料保留存档。"}), 410
+
+
+async def _save_problem_favorite(owner, platform, problem, data):
+    if "note_md" in data:
+        return jsonify({"success": False, "code": "feature_retired", "message": "笔记编辑已下线。"}), 410
+    if not _valid_qq(owner) or type(data.get("is_favorite")) is not bool:
+        return jsonify({"success": False, "message": "有效成员 QQ 和布尔 is_favorite 必填。"}), 400
     db = await get_db()
     try:
-        if request.method == "DELETE":
-            await db.execute("DELETE FROM workspace_items WHERE id=?", (item_id,))
-            await db.commit()
-            return jsonify({"success": True})
-        data = await request.get_json(silent=True) or {}
-        allowed = {"title": _field(data, "title", 240), "body_md": _field(data, "body_md", 12000), "status": _field(data, "status", 20), "priority": int(data.get("priority", 0) or 0), "due_at": int(data.get("due_at") or 0) or None, "sort_order": int(data.get("sort_order", 0) or 0)}
-        fields = [key for key in allowed if key in data]
-        if fields:
-            values = [allowed[key] for key in fields]
-            await db.execute(f"UPDATE workspace_items SET {', '.join(f'{key}=?' for key in fields)}, updated_at=? WHERE id=?", values + [int(time.time()), item_id])
-            await db.commit()
+        await db.execute(
+            "INSERT INTO user_problem_state(owner_qq_id,platform,problem_id,is_favorite,updated_at) "
+            "VALUES(?,?,?,?,?) ON CONFLICT(owner_qq_id,platform,problem_id) DO UPDATE SET "
+            "is_favorite=excluded.is_favorite,updated_at=excluded.updated_at",
+            (owner, platform[:24], problem[:160], int(data["is_favorite"]), int(time.time())),
+        )
+        await db.commit()
         return jsonify({"success": True})
     finally:
         await db.close()
+
+
+async def _contest_rows(owner, contest):
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT owner_qq_id,contest_id,problem_id,verdict,rating,status,updated_at "
+            "FROM contest_problem_reviews WHERE owner_qq_id=? AND contest_id=? ORDER BY problem_id", (owner, contest),
+        ) as cursor:
+            return jsonify([dict(row) for row in await cursor.fetchall()])
+    finally:
+        await db.close()
+
+
+async def _save_contest_state(owner, data):
+    if "note_md" in data:
+        return jsonify({"success": False, "code": "feature_retired", "message": "赛事笔记编辑已下线。"}), 410
+    contest, problem = _field(data, "contest_id", 80), _field(data, "problem_id", 160)
+    if not _valid_qq(owner) or not contest or not problem:
+        return jsonify({"success": False, "message": "成员 QQ、contest_id 和 problem_id 必填。"}), 400
+    fields = {}
+    if "status" in data:
+        if data["status"] not in ("todo", "unsolved", "queued", "solved", "ignored", "reviewed"):
+            return jsonify({"success": False, "message": "无效的赛事复盘状态。"}), 400
+        fields["status"] = data["status"]
+    if "verdict" in data:
+        fields["verdict"] = _field(data, "verdict", 40)
+    if "rating" in data:
+        try:
+            if isinstance(data["rating"], bool):
+                raise ValueError()
+            fields["rating"] = int(data["rating"]) if data["rating"] is not None else None
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "message": "rating 必须为整数或 null。"}), 400
+    if not fields:
+        return jsonify({"success": False, "message": "请提供需要更新的状态或结果字段。"}), 400
+    db = await get_db()
+    try:
+        columns = list(fields)
+        await db.execute(
+            "INSERT INTO contest_problem_reviews(owner_qq_id,contest_id,problem_id," + ",".join(columns) + ",updated_at) "
+            "VALUES(" + ",".join("?" for _ in range(len(columns) + 4)) + ") "
+            "ON CONFLICT(owner_qq_id,contest_id,problem_id) DO UPDATE SET " +
+            ",".join(column + "=excluded." + column for column in columns) + ",updated_at=excluded.updated_at",
+            [owner, contest, problem, *fields.values(), int(time.time())],
+        )
+        await db.commit()
+        return jsonify({"success": True, **fields})
+    finally:
+        await db.close()
+
+
+# Prefer the catalog metadata and collapse repeated submission rows to one problem.
+_PROBLEM_QUERY = """SELECT p.platform,p.problem_id,p.problem_name,p.problem_rating,p.problem_url,p.tags,
+    COALESCE(s.is_favorite,0) AS is_favorite FROM (
+      SELECT *,ROW_NUMBER() OVER(PARTITION BY platform,problem_id ORDER BY source,submit_time DESC) AS position
+      FROM (
+        SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags,0 AS source,0 AS submit_time FROM recommendations
+        UNION ALL
+        SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags,1 AS source,submit_time FROM submissions
+      ) catalog
+    ) p LEFT JOIN user_problem_state s ON s.owner_qq_id=? AND s.platform=p.platform AND s.problem_id=p.problem_id
+    WHERE p.position=1"""
 
 
 @api.route("/problems", methods=["GET"])
@@ -1331,7 +1375,7 @@ async def api_problems():
         platform = _field(request.args, "platform", 24)
         tag = _field(request.args, "tag", 100)
         state = _field(request.args, "state", 20)
-        query = """SELECT p.platform,p.problem_id,p.problem_name,p.problem_rating,p.problem_url,p.tags,COALESCE(s.is_favorite,0) AS is_favorite,COALESCE(s.state,'inbox') AS user_state,s.note_md FROM (SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags FROM recommendations UNION SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags FROM submissions) p LEFT JOIN user_problem_state s ON s.owner_qq_id=? AND s.platform=p.platform AND s.problem_id=p.problem_id WHERE 1=1"""
+        query = _PROBLEM_QUERY
         params = [owner]
         if platform: query += " AND p.platform=?"; params.append(platform)
         if tag: query += " AND (p.problem_name LIKE ? OR p.problem_id LIKE ? OR COALESCE(p.tags,'') LIKE ?)"; params.extend([f"%{tag}%", f"%{tag}%", f"%{tag}%"])
@@ -1340,10 +1384,15 @@ async def api_problems():
         count_query = "SELECT COUNT(*) FROM (" + query + ") filtered"
         async with db.execute(count_query, tuple(params)) as cursor:
             total = int((await cursor.fetchone())[0])
-        query += " ORDER BY CAST(p.problem_rating AS INTEGER), p.platform, p.problem_id LIMIT 500"
-        async with db.execute(query, tuple(params)) as cursor:
+        try:
+            page = max(1, int(request.args.get("page", 1)))
+            size = max(1, min(500, int(request.args.get("page_size", 500))))
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "message": "分页参数必须为整数。"}), 400
+        query += " ORDER BY CAST(p.problem_rating AS INTEGER), p.platform, p.problem_id LIMIT ? OFFSET ?"
+        async with db.execute(query, tuple(params + [size, (page - 1) * size])) as cursor:
             items = [dict(row) for row in await cursor.fetchall()]
-        return jsonify({"items": items, "total": total, "returned": len(items)})
+        return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": size})
     finally:
         await db.close()
 
@@ -1351,52 +1400,22 @@ async def api_problems():
 @api.route("/problems/<platform>/<problem_id>/state", methods=["PUT"])
 @admin_required
 async def api_problem_state(platform, problem_id):
-    db = await get_db()
-    try:
-        data = await request.get_json(silent=True) or {}; owner = _field(data, "owner_qq_id", 32)
-        if not owner: return jsonify({"success": False, "message": "owner_qq_id 必填。"}), 400
-        now = int(time.time())
-        await db.execute("INSERT INTO user_problem_state(owner_qq_id,platform,problem_id,is_favorite,state,note_md,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(owner_qq_id,platform,problem_id) DO UPDATE SET is_favorite=excluded.is_favorite,state=excluded.state,note_md=excluded.note_md,updated_at=excluded.updated_at", (owner, platform[:24], problem_id[:160], int(bool(data.get("is_favorite", False))), _field(data, "state", 20) or "inbox", _field(data, "note_md", 12000), now))
-        await db.commit(); return jsonify({"success": True})
-    finally:
-        await db.close()
+    data = await request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"success": False, "message": "请求数据格式错误。"}), 400
+    return await _save_problem_favorite(_field(data, "owner_qq_id", 32), platform, problem_id, data)
 
 
 @api.route("/submissions/attempts", methods=["GET", "POST"])
 @admin_required
 async def api_submission_attempts():
-    db = await get_db()
-    try:
-        if request.method == "GET":
-            owner = _field(request.args, "owner_qq_id", 32)
-            async with db.execute("SELECT id,owner_qq_id,platform,external_submission_id,problem_id,contest_id,verdict,language,submitted_at,source_code FROM submission_attempts WHERE owner_qq_id=? ORDER BY submitted_at DESC LIMIT 500", (owner,)) as cursor:
-                return jsonify([dict(row) for row in await cursor.fetchall()])
-        data = await request.get_json(silent=True) or {}; owner = _field(data, "owner_qq_id", 32); platform = _field(data, "platform", 24); problem_id = _field(data, "problem_id", 160)
-        if not owner or not platform or not problem_id: return jsonify({"success": False, "message": "owner_qq_id、platform、problem_id 必填。"}), 400
-        now = int(time.time()); submitted = int(data.get("submitted_at") or now)
-        await db.execute("INSERT OR IGNORE INTO submission_attempts(owner_qq_id,platform,external_submission_id,problem_id,contest_id,verdict,language,submitted_at,source_code,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)", (owner,platform,_field(data,"external_submission_id",80) or None,problem_id,_field(data,"contest_id",80) or None,_field(data,"verdict",40),_field(data,"language",100),submitted,_field(data,"source_code",200000),now))
-        await db.commit(); return jsonify({"success": True}), 201
-    finally:
-        await db.close()
+    return jsonify({"success": False, "code": "feature_retired", "message": "该 Web 功能已下线，历史资料保留存档。"}), 410
 
 
 @api.route("/reviews/drafts", methods=["GET", "POST"])
 @admin_required
 async def api_review_drafts():
-    db = await get_db()
-    try:
-        if request.method == "GET":
-            owner = _field(request.args, "owner_qq_id", 32)
-            async with db.execute("SELECT * FROM review_drafts WHERE owner_qq_id=? ORDER BY updated_at DESC LIMIT 100", (owner,)) as cursor: return jsonify([dict(row) for row in await cursor.fetchall()])
-        data = await request.get_json(silent=True) or {}; owner = _field(data,"owner_qq_id",32); context = _field(data,"context_id",160)
-        if not owner or not context: return jsonify({"success": False, "message": "owner_qq_id 和 context_id 必填。"}), 400
-        now = int(time.time())
-        cursor = await db.execute("INSERT INTO review_drafts(owner_qq_id,context_type,context_id,draft_md,status,model,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", (owner, _field(data, "context_type", 40) or "contest", context, _field(data, "draft_md", 30000), "draft", _field(data, "model", 100), now, now))
-        draft_id = cursor.lastrowid
-        await db.commit()
-        return jsonify({"success": True, "id": draft_id}), 201
-    finally:
-        await db.close()
+    return jsonify({"success": False, "code": "feature_retired", "message": "该 Web 功能已下线，历史资料保留存档。"}), 410
 
 
 @api.route("/ui/preferences", methods=["GET", "PUT"])
@@ -1404,13 +1423,26 @@ async def api_review_drafts():
 async def api_ui_preferences():
     db = await get_db()
     try:
-        key = "webui_preferences"
-        if request.method == "GET":
-            async with db.execute("SELECT value FROM settings WHERE key=?", (key,)) as cursor: row = await cursor.fetchone()
-            try: return jsonify(json.loads(row["value"]) if row else {})
-            except (TypeError, ValueError): return jsonify({})
-        data = await request.get_json(silent=True) or {}; value = {"nav_order": list(data.get("nav_order", []))[:20], "nav_hidden": list(data.get("nav_hidden", []))[:20], "font_scale": max(.8, min(1.5, float(data.get("font_scale", 1)))), "review_full_page": bool(data.get("review_full_page", False))}
-        await db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (key, json.dumps(value, ensure_ascii=False))); await db.commit(); return jsonify(value)
+        async with db.execute("SELECT value FROM settings WHERE key='webui_preferences'") as cursor:
+            row = await cursor.fetchone()
+        try:
+            stored = json.loads(row["value"]) if row else {}
+            scale = float(stored.get("font_scale", 1))
+            if not .8 <= scale <= 1.5:
+                scale = 1.0
+        except (TypeError, ValueError, AttributeError):
+            scale = 1.0
+        if request.method == "PUT":
+            data = await request.get_json(silent=True)
+            try:
+                scale = float(data["font_scale"])
+                if not .8 <= scale <= 1.5:
+                    raise ValueError()
+            except (TypeError, ValueError, KeyError):
+                return jsonify({"success": False, "message": "font_scale 必须在 0.8–1.5 之间。"}), 400
+            await db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('webui_preferences',?)", (json.dumps({"font_scale": scale}),))
+            await db.commit()
+        return jsonify({"font_scale": scale})
     finally:
         await db.close()
 
@@ -1499,33 +1531,13 @@ async def api_training_weak_tags():
 @api.route("/review/queue", methods=["GET"])
 @admin_required
 async def api_review_queue():
-    db = await get_db()
-    try:
-        owner = _field(request.args, "owner_qq_id", 32)
-        if not owner: return jsonify([])
-        now = int(time.time())
-        query = """SELECT p.platform,p.problem_id,p.problem_name,p.problem_rating,p.problem_url,p.tags,COUNT(DISTINCT s.id) AS attempts,MAX(s.submit_time) AS last_submit,COALESCE(r.grade,'new') AS grade,COALESCE(r.interval_days,0) AS interval_days,COALESCE(r.due_at,0) AS due_at,COALESCE(r.review_count,0) AS review_count,COALESCE(r.difficulty,0) AS difficulty,COALESCE(r.mistakes,0) AS mistakes,COALESCE(ups.is_favorite,0) AS is_favorite,cr.contest_id,cr.verdict AS contest_verdict,cr.status AS contest_status,CASE WHEN cr.status IN ('unsolved','queued') THEN 'upsolve' ELSE 'review' END AS queue_type FROM (SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags FROM recommendations UNION SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags FROM submissions UNION SELECT 'codeforces' AS platform,problem_id,problem_id AS problem_name,NULL AS problem_rating,'https://codeforces.com/' AS problem_url,'' AS tags FROM submission_attempts GROUP BY platform,problem_id) p LEFT JOIN submissions s ON s.user_qq_id=? AND s.platform=p.platform AND s.problem_id=p.problem_id LEFT JOIN review_states r ON r.owner_qq_id=? AND r.platform=p.platform AND r.problem_id=p.problem_id LEFT JOIN user_problem_state ups ON ups.owner_qq_id=? AND ups.platform=p.platform AND ups.problem_id=p.problem_id LEFT JOIN contest_problem_reviews cr ON cr.owner_qq_id=? AND cr.problem_id=p.problem_id AND p.platform='codeforces' WHERE (s.id IS NOT NULL OR cr.status IN ('unsolved','queued')) GROUP BY p.platform,p.problem_id,p.problem_name,p.problem_rating,p.problem_url,p.tags,r.grade,r.interval_days,r.due_at,r.review_count,r.difficulty,r.mistakes,ups.is_favorite,cr.contest_id,cr.verdict,cr.status ORDER BY CASE WHEN cr.status IN ('unsolved','queued') THEN 0 WHEN COALESCE(r.due_at,0)>0 AND r.due_at<=? THEN 1 ELSE 2 END, COALESCE(r.due_at,0), last_submit DESC LIMIT 200"""
-        async with db.execute(query, (owner, owner, owner, owner, now)) as cursor: rows=[dict(row) for row in await cursor.fetchall()]
-        return jsonify(rows)
-    finally: await db.close()
+    return jsonify({"success": False, "code": "feature_retired", "message": "该 Web 功能已下线，历史资料保留存档。"}), 410
 
 
 @api.route("/review/feedback", methods=["POST"])
 @admin_required
 async def api_review_feedback():
-    data = await request.get_json(silent=True) or {}; owner=_field(data,"owner_qq_id",32); platform=_field(data,"platform",24); problem_id=_field(data,"problem_id",160); grade=_field(data,"grade",12)
-    if not owner or not platform or not problem_id or grade not in {"again","hard","good","easy"}: return jsonify({"success":False,"message":"owner_qq_id、platform、problem_id 和有效 grade 必填。"}),400
-    db=await get_db()
-    try:
-        async with db.execute("SELECT interval_days,ease,review_count,mistakes FROM review_states WHERE owner_qq_id=? AND platform=? AND problem_id=?",(owner,platform,problem_id)) as cursor: old=await cursor.fetchone()
-        interval=int(old["interval_days"] if old else 0); ease=float(old["ease"] if old else 2.5); count=int(old["review_count"] if old else 0); mistakes=int(old["mistakes"] if old else 0)
-        if grade=="again": interval=1; ease=max(1.3,ease-0.2); mistakes+=1
-        elif grade=="hard": interval=max(2,round(max(1,interval)*1.25)); ease=max(1.3,ease-0.05)
-        elif grade=="good": interval=5 if interval<=0 else min(120,round(max(5,interval)*ease))
-        else: interval=14 if interval<=0 else min(180,round(max(14,interval)*ease*1.25)); ease=min(3.2,ease+0.15)
-        now=int(time.time()); due=now+interval*86400
-        await db.execute("INSERT INTO review_states(owner_qq_id,platform,problem_id,grade,interval_days,ease,due_at,review_count,last_review_at,difficulty,mistakes) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(owner_qq_id,platform,problem_id) DO UPDATE SET grade=excluded.grade,interval_days=excluded.interval_days,ease=excluded.ease,due_at=excluded.due_at,review_count=excluded.review_count,last_review_at=excluded.last_review_at,mistakes=excluded.mistakes",(owner,platform,problem_id,grade,interval,ease,due,count+1,now,0,mistakes));await db.commit();return jsonify({"success":True,"grade":grade,"interval_days":interval,"due_at":due})
-    finally: await db.close()
+    return jsonify({"success": False, "code": "feature_retired", "message": "该 Web 功能已下线，历史资料保留存档。"}), 410
 @api.route("/training/summary", methods=["GET"])
 @admin_required
 async def api_training_summary():
@@ -1546,67 +1558,24 @@ async def api_training_summary():
 @api.route("/submissions/analytics", methods=["GET"])
 @admin_required
 async def api_submission_analytics():
-    owner = _field(request.args, "owner_qq_id", 32)
-    db = await get_db()
-    try:
-        async with db.execute("SELECT platform,COUNT(*) AS solved,COUNT(DISTINCT problem_id) AS problems,MIN(submit_time) AS first_at,MAX(submit_time) AS last_at FROM submissions WHERE user_qq_id=? GROUP BY platform ORDER BY solved DESC", (owner,)) as cursor:
-            platforms = [dict(row) for row in await cursor.fetchall()]
-        async with db.execute("SELECT date(submit_time,'unixepoch','localtime') AS day,COUNT(*) AS solved FROM submissions WHERE user_qq_id=? GROUP BY day ORDER BY day DESC LIMIT 90", (owner,)) as cursor:
-            daily = [dict(row) for row in await cursor.fetchall()]
-        return jsonify({"platforms": platforms, "daily": daily})
-    finally:
-        await db.close()
+    return jsonify({"success": False, "code": "feature_retired", "message": "该 Web 功能已下线，历史资料保留存档。"}), 410
 
 
 @api.route("/contest/reviews", methods=["GET", "PUT"])
 @admin_required
 async def api_contest_problem_reviews():
-    db = await get_db()
-    try:
-        if request.method == "GET":
-            owner = _field(request.args, "owner_qq_id", 32); contest = _field(request.args, "contest_id", 80)
-            async with db.execute("SELECT * FROM contest_problem_reviews WHERE owner_qq_id=? AND contest_id=? ORDER BY problem_id", (owner, contest)) as cursor:
-                return jsonify([dict(row) for row in await cursor.fetchall()])
-        data = await request.get_json(silent=True) or {}; owner = _field(data, "owner_qq_id", 32); contest = _field(data, "contest_id", 80); problem = _field(data, "problem_id", 160)
-        if not owner or not contest or not problem: return jsonify({"success": False, "message": "owner_qq_id、contest_id、problem_id 必填。"}), 400
-        now = int(time.time())
-        status = _field(data, "status", 20) or "todo"
-        if status not in {"todo", "unsolved", "queued", "solved", "ignored"}:
-            return jsonify({"success": False, "message": "无效的赛事复盘状态。"}), 400
-        verdict = _field(data, "verdict", 40)
-        rating = int(data.get("rating") or 0) or None
-        await db.execute("INSERT INTO contest_problem_reviews(owner_qq_id,contest_id,problem_id,verdict,rating,note_md,status,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(owner_qq_id,contest_id,problem_id) DO UPDATE SET verdict=excluded.verdict,rating=excluded.rating,note_md=excluded.note_md,status=excluded.status,updated_at=excluded.updated_at", (owner, contest, problem, verdict, rating, _field(data, "note_md", 12000), status, now))
-        if status in {"unsolved", "queued"}:
-            await db.execute("INSERT OR IGNORE INTO study_plan_items(owner_qq_id,platform,problem_id,status,position,added_at) VALUES(?,?,?,?,?,?)", (owner, "codeforces", problem, "pending", 0, now))
-            await db.execute("INSERT INTO review_states(owner_qq_id,platform,problem_id,grade,interval_days,ease,due_at,review_count,last_review_at,difficulty,mistakes) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(owner_qq_id,platform,problem_id) DO UPDATE SET due_at=MIN(review_states.due_at, excluded.due_at), grade=CASE WHEN review_states.grade='new' THEN excluded.grade ELSE review_states.grade END", (owner, "codeforces", problem, "again", 0, 2.5, now, 0, 0, 0, 1))
-        elif status == "solved":
-            await db.execute("UPDATE study_plan_items SET status='done',completed_at=? WHERE owner_qq_id=? AND platform='codeforces' AND problem_id=?", (now, owner, problem))
-        await db.commit(); return jsonify({"success": True, "status": status})
-    finally:
-        await db.close()
+    if request.method == "GET":
+        return await _contest_rows(_field(request.args, "owner_qq_id", 32), _field(request.args, "contest_id", 80))
+    data = await request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"success": False, "message": "请求数据格式错误。"}), 400
+    return await _save_contest_state(_field(data, "owner_qq_id", 32), data)
 
 
 @api.route("/study-plan", methods=["GET", "POST", "PATCH", "DELETE"])
 @admin_required
 async def api_study_plan():
-    db = await get_db()
-    try:
-        data = await request.get_json(silent=True) or {}
-        owner = _field(request.args if request.method == "GET" else data, "owner_qq_id", 32)
-        if not owner: return jsonify([] if request.method == "GET" else {"success": False, "message": "owner_qq_id 必填。"}), (200 if request.method == "GET" else 400)
-        if request.method == "GET":
-            async with db.execute("SELECT p.platform,p.problem_id,p.problem_name,p.problem_rating,p.problem_url,p.tags,i.status,i.position,i.added_at,i.completed_at FROM study_plan_items i LEFT JOIN (SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags FROM recommendations UNION SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags FROM submissions) p ON p.platform=i.platform AND p.problem_id=i.problem_id WHERE i.owner_qq_id=? ORDER BY i.position,i.added_at", (owner,)) as cursor: return jsonify([dict(row) for row in await cursor.fetchall()])
-        platform=_field(data,"platform",24); problem_id=_field(data,"problem_id",160)
-        if not platform or not problem_id: return jsonify({"success":False,"message":"platform 和 problem_id 必填。"}),400
-        now=int(time.time())
-        if request.method == "POST":
-            await db.execute("INSERT OR IGNORE INTO study_plan_items(owner_qq_id,platform,problem_id,status,position,added_at) VALUES(?,?,?,?,?,?)",(owner,platform,problem_id,"pending",int(data.get("position") or 0),now))
-        elif request.method == "PATCH":
-            status=_field(data,"status",20) or "pending"; await db.execute("UPDATE study_plan_items SET status=?,position=?,completed_at=? WHERE owner_qq_id=? AND platform=? AND problem_id=?",(status,int(data.get("position") or 0),now if status=="done" else None,owner,platform,problem_id))
-        else:
-            await db.execute("DELETE FROM study_plan_items WHERE owner_qq_id=? AND platform=? AND problem_id=?",(owner,platform,problem_id))
-        await db.commit(); return jsonify({"success":True})
-    finally: await db.close()
+    return jsonify({"success": False, "code": "feature_retired", "message": "该 Web 功能已下线，历史资料保留存档。"}), 410
 
 
 def _me_qq_id():
@@ -1830,11 +1799,7 @@ async def api_me_problems():
     state = _field(request.args, "state", 20)
     db = await get_db()
     try:
-        query = """SELECT p.platform,p.problem_id,p.problem_name,p.problem_rating,p.problem_url,p.tags,
-          COALESCE(s.is_favorite,0) AS is_favorite,COALESCE(s.state,'inbox') AS user_state,s.note_md
-          FROM (SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags FROM recommendations
-          UNION SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags FROM submissions) p
-          LEFT JOIN user_problem_state s ON s.owner_qq_id=? AND s.platform=p.platform AND s.problem_id=p.problem_id WHERE 1=1"""
+        query = _PROBLEM_QUERY
         params = [qq_id]
         if platform:
             query += " AND p.platform=?"
@@ -1849,10 +1814,15 @@ async def api_me_problems():
         count_query = "SELECT COUNT(*) FROM (" + query + ") filtered"
         async with db.execute(count_query, tuple(params)) as cursor:
             total = int((await cursor.fetchone())[0])
-        query += " ORDER BY CAST(p.problem_rating AS INTEGER),p.platform,p.problem_id LIMIT 500"
-        async with db.execute(query, tuple(params)) as cursor:
+        try:
+            page = max(1, int(request.args.get("page", 1)))
+            size = max(1, min(500, int(request.args.get("page_size", 500))))
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "message": "分页参数必须为整数。"}), 400
+        query += " ORDER BY CAST(p.problem_rating AS INTEGER),p.platform,p.problem_id LIMIT ? OFFSET ?"
+        async with db.execute(query, tuple(params + [size, (page - 1) * size])) as cursor:
             items = [dict(row) for row in await cursor.fetchall()]
-        return jsonify({"items": items, "total": total, "returned": len(items)})
+        return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": size})
     finally:
         await db.close()
 
@@ -1860,58 +1830,22 @@ async def api_me_problems():
 @api.route("/me/problems/<platform>/<problem_id>/state", methods=["PUT"])
 @member_required
 async def api_me_problem_state(platform, problem_id):
-    data = await request.get_json(silent=True) or {}
+    data = await request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"success": False, "message": "请求数据格式错误。"}), 400
-    now = int(time.time())
-    db = await get_db()
-    try:
-        await db.execute(
-            "INSERT INTO user_problem_state(owner_qq_id,platform,problem_id,is_favorite,state,note_md,updated_at) "
-            "VALUES(?,?,?,?,?,?,?) ON CONFLICT(owner_qq_id,platform,problem_id) DO UPDATE SET "
-            "is_favorite=excluded.is_favorite,state=excluded.state,note_md=excluded.note_md,updated_at=excluded.updated_at",
-            (_me_qq_id(), platform[:24], problem_id[:160], int(bool(data.get("is_favorite", False))),
-             _field(data, "state", 20) or "inbox", _field(data, "note_md", 12000), now),
-        )
-        await db.commit()
-        return jsonify({"success": True})
-    finally:
-        await db.close()
+    return await _save_problem_favorite(_me_qq_id(), platform, problem_id, data)
 
 
 @api.route("/me/submissions/attempts", methods=["GET"])
 @member_required
 async def api_me_submission_attempts():
-    db = await get_db()
-    try:
-        async with db.execute(
-            "SELECT id,platform,external_submission_id,problem_id,contest_id,verdict,language,submitted_at "
-            "FROM submission_attempts WHERE owner_qq_id=? ORDER BY submitted_at DESC LIMIT 500",
-            (_me_qq_id(),),
-        ) as cursor:
-            return jsonify([dict(row) for row in await cursor.fetchall()])
-    finally:
-        await db.close()
+    return jsonify({"success": False, "code": "feature_retired", "message": "该 Web 功能已下线，历史资料保留存档。"}), 410
 
 
 @api.route("/me/submissions/analytics", methods=["GET"])
 @member_required
 async def api_me_submission_analytics():
-    db = await get_db()
-    try:
-        async with db.execute(
-            "SELECT platform,COUNT(*) AS solved,COUNT(DISTINCT problem_id) AS problems,MIN(submit_time) AS first_at,MAX(submit_time) AS last_at "
-            "FROM submissions WHERE user_qq_id=? GROUP BY platform ORDER BY solved DESC", (_me_qq_id(),)
-        ) as cursor:
-            platforms = [dict(row) for row in await cursor.fetchall()]
-        async with db.execute(
-            "SELECT date(submit_time,'unixepoch','localtime') AS day,COUNT(*) AS solved FROM submissions "
-            "WHERE user_qq_id=? GROUP BY day ORDER BY day DESC LIMIT 90", (_me_qq_id(),)
-        ) as cursor:
-            daily = [dict(row) for row in await cursor.fetchall()]
-        return jsonify({"platforms": platforms, "daily": daily})
-    finally:
-        await db.close()
+    return jsonify({"success": False, "code": "feature_retired", "message": "该 Web 功能已下线，历史资料保留存档。"}), 410
 
 
 @api.route("/me/reviews/weak-tags", methods=["GET"])
@@ -1958,251 +1892,48 @@ async def api_me_review_weak_tags():
 @api.route("/me/reviews", methods=["GET"])
 @member_required
 async def api_me_reviews():
-    qq_id = _me_qq_id()
-    db = await get_db()
-    try:
-        now = int(time.time())
-        query = """SELECT p.platform,p.problem_id,p.problem_name,p.problem_rating,p.problem_url,p.tags,
-          COUNT(DISTINCT s.id) AS attempts,MAX(s.submit_time) AS last_submit,COALESCE(r.grade,'new') AS grade,
-          COALESCE(r.interval_days,0) AS interval_days,COALESCE(r.due_at,0) AS due_at,
-          COALESCE(r.review_count,0) AS review_count,COALESCE(r.difficulty,0) AS difficulty,
-          COALESCE(r.mistakes,0) AS mistakes,COALESCE(ups.is_favorite,0) AS is_favorite,
-          cr.contest_id,cr.verdict AS contest_verdict,cr.status AS contest_status,
-          CASE WHEN cr.status IN ('unsolved','queued') THEN 'upsolve' ELSE 'review' END AS queue_type
-          FROM (SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags FROM recommendations
-          UNION SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags FROM submissions
-          UNION SELECT 'codeforces',problem_id,problem_id,NULL,'https://codeforces.com/','' FROM submission_attempts WHERE owner_qq_id=? GROUP BY problem_id) p
-          LEFT JOIN submissions s ON s.user_qq_id=? AND s.platform=p.platform AND s.problem_id=p.problem_id
-          LEFT JOIN review_states r ON r.owner_qq_id=? AND r.platform=p.platform AND r.problem_id=p.problem_id
-          LEFT JOIN user_problem_state ups ON ups.owner_qq_id=? AND ups.platform=p.platform AND ups.problem_id=p.problem_id
-          LEFT JOIN contest_problem_reviews cr ON cr.owner_qq_id=? AND cr.problem_id=p.problem_id AND p.platform='codeforces'
-          WHERE (s.id IS NOT NULL OR cr.status IN ('unsolved','queued'))
-          GROUP BY p.platform,p.problem_id,p.problem_name,p.problem_rating,p.problem_url,p.tags,r.grade,r.interval_days,r.due_at,r.review_count,r.difficulty,r.mistakes,ups.is_favorite,cr.contest_id,cr.verdict,cr.status
-          ORDER BY CASE WHEN cr.status IN ('unsolved','queued') THEN 0 WHEN COALESCE(r.due_at,0)>0 AND r.due_at<=? THEN 1 ELSE 2 END,COALESCE(r.due_at,0),last_submit DESC LIMIT 200"""
-        async with db.execute(query, (qq_id, qq_id, qq_id, qq_id, qq_id, now)) as cursor:
-            return jsonify([dict(row) for row in await cursor.fetchall()])
-    finally:
-        await db.close()
+    return jsonify({"success": False, "code": "feature_retired", "message": "该 Web 功能已下线，历史资料保留存档。"}), 410
 
 
 @api.route("/me/reviews/feedback", methods=["POST"])
 @member_required
 async def api_me_review_feedback():
-    data = await request.get_json(silent=True) or {}
-    platform = _field(data, "platform", 24)
-    problem_id = _field(data, "problem_id", 160)
-    grade = _field(data, "grade", 12)
-    if not platform or not problem_id or grade not in {"again", "hard", "good", "easy"}:
-        return jsonify({"success": False, "message": "platform、problem_id 和有效 grade 必填。"}), 400
-    owner = _me_qq_id()
-    db = await get_db()
-    try:
-        async with db.execute("SELECT interval_days,ease,review_count,mistakes FROM review_states WHERE owner_qq_id=? AND platform=? AND problem_id=?", (owner, platform, problem_id)) as cursor:
-            old = await cursor.fetchone()
-        interval = int(old["interval_days"] if old else 0)
-        ease = float(old["ease"] if old else 2.5)
-        count = int(old["review_count"] if old else 0)
-        mistakes = int(old["mistakes"] if old else 0)
-        if grade == "again": interval=1; ease=max(1.3,ease-0.2); mistakes+=1
-        elif grade == "hard": interval=max(2,round(max(1,interval)*1.25)); ease=max(1.3,ease-0.05)
-        elif grade == "good": interval=5 if interval<=0 else min(120,round(max(5,interval)*ease))
-        else: interval=14 if interval<=0 else min(180,round(max(14,interval)*ease*1.25)); ease=min(3.2,ease+0.15)
-        now = int(time.time())
-        due = now + interval * 86400
-        await db.execute(
-            "INSERT INTO review_states(owner_qq_id,platform,problem_id,grade,interval_days,ease,due_at,review_count,last_review_at,difficulty,mistakes) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(owner_qq_id,platform,problem_id) DO UPDATE SET grade=excluded.grade,interval_days=excluded.interval_days,ease=excluded.ease,due_at=excluded.due_at,review_count=excluded.review_count,last_review_at=excluded.last_review_at,mistakes=excluded.mistakes",
-            (owner,platform,problem_id,grade,interval,ease,due,count+1,now,0,mistakes),
-        )
-        await db.commit()
-        return jsonify({"success": True, "grade": grade, "interval_days": interval, "due_at": due})
-    finally:
-        await db.close()
+    return jsonify({"success": False, "code": "feature_retired", "message": "该 Web 功能已下线，历史资料保留存档。"}), 410
 
 
 @api.route("/me/workspace/items", methods=["GET", "POST"])
 @member_required
 async def api_me_workspace_items():
-    owner = _me_qq_id()
-    db = await get_db()
-    try:
-        if request.method == "GET":
-            async with db.execute(
-                "SELECT id,kind,title,body_md,status,priority,due_at,context_type,context_id,sort_order,created_at,updated_at,completed_at "
-                "FROM workspace_items WHERE owner_qq_id=? ORDER BY sort_order,updated_at DESC LIMIT 500", (owner,)
-            ) as cursor:
-                return jsonify([dict(row) for row in await cursor.fetchall()])
-        data = await request.get_json(silent=True) or {}
-        if not isinstance(data, dict):
-            return jsonify({"success": False, "message": "请求数据格式错误。"}), 400
-        title = _field(data, "title", 240)
-        if not title:
-            return jsonify({"success": False, "message": "title 必填。"}), 400
-        try:
-            priority = max(-100, min(100, int(data.get("priority", 0) or 0)))
-            due_at = int(data.get("due_at") or 0) or None
-            sort_order = int(data.get("sort_order", 0) or 0)
-        except (TypeError, ValueError):
-            return jsonify({"success": False, "message": "优先级、截止时间和排序必须是整数。"}), 400
-        now = int(time.time())
-        cursor = await db.execute(
-            "INSERT INTO workspace_items(owner_qq_id,kind,title,body_md,status,priority,due_at,context_type,context_id,sort_order,created_at,updated_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-            (owner,_field(data,"kind",20) or "note",title,_field(data,"body_md",12000),
-             _field(data,"status",20) or "todo",priority,due_at,_field(data,"context_type",40) or None,
-             _field(data,"context_id",160) or None,sort_order,now,now),
-        )
-        await db.commit()
-        return jsonify({"success": True, "id": cursor.lastrowid}), 201
-    finally:
-        await db.close()
+    return jsonify({"success": False, "code": "feature_retired", "message": "该 Web 功能已下线，历史资料保留存档。"}), 410
 
 
 @api.route("/me/workspace/items/<int:item_id>", methods=["PATCH", "DELETE"])
 @member_required
 async def api_me_workspace_item(item_id):
-    owner = _me_qq_id()
-    db = await get_db()
-    try:
-        if request.method == "DELETE":
-            cursor = await db.execute("DELETE FROM workspace_items WHERE id=? AND owner_qq_id=?", (item_id, owner))
-            if cursor.rowcount == 0:
-                return jsonify({"success": False, "message": "记录不存在。"}), 404
-            await db.commit()
-            return jsonify({"success": True})
-        data = await request.get_json(silent=True) or {}
-        if not isinstance(data, dict):
-            return jsonify({"success": False, "message": "请求数据格式错误。"}), 400
-        allowed = {
-            "title": _field(data, "title", 240),
-            "body_md": _field(data, "body_md", 12000),
-            "status": _field(data, "status", 20),
-        }
-        if "priority" in data:
-            try: allowed["priority"] = max(-100, min(100, int(data["priority"])))
-            except (TypeError, ValueError): return jsonify({"success": False, "message": "priority 必须是整数。"}), 400
-        if "due_at" in data:
-            try: allowed["due_at"] = int(data["due_at"] or 0) or None
-            except (TypeError, ValueError): return jsonify({"success": False, "message": "due_at 必须是整数。"}), 400
-        if "sort_order" in data:
-            try: allowed["sort_order"] = int(data["sort_order"] or 0)
-            except (TypeError, ValueError): return jsonify({"success": False, "message": "sort_order 必须是整数。"}), 400
-        fields = [key for key in allowed if key in data]
-        if not fields:
-            return jsonify({"success": False, "message": "没有可更新的字段。"}), 400
-        values = [allowed[key] for key in fields]
-        cursor = await db.execute(
-            f"UPDATE workspace_items SET {', '.join(f'{key}=?' for key in fields)},updated_at=? WHERE id=? AND owner_qq_id=?",
-            values + [int(time.time()), item_id, owner],
-        )
-        if cursor.rowcount == 0:
-            return jsonify({"success": False, "message": "记录不存在。"}), 404
-        await db.commit()
-        return jsonify({"success": True})
-    finally:
-        await db.close()
+    return jsonify({"success": False, "code": "feature_retired", "message": "该 Web 功能已下线，历史资料保留存档。"}), 410
 
 
 @api.route("/me/study-plan", methods=["GET", "POST", "PATCH", "DELETE"])
 @member_required
 async def api_me_study_plan():
-    owner = _me_qq_id()
-    db = await get_db()
-    try:
-        data = await request.get_json(silent=True) or {}
-        if request.method == "GET":
-            async with db.execute(
-                "SELECT p.platform,p.problem_id,p.problem_name,p.problem_rating,p.problem_url,p.tags,i.status,i.position,i.added_at,i.completed_at "
-                "FROM study_plan_items i LEFT JOIN (SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags FROM recommendations "
-                "UNION SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags FROM submissions) p "
-                "ON p.platform=i.platform AND p.problem_id=i.problem_id WHERE i.owner_qq_id=? ORDER BY i.position,i.added_at", (owner,)
-            ) as cursor:
-                return jsonify([dict(row) for row in await cursor.fetchall()])
-        if not isinstance(data, dict):
-            return jsonify({"success": False, "message": "请求数据格式错误。"}), 400
-        platform = _field(data, "platform", 24)
-        problem_id = _field(data, "problem_id", 160)
-        if not platform or not problem_id:
-            return jsonify({"success": False, "message": "platform 和 problem_id 必填。"}), 400
-        now = int(time.time())
-        if request.method == "POST":
-            try: position = int(data.get("position", 0) or 0)
-            except (TypeError, ValueError): return jsonify({"success": False, "message": "position 必须是整数。"}), 400
-            await db.execute("INSERT OR IGNORE INTO study_plan_items(owner_qq_id,platform,problem_id,status,position,added_at) VALUES(?,?,?,?,?,?)", (owner,platform,problem_id,"pending",position,now))
-        elif request.method == "PATCH":
-            status = _field(data, "status", 20) or "pending"
-            if status not in {"pending", "done"}:
-                return jsonify({"success": False, "message": "status 无效。"}), 400
-            try: position = int(data.get("position", 0) or 0)
-            except (TypeError, ValueError): return jsonify({"success": False, "message": "position 必须是整数。"}), 400
-            await db.execute("UPDATE study_plan_items SET status=?,position=?,completed_at=? WHERE owner_qq_id=? AND platform=? AND problem_id=?", (status,position,now if status=="done" else None,owner,platform,problem_id))
-        else:
-            await db.execute("DELETE FROM study_plan_items WHERE owner_qq_id=? AND platform=? AND problem_id=?", (owner,platform,problem_id))
-        await db.commit()
-        return jsonify({"success": True})
-    finally:
-        await db.close()
+    return jsonify({"success": False, "code": "feature_retired", "message": "该 Web 功能已下线，历史资料保留存档。"}), 410
 
 
 @api.route("/me/contest/reviews", methods=["GET", "PUT"])
 @member_required
 async def api_me_contest_reviews():
-    owner = _me_qq_id()
-    db = await get_db()
-    try:
-        if request.method == "GET":
-            contest = _field(request.args, "contest_id", 80)
-            async with db.execute("SELECT contest_id,problem_id,verdict,rating,note_md,status,updated_at FROM contest_problem_reviews WHERE owner_qq_id=? AND contest_id=? ORDER BY problem_id", (owner,contest)) as cursor:
-                return jsonify([dict(row) for row in await cursor.fetchall()])
-        data = await request.get_json(silent=True) or {}
-        if not isinstance(data, dict):
-            return jsonify({"success": False, "message": "请求数据格式错误。"}), 400
-        contest = _field(data, "contest_id", 80)
-        problem = _field(data, "problem_id", 160)
-        if not contest or not problem:
-            return jsonify({"success": False, "message": "contest_id 和 problem_id 必填。"}), 400
-        status = _field(data, "status", 20) or "todo"
-        if status not in {"todo", "unsolved", "queued", "solved", "ignored", "reviewed"}:
-            return jsonify({"success": False, "message": "无效的赛事复盘状态。"}), 400
-        try: rating = int(data.get("rating") or 0) or None
-        except (TypeError, ValueError): return jsonify({"success": False, "message": "rating 必须是整数。"}), 400
-        now = int(time.time())
-        await db.execute(
-            "INSERT INTO contest_problem_reviews(owner_qq_id,contest_id,problem_id,verdict,rating,note_md,status,updated_at) VALUES(?,?,?,?,?,?,?,?) "
-            "ON CONFLICT(owner_qq_id,contest_id,problem_id) DO UPDATE SET verdict=excluded.verdict,rating=excluded.rating,note_md=excluded.note_md,status=excluded.status,updated_at=excluded.updated_at",
-            (owner,contest,problem,_field(data,"verdict",40),rating,_field(data,"note_md",12000),status,now),
-        )
-        if status in {"unsolved", "queued"}:
-            await db.execute("INSERT OR IGNORE INTO study_plan_items(owner_qq_id,platform,problem_id,status,position,added_at) VALUES(?,?,?,?,?,?)", (owner,"codeforces",problem,"pending",0,now))
-        elif status == "solved":
-            await db.execute("UPDATE study_plan_items SET status='done',completed_at=? WHERE owner_qq_id=? AND platform='codeforces' AND problem_id=?", (now,owner,problem))
-        await db.commit()
-        return jsonify({"success": True, "status": status})
-    finally:
-        await db.close()
+    if request.method == "GET":
+        return await _contest_rows(_me_qq_id(), _field(request.args, "contest_id", 80))
+    data = await request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"success": False, "message": "请求数据格式错误。"}), 400
+    return await _save_contest_state(_me_qq_id(), data)
 
 
 @api.route("/me/reviews/drafts", methods=["GET", "POST"])
 @member_required
 async def api_me_review_drafts():
-    owner = _me_qq_id()
-    db = await get_db()
-    try:
-        if request.method == "GET":
-            async with db.execute("SELECT id,context_type,context_id,draft_md,status,model,created_at,updated_at FROM review_drafts WHERE owner_qq_id=? ORDER BY updated_at DESC LIMIT 100", (owner,)) as cursor:
-                return jsonify([dict(row) for row in await cursor.fetchall()])
-        data = await request.get_json(silent=True) or {}
-        if not isinstance(data, dict):
-            return jsonify({"success": False, "message": "请求数据格式错误。"}), 400
-        context = _field(data, "context_id", 160)
-        if not context:
-            return jsonify({"success": False, "message": "context_id 必填。"}), 400
-        now = int(time.time())
-        cursor = await db.execute("INSERT INTO review_drafts(owner_qq_id,context_type,context_id,draft_md,status,model,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", (owner,_field(data,"context_type",40) or "contest",context,_field(data,"draft_md",30000),"draft",_field(data,"model",100),now,now))
-        await db.commit()
-        return jsonify({"success": True, "id": cursor.lastrowid}), 201
-    finally:
-        await db.close()
+    return jsonify({"success": False, "code": "feature_retired", "message": "该 Web 功能已下线，历史资料保留存档。"}), 410
 
 
 _LEADERBOARD_SORT_COLUMNS = {

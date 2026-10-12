@@ -46,7 +46,7 @@ class SyncEngine(SyncMixin):
     def _crawler_config(self):
         return self.crawler_config
 
-    async def sync_account(self, qq_id, platforms, task, days=0):
+    async def sync_account(self, qq_id, platforms, task, days=0, *, incremental=False):
         task["status"] = "running"
         task["started_at"] = int(time.time())
         results = {}
@@ -55,7 +55,7 @@ class SyncEngine(SyncMixin):
                 for platform in platforms:
                     try:
                         results[platform] = await self.sync_single_platform_for_days(
-                            qq_id, platform, days
+                            qq_id, platform, days, incremental=incremental
                         )
                     except asyncio.CancelledError:
                         raise
