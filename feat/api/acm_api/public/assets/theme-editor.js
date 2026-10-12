@@ -578,7 +578,8 @@
     const activeProfile = draft[editMode];
     for (const choice of ui.dialog.querySelectorAll('.theme-preset')) {
       const profile = presetProfile(choice.dataset.preset, editMode);
-      const selected = !Object.keys(activeProfile.overrides).length && BASE_KEYS.every(key => activeProfile.colors[key] === profile.colors[key]);
+      const selected = BASE_KEYS.every(key => activeProfile.colors[key] === profile.colors[key]) &&
+        OVERRIDE_KEYS.every(key => activeProfile.overrides[key] === profile.overrides[key]);
       if (choice.getAttribute('aria-pressed') !== String(selected)) choice.setAttribute('aria-pressed', String(selected));
       if (choice.dataset.swatchMode !== editMode) {
         choice.dataset.swatchMode = editMode;
