@@ -33,6 +33,25 @@ test('repair coordinates incompatible surfaces without mutating input',()=>{
  const fixed=api.repairProfile(p,false);assert.ok(api.contrastChecks(fixed,false).every(x=>x.pass));
  assert.equal(p.colors.surface,'#ffffff');
 });
+
+test('industrial presets match defaults with readable hero and accent foregrounds',()=>{
+ const theme=api.createDefaultTheme();
+ for(const mode of ['light','dark']){
+  assert.deepEqual(copy(api.presetProfile('industrial',mode)),copy(theme[mode]));
+  const tokens=api.deriveTokens(theme[mode],mode==='dark');
+  assert.ok(api.getContrast(tokens['--hero-bg'],tokens['--hero-text'])>=4.5,mode+' hero text');
+  assert.ok(api.getContrast(tokens['--hero-bg'],tokens['--hero-muted'])>=4.5,mode+' hero description');
+  assert.ok(api.getContrast(theme[mode].colors.accent,tokens['--on-accent'])>=4.5,mode+' primary action');
+ }
+});
+
+test('saved legacy profiles retain their colors and mode after parsing',()=>{
+ const theme=copy(api.createDefaultTheme());
+ theme.light=copy(api.presetProfile('mint','light'));
+ theme.dark=copy(api.presetProfile('rose','dark'));
+ theme.mode='dark';
+ assert.deepEqual(copy(api.parseThemeJSON(JSON.stringify(theme))),theme);
+});
 test('extreme colors produce safe automatic foreground pairs',()=>{
  for(const c of ['#000000','#ffffff','#777777','#ff0000','#00ff00','#0000ff']){
   const p=copy(api.createDefaultTheme().dark);for(const k of Object.keys(p.colors))p.colors[k]=c;

@@ -21,8 +21,8 @@ test('lookup luminance preserves reference contrast for 512 color pairs',()=>{
   assert.equal(api.getContrast(a,b),(Math.max(x,y)+.05)/(Math.min(x,y)+.05));
  }
 });
-test('four presets return independent editable profiles and safe light/dark defaults',()=>{
- for(const id of ['mint','gray','sunshine','rose'])for(const mode of ['light','dark']){
+test('five presets return independent editable profiles and safe light/dark defaults',()=>{
+ for(const id of ['industrial','mint','gray','sunshine','rose'])for(const mode of ['light','dark']){
   const p=api.presetProfile(id,mode),original=JSON.stringify(p);
   assert.ok(api.contrastChecks(p,mode==='dark').every(c=>c.pass),id+'/'+mode);
   p.colors.primary='#123456';p.overrides.text='#ff0000';
