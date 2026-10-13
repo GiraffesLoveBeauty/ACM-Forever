@@ -20,8 +20,8 @@ with sync_playwright() as p:
     page.locator('.theme-trigger').click()
     assert page.locator('dialog.theme-editor').is_visible()
     original = page.evaluate("document.body.style.getPropertyValue('--brand')")
-    assert page.locator('.theme-preset').count() == 4
-    for preset in ['gray', 'sunshine', 'rose', 'mint']:
+    assert page.locator('.theme-preset').count() == 5
+    for preset in ['industrial', 'gray', 'sunshine', 'rose', 'mint']:
         page.locator('[data-preset=' + preset + ']').click()
         assert page.locator('[data-preset=' + preset + ']').get_attribute('aria-pressed') == 'true'
     page.locator('.theme-restore-original').click()

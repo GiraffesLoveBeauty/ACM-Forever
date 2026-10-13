@@ -151,11 +151,12 @@
   }
   function createDefaultTheme() {
     return {version:1, mode:'system',
-      light:{colors:{primary:'#16766a', background:'#edf3ef', surface:'#fbfdf9', accent:'#efcf63'}, overrides:{}},
-      dark:{colors:{primary:'#70c3a6', background:'#122222', surface:'#1a302e', accent:'#edcb69'}, overrides:{}}};
+      light:{colors:{primary:'#292c29', background:'#e8e9e4', surface:'#f8f8f3', accent:'#f1f547'}, overrides:{text:'#292c29',muted:'#62685e',border:'#c7cabc',link:'#292c29',selected:'#292c29',hero:'#20231f'}},
+      dark:{colors:{primary:'#e2e5d8', background:'#1a1d19', surface:'#242823', accent:'#f1f547'}, overrides:{text:'#f5f6eb',muted:'#b4bbac',border:'#454b41',link:'#eef1df',selected:'#eef1df',hero:'#151814'}}};
   }
   // Legacy color families are optional starting points, never storage migrations.
   const PRESETS = Object.freeze([
+    {id:'industrial', name:'工业黄', light:['#292c29','#e8e9e4','#f8f8f3','#f1f547'], dark:['#e2e5d8','#1a1d19','#242823','#f1f547']},
     {id:'mint', name:'清绿', light:['#16766a','#edf3ef','#fbfdf9','#efcf63'], dark:['#70c3a6','#122222','#1a302e','#edcb69']},
     {id:'gray', name:'白灰', light:['#68717a','#f0f1f3','#fcfcfd','#aab1b9'], dark:['#c0c6cd','#202327','#292d32','#c9cdd2']},
     {id:'sunshine', name:'暖黄', light:['#98741f','#faf5e6','#fffdf6','#edc54d'], dark:['#e6c65e','#272317','#342e1e','#f2cf60']},
@@ -164,7 +165,7 @@
   function presetProfile(id, mode) {
     const preset = PRESETS.find(item => item.id === id);
     if (!preset || !['light','dark'].includes(mode)) throw new TypeError('未知预设或模式');
-    return {colors:Object.fromEntries(BASE_KEYS.map((key,index) => [key,preset[mode][index]])), overrides:{}};
+    return {colors:Object.fromEntries(BASE_KEYS.map((key,index) => [key,preset[mode][index]])), overrides:id === 'industrial' ? createDefaultTheme()[mode].overrides : {}};
   }
   // Validate descriptors before reading values; reject unknown keys, getters,
   // symbols and custom prototypes. Ordinary records from other realms are OK.
@@ -236,7 +237,7 @@
       '--focus-ring':readable(backgrounds, c.primary, 3),
       '--wash-a':c.accent + '18', '--wash-b':c.primary + '0c', '--page-backdrop':c.background,
       '--hero-bg':hero, '--hero-gradient':'linear-gradient(120deg,' + hero + ',' + hero + ')',
-      '--hero-text':readable([hero], text), '--hero-muted':readable([hero], muted),
+      '--hero-text':readable([hero], '#ffffff'), '--hero-muted':readable([hero], mix('#ffffff',hero,.25)),
       '--art-shade':art, '--art-background':art, '--art-hue':'0deg', '--art-saturation':'1',
       '--art-label':readable([art], '#eaf3de'), '--art-route':readable([art], c.accent),
       '--art-node':c.accent, '--art-node-text':readable([c.accent, artBack], '#163432'),
@@ -577,7 +578,8 @@
     const activeProfile = draft[editMode];
     for (const choice of ui.dialog.querySelectorAll('.theme-preset')) {
       const profile = presetProfile(choice.dataset.preset, editMode);
-      const selected = !Object.keys(activeProfile.overrides).length && BASE_KEYS.every(key => activeProfile.colors[key] === profile.colors[key]);
+      const selected = BASE_KEYS.every(key => activeProfile.colors[key] === profile.colors[key]) &&
+        OVERRIDE_KEYS.every(key => activeProfile.overrides[key] === profile.overrides[key]);
       if (choice.getAttribute('aria-pressed') !== String(selected)) choice.setAttribute('aria-pressed', String(selected));
       if (choice.dataset.swatchMode !== editMode) {
         choice.dataset.swatchMode = editMode;
