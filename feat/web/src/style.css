@@ -1,0 +1,134 @@
+/* Vue layout primitives; visual tokens remain shared with the industrial theme. */
+#app {
+  min-height: 100vh;
+}
+.auth-main {
+  max-width: 480px;
+  margin: 56px auto;
+  padding: 20px;
+}
+.auth-card {
+  display: grid;
+  gap: 16px;
+}
+.auth-card label {
+  display: grid;
+  gap: 8px;
+}
+.plain-comment {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.vue-theme-dialog {
+  width: min(720px, calc(100vw - 32px));
+  max-height: 88vh;
+  overflow: auto;
+  padding: 24px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+.vue-theme-dialog::backdrop {
+  background: #0008;
+}
+.vue-theme-dialog .filters {
+  margin: 16px 0;
+}
+.vue-theme-dialog label {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.vue-theme-dialog input[type='color'] {
+  width: 100%;
+  height: 42px;
+  padding: 2px;
+}
+.vue-draft-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+.vue-draft-item.active {
+  background: var(--subtle-bg);
+}
+.compose-textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 380px;
+}
+.compose-preview {
+  min-height: 380px;
+  padding: 20px;
+  overflow-wrap: anywhere;
+}
+.compose-sidebar {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 20px;
+}
+.compose-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 20px;
+}
+.admin-workspace {
+  min-width: 0;
+}
+.admin-workspace .admin-panel {
+  margin: 20px 0;
+}
+.admin-workspace .list-item,
+.community-main .list-item {
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.table-wrap,
+.admin-table-wrap,
+.community-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.table-wrap table {
+  min-width: 580px;
+}
+.cf-dialog {
+  width: min(1040px, calc(100vw - 24px));
+  max-height: 85vh;
+}
+.algorithm-graph .graph-path-core {
+  stroke: var(--art-route);
+}
+.algorithm-graph .graph-node.is-selected .graph-node-ring {
+  opacity: 1;
+}
+.algorithm-graph .graph-node.is-selected .graph-node-back {
+  fill: var(--art-node);
+}
+.algorithm-graph .graph-node:hover .graph-node-ring {
+  opacity: 1;
+}
+@media (max-width: 600px) {
+  .vue-theme-dialog {
+    padding: 16px;
+  }
+  .auth-main {
+    margin-top: 24px;
+  }
+  .admin-pagination {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .compose-textarea,
+  .compose-preview {
+    min-height: 300px;
+  }
+}
