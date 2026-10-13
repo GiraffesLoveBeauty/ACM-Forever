@@ -1,0 +1,46 @@
+# ACM Forever Vue 前端
+
+Vue 3 + Vue Router + Vite。社区、个人中心、训练工具及 9 个管理模块均由 Vue 组件渲染，通过原来的 `/api/*` 接口访问 Python 服务。
+
+## 本地开发
+
+需要 Node.js 22.12 或更新版本、pnpm 11.25.0。先按 [API README](../api/README.md) 启动后端，默认端口 `8088`，再在本目录执行：
+
+```powershell
+pnpm install --frozen-lockfile
+pnpm dev
+```
+
+打开 `http://127.0.0.1:5173/`。Vite 将 `/api`、`/uploads`、`/health` 代理到 `127.0.0.1:8088`；登录 Cookie 与 CSRF 请求走同源代理。使用 `127.0.0.1`，避免混用 `localhost` 导致 Cookie 不一致。
+
+## 生产构建
+
+```powershell
+pnpm build
+```
+
+生成 `dist/`，Quart 在 `8088` 上提供构建后的页面与资源。未构建时页面返回 `503` 并提示构建；API 仍可单独使用。`pnpm preview` 仅预览静态制品，业务联调使用 Vite 开发代理或 Quart。
+
+保留 `/index.html`、`/post.html?id=...`、`/compose.html?draft_id=...`、`/home.html`、`/leaderboard.html`、登录与改密路径，后台仍是 `/admin.html?section=...&tab=...`。旧管理入口与普通成员的训练、题库、赛事复盘链接也保留。
+
+## 目录
+
+- `src/views/`：社区与账户页面、后台壳及旧入口。
+- `src/admin/`：成员账号、成员资料、训练、题库、CF 选题、赛事复盘、同步任务、审核、设置。
+- `src/components/`：导航、主题编辑器、图谱、插图、话题卡片和分页。
+- `src/lib/`：请求与会话、Markdown 消毒、主题色算法、头像压缩、后台状态。
+- `vite.config.js`：开发代理、生产媒体复制与构建配置。
+
+沿用 `api/acm_api/public/assets` 中的 CSS 与媒体。原生页面和业务脚本暂留在旧目录，供历史版本对照及现有单元用例使用；它们不打包、不提供为活动页面。主题算法与头像压缩以模块形式迁入 Vue，修改后需要同步维护相关算法的检查用例。
+
+## 状态与安全约定
+
+- 所有页面加载在离开时取消，替代查询取消旧请求；定时轮询随模块销毁停止。
+- 登录与角色检查同时保留在 Quart 和 Vue 路由，实际接口权限始终由后端校验。
+- Markdown 仅通过 `marked` + DOMPurify 的允许列表渲染；用户资料与评论使用 Vue 文本插值。
+- 账号临时密码仅保存在组件内存中，离开提醒、离开清除，导出 CSV 转义公式前缀。
+- CF 同步 POST 的提交确认不随模块卸载取消，重进模块继续读取任务；复制候选题前重新查重。
+- 草稿保存串行处理并保存后续编辑，离开路由前等待保存；关闭页面采用已有草稿的 keepalive 补存。
+- 主题兼容 `acm.theme.v1` 与 `acm.theme.library.v1`，同时比较基础色和高级覆盖色判断预设选中状态。
+
+CI 先构建 Vue 再运行仓库原有用例。部署工作流先构建再打包 `feat/`，包含 `web/dist`，排除依赖目录、缓存与本地数据库。旧原生脚本用例不代表 Vue 交互回归已通过；登录、草稿、批量发号、同步恢复等仍需在本地环境完成验收后再合并。
