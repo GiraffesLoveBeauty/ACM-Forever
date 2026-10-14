@@ -56,7 +56,11 @@ python3 -m api.init_db --database /home/WYJ/acm-forever-data/acm_forever.db
 
 省略 `--database` 时读取 `ACM_DATABASE_PATH`，未配置时使用当前目录的 `./data/acm_forever.db`。命令初始化服务所需的表结构与默认设置，可重复运行，保留已有业务数据；root 账号仍由服务启动时的配置创建。正常启动也会自动执行相同的表结构初始化。
 
-管理员通过 `POST /api/admin/problems/sync` 触发服务器抓取公开 AtCoder 或 Codeforces 比赛的新题目。接口使用现有 Web `admin/root` 会话与 CSRF，返回 202 和任务 ID，进度及取消复用 `/api/tasks`。题目正文与样例写入同一条 `crawler_problems` 记录，并原子更新 `recommendations`，使既有题库列表能够展示新题目。默认跳过成功题目，可显式刷新；失败保留已有正文和样例。CF 当前支持普通公开比赛，题号兼容 `1843A/cf_1843A`，与既有提交记录统一存为 `cf_1843A`；元数据和页面共用 CF 请求节流。详细参数和调用示例见 [API 调用指南](../../docs/api.md#管理员采集新题目)。
+管理员在 **管理后台 → 题库管理 → 拉取题目** 中选择平台、填写比赛 ID 和题数，点击 **开始拉取**，即可触发服务器抓取公开 AtCoder 或 Codeforces 比赛的新题目。支持选填题号、选择题面语言和刷新已有题目；页面显示进度与失败原因，成功后自动刷新题库。离开页面后任务继续执行，可在 **同步任务** 查看或取消。
+
+同一页面的 **初始化数据库** 按钮补齐服务端 SQLite 表结构并显示平台题库统计，保留已有数据。选择 **拉取范围 → 该平台全部题目** 后无需填写比赛 ID，服务器先导入公开目录，再按 **每批处理题数** 自动拉取所有题面与样例；每批题数不限制总数量。默认跳过成功题目，取消或重启后再次运行可继续未完成题目并重试失败题目。全量任务逐题限速，可能运行数小时。
+
+网页调用 `POST /api/admin/problems/sync`，使用现有 Web `admin/root` 会话与 CSRF，返回 202 和任务 ID，进度及取消复用 `/api/tasks`。题目正文与样例写入同一条 `crawler_problems` 记录，并原子更新 `recommendations`，使既有题库列表能够展示新题目。默认跳过成功题目，可显式刷新；失败保留已有正文和样例。CF 当前支持普通公开比赛，题号兼容 `1843A/cf_1843A`，与既有提交记录统一存为 `cf_1843A`；元数据和页面共用 CF 请求节流。详细参数和调用示例见 [API 调用指南](../../docs/api.md#管理员采集新题目)。
 
 ## 环境变量
 
@@ -98,7 +102,7 @@ WebUI API 以原 WebUI 路由为兼容基线。常用路由包括：
 - `/api/member/<qq_id>`、`/api/user`、`/api/me/profile`
 - `POST /api/me/avatar`、`DELETE /api/me/avatar`：当前成员头像上传与重置
 - `/api/admin/members`：成员搜索与分页
-- `/api/problems`、`/api/me/problems`：题库查询和收藏
+- `/api/problems`、`/api/me/problems`：题库查询和收藏；各自的 `/<platform>/<problem_id>` GET 接口读取已采集题面与样例。列表的“打开题目”进入 `/problem.html` 站内详情页，支持公式与样例复制；仅有目录时显示等待采集提示。图片仍由原站 HTTPS 加载。
 - `/api/training/*`、`/api/me/training/*`、`/api/contest/reviews`、`/api/me/contest/reviews`
 - `/api/stats`、`/api/leaderboard`、`/api/me/leaderboard`
 - `/api/admin/cf/*`：管理员近期 AC 汇总、全量历史候选查重与持久化刷新任务
@@ -153,7 +157,7 @@ Bot 服务接口包括：
 
 ```powershell
 python -m unittest discover -s feat/api/tests -p "test_*.py"
-node --test feat/api/tests/admin-history.test.cjs feat/api/tests/cf-sync.test.cjs feat/api/tests/theme-colors.test.cjs feat/api/tests/theme-performance.test.cjs
+node --test feat/api/tests/admin-history.test.cjs feat/api/tests/admin-problem-sync.test.cjs feat/api/tests/cf-sync.test.cjs feat/api/tests/theme-colors.test.cjs feat/api/tests/theme-performance.test.cjs
 ```
 
 本地浏览器联调、演示数据库和截图应置于仓库外，使用合成数据和模拟 OJ 响应。当前服务器工作流在 `feat/**` 改动合并 `main` 后自动部署，合并前仍需跨人评审、联调验收及运维确认。

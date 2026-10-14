@@ -259,10 +259,11 @@ def create_app():
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
+        problem_images = " https://*.codeforces.com https://codeforces.com https://img.atcoder.jp https://atcoder.jp" if request.path == "/problem.html" else ""
         response.headers.setdefault(
             "Content-Security-Policy",
             "default-src 'self'; base-uri 'self'; object-src 'none'; "
-            "frame-ancestors 'none'; connect-src 'self'; img-src 'self' data: blob:; "
+            f"frame-ancestors 'none'; connect-src 'self'; img-src 'self' data:{problem_images}; "
             "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'",
         )
         if response.content_type == "application/json":
@@ -296,7 +297,7 @@ def create_app():
 _PUBLIC_PAGES = {
     "index.html", "login.html", "post.html", "forum-moderation.html",
     "change-password.html", "home.html", "admin.html",
-    "leaderboard.html", "challenge.html", "reviews.html", "problem-bank.html",
+    "leaderboard.html", "challenge.html", "reviews.html", "problem-bank.html", "problem.html",
     "submissions.html", "workspace.html", "contest-review.html", "member.html", "compose.html",
     "tasks.html", "settings.html", "cf-practice.html",
 }

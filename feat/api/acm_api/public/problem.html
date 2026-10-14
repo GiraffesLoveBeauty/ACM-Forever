@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>题目详情 · ACM Forever</title>
+  <link rel="stylesheet" href="/assets/app.css?v=unified-admin-1">
+  <link rel="stylesheet" href="/assets/problem.css?v=2">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar"><div class="brand">ACM Forever</div><nav class="nav"></nav></aside>
+    <main class="main problem-page">
+      <header class="topbar">
+        <div><a id="problem-back" class="muted" href="/problem-bank.html">← 返回题库</a><h1 id="problem-title">题目详情</h1></div>
+        <div class="userbar"><button class="btn" id="theme-toggle" aria-label="切换主题">◐</button><button class="btn" id="logout">退出</button></div>
+      </header>
+      <div class="problem-overview">
+        <div id="problem-meta" class="chips"></div>
+        <a id="problem-original" class="btn" target="_blank" rel="noopener noreferrer" aria-label="查看原题（新标签页）" hidden>查看原题 ↗</a>
+      </div>
+      <p id="problem-message" class="muted" role="status" aria-live="polite">正在读取已采集题目…</p>
+      <section id="problem-empty" class="card" hidden>
+        <h2>题面尚未采集</h2><p id="problem-empty-message"></p>
+        <button class="btn" id="problem-reload" type="button">重新检查</button>
+      </section>
+      <article id="problem-statement" class="card problem-statement" aria-label="已采集题面与样例" hidden></article>
+      <section id="problem-samples" class="card problem-samples" aria-label="样例" hidden></section>
+    </main>
+  </div>
+  <script src="/assets/vendor/purify.min.js"></script>
+  <script src="/assets/vendor/katex/katex.min.js?v=0.19.0"></script>
+  <script src="/assets/vendor/katex/auto-render.min.js?v=0.19.0"></script>
+  <script src="/assets/app.js?v=unified-admin-1"></script>
+  <script src="/assets/problem.js?v=2"></script>
+</body>
+</html>

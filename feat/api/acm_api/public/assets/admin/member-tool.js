@@ -6,5 +6,5 @@ window.PAGE_LOAD=async()=>{
   const ctx=context(root,new URLSearchParams(location.search),{},{notice:text=>{document.getElementById('tool-message').textContent=text},updateParams:()=>{}});
   let module;
   window.addEventListener('pagehide',()=>{module?.exit?.();ctx.dispose()},{once:true});
-  try{module=await (await import('./'+name+'.js?v=unified-admin-1')).enter(ctx)}catch(error){if(error.name!=='AbortError')ctx.notice(error.message)}
+  try{module=await (await import('./'+name+'.js?v=unified-admin-4')).enter(ctx)}catch(error){if(error.name!=='AbortError')ctx.notice(error.message)}
 };
