@@ -35,6 +35,10 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
       codeMask.fill(1, lineStart, lineLimit);
       fence = { character: fenceMatch[1][0], length: fenceMatch[1].length, quoteDepth, listIndent };
     }
+    if (!fence && !codeMask[lineStart]) {
+      const indentation = line.slice(containerPrefix.length).match(/^[\t ]*/)[0];
+      if (indentation.includes("\t") || indentation.length >= 4) codeMask.fill(1, lineStart, lineLimit);
+    }
     lineStart = lineLimit;
   }
   const backtickRuns = new Map();
