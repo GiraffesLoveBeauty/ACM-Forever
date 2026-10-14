@@ -244,7 +244,14 @@
       for(const token of tokens){
         const raw=String(token.raw||'');
         if(!raw)continue;
-        const startOffset=source.indexOf(raw,offset);
+        let startOffset=source.indexOf(raw,offset);
+        if(token.type==='heading'&&token.depth===1){
+          while(startOffset>=0){
+            const lineStart=source.lastIndexOf('\n',startOffset-1)+1;
+            if(/^[\t ]{0,3}$/.test(source.slice(lineStart,startOffset)))break;
+            startOffset=source.indexOf(raw,startOffset+1);
+          }
+        }
         if(startOffset<0)continue;
         if(token.type==='heading'&&token.depth===1&&raw){
           const inlineHtml=window.marked.parseInline(token.text||'',{gfm:true});
@@ -342,7 +349,7 @@
       const recoverySaved=scheduleSave();if(!recoverySaved){messageBox.classList.remove('success');messageBox.textContent='恢复内容已载入，但浏览器本地恢复保存失败；正在尝试保存到服务器，请立即复制正文。';return}
       recoveryBox.hidden=true;
     });
-    document.getElementById('discard-recovery').addEventListener('click',()=>{clearRecovery(recoveryCandidateKey||recoveryKey());clearRecoveryCandidateSource();clearRecoveryWorkingCopy();recoveryCandidate=null;recoveryCandidateKey=null;recoveryBox.hidden=true});
+    document.getElementById('discard-recovery').addEventListener('click',()=>{clearRecovery(recoveryCandidateKey||recoveryKey());clearRecoveryCandidateSource();recoveryCandidate=null;recoveryCandidateKey=null;recoveryBox.hidden=true});
     bodyInput.addEventListener('keydown',event=>{
       if(!(event.ctrlKey||event.metaKey)||event.altKey)return;
       const key=event.key.toLowerCase(),kind=key==='b'?'bold':key==='i'?'italic':key==='k'?'link':null;
