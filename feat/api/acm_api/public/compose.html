@@ -268,7 +268,7 @@
       if(!file)return;
       if(!/\.(md|markdown)$/i.test(file.name)){messageBox.classList.remove('success');messageBox.textContent='请选择 .md 或 .markdown 文件。';return}
       if(file.size>102400){messageBox.classList.remove('success');messageBox.textContent='文件不能超过 100 KB。';return}
-      if(bodyInput.value.trim()&&!confirm('导入 Markdown 会替换当前正文，确定继续吗？'))return;
+      if((titleInput.value.trim()||bodyInput.value.trim())&&!confirm('导入 Markdown 会替换当前标题和正文，确定继续吗？'))return;
       const generation=++markdownImportGeneration;
       try{
         const importedText=await file.text();
