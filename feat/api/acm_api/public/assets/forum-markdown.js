@@ -47,7 +47,7 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
       if (line.trim()) while (listContentIndents.length && contentIndent < listContentIndents[listContentIndents.length - 1]) listContentIndents.pop();
     }
     const listIndent = listContentIndents[listContentIndents.length - 1] || 0;
-    const fenceMatch = line.match(/^(?:(?: {0,3}>[\t ]?| {0,3}(?:[-+*]|\d{1,9}[.)])[\t ]+))*[\t ]{0,3}(`{3,}|~{3,})/);
+    const fenceMatch = line.match(/^(?:(?: {0,3}>[\t ]?| {0,3}(?:[-+*]|\d{1,9}[.)])[\t ]+))* {0,3}(`{3,}|~{3,})/);
     const lineLimit = newline < 0 ? lineEnd : newline + 1;
     if (fence && (quoteDepth < fence.quoteDepth || line.trim() && fence.listIndent > contentIndent)) fence = null;
     if (fence) {
