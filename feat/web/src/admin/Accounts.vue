@@ -50,13 +50,21 @@ async function loadAccounts() {
 }
 function select(qq, active) {
   const next = new Set(selected.value);
-  if (active && next.size < 20) next.add(qq);
-  else next.delete(qq);
+  if (active) {
+    if (next.size < 20) next.add(qq);
+  } else next.delete(qq);
   selected.value = next;
 }
 function selectPage(event) {
+  if (busy.value) return;
   for (const row of candidates.value.items.filter((r) => !r.has_web_account))
     select(row.qq_id, event.target.checked);
+}
+function changeRole(row, event) {
+  const role = event.target.value;
+  // Keep the control on the confirmed role until the server refresh succeeds.
+  event.target.value = row.role;
+  if (role !== row.role) action(row, 'role', role);
 }
 function remember(result) {
   credentials.value = (result.created || []).map((row) => ({
@@ -245,6 +253,7 @@ onBeforeUnmount(() => {
                   <input
                     type="checkbox"
                     aria-label="选择本页未发号成员"
+                    :disabled="busy"
                     :checked="
                       candidates.items.filter((r) => !r.has_web_account).length > 0 &&
                       candidates.items
@@ -399,7 +408,7 @@ onBeforeUnmount(() => {
               v-if="auth.role === 'root'"
               :value="row.role"
               :disabled="busy"
-              @change="action(row, 'role', $event.target.value)"
+              @change="changeRole(row, $event)"
             >
               <option value="member">成员</option>
               <option v-if="auth.role === 'root'" value="admin">管理员</option>
