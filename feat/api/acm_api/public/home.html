@@ -67,10 +67,14 @@
         throw Error('图片压缩未能达到 2 MB，请换一张图片再试。');
       }finally{image.close()}
     }
+    let forumContentRequest=0;
+    function activeForumTab(){return document.querySelector('[data-forum-tab].active')?.dataset.forumTab||'posts'}
     async function loadForumContent(tab='posts'){
+      const request=++forumContentRequest;
       const box=document.getElementById('my-forum-content');
       try{
         const rows=await api(tab==='posts'?'/forum/mine/posts':'/forum/mine/bookmarks');
+        if(request!==forumContentRequest||tab!==activeForumTab())return;
         box.innerHTML=rows.map(item=>{
           const state=tab==='posts'?({pending:'待审核',published:'已发布',rejected:'未通过'}[item.status]||item.status):esc(item.author_name||'');
           const status=tab==='posts'?({pending:'审核中',published:'已发布',rejected:'未通过'}[item.status]||'查看'):'查看';
@@ -80,10 +84,10 @@
         box.querySelectorAll('[data-delete-own-post]').forEach(button=>button.onclick=async()=>{
           if(!confirm('确定删除这篇帖子吗？删除后会从论坛中移除。'))return;
           button.disabled=true;
-          try{await api(`/forum/posts/${Number(button.dataset.deleteOwnPost)}`,{method:'DELETE'});await loadForumContent('posts')}
+          try{await api(`/forum/posts/${Number(button.dataset.deleteOwnPost)}`,{method:'DELETE'});await loadForumContent(activeForumTab())}
           catch(error){button.disabled=false;alert(error.message)}
         });
-      }catch(error){box.innerHTML=`<div class="empty">${esc(error.message)}</div>`}
+      }catch(error){if(request===forumContentRequest&&tab===activeForumTab())box.innerHTML=`<div class="empty">${esc(error.message)}</div>`}
     }
     async function load(){
       try{

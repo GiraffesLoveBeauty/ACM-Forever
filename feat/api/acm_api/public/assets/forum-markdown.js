@@ -34,7 +34,7 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
   }
   const backtickRuns = new Map();
   for (let index = 0; index < text.length;) {
-    if (text[index] !== "`" || codeMask[index]) { index++; continue; }
+    if (text[index] !== "`" || codeMask[index] || isEscapedAt(text, index)) { index++; continue; }
     let end = index + 1;
     while (end < text.length && text[end] === "`") end++;
     const length = end - index;
