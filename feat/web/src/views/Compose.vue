@@ -1,7 +1,7 @@
 <script setup>
 import { ref, reactive, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
-import { api, auth, useRequests, notify, showError } from '../lib/api.js';
+import { api, useRequests, notify, showError } from '../lib/api.js';
 import { markdown } from '../lib/markdown.js';
 const route = useRoute(),
   router = useRouter(),
@@ -39,7 +39,7 @@ watch(
   },
   { flush: 'sync' },
 );
-async function save() {
+async function save({ keepalive = false } = {}) {
   clearTimeout(timer);
   if (saving) return saving;
   if (revision === savedRevision || disposed) return;
@@ -51,10 +51,11 @@ async function save() {
       const result = await api(id.value ? `/forum/drafts/${id.value}` : '/forum/drafts', {
         method: id.value ? 'PUT' : 'POST',
         body: data,
+        keepalive,
       });
       id.value = result.id;
       savedRevision = version;
-      if (!leaving && String(route.query.draft_id) !== String(id.value))
+      if (!keepalive && !leaving && String(route.query.draft_id) !== String(id.value))
         await router.replace({ path: '/compose.html', query: { draft_id: id.value } });
     }
     message.value = '草稿已保存';
@@ -67,7 +68,7 @@ async function save() {
   } finally {
     saving = null;
   }
-  list().catch(showError);
+  if (!keepalive) list().catch(showError);
 }
 async function choose(draftId) {
   if (busy.value) return;
@@ -165,13 +166,9 @@ function unload(event) {
   }
 }
 function pagehide() {
-  if (id.value && revision !== savedRevision && !saving)
-    fetch(`/api/forum/drafts/${id.value}`, {
-      method: 'PUT',
-      credentials: 'same-origin',
-      keepalive: true,
-      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': auth.csrf_token },
-      body: JSON.stringify(payload()),
+  if (!finished && !disposed && revision !== savedRevision && !saving)
+    save({ keepalive: true }).catch(() => {
+      /* The page is leaving; a failed request must not report a successful save. */
     });
 }
 onBeforeRouteLeave(async () => {
