@@ -20,15 +20,20 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
     const newline = text.indexOf("\n", lineStart);
     const lineEnd = newline < 0 ? text.length : newline;
     const line = text.slice(lineStart, lineEnd);
+    const containerPrefix = line.match(/^(?:(?: {0,3}>[\t ]?| {0,3}(?:[-+*]|\d{1,9}[.)])[\t ]+))*/)[0];
+    const quoteDepth = (containerPrefix.match(/>/g) || []).length;
+    const listIndent = /(?:[-+*]|\d{1,9}[.)])[\t ]+/.test(containerPrefix) ? containerPrefix.length : 0;
+    const contentIndent = containerPrefix.length + (line.slice(containerPrefix.length).match(/^[\t ]*/)?.[0].length || 0);
     const fenceMatch = line.match(/^(?:(?: {0,3}>[\t ]?| {0,3}(?:[-+*]|\d{1,9}[.)])[\t ]+))*[\t ]{0,3}(`{3,}|~{3,})/);
     const lineLimit = newline < 0 ? lineEnd : newline + 1;
+    if (fence && (quoteDepth < fence.quoteDepth || line.trim() && fence.listIndent > contentIndent)) fence = null;
     if (fence) {
       codeMask.fill(1, lineStart, lineLimit);
       if (fenceMatch && fenceMatch[1][0] === fence.character && fenceMatch[1].length >= fence.length
           && !line.slice(fenceMatch[0].length).trim()) fence = null;
     } else if (fenceMatch && (fenceMatch[1][0] !== "`" || !line.slice(fenceMatch[0].length).includes("`"))) {
       codeMask.fill(1, lineStart, lineLimit);
-      fence = { character: fenceMatch[1][0], length: fenceMatch[1].length };
+      fence = { character: fenceMatch[1][0], length: fenceMatch[1].length, quoteDepth, listIndent };
     }
     lineStart = lineLimit;
   }
