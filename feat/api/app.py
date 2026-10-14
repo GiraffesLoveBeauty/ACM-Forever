@@ -120,6 +120,7 @@ def create_app():
         ),
         "_task_provider": task_manager.snapshots,
         "_task_canceller": task_manager.cancel,
+        "_problem_sync_submitter": task_manager.submit_problem_sync,
         "_account_sync_submitter": task_manager.submit_account_sync,
         "_all_account_sync_submitter": task_manager.submit_all_accounts_sync,
         "_registration_sync_submitter": lambda qq_id: task_manager.submit_account_sync(
@@ -169,6 +170,7 @@ def create_app():
 
     @app.after_serving
     async def close_service():
+        await task_manager.close()
         await practice_jobs.close()
         await sync_engine.close()
 

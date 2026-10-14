@@ -5,6 +5,8 @@ from contextlib import asynccontextmanager
 
 import aiosqlite
 
+from .problem_bank import initialize_problem_bank
+
 
 @asynccontextmanager
 async def isolated_connection(connection):
@@ -78,6 +80,7 @@ async def connect_db(db_path):
     await db.execute(
         "CREATE TABLE IF NOT EXISTS recommendations (id INTEGER PRIMARY KEY AUTOINCREMENT, platform TEXT NOT NULL, problem_id TEXT NOT NULL, problem_name TEXT, problem_rating TEXT, problem_url TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '', UNIQUE(platform, problem_id))"
     )
+    await initialize_problem_bank(db)
     await db.execute("CREATE INDEX IF NOT EXISTS idx_submissions_user_time ON submissions(user_qq_id, submit_time)")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_submissions_time ON submissions(submit_time)")
     await db.execute(

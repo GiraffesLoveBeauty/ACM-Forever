@@ -45,6 +45,19 @@ GitHub Actions 会在 `/home/WYJ/acm-forever-data/.env` 已存在时安装依赖
 
 首次启动时，服务会自动建立数据库表结构。若数据库中没有 Web 账号，可配置 `ACM_BOOTSTRAP_ROOT_QQ_ID` 和 `ACM_BOOTSTRAP_ROOT_PASSWORD` 初始化一个 root 账号；初始化成功后应移除这两个变量。也可先在环境中配置旧式管理员登录账号与密码，但应优先使用数据库账号登录。
 
+### 单独初始化数据库与题目采集
+
+安装 API 依赖后，可以在服务器部署目录执行初始化，无需启动 HTTP 服务，也无需设置 Web 会话密钥：
+
+```bash
+cd /home/WYJ/acm-forever-feat
+python3 -m api.init_db --database /home/WYJ/acm-forever-data/acm_forever.db
+```
+
+省略 `--database` 时读取 `ACM_DATABASE_PATH`，未配置时使用当前目录的 `./data/acm_forever.db`。命令初始化服务所需的表结构与默认设置，可重复运行，保留已有业务数据；root 账号仍由服务启动时的配置创建。正常启动也会自动执行相同的表结构初始化。
+
+管理员通过 `POST /api/admin/problems/sync` 触发服务器抓取公开 AtCoder 或 Codeforces 比赛的新题目。接口使用现有 Web `admin/root` 会话与 CSRF，返回 202 和任务 ID，进度及取消复用 `/api/tasks`。题目正文与样例写入同一条 `crawler_problems` 记录，并原子更新 `recommendations`，使既有题库列表能够展示新题目。默认跳过成功题目，可显式刷新；失败保留已有正文和样例。CF 当前支持普通公开比赛，题号兼容 `1843A/cf_1843A`，与既有提交记录统一存为 `cf_1843A`；元数据和页面共用 CF 请求节流。详细参数和调用示例见 [API 调用指南](../../docs/api.md#管理员采集新题目)。
+
 ## 环境变量
 
 | 变量 | 用途 |
