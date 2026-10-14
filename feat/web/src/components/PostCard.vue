@@ -1,0 +1,66 @@
+<script setup>
+import { ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { auth, api, avatar, date, showError } from '../lib/api.js';
+const props = defineProps({ post: { type: Object, required: true } });
+const router = useRouter(),
+  busy = ref(false);
+async function toggle(kind) {
+  if (!auth.authenticated)
+    return router.push({
+      path: '/login.html',
+      query: { next: router.currentRoute.value.fullPath },
+    });
+  if (busy.value) return;
+  busy.value = true;
+  try {
+    const result = await api(`/forum/posts/${props.post.id}/${kind}`, { method: 'POST' });
+    const key = kind === 'like' ? 'viewer_liked' : 'viewer_bookmarked';
+    if (kind === 'like' && Boolean(props.post[key]) !== result.active)
+      props.post.likes_count = Math.max(
+        0,
+        (props.post.likes_count || 0) + (result.active ? 1 : -1),
+      );
+    props.post[key] = result.active;
+  } catch (e) {
+    showError(e);
+  } finally {
+    busy.value = false;
+  }
+}
+</script>
+<template>
+  <article class="forum-post-card" :data-category="post.category_slug || 'discussion'">
+    <div class="forum-post-meta">
+      <span class="forum-category-pill">{{ post.category_name }}</span
+      ><span v-if="post.is_pinned" class="forum-pinned">置顶</span
+      ><time class="forum-post-time">{{ date(post.created_at) }}</time>
+    </div>
+    <h2>
+      <RouterLink :to="`/post.html?id=${post.id}`">{{ post.title }}</RouterLink>
+    </h2>
+    <RouterLink class="forum-post-excerpt" :to="`/post.html?id=${post.id}`">{{
+      post.excerpt
+    }}</RouterLink>
+    <div class="forum-post-author">
+      <img class="forum-avatar" :src="avatar(post.author_avatar_url)" alt="作者头像" /><span>{{
+        post.author_name || 'ACM 成员'
+      }}</span
+      ><span>· 计量 ACMer</span>
+    </div>
+    <div class="forum-post-actions">
+      <RouterLink :to="`/post.html?id=${post.id}#comments`"
+        >▤ {{ post.comments_count || 0 }} 条评论</RouterLink
+      ><button :class="{ 'is-active': post.viewer_liked }" :disabled="busy" @click="toggle('like')">
+        {{ post.viewer_liked ? '♥' : '♡' }} {{ post.likes_count || 0 }} 赞</button
+      ><span>◉ {{ post.views_count || 0 }} 阅读</span
+      ><button
+        :class="{ 'is-active': post.viewer_bookmarked }"
+        :disabled="busy"
+        @click="toggle('bookmark')"
+      >
+        {{ post.viewer_bookmarked ? '★ 已收藏' : '☆ 收藏' }}
+      </button>
+    </div>
+  </article>
+</template>

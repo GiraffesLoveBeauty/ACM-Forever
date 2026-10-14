@@ -1,0 +1,14 @@
+import { createApp } from 'vue';
+import App from './App.vue';
+import router from './router.js';
+import '../../api/acm_api/public/assets/app.css';
+import '../../api/acm_api/public/assets/forum.css';
+import '../../api/acm_api/public/assets/forum-graph.css';
+import '../../api/acm_api/public/assets/forum-home-layout.css';
+import '../../api/acm_api/public/assets/community-art.css';
+import '../../api/acm_api/public/assets/admin.css';
+import '../../api/acm_api/public/assets/cf-practice.css';
+import '../../api/acm_api/public/assets/theme-editor.css';
+import '../../api/acm_api/public/assets/endfield-theme.css';
+import './style.css';
+createApp(App).use(router).mount('#app');

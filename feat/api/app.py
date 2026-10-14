@@ -71,6 +71,7 @@ def create_app():
     app.config["MAX_CONTENT_LENGTH"] = 3 * 1024 * 1024
     app.config["BOT_API_TOKEN"] = os.getenv("ACM_BOT_API_TOKEN", "").strip()
     app.config["WEBUI_PUBLIC_DIR"] = Path(__file__).parent / "acm_api" / "public"
+    app.config["WEBUI_DIST_DIR"] = Path(__file__).parent.parent / "web" / "dist"
     root_ids = _csv_env("ACM_ROOT_QQ_IDS")
     initial_admin_ids = _csv_env("ACM_ADMIN_QQ_IDS")
     crawler_config = {
@@ -190,7 +191,16 @@ def create_app():
         identity = await _session_identity()
         if identity and identity["must_change_password"]:
             return redirect("/change-password.html?" + urlencode({"next": "/"}))
-        return await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], "index.html")
+        return await vue_entry()
+
+    async def vue_entry(filename="index.html"):
+        dist = app.config["WEBUI_DIST_DIR"]
+        if not (dist / "index.html").is_file():
+            return (
+                "Vue frontend has not been built. Run pnpm install and pnpm build in feat/web.",
+                503,
+            )
+        return await send_from_directory(dist, filename)
 
     @app.get("/<path:filename>")
     async def webui_static(filename):
@@ -199,7 +209,7 @@ def create_app():
         if filename.startswith("assets/") and extension in {
             ".css", ".js", ".png", ".jpg", ".jpeg", ".svg", ".woff", ".woff2", ".otf", ".ico",
         }:
-            return await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], filename)
+            return await send_from_directory(app.config["WEBUI_DIST_DIR"], filename)
         if filename not in _PUBLIC_PAGES:
             abort(404)
 
@@ -213,7 +223,7 @@ def create_app():
             params["section"] = legacy
             target = "/admin.html?" + urlencode(params)
         if filename in _RETIRED_PAGES:
-            return await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], filename)
+            return await vue_entry("retired.html")
         if identity and identity["must_change_password"] and filename != "change-password.html":
             return redirect("/change-password.html?" + urlencode({"next": target}))
         if filename in _ADMIN_PAGES:
@@ -234,7 +244,7 @@ def create_app():
             return redirect("/login.html?" + urlencode({"next": target}))
         if target != request.full_path.rstrip("?"):
             return redirect(target)
-        return await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], filename)
+        return await vue_entry()
 
     @app.get("/uploads/avatars/<filename>")
     async def uploaded_avatar(filename):
