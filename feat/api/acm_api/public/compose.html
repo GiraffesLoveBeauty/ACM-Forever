@@ -74,7 +74,7 @@
   <script src="/assets/vendor/purify.min.js"></script>
   <script src="/assets/vendor/katex/katex.min.js?v=0.19.0"></script>
   <script src="/assets/vendor/katex/auto-render.min.js?v=0.19.0"></script>
-  <script src="/assets/forum-markdown.js?v=forum-math-7"></script>
+  <script src="/assets/forum-markdown.js?v=forum-math-9"></script>
   <script src="/assets/app.js?v=industrial-4"></script>
   <script>
     const titleInput=document.getElementById('draft-title');
@@ -84,7 +84,7 @@
     const messageBox=document.getElementById('compose-message');
     const draftList=document.getElementById('draft-list');
     const recoveryBox=document.getElementById('compose-recovery');
-    let recoveryOwner='member',recoveryTabId='',recoveryTabInstanceId='',recoveryTabStartedAt=0,recoveryTabChannel=null,pageReady=false,localOnly=false,categoriesLoaded=false,deletingDraft=false,submitting=false,markdownImportPromises=new Set();
+    let recoveryOwner='member',recoveryTabId='',recoveryTabInstanceId='',recoveryTabStartedAt=0,recoveryTabChannel=null,pageReady=false,localOnly=false,categoriesLoaded=false,deletingDraft=false,submitting=false,markdownImportGeneration=0,markdownImportPromises=new Set();
     const queryDraftId=new URLSearchParams(location.search).get('draft_id');
     let draftId=queryDraftId&&/^\d+$/.test(queryDraftId)?Number(queryDraftId):null;
     let revision=0,savedRevision=-1,saveTimer=null,savePromise=null,recoveryCandidate=null,recoveryCandidateKey=null,recoveryCandidateSourceKey=null,recoveryCandidateSourceValue=null,recoveryWorkingKey=null,recoveryCategoryId=null;
@@ -196,6 +196,7 @@
     }
     function scheduleSave(){if(!pageReady)return false;limitCodePoints(titleInput,120);limitCodePoints(bodyInput,20000);revision++;const payload=draftPayload();if(localOnly&&!categoriesLoaded&&recoveryCandidate?.payload)payload.category_id=recoveryCandidate.payload.category_id||null;const recoverySaved=persistRecovery(payload);setSaveState(!recoverySaved?'本地恢复保存失败，请复制内容':localOnly?'仅保存在此浏览器':'有未保存的修改',!recoverySaved||localOnly?'error':'dirty');messageBox.textContent=!recoverySaved?'浏览器无法保存本地恢复副本，请立即复制正文。':localOnly?'服务器暂不可用，内容已保存在此浏览器。恢复连接后请重新加载再保存。':'';messageBox.classList.remove('success');updatePreview();clearTimeout(saveTimer);if(!localOnly)saveTimer=setTimeout(()=>saveDraft().catch(()=>{}),900);return recoverySaved}
     function applyMarkdown(kind){
+      markdownImportGeneration++;
       const start=bodyInput.selectionStart,end=bodyInput.selectionEnd;
       const selected=bodyInput.value.slice(start,end);
       const presets={bold:['**','**','重点内容'],italic:['*','*','强调内容'],strike:['~~','~~','删除线内容'],code:['`','`','code'],link:['[','](https://)','链接文字'],h1:['# ','','一级标题'],h2:['## ','','二级标题'],quote:['> ','','引用内容'],ul:['- ','','列表项目'],ol:['1. ','','列表项目'],codeblock:['```\n','\n```','在这里写代码']};
@@ -261,8 +262,11 @@
       if(!/\.(md|markdown)$/i.test(file.name)){messageBox.classList.remove('success');messageBox.textContent='请选择 .md 或 .markdown 文件。';return}
       if(file.size>102400){messageBox.classList.remove('success');messageBox.textContent='文件不能超过 100 KB。';return}
       if(bodyInput.value.trim()&&!confirm('导入 Markdown 会替换当前正文，确定继续吗？'))return;
+      const generation=++markdownImportGeneration;
       try{
-        const text=(await file.text()).replace(/^\uFEFF/,'').replace(/\r\n?/g,'\n');
+        const importedText=await file.text();
+        if(generation!==markdownImportGeneration)return;
+        const text=importedText.replace(/^\uFEFF/,'').replace(/\r\n?/g,'\n');
         const heading=findFirstMarkdownH1(text);
         let body=text,title=Array.from(file.name.replace(/\.(md|markdown)$/i,'')).slice(0,120).join('');
         if(heading){
@@ -271,8 +275,7 @@
         }
         if(Array.from(body).length>20000)throw Error('Markdown 正文超过 20000 个字符，请精简后再导入。');
         titleInput.value=title;bodyInput.value=body;const recoverySaved=scheduleSave();if(recoverySaved){messageBox.classList.add('success');messageBox.textContent='Markdown 已导入，草稿正在自动保存。'}else{messageBox.classList.remove('success');messageBox.textContent='Markdown 已导入，但浏览器本地恢复保存失败，请立即复制正文。'}
-      }catch(error){messageBox.classList.remove('success');messageBox.textContent=error.message||'无法读取这个文件。'}
-      finally{document.getElementById('markdown-file').value=''}
+      }catch(error){if(generation!==markdownImportGeneration)return;messageBox.classList.remove('success');messageBox.textContent=error.message||'无法读取这个文件。'}
     }
     async function submitDraft(){
       if(submitting)return;
@@ -321,7 +324,7 @@
       updatePreview();
     };
     [titleInput,bodyInput].forEach(input=>{
-      input.addEventListener('input',event=>{if(event.isComposing){updatePreview();return}scheduleSave()});
+      input.addEventListener('input',event=>{markdownImportGeneration++;if(event.isComposing){updatePreview();return}scheduleSave()});
       input.addEventListener('compositionend',scheduleSave);
     });
     categoryInput.addEventListener('change',()=>{recoveryCategoryId=categoryInput.value||null;scheduleSave()});
@@ -331,9 +334,10 @@
     document.getElementById('submit-draft').addEventListener('click',submitDraft);
     document.getElementById('delete-draft').addEventListener('click',deleteDraft);
     document.getElementById('import-markdown').addEventListener('click',()=>document.getElementById('markdown-file').click());
-    document.getElementById('markdown-file').addEventListener('change',event=>{const task=importMarkdown(event.target.files?.[0]);markdownImportPromises.add(task);task.finally(()=>markdownImportPromises.delete(task))});
+    document.getElementById('markdown-file').addEventListener('change',event=>{const input=event.currentTarget,file=input.files?.[0];input.value='';const task=importMarkdown(file);markdownImportPromises.add(task);task.finally(()=>markdownImportPromises.delete(task))});
     document.getElementById('restore-recovery').addEventListener('click',()=>{
       if(!recoveryCandidate?.payload)return;
+      markdownImportGeneration++;
       titleInput.value=recoveryCandidate.payload.title||'';bodyInput.value=recoveryCandidate.payload.body||'';categoryInput.value=recoveryCandidate.payload.category_id||'';if(!categoriesLoaded)recoveryCategoryId=recoveryCandidate.payload.category_id||null;
       const candidateKey=recoveryCandidateKey;if(!persistRecovery(draftPayload(),recoveryKey())){messageBox.classList.remove('success');messageBox.textContent='恢复内容已载入，但浏览器本地恢复保存失败，请立即复制正文。';return}
       recoveryBox.hidden=true;recoveryCandidate=null;recoveryCandidateKey=null;clearRecoveryCandidateSource();clearRecoveryWorkingCopy();if(candidateKey&&candidateKey!==recoveryKey())clearRecovery(candidateKey);scheduleSave();
@@ -361,7 +365,7 @@
       const payload=draftPayload();
       if(localOnly&&!categoriesLoaded&&recoveryCandidate?.payload)payload.category_id=recoveryCandidate.payload.category_id||null;
       persistRecovery(payload);
-      if(localOnly)return;
+      if(localOnly||!draftId)return;
       if(savePromise)return;
       const method=draftId?'PUT':'POST',path=draftId?`/forum/drafts/${draftId}`:'/forum/drafts';
       api(path,{method,body:JSON.stringify(payload),keepalive:true}).then(()=>{if(recoveryCandidate?.payload&&!recoveryBox.hidden)clearRecoveryWorkingCopy();else{clearRecovery(recoveryKey());clearRecoveryCandidateSource();clearRecoveryWorkingCopy()}}).catch(()=>{});

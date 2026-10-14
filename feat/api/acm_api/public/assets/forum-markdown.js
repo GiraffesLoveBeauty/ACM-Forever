@@ -21,17 +21,6 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
     }
     return -1;
   };
-  const hasBlockquotePrefix = prefix => {
-    let remaining = prefix;
-    while (remaining) {
-      const quote = remaining.match(/^[\t ]{0,3}>[\t ]?/);
-      if (quote) return true;
-      const listItem = remaining.match(/^[\t ]{0,3}(?:[-+*]|\d{1,9}[.)])[\t ]+/);
-      if (!listItem) return false;
-      remaining = remaining.slice(listItem[0].length);
-    }
-    return false;
-  };
   const noCloserThrough = new Map();
   let protectedText = "";
   for (let index = 0; index < text.length;) {
@@ -58,9 +47,7 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
       if (closingIndex > index + openingDelimiter.length) {
         const formula = text.slice(index, closingIndex + closingDelimiter.length);
         const placeholder = `${placeholderPrefix}${formulas.length}TOKEN`;
-        const lineStart = text.lastIndexOf("\n", index - 1) + 1;
-        const formulaIsInBlockquote = hasBlockquotePrefix(text.slice(lineStart, index));
-        formulas.push({ placeholder, formula, formulaIsInBlockquote });
+        formulas.push({ placeholder, formula });
         protectedText += placeholder;
         noCloserThrough.delete(closingDelimiter);
         index = closingIndex + closingDelimiter.length;
@@ -100,16 +87,26 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
   })[character]);
   const formulaPattern = new RegExp(`${placeholderPrefix}(\\d+)TOKEN`, "g");
   const formulaInCode = new Set();
+  const formulaBlockquoteDepth = new Map();
   if (formulas.length) {
     const formulaProbe = document.createElement("div");
     formulaProbe.innerHTML = safeHtml;
     const walker = document.createTreeWalker(formulaProbe, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) {
       const node = walker.currentNode;
-      if (!node.parentElement?.closest("code, pre")) continue;
+      const inCode = Boolean(node.parentElement?.closest("code, pre"));
+      let blockquoteDepth = 0;
+      for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+        if (parent.tagName === "BLOCKQUOTE") blockquoteDepth++;
+      }
+      if (!inCode && !blockquoteDepth) continue;
       formulaPattern.lastIndex = 0;
       let match;
-      while ((match = formulaPattern.exec(node.nodeValue))) formulaInCode.add(Number(match[1]));
+      while ((match = formulaPattern.exec(node.nodeValue))) {
+        const index = Number(match[1]);
+        if (inCode) formulaInCode.add(index);
+        if (blockquoteDepth) formulaBlockquoteDepth.set(index, blockquoteDepth);
+      }
     }
   }
   formulaPattern.lastIndex = 0;
@@ -117,8 +114,17 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
     const formula = formulas[Number(index)];
     if (!formula) return placeholder;
     const code = formulaInCode.has(Number(index));
-    const normalizedFormula = formula.formulaIsInBlockquote && !code
-      ? formula.formula.replace(/(^|\n)(?:[\t ]{0,3}>[\t ]?)+/g, "$1")
+    const blockquoteDepth = formulaBlockquoteDepth.get(Number(index)) || 0;
+    const normalizedFormula = blockquoteDepth && !code
+      ? formula.formula.replace(/\n([\t ]*)((?:>[\t ]?)+)/g, (line, indentation, quoteMarkers) => {
+        let remaining = quoteMarkers;
+        for (let depth = 0; depth < blockquoteDepth; depth++) {
+          const prefix = remaining.match(/^>[\t ]?/);
+          if (!prefix) break;
+          remaining = remaining.slice(prefix[0].length);
+        }
+        return `\n${remaining}`;
+      })
       : formula.formula;
     return escapeHtml(normalizedFormula);
   });
