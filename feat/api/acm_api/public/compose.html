@@ -339,8 +339,8 @@
       if(!recoveryCandidate?.payload)return;
       markdownImportGeneration++;
       titleInput.value=recoveryCandidate.payload.title||'';bodyInput.value=recoveryCandidate.payload.body||'';categoryInput.value=recoveryCandidate.payload.category_id||'';if(!categoriesLoaded)recoveryCategoryId=recoveryCandidate.payload.category_id||null;
-      const candidateKey=recoveryCandidateKey;if(!persistRecovery(draftPayload(),recoveryKey())){messageBox.classList.remove('success');messageBox.textContent='恢复内容已载入，但浏览器本地恢复保存失败，请立即复制正文。';return}
-      recoveryBox.hidden=true;recoveryCandidate=null;recoveryCandidateKey=null;clearRecoveryCandidateSource();clearRecoveryWorkingCopy();if(candidateKey&&candidateKey!==recoveryKey())clearRecovery(candidateKey);scheduleSave();
+      const candidateKey=recoveryCandidateKey;const recoverySaved=scheduleSave();if(!recoverySaved){messageBox.classList.remove('success');messageBox.textContent='恢复内容已载入，但浏览器本地恢复保存失败；正在尝试保存到服务器，请立即复制正文。';return}
+      recoveryBox.hidden=true;recoveryCandidate=null;recoveryCandidateKey=null;clearRecoveryCandidateSource();clearRecoveryWorkingCopy();if(candidateKey&&candidateKey!==recoveryKey())clearRecovery(candidateKey);
     });
     document.getElementById('discard-recovery').addEventListener('click',()=>{clearRecovery(recoveryCandidateKey||recoveryKey());clearRecoveryCandidateSource();clearRecoveryWorkingCopy();recoveryCandidate=null;recoveryCandidateKey=null;recoveryBox.hidden=true});
     bodyInput.addEventListener('keydown',event=>{
