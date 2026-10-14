@@ -97,7 +97,7 @@ export async function api(path, options = {}) {
       location.assign(
         '/login.html?next=' + encodeURIComponent(location.pathname + location.search),
       );
-    if (response.status === 428)
+    if (response.status === 428 && location.pathname !== '/change-password.html')
       location.assign(
         '/change-password.html?next=' + encodeURIComponent(location.pathname + location.search),
       );
@@ -122,7 +122,7 @@ export function initializeAuth() {
   return (initialization ||= api('/auth/me')
     .then(async (data) => {
       Object.assign(auth, data);
-      if (['admin', 'root'].includes(auth.role)) {
+      if (['admin', 'root'].includes(auth.role) && !auth.must_change_password) {
         try {
           const preferences = await api('/ui/preferences');
           document.documentElement.style.setProperty('--font-scale', preferences.font_scale || 1);
