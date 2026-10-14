@@ -57,6 +57,20 @@ def binding_key(user):
     return f"{str(user['cf_handle'] or '').strip().casefold()}:{int(user['cf_binding_version'] or 0)}"
 
 
+async def cf_page(session, url):
+    """Read a public statement using the same request gate as the CF API."""
+    loop = asyncio.get_running_loop()
+    gate = _gates.setdefault(loop, {"lock": asyncio.Lock(), "next": 0.0})
+    async with gate["lock"]:
+        await asyncio.sleep(max(0, gate["next"] - time.monotonic()))
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                response.raise_for_status()
+                return await response.read()
+        finally:
+            gate["next"] = time.monotonic() + 2.1
+
+
 def problem_url(contest_id, index):
     section = "gym" if int(contest_id) >= 100000 else "contest"
     return f"https://codeforces.com/{section}/{int(contest_id)}/problem/{index}"

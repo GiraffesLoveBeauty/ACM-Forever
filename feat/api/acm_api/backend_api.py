@@ -30,6 +30,7 @@ from .auth_service import (
 )
 from .reporting import valid_contest_report_time
 from .cf_client import cf_request
+from .problem_sync import sync_options
 
 LOG = logging.getLogger("acm_api")
 api = Blueprint("api", __name__)
@@ -1395,6 +1396,22 @@ async def api_problems():
         return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": size})
     finally:
         await db.close()
+
+
+@api.post("/admin/problems/sync")
+@admin_required
+async def api_sync_problems():
+    try:
+        options = sync_options(await request.get_json(silent=True))
+    except ValueError as error:
+        return jsonify({"success": False, "code": "invalid_request", "message": str(error)}), 400
+    submitter = current_app.config.get("PLUGIN_CONFIG", {}).get("_problem_sync_submitter")
+    if not callable(submitter):
+        return jsonify({"success": False, "code": "unavailable", "message": "题目采集服务未配置。"}), 503
+    task = submitter(options)
+    if task is None:
+        return jsonify({"success": False, "code": "problem_sync_busy", "message": "已有题目采集任务，请等待完成或取消后重试。"}), 409
+    return jsonify({"success": True, "status": "queued", "task": task}), 202
 
 
 @api.route("/problems/<platform>/<problem_id>/state", methods=["PUT"])
