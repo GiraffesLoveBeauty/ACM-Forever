@@ -25,7 +25,7 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
     if (fence) {
       codeMask.fill(1, lineStart, lineLimit);
       if (fenceMatch && fenceMatch[1][0] === fence.character && fenceMatch[1].length >= fence.length
-          && !fenceMatch[1].slice(1).includes(fence.character) && !line.slice(fenceMatch[0].length).trim()) fence = null;
+          && !line.slice(fenceMatch[0].length).trim()) fence = null;
     } else if (fenceMatch && (fenceMatch[1][0] !== "`" || !line.slice(fenceMatch[0].length).includes("`"))) {
       codeMask.fill(1, lineStart, lineLimit);
       fence = { character: fenceMatch[1][0], length: fenceMatch[1].length };
