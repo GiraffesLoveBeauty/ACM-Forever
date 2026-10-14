@@ -1,8 +1,10 @@
 <script setup>
 import { ref, reactive, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
-import { api, useRequests, notify, showError } from '../lib/api.js';
+import { api, useRequests, notify, showError, auth } from '../lib/api.js';
 import { markdown } from '../lib/markdown.js';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 const route = useRoute(),
   router = useRouter(),
   request = useRequests();
@@ -12,6 +14,9 @@ const form = reactive({ title: '', body: '', category_id: null }),
   id = ref(null),
   mode = ref('write'),
   input = ref(),
+  fileInput = ref(),
+  recoveryCandidate = ref(null),
+  recoveryKeyForCandidate = ref(''),
   message = ref('新话题尚未保存'),
   busy = ref(false);
 let revision = 0,
@@ -21,9 +26,190 @@ let revision = 0,
   loading = false,
   disposed = false,
   finished = false,
-  leaving = false;
+  leaving = false,
+  recoveryTabId = '',
+  recoveryResolved = false;
 function payload() {
   return { title: form.title, body: form.body, category_id: form.category_id || null };
+}
+function recoveryKey(draftId = id.value) {
+  const scope = draftId == null ? 'new' : String(draftId);
+  return `acm-forum-compose:${auth.qq_id || 'member'}:${scope}:tab:${recoveryTabId || 'tab'}`;
+}
+function workingRecoveryKey(draftId = id.value) {
+  return `${recoveryKey(draftId)}:working`;
+}
+function removeRecoveryKey(key) {
+  try {
+    localStorage.removeItem(key);
+    localStorage.removeItem(`acm-forum-compose-handled:${key}`);
+  } catch {
+    // Private browsing or storage quotas can disable local recovery.
+  }
+}
+function persistRecovery() {
+  const key = recoveryCandidate.value && !recoveryResolved
+    ? workingRecoveryKey()
+    : recoveryKey();
+  try {
+    localStorage.setItem(key, JSON.stringify({ payload: payload(), updated_at: Date.now() }));
+    localStorage.removeItem(`acm-forum-compose-handled:${key}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function migrateRecovery(previousId, nextId) {
+  const previousKeys = [recoveryKey(previousId), workingRecoveryKey(previousId)];
+  const nextKeys = [recoveryKey(nextId), workingRecoveryKey(nextId)];
+  for (let index = 0; index < previousKeys.length; index++) {
+    const previousKey = previousKeys[index], nextKey = nextKeys[index];
+    if (previousKey === nextKey) continue;
+    try {
+      const stored = localStorage.getItem(previousKey);
+      if (stored) {
+        localStorage.setItem(nextKey, stored);
+        localStorage.removeItem(`acm-forum-compose-handled:${nextKey}`);
+        if (localStorage.getItem(previousKey) === stored) removeRecoveryKey(previousKey);
+      }
+    } catch {
+      // Keep the previous key when the new location cannot be written.
+    }
+  }
+  if (recoveryKeyForCandidate.value === previousKeys[0]) recoveryKeyForCandidate.value = nextKeys[0];
+  else if (recoveryKeyForCandidate.value === previousKeys[1]) recoveryKeyForCandidate.value = nextKeys[1];
+}
+function discoverRecovery(serverPayload) {
+  const key = recoveryKey(), workingKey = workingRecoveryKey();
+  let candidate = null;
+  try {
+    for (const candidateKey of [key, workingKey]) {
+      const stored = localStorage.getItem(candidateKey);
+      if (!stored) continue;
+      const parsed = JSON.parse(stored);
+      if (parsed?.payload && (!candidate || Number(parsed.updated_at || 0) > Number(candidate.value.updated_at || 0)))
+        candidate = { key: candidateKey, value: parsed };
+    }
+    if (!candidate) {
+      const legacyKey = `acm-forum-compose:${auth.qq_id || 'member'}:${id.value == null ? 'new' : id.value}`;
+      const stored = localStorage.getItem(legacyKey);
+      if (stored) {
+        localStorage.setItem(key, stored);
+        localStorage.removeItem(legacyKey);
+        candidate = { key, value: JSON.parse(stored) };
+      }
+    }
+    if (!candidate?.value?.payload) return;
+    if (candidate.key === workingKey) {
+      try {
+        localStorage.setItem(key, JSON.stringify(candidate.value));
+        candidate.key = key;
+      } catch {
+        // Keep the original copy if storage cannot duplicate it.
+      }
+    }
+    const local = candidate.value.payload;
+    if (
+      local.title === serverPayload.title && local.body === serverPayload.body &&
+      String(local.category_id || '') === String(serverPayload.category_id || '')
+    ) {
+      removeRecoveryKey(candidate.key);
+      return;
+    }
+    recoveryCandidate.value = local;
+    recoveryKeyForCandidate.value = candidate.key;
+    recoveryResolved = false;
+  } catch {
+    recoveryCandidate.value = null;
+  }
+}
+function markDirty() {
+  revision++;
+  clearTimeout(timer);
+  const persisted = persistRecovery();
+  message.value = persisted ? '有未保存的修改' : '本地恢复保存失败，请尽快复制内容';
+  timer = setTimeout(() => save().catch(showError), 900);
+}
+function restoreRecovery() {
+  if (!recoveryCandidate.value) return;
+  loading = true;
+  Object.assign(form, {
+    title: recoveryCandidate.value.title || '',
+    body: recoveryCandidate.value.body || '',
+    category_id: recoveryCandidate.value.category_id || null,
+  });
+  loading = false;
+  recoveryResolved = true;
+  removeRecoveryKey(recoveryKey());
+  removeRecoveryKey(workingRecoveryKey());
+  recoveryCandidate.value = null;
+  recoveryKeyForCandidate.value = '';
+  markDirty();
+}
+function discardRecovery() {
+  removeRecoveryKey(recoveryKey());
+  removeRecoveryKey(workingRecoveryKey());
+  recoveryCandidate.value = null;
+  recoveryKeyForCandidate.value = '';
+  recoveryResolved = true;
+  if (revision !== savedRevision) persistRecovery();
+}
+function findFirstMarkdownH1(source) {
+  let offset = 0;
+  for (const token of marked.lexer(source, { gfm: true })) {
+    const raw = String(token.raw || '');
+    if (!raw) continue;
+    let startOffset = source.indexOf(raw, offset);
+    if (token.type === 'heading' && token.depth === 1) {
+      while (startOffset >= 0) {
+        const lineStart = source.lastIndexOf('\n', startOffset - 1) + 1;
+        if (/^[\t ]{0,3}$/.test(source.slice(lineStart, startOffset))) break;
+        startOffset = source.indexOf(raw, startOffset + 1);
+      }
+    }
+    if (startOffset < 0) continue;
+    if (token.type === 'heading' && token.depth === 1) {
+      const inlineHtml = DOMPurify.sanitize(marked.parseInline(token.text || '', { gfm: true }));
+      const titleNode = document.createElement('div');
+      titleNode.innerHTML = inlineHtml;
+      return { startOffset, endOffset: startOffset + raw.length, title: titleNode.textContent.trim() };
+    }
+    offset = startOffset + raw.length;
+  }
+  return null;
+}
+async function importMarkdown(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file || busy.value) return;
+  if (!/\.(md|markdown)$/i.test(file.name)) {
+    notify('请选择 .md 或 .markdown 文件。');
+    return;
+  }
+  if (file.size > 102400) {
+    notify('Markdown 文件不能超过 100 KB。');
+    return;
+  }
+  if ((form.title.trim() || form.body.trim()) && !confirm('导入 Markdown 会替换当前标题和正文，确定继续吗？')) return;
+  busy.value = true;
+  try {
+    const text = (await file.text()).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+    const heading = findFirstMarkdownH1(text);
+    let title = Array.from(file.name.replace(/\.(md|markdown)$/i, '')).slice(0, 120).join('');
+    let body = text;
+    if (heading) {
+      title = Array.from(heading.title).slice(0, 120).join('');
+      body = (text.slice(0, heading.startOffset) + text.slice(heading.endOffset)).replace(/^\n+/, '');
+    }
+    if (Array.from(body).length > 20000) throw Error('Markdown 正文超过 20000 个字符，请精简后再导入。');
+    form.title = title;
+    form.body = body;
+    notify('Markdown 已导入，草稿正在自动保存。');
+  } catch (error) {
+    showError(error);
+  } finally {
+    busy.value = false;
+  }
 }
 async function list() {
   drafts.value = await request('/forum/drafts');
@@ -32,10 +218,7 @@ watch(
   form,
   () => {
     if (loading) return;
-    revision++;
-    clearTimeout(timer);
-    message.value = '有未保存的修改';
-    timer = setTimeout(() => save().catch(showError), 900);
+    markDirty();
   },
   { flush: 'sync' },
 );
@@ -46,7 +229,8 @@ async function save({ keepalive = false } = {}) {
   saving = (async () => {
     while (revision !== savedRevision && !disposed) {
       const version = revision,
-        data = payload();
+        data = payload(),
+        previousId = id.value;
       message.value = '正在保存…';
       const result = await api(id.value ? `/forum/drafts/${id.value}` : '/forum/drafts', {
         method: id.value ? 'PUT' : 'POST',
@@ -54,11 +238,20 @@ async function save({ keepalive = false } = {}) {
         keepalive,
       });
       id.value = result.id;
+      if (previousId !== id.value) migrateRecovery(previousId, id.value);
       savedRevision = version;
+      if (revision === version) {
+        if (recoveryKeyForCandidate.value !== workingRecoveryKey() || recoveryResolved)
+          removeRecoveryKey(workingRecoveryKey());
+        if (!recoveryCandidate.value || recoveryResolved) {
+          removeRecoveryKey(recoveryKey());
+          removeRecoveryKey(recoveryKey(previousId));
+        }
+      } else persistRecovery();
       if (!keepalive && !leaving && String(route.query.draft_id) !== String(id.value))
         await router.replace({ path: '/compose.html', query: { draft_id: id.value } });
     }
-    message.value = '草稿已保存';
+    if (revision === savedRevision) message.value = '草稿已保存';
   })();
   try {
     await saving;
@@ -87,6 +280,10 @@ async function choose(draftId) {
     id.value = draftId;
     revision = 0;
     savedRevision = 0;
+    recoveryCandidate.value = null;
+    recoveryKeyForCandidate.value = '';
+    recoveryResolved = true;
+    discoverRecovery(payload());
     message.value = draftId ? '已读取草稿' : '新话题尚未保存';
     await router.replace({ path: '/compose.html', query: draftId ? { draft_id: draftId } : {} });
   } catch (e) {
@@ -100,10 +297,14 @@ async function submit() {
   if (busy.value) return;
   busy.value = true;
   try {
+    if (recoveryCandidate.value) throw Error('请先恢复或丢弃本地恢复内容，再提交草稿。');
     if (!form.title.trim() || !form.body.trim() || !form.category_id)
       throw Error('请填写版块、标题和正文。');
     await save();
     const data = await api(`/forum/drafts/${id.value}/submit`, { method: 'POST', body: {} });
+    removeRecoveryKey(recoveryKey());
+    removeRecoveryKey(workingRecoveryKey());
+    recoveryResolved = true;
     finished = true;
     notify(data.message || '话题已提交审核');
     await router.push('/index.html');
@@ -120,6 +321,8 @@ async function remove() {
   try {
     if (saving) await saving;
     await api(`/forum/drafts/${id.value}`, { method: 'DELETE' });
+    removeRecoveryKey(recoveryKey());
+    removeRecoveryKey(workingRecoveryKey());
     loading = true;
     Object.assign(form, { title: '', body: '', category_id: null });
     id.value = null;
@@ -166,6 +369,7 @@ function unload(event) {
   }
 }
 function pagehide() {
+  if (!finished && revision !== savedRevision) persistRecovery();
   if (!finished && !disposed && revision !== savedRevision && !saving)
     save({ keepalive: true }).catch(() => {
       /* The page is leaving; a failed request must not report a successful save. */
@@ -191,9 +395,15 @@ onMounted(async () => {
   window.addEventListener('beforeunload', unload);
   window.addEventListener('pagehide', pagehide);
   try {
+    try { recoveryTabId = sessionStorage.getItem('acm-forum-compose-tab-id') || ''; } catch { recoveryTabId = ''; }
+    if (!recoveryTabId) {
+      recoveryTabId = window.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      try { sessionStorage.setItem('acm-forum-compose-tab-id', recoveryTabId); } catch { /* Local recovery still works with this page token. */ }
+    }
     categories.value = await request('/forum/categories');
     await list();
     if (route.query.draft_id) await choose(route.query.draft_id);
+    else discoverRecovery(payload());
   } catch (e) {
     showError(e);
   }
@@ -210,6 +420,13 @@ onBeforeUnmount(() => {
     <div class="compose-topline">
       <RouterLink to="/index.html">← 返回论坛</RouterLink
       ><span class="compose-save-state" role="status">{{ message }}</span>
+    </div>
+    <div v-if="recoveryCandidate" class="compose-recovery" role="status">
+      <span>发现一份尚未同步到账号的本地内容。请选择恢复或丢弃后继续编辑。</span>
+      <div>
+        <button type="button" :disabled="busy" @click="restoreRecovery">恢复内容</button>
+        <button type="button" :disabled="busy" @click="discardRecovery">丢弃</button>
+      </div>
     </div>
     <div class="compose-grid">
       <section class="compose-editor-panel">
@@ -250,6 +467,17 @@ onBeforeUnmount(() => {
             role="toolbar"
             aria-label="Markdown 格式工具"
           >
+            <button type="button" :disabled="busy" @click="fileInput?.click()">导入 .md</button>
+            <input
+              ref="fileInput"
+              type="file"
+              accept=".md,.markdown,text/markdown,text/plain"
+              aria-label="选择 Markdown 文件"
+              hidden
+              :disabled="busy"
+              @change="importMarkdown"
+            />
+            <span class="toolbar-divider"></span>
             <button
               v-for="(label, key) in {
                 h1: 'H1',
@@ -281,14 +509,14 @@ onBeforeUnmount(() => {
             maxlength="20000"
             placeholder="记录你的思路…"
           ></textarea>
-          <div v-else class="compose-preview forum-markdown" v-html="markdown(form.body)"></div>
+          <div v-else v-forum-math class="compose-preview forum-markdown" v-html="markdown(form.body)"></div>
         </section>
         <div class="compose-actions">
           <button class="btn" :disabled="busy" @click="save().catch(showError)">保存草稿</button
           ><button class="btn primary" :disabled="busy" @click="submit">
             {{ busy ? '正在处理…' : '提交审核' }}</button
           ><button v-if="id" class="btn" :disabled="busy" @click="remove">删除草稿</button
-          ><span class="muted">{{ form.body.length }} / 20000</span>
+          ><span class="muted">{{ Array.from(form.body).length }} / 20000</span>
         </div>
       </section>
       <aside class="compose-sidebar">

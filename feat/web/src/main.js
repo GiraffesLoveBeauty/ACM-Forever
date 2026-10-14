@@ -11,4 +11,7 @@ import '../../api/acm_api/public/assets/cf-practice.css';
 import '../../api/acm_api/public/assets/theme-editor.css';
 import '../../api/acm_api/public/assets/endfield-theme.css';
 import './style.css';
-createApp(App).use(router).mount('#app');
+const app = createApp(App);
+const renderMath = (element) => window.renderForumMath?.(element);
+app.directive('forum-math', { mounted: renderMath, updated: renderMath });
+app.use(router).mount('#app');

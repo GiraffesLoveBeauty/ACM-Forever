@@ -51,20 +51,25 @@ watch(tab, load, { immediate: true });
         ><time>{{ date(item.created_at) }}</time>
       </div>
       <h2>
-        <RouterLink v-if="tab === 'reports'" :to="`/post.html?id=${item.post_id}`">{{
+        <RouterLink v-if="tab === 'reports' && item.post_status === 'published'" :to="`/post.html?id=${item.post_id}`">{{
           item.title
         }}</RouterLink
-        ><template v-else>{{ item.title }}</template>
+        ><template v-else
+          >{{ item.title }}<small v-if="tab === 'reports'" class="forum-report-status">
+            （{{ { removed: '帖子已删除', pending: '待审核', rejected: '未通过' }[item.post_status] || '帖子不可访问' }}）
+          </small></template
+        >
       </h2>
       <p class="forum-moderation-byline">
         {{ tab === 'posts' ? '投稿人' : '举报人' }}：{{ item.author_name || item.reporter_name }}
       </p>
+      <p v-if="tab === 'reports'" class="forum-report-reason">举报理由：{{ item.reason }}</p>
       <div
-        v-if="tab === 'posts'"
+        v-if="item.body"
         class="forum-moderation-body forum-markdown"
+        v-forum-math
         v-html="markdown(item.body)"
       ></div>
-      <p v-else>{{ item.reason }}</p>
       <div class="forum-moderation-actions">
         <button
           v-for="(label, decision) in tab === 'posts'
