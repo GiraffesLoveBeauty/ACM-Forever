@@ -224,6 +224,7 @@ onBeforeUnmount(() => {
             ><input
               v-model.trim="filter.search"
               type="search"
+              aria-label="搜索昵称、QQ 或学校"
               placeholder="搜索昵称、QQ 或学校" /></label
           ><label class="admin-toggle"
             ><input

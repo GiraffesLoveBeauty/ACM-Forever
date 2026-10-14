@@ -105,11 +105,13 @@ onMounted(async () => {
           <RouterLink class="admin-action-link" to="/change-password.html?next=/admin.html"
             >修改密码</RouterLink
           ><button class="admin-icon-button" aria-label="切换主题" @click="toggleTheme">◐</button>
-          <button class="btn" @click="openTheme">自助调色</button
+          <button class="admin-action-link" @click="openTheme">自助调色</button
           ><button class="admin-logout" @click="logout">退出</button>
         </div>
       </header>
-      <div class="admin-workspace"><component :is="modules[section]" :key="section" /></div>
+      <div class="admin-workspace admin-module">
+        <component :is="modules[section]" :key="section" />
+      </div>
     </main>
   </div>
 </template>
