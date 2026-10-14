@@ -1,7 +1,7 @@
 <script setup>
 import { inject } from 'vue';
 import { useRouter, isNavigationFailure, NavigationFailureType } from 'vue-router';
-import { auth, api, avatar, showError } from '../lib/api.js';
+import { auth, logoutSession, avatar, showError } from '../lib/api.js';
 const openTheme = inject('openTheme');
 const toggleTheme = inject('toggleTheme');
 const router = useRouter();
@@ -13,8 +13,7 @@ async function logout() {
       !isNavigationFailure(failure, NavigationFailureType.duplicated)
     )
       return;
-    await api('/auth/logout', { method: 'POST' });
-    Object.assign(auth, { authenticated: false, csrf_token: '', role: null });
+    await logoutSession();
     await router.push('/index.html');
   } catch (e) {
     showError(e);

@@ -2,11 +2,13 @@
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useRoute } from 'vue-router';
 import { api, useRequests, showError, notify, date, external } from '../lib/api.js';
-import { cfMemory, useParams } from '../lib/admin.js';
+import { cfMemory, adminSessionVersion, useParams } from '../lib/admin.js';
 import Pager from '../components/Pager.vue';
 const route = useRoute(),
   update = useParams(),
   request = useRequests();
+const sessionVersion = adminSessionVersion();
+const sameSession = () => sessionVersion === adminSessionVersion();
 const options = ref([]),
   statuses = ref([...cfMemory.statuses]),
   excluded = ref([...cfMemory.excluded]),
@@ -81,7 +83,7 @@ function invalidate(text = '范围或输入已改变，请重新查重。') {
   selected.value = [];
   copyFallback.value = '';
   checkBusy.value = copyBusy.value = false;
-  cfMemory.recheck = false;
+  if (sameSession()) cfMemory.recheck = false;
   message.value = text;
 }
 function recentPayload() {
@@ -178,10 +180,11 @@ function selectable(row) {
   );
 }
 async function poll(id, current, kind) {
+  if (!sameSession()) throw canceled();
   cfMemory.job = { id, kind };
-  while (alive && current()) {
+  while (alive && current() && sameSession()) {
     const value = await request('/admin/cf/jobs/' + encodeURIComponent(id), {}, kind + '-job');
-    if (!current()) throw canceled();
+    if (!current() || !sameSession()) throw canceled();
     job.value = value;
     if (terminals.has(value.status)) {
       if (cfMemory.job?.id === id) cfMemory.job = null;
@@ -228,6 +231,7 @@ function submitSync(body) {
   cfMemory.submission = operation;
   operation.ready = api('/admin/cf/sync', { method: 'POST', timeoutMs: 30000, body })
     .then((data) => {
+      if (!sameSession() || cfMemory.submission !== operation) return;
       operation.id = data.job_id;
       cfMemory.job = { id: data.job_id, kind: 'sync' };
     })
@@ -238,7 +242,7 @@ function submitSync(body) {
 }
 async function followSync(operation) {
   const version = ++syncVersion;
-  const current = () => alive && version === syncVersion;
+  const current = () => alive && sameSession() && version === syncVersion;
   syncBusy.value = true;
   message.value = '正在确认同步提交…';
   try {
@@ -264,7 +268,7 @@ async function followSync(operation) {
   }
 }
 async function sync() {
-  if (busy.value || cfMemory.submission || !scope.value?.member_count) return;
+  if (!sameSession() || busy.value || cfMemory.submission || !scope.value?.member_count) return;
   const recheck = Boolean(result.value);
   const body = { scope: scopeSpec(), expected_scope_fingerprint: scope.value.fingerprint };
   invalidate('数据更新中，旧查重结果已失效。');
@@ -419,14 +423,15 @@ onBeforeUnmount(() => {
     reject(canceled());
   }
   waits.clear();
-  Object.assign(cfMemory, {
-    statuses: [...statuses.value],
-    excluded: [...excluded.value],
-    input: candidate.input,
-    contest: candidate.contest,
-    kind: candidate.kind,
-    mode: candidate.mode,
-  });
+  if (sameSession())
+    Object.assign(cfMemory, {
+      statuses: [...statuses.value],
+      excluded: [...excluded.value],
+      input: candidate.input,
+      contest: candidate.contest,
+      kind: candidate.kind,
+      mode: candidate.mode,
+    });
   dialog.value?.close();
 });
 </script>

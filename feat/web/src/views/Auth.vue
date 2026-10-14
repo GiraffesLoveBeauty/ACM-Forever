@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { api, auth, safeNext } from '../lib/api.js';
+import { api, auth, setAuth, logoutSession, safeNext } from '../lib/api.js';
 const route = useRoute(),
   router = useRouter(),
   identifier = ref(''),
@@ -32,7 +32,7 @@ async function submit() {
           password: password.value,
         },
       });
-      Object.assign(auth, data, await api('/auth/me'));
+      setAuth({ ...data, ...(await api('/auth/me')) }, true);
     }
     const next = safeNext(
       route.query.next,
@@ -52,8 +52,7 @@ async function submit() {
 }
 async function logout() {
   try {
-    await api('/auth/logout', { method: 'POST' });
-    Object.assign(auth, { authenticated: false, csrf_token: '', role: null });
+    await logoutSession();
     await router.push('/login.html');
   } catch (e) {
     message.value = e.message;

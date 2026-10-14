@@ -2,7 +2,7 @@
 import { computed, provide, inject, defineAsyncComponent, onMounted } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 import { sections } from '../router.js';
-import { api, auth, showError } from '../lib/api.js';
+import { api, logoutSession, showError } from '../lib/api.js';
 const route = useRoute(),
   router = useRouter(),
   openTheme = inject('openTheme');
@@ -35,8 +35,7 @@ onBeforeRouteUpdate((to) => {
 async function logout() {
   if (!(await leaveGuard())) return;
   try {
-    await api('/auth/logout', { method: 'POST' });
-    Object.assign(auth, { authenticated: false, role: null, csrf_token: '' });
+    await logoutSession();
     leaveGuard = () => true;
     await router.push('/index.html');
   } catch (e) {

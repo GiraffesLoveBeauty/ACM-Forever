@@ -1,12 +1,33 @@
 import { reactive, ref, onBeforeUnmount } from 'vue';
+import { adminSessionVersion, resetAdminSession } from './admin.js';
 
-export const auth = reactive({
+const anonymousAuth = () => ({
   authenticated: false,
   role: null,
   qq_id: null,
   csrf_token: '',
   avatar_url: null,
+  must_change_password: false,
 });
+export const auth = reactive(anonymousAuth());
+export function setAuth(data, newSession = false) {
+  if (
+    newSession ||
+    Boolean(data.authenticated) !== auth.authenticated ||
+    (data.qq_id ?? null) !== auth.qq_id
+  )
+    resetAdminSession();
+  for (const key of Object.keys(auth)) delete auth[key];
+  Object.assign(auth, anonymousAuth(), data);
+}
+export async function logoutSession() {
+  try {
+    await api('/auth/logout', { method: 'POST' });
+  } catch (error) {
+    if (error.status !== 401) throw error;
+  }
+  setAuth(anonymousAuth(), true);
+}
 export const notification = ref('');
 let noticeTimer;
 export function notify(message) {
@@ -43,6 +64,7 @@ export function date(value) {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
 }
 export async function api(path, options = {}) {
+  const sessionVersion = adminSessionVersion();
   let body = options.body;
   if (auth.authenticated && auth.role === 'member') {
     const [pathname, query = ''] = path.split('?');
@@ -93,10 +115,18 @@ export async function api(path, options = {}) {
       },
     });
     const data = await response.json().catch(() => ({}));
-    if (response.status === 401 && !path.startsWith('/auth/'))
-      location.assign(
-        '/login.html?next=' + encodeURIComponent(location.pathname + location.search),
-      );
+    if (sessionVersion !== adminSessionVersion())
+      throw new DOMException('登录会话已改变', 'AbortError');
+    if (
+      response.status === 401 &&
+      (!path.startsWith('/auth/') || ['/auth/me', '/auth/logout'].includes(path))
+    ) {
+      setAuth(anonymousAuth(), true);
+      if (!path.startsWith('/auth/'))
+        location.assign(
+          '/login.html?next=' + encodeURIComponent(location.pathname + location.search),
+        );
+    }
     if (response.status === 428 && location.pathname !== '/change-password.html')
       location.assign(
         '/change-password.html?next=' + encodeURIComponent(location.pathname + location.search),
@@ -121,7 +151,7 @@ let initialization;
 export function initializeAuth() {
   return (initialization ||= api('/auth/me')
     .then(async (data) => {
-      Object.assign(auth, data);
+      setAuth(data);
       if (['admin', 'root'].includes(auth.role) && !auth.must_change_password) {
         try {
           const preferences = await api('/ui/preferences');

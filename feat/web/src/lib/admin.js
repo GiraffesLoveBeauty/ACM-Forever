@@ -15,8 +15,8 @@ export function useLeaveGuard(handler) {
   const remove = register?.(handler);
   onBeforeUnmount(() => remove?.());
 }
-// Recoverable CF submission acknowledgement outlives the module; no credentials live here.
-export const cfMemory = {
+// Recoverable CF submission acknowledgement outlives the module, within one login session.
+const defaultCfMemory = () => ({
   scope: null,
   statuses: [],
   excluded: [],
@@ -27,5 +27,15 @@ export const cfMemory = {
   job: null,
   submission: null,
   recheck: false,
-};
+});
+export const cfMemory = defaultCfMemory();
 export const adminFilters = {};
+let sessionVersion = 0;
+export function adminSessionVersion() {
+  return sessionVersion;
+}
+export function resetAdminSession() {
+  sessionVersion++;
+  Object.assign(cfMemory, defaultCfMemory());
+  for (const key of Object.keys(adminFilters)) delete adminFilters[key];
+}
