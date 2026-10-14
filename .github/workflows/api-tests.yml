@@ -42,4 +42,4 @@ jobs:
           node-version: "22"
 
       - name: Run Web unit tests
-        run: node --test feat/api/tests/admin-history.test.cjs feat/api/tests/cf-sync.test.cjs feat/api/tests/theme-colors.test.cjs feat/api/tests/theme-performance.test.cjs
+        run: node --test feat/api/tests/admin-history.test.cjs feat/api/tests/admin-problem-sync.test.cjs feat/api/tests/cf-sync.test.cjs feat/api/tests/theme-colors.test.cjs feat/api/tests/theme-performance.test.cjs

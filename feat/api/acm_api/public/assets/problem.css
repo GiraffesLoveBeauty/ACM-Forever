@@ -1,0 +1,32 @@
+.problem-page{max-width:1400px}
+.problem-page .topbar{align-items:flex-start;gap:24px}
+.problem-page h1{overflow-wrap:anywhere;margin-top:12px;font-size:30px}
+.problem-page .userbar{flex-shrink:0}
+.problem-page #problem-meta{gap:8px}
+.problem-overview{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.problem-overview .btn{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:9px 14px;font:inherit;font-weight:600;line-height:1.4;white-space:nowrap}
+.problem-overview [hidden]{display:none}
+.problem-page #problem-message{margin:18px 0 24px}
+.problem-statement{padding:28px 34px;line-height:1.85;font-size:16px;overflow-wrap:anywhere}
+.problem-statement h2,.problem-statement h3,.problem-statement .section-title{font-family:var(--font-body);font-size:20px;font-weight:650;margin:28px 0 12px}
+.problem-statement .header{padding-bottom:18px;border-bottom:1px solid var(--line);color:var(--muted);font-size:14px}
+.problem-statement .header .title{display:none}
+.problem-statement .property-title{display:inline;font-weight:600;margin-right:8px}
+.problem-statement .sample-test .title{font-weight:650;margin-top:18px}
+.problem-statement p{margin:14px 0}
+.problem-statement pre,.problem-samples pre{font:14px/1.7 Consolas,"Courier New",monospace;white-space:pre;overflow:auto;background:var(--bg);border:1px solid var(--line);border-radius:var(--radius-sm);padding:16px;tab-size:4}
+.problem-statement pre.problem-plain{white-space:pre-wrap;overflow-wrap:anywhere}
+.problem-statement code{font-family:Consolas,"Courier New",monospace}
+.problem-statement img{max-width:100%;height:auto;display:block;margin:16px auto}
+.problem-statement a{text-decoration:underline;color:var(--brand)}
+.problem-statement table{display:block;overflow:auto}
+.problem-statement td,.problem-statement th{white-space:normal;min-width:80px}
+.problem-statement math{font-size:1.1em}
+.problem-statement math[display="block"]{display:block;overflow:auto;padding:12px 0}
+.problem-copy{font-size:12px;margin:0 0 10px}
+.problem-samples{margin-top:20px}
+.problem-sample-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.problem-sample-grid>div{min-width:0}
+.problem-sample-grid h3{margin-top:20px}
+.problem-statement [hidden],.problem-page>[hidden]{display:none}
+@media(max-width:700px){.problem-page .topbar{gap:12px}.problem-page h1{font-size:24px}.problem-statement{padding:18px;font-size:15px}.problem-sample-grid{grid-template-columns:1fr;gap:0}}

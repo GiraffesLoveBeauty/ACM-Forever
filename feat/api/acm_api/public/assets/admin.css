@@ -11,10 +11,25 @@
 .admin-module .filters input,.admin-module .filters select{max-width:100%;min-width:0}
 .admin-module .list-item{gap:14px;flex-wrap:wrap}
 .admin-module .list-item>span{min-width:0}
+#problem-list .chips{align-self:center;align-items:center;flex-shrink:0}
+#problem-list .chips .btn{display:inline-flex;align-items:center;justify-content:center;width:7em;height:2.8em;min-height:36px;padding:0 .75em;font:inherit;font-weight:600;line-height:1.4;text-align:center;white-space:nowrap}
 .admin-module .table-wrap{max-width:100%;overflow-x:auto}
 .admin-module table{width:100%}
 .admin-module td{overflow-wrap:anywhere}
 #admin-notice:empty{display:none}
+.problem-sync fieldset{margin:0;padding:0;min-width:0;border:0}
+.problem-sync .admin-create-grid label{align-content:start;font-size:12px}
+.problem-sync .admin-create-grid input,.problem-sync .admin-create-grid select{font-size:13px}
+.problem-sync .admin-form-note{font-size:12px}
+.problem-sync .problem-sync-wide{grid-column:span 2}
+.problem-sync small{font-weight:400;line-height:1.6}
+.problem-sync-status{border-top:1px solid var(--admin-line);padding-top:12px}
+.problem-sync-status p{margin:0 0 8px}
+.problem-sync-status progress{display:block;width:100%;height:12px;margin-bottom:8px;accent-color:var(--brand)}
+.problem-sync-status summary{cursor:pointer}
+.problem-sync-status li{overflow-wrap:anywhere}
+.problem-sync button:disabled{cursor:wait;opacity:.65}
+@media(max-width:390px){.problem-sync .problem-sync-wide{grid-column:auto}}
 @media(max-width:700px){.admin-module .grid.three{grid-template-columns:1fr}.admin-module .admin-pagination{flex-wrap:wrap}.admin-module .filters>*{max-width:100%}}
 .admin-console{min-height:100vh;background:var(--admin-canvas);color:var(--admin-ink);font-family:var(--admin-font);font-size:14px;line-height:1.55}
 .admin-console[data-theme=dark]{--admin-pine-bg:color-mix(in srgb,var(--brand) 22%,var(--bg))}
