@@ -3,7 +3,7 @@ import { ref, provide, onMounted, onBeforeUnmount } from 'vue';
 import { useRoute } from 'vue-router';
 import Header from './components/Header.vue';
 import ThemeEditor from './components/ThemeEditor.vue';
-import { notification } from './lib/api.js';
+import { auth, notification } from './lib/api.js';
 const route = useRoute();
 const themeEditor = ref();
 provide('openTheme', () => themeEditor.value?.open());
@@ -22,7 +22,13 @@ onBeforeUnmount(() => document.removeEventListener('error', imageError, true));
 </script>
 <template>
   <Header v-if="route.path !== '/admin.html'" />
-  <RouterView v-slot="{ Component }"><component :is="Component" :key="route.path" /></RouterView>
+  <RouterView v-slot="{ Component }">
+    <component
+      :is="Component"
+      v-if="route.meta.public || auth.authenticated"
+      :key="`${route.path}:${auth.authenticated}:${auth.qq_id || ''}`"
+    />
+  </RouterView>
   <ThemeEditor ref="themeEditor" />
   <div class="forum-toast" :class="{ visible: notification }" role="status">{{ notification }}</div>
 </template>

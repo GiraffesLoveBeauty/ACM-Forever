@@ -271,5 +271,66 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await created.get_json())["status"], "pending")
 
 
+    async def test_forum_viewer_states_are_isolated_after_logout_and_account_switch(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            headers = await self.account_login(client, role="member")
+            created = await client.post(
+                "/api/forum/posts",
+                headers=headers,
+                json={"title": "会话隔离测试", "body": "仅用于测试的帖子", "category_id": 1},
+            )
+            self.assertEqual(created.status_code, 201)
+            post_id = (await created.get_json())["id"]
+            db = await connect_db(self.db_path)
+            try:
+                await db.execute("UPDATE forum_posts SET status='published' WHERE id=?", (post_id,))
+                await db.execute("INSERT INTO users(qq_id,name) VALUES('87654321','第二个测试账号')")
+                now = int(time.time())
+                await db.execute(
+                    "INSERT INTO web_accounts"
+                    "(qq_id,password_hash,role,must_change_password,is_active,credential_version,created_at,updated_at) "
+                    "VALUES('87654321',?,'member',0,1,1,?,?)",
+                    (hash_password("Test-Password-123!"), now, now),
+                )
+                await db.commit()
+            finally:
+                await db.close()
+            for action in ("like", "bookmark"):
+                toggled = await client.post(f"/api/forum/posts/{post_id}/{action}", headers=headers)
+                self.assertEqual(toggled.status_code, 200)
+                self.assertTrue((await toggled.get_json())["active"])
+
+            async def assert_viewer_states(expected):
+                for sort in ("latest", "hot", "unanswered"):
+                    result = await client.get(f"/api/forum/posts?sort={sort}")
+                    self.assertEqual(result.status_code, 200)
+                    row = (await result.get_json())["rows"][0]
+                    self.assertEqual(bool(row["viewer_liked"]), expected)
+                    self.assertEqual(bool(row["viewer_bookmarked"]), expected)
+                    self.assertEqual(row["likes_count"], 1)
+                detail = await client.get(f"/api/forum/posts/{post_id}")
+                self.assertEqual(detail.status_code, 200)
+                row = await detail.get_json()
+                self.assertEqual(bool(row["viewer_liked"]), expected)
+                self.assertEqual(bool(row["viewer_bookmarked"]), expected)
+
+            await assert_viewer_states(True)
+            self.assertEqual((await client.post("/api/auth/logout", headers=headers)).status_code, 200)
+            await assert_viewer_states(False)
+            login = await client.post(
+                "/api/auth/login", json={"qq_id": "87654321", "password": "Test-Password-123!"},
+            )
+            self.assertEqual(login.status_code, 200)
+            headers = {"X-CSRF-Token": (await login.get_json())["csrf_token"]}
+            await assert_viewer_states(False)
+            self.assertEqual((await client.post("/api/auth/logout", headers=headers)).status_code, 200)
+            login = await client.post(
+                "/api/auth/login", json={"qq_id": "12345678", "password": "Test-Password-123!"},
+            )
+            self.assertEqual(login.status_code, 200)
+            await assert_viewer_states(True)
+
+
 if __name__ == "__main__":
     unittest.main()
