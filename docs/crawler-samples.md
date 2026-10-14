@@ -195,7 +195,7 @@ JSON 和报告每次覆盖，数据库累计保留。没有待采集题目时，
 python -X utf8 tools/crawlers/atcoder_collect.py --problem-id abc370_a --refresh --html-dir data/crawler-samples/atcoder/html
 ```
 
-`--metadata-json` 可指定其他元数据文件，`--output-dir` 可指定缓存和报告目录。`data/` 已被 Git 忽略，数据库和页面缓存不会提交到仓库。题面 HTML 是原站内容；后续接入前端展示时应使用 HTML 清理和公式渲染，当前采集脚本不负责页面展示。
+`--metadata-json` 可指定其他元数据文件，`--output-dir` 可指定缓存和报告目录。`data/` 已被 Git 忽略，数据库和页面缓存不会提交到仓库。题面 HTML 是原站内容；站内详情页使用 DOMPurify 清理 HTML，并用本地 KaTeX 渲染公式。
 
 ## 服务端初始化与管理员采集
 
@@ -209,7 +209,9 @@ python -m api.init_db --database ./data/acm_forever.db
 
 管理员使用 `POST /api/admin/problems/sync` 触发服务器直接读取公开比赛题目列表和题面，无需先运行本地脚本或上传 JSON。支持 `platform=atcoder/codeforces`，CF 当前支持普通公开比赛。接口返回任务 ID，进度通过 `GET /api/tasks` 查询，也可用既有任务取消接口停止。完整参数、鉴权与请求示例见 [API 调用指南](api.md#管理员采集新题目)。
 
-成功题目保存到服务端 `crawler_problems` 表，并在同一事务内更新 `recommendations` 目录，因此管理中心与成员题库列表可以读取题名和原站链接。样例仍位于题目自己的 `samples` 字段，题面 HTML 保留样例章节；当前题库网页使用原站链接打开正文。AtCoder 从官方列表获取题名，不获取第三方难度模型，新题难度为 null；CF 保存 API 题目列表提供的 Rating 与标签，题号统一为 `cf_比赛ID题序`。已有难度和标签不会因缺少这些数据而被清空。
+网页入口是 **管理后台 → 题库管理**。顶部可 **初始化数据库**（补齐表结构，保留已有数据）；**拉取范围 → 该平台全部题目** 调用 `scope=platform`，先导入 AtCoder Problems / CF 官方 problemset 公开目录，再以 `batch_size` 自动处理所有待采题面与样例。默认跳过成功题目，失败记录持久化，取消或重启后再次运行可继续处理。全平台模式不传比赛 ID、指定题号或总数量上限；批次大小为 1–100。具体范围及任务进度字段见 API 调用指南。
+
+成功题目保存到服务端 `crawler_problems` 表，并在同一事务内更新 `recommendations` 目录，因此管理中心与成员题库列表可以读取题名。样例仍位于题目自己的 `samples` 字段，题面 HTML 保留样例章节；题库网页的“打开题目”进入站内详情页，读取数据库中的正文与样例，尚未采集正文时显示等待提示。AtCoder 从官方列表获取题名，不获取第三方难度模型，新题难度为 null；CF 保存 API 题目列表提供的 Rating 与标签，题号统一为 `cf_比赛ID题序`。已有难度和标签不会因缺少这些数据而被清空。
 
 ## 验证
 

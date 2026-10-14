@@ -1,6 +1,6 @@
 import {context} from './common.js';
 
-const modules={accounts:['成员账号','发放社区账号，维护登录权限。'],members:['成员资料','搜索成员，维护个人资料和 OJ 绑定。'],training:['训练管理','为成员选择平台和难度，生成训练并查看挑战历史。'],problems:['题库管理','查询、筛选和收藏同步题目。'],'cf-practice':['CF 练习赛选题','近期刷题、候选查重和成员证据。'],contests:['赛事复盘','查看比赛题目，维护逐题状态。'],tasks:['同步任务','查看执行进度、失败信息和同步队列。'],moderation:['内容审核','审核社区话题并处理举报。'],settings:['全局设置','外观、比赛播报和 QQBot 管理员配置。']};
+const modules={accounts:['成员账号','发放社区账号，维护登录权限。'],members:['成员资料','搜索成员，维护个人资料和 OJ 绑定。'],training:['训练管理','为成员选择平台和难度，生成训练并查看挑战历史。'],problems:['题库管理','拉取公开比赛题目，查询、筛选和收藏题库。'],'cf-practice':['CF 练习赛选题','近期刷题、候选查重和成员证据。'],contests:['赛事复盘','查看比赛题目，维护逐题状态。'],tasks:['同步任务','查看执行进度、失败信息和同步队列。'],moderation:['内容审核','审核社区话题并处理举报。'],settings:['全局设置','外观、比赛播报和 QQBot 管理员配置。']};
 const memories=new Map();let active=null,sequence=0;
 const notice=text=>{document.getElementById('admin-notice').textContent=text||''};
 function route(url){
@@ -44,7 +44,7 @@ async function open(url,{replace=false,pop=false}={}){
   }});
   active={ctx,url:target.url,exit:()=>ctx.cleanup?.(),beforeLeave:()=>ctx.beforeLeave?.()??true};
   try{
-    const module=await import('./'+target.section+'.js?v=unified-admin-1');
+    const module=await import('./'+target.section+'.js?v=unified-admin-4');
     if(version!==sequence)return;
     const lifecycle=await module.enter(ctx);
     if(version!==sequence){ctx.dispose();return;}
