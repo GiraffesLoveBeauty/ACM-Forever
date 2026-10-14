@@ -27,7 +27,7 @@ function shell(start='/admin.html'){
   const common=fs.readFileSync(path.join(assets,'common.js'),'utf8').replace('export function context','function context');
   // Keep the real lifecycle/router bodies; substitute only module loading and DOM/API boundaries.
   const cf=fs.readFileSync(path.join(assets,'cf-practice.js'),'utf8').replace(/^import [^\r\n]*\r?\n/,'').replace('export async function enter','async function enter');
-  const router=fs.readFileSync(path.join(assets,'router.js'),'utf8').replace(/^import [^\r\n]*\r?\n/,'').replace("await import('./'+target.section+'.js?v=unified-admin-1')",'await loadModule(target.section)');
+  const router=fs.readFileSync(path.join(assets,'router.js'),'utf8').replace(/^import [^\r\n]*\r?\n/,'').replace(/await import\('\.\/'\+target\.section\+'\.js\?v=[^']+'\)/,'await loadModule(target.section)');
   vm.createContext(sandbox);vm.runInContext(common+'\n'+cf+'\n'+router,sandbox);
   sandbox.loadModule=async section=>section==='cf-practice'?{enter:sandbox.enter}:{enter:async()=>({})};
   const view=()=>document.getElementById('admin-content').root;

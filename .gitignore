@@ -1,1 +1,7 @@
 /data/
+/feat/data/
+/feat/web/node_modules/
+/feat/web/dist/
+/feat/.pnpm-store/
+/feat/web/.pnpm-store/
+__pycache__/

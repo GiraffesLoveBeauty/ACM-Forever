@@ -1,0 +1,265 @@
+/* Vue layout primitives; visual tokens remain shared with the industrial theme. */
+#app {
+  min-height: 100vh;
+}
+.auth-main {
+  max-width: 480px;
+  margin: 56px auto;
+  padding: 20px;
+}
+.auth-card {
+  display: grid;
+  gap: 16px;
+}
+.auth-card label {
+  display: grid;
+  gap: 8px;
+}
+.plain-comment {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.vue-theme-dialog {
+  width: min(720px, calc(100vw - 32px));
+  max-height: 88vh;
+  overflow: auto;
+  padding: 24px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+.vue-theme-dialog::backdrop {
+  background: #0008;
+}
+.vue-theme-dialog .filters {
+  margin: 16px 0;
+}
+.vue-theme-dialog label {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.vue-theme-dialog input[type='color'] {
+  width: 100%;
+  height: 42px;
+  padding: 2px;
+}
+.vue-draft-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+.vue-draft-item.active {
+  background: var(--subtle-bg);
+}
+.compose-textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 380px;
+}
+.compose-preview {
+  min-height: 380px;
+  padding: 20px;
+  overflow-wrap: anywhere;
+}
+.compose-sidebar {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 20px;
+}
+.compose-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 20px;
+}
+.admin-workspace {
+  min-width: 0;
+}
+.admin-workspace .admin-panel {
+  margin: 20px 0;
+}
+/* Keep Vue controls aligned with the existing admin shell. */
+.admin-console .admin-actions,
+.admin-console .admin-result-actions,
+.admin-console .admin-table-footer,
+.admin-console .admin-pagination {
+  flex-wrap: wrap;
+}
+.admin-console .admin-topbar > div:first-child {
+  min-width: 0;
+}
+.admin-console .admin-actions {
+  justify-content: flex-end;
+}
+.admin-console .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 7px 12px;
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.admin-console .btn.primary {
+  background: var(--brand-strong);
+  border-color: var(--brand-strong);
+  color: var(--on-brand);
+}
+.admin-console .btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.admin-console input,
+.admin-console select,
+.admin-console textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+.admin-console .filters {
+  align-items: end;
+}
+.admin-console .filters > label:not(:has(input[type='checkbox'], input[type='radio'])) {
+  flex: 1 1 180px;
+  max-width: 320px;
+}
+.admin-console .filters label > input:not([type='checkbox'], [type='radio']),
+.admin-console .filters label > select {
+  width: 100%;
+  min-height: 40px;
+}
+.admin-console .filters label:has(input[type='checkbox'], input[type='radio']) {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  gap: 8px;
+}
+.admin-console input:is([type='checkbox'], [type='radio']) {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  flex: 0 0 18px;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--brand-strong);
+}
+.admin-console :is(button, a, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--brand-strong);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+.admin-console .admin-search {
+  height: 40px;
+}
+.admin-console .admin-search:focus-within {
+  border-color: var(--brand-strong);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand-strong) 20%, transparent);
+}
+.admin-console .admin-search input {
+  border-radius: 0;
+}
+/* The enclosing search field owns the single focus indicator. */
+.admin-console .admin-search input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.admin-console .admin-toggle {
+  min-height: 40px;
+}
+.admin-console .admin-account-list .chips {
+  min-width: 0;
+  max-width: 100%;
+}
+.admin-console .admin-account-list .chips :is(.btn, select) {
+  min-height: 34px;
+  font-size: 12px;
+}
+.admin-console .admin-pagination > span {
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.admin-console .admin-create-body > .btn {
+  margin-top: 16px;
+}
+.admin-workspace .list-item,
+.community-main .list-item {
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.table-wrap,
+.admin-table-wrap,
+.community-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.table-wrap table {
+  min-width: 580px;
+}
+.cf-dialog {
+  width: min(1040px, calc(100vw - 24px));
+  max-height: 85vh;
+}
+.algorithm-graph .graph-path-core {
+  stroke: var(--art-route);
+}
+.algorithm-graph .graph-node.is-selected .graph-node-ring {
+  opacity: 1;
+}
+.algorithm-graph .graph-node.is-selected .graph-node-back {
+  fill: var(--art-node);
+}
+.algorithm-graph .graph-node:hover .graph-node-ring {
+  opacity: 1;
+}
+@media (max-width: 600px) {
+  .admin-console .admin-actions {
+    justify-content: flex-start;
+  }
+  .admin-console .admin-actions > * {
+    min-height: 38px;
+  }
+  .admin-console .filters > label:not(:has(input[type='checkbox'], input[type='radio'])) {
+    flex-basis: 100%;
+    max-width: none;
+  }
+  .admin-console .admin-filter-row > .btn,
+  .admin-console .admin-table-footer > .btn,
+  .admin-console .admin-result-actions > .btn {
+    flex: 1 1 auto;
+  }
+  .admin-console .admin-account-list .chips {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .admin-console .admin-pagination {
+    width: 100%;
+    justify-content: center;
+  }
+  .admin-console .admin-pagination > span {
+    flex: 1 1 120px;
+  }
+  .vue-theme-dialog {
+    padding: 16px;
+  }
+  .auth-main {
+    margin-top: 24px;
+  }
+  .admin-pagination {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .compose-textarea,
+  .compose-preview {
+    min-height: 300px;
+  }
+}

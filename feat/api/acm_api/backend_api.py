@@ -30,6 +30,9 @@ from .auth_service import (
 )
 from .reporting import valid_contest_report_time
 from .cf_client import cf_request
+from .problem_sync import sync_options
+from .problem_bank import problem_bank_status
+from .database import connect_db
 
 LOG = logging.getLogger("acm_api")
 api = Blueprint("api", __name__)
@@ -1395,6 +1398,97 @@ async def api_problems():
         return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": size})
     finally:
         await db.close()
+
+
+async def _problem_detail(platform, problem_id):
+    """Read the saved statement without triggering a remote fetch."""
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT platform,problem_id,contest_id,problem_name,problem_rating,problem_url,tags,"
+            "statement_html,statement_text,statement_language,samples,statement_fetched_at,last_fetch_status "
+            "FROM crawler_problems WHERE platform=? AND problem_id=?", (platform, problem_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row:
+            detail = dict(row)
+            detail["tags"] = json.loads(detail["tags"] or "[]")
+            detail["samples"] = json.loads(detail["samples"] or "[]")
+        else:
+            # Older catalog/submission entries may not have a crawler row yet.
+            async with db.execute(
+                "SELECT problem_name,problem_rating,problem_url,tags FROM ("
+                "SELECT problem_name,problem_rating,problem_url,tags,0 AS source,0 AS submit_time FROM recommendations "
+                "WHERE platform=? AND problem_id=? UNION ALL "
+                "SELECT problem_name,problem_rating,problem_url,tags,1 AS source,submit_time FROM submissions "
+                "WHERE platform=? AND problem_id=?) ORDER BY source,submit_time DESC LIMIT 1",
+                (platform, problem_id, platform, problem_id),
+            ) as cursor:
+                row = await cursor.fetchone()
+            if not row:
+                return jsonify({"success": False, "message": "题库中没有这道题目。"}), 404
+            detail = {
+                **dict(row), "platform": platform, "problem_id": problem_id, "contest_id": None,
+                "tags": [tag.strip() for tag in (row["tags"] or "").split(",") if tag.strip()],
+                "statement_html": None, "statement_text": None, "statement_language": None,
+                "samples": [], "statement_fetched_at": None, "last_fetch_status": "never",
+            }
+        detail["content_available"] = bool(detail["statement_html"] or detail["statement_text"])
+        return jsonify(detail)
+    finally:
+        await db.close()
+
+
+@api.get("/problems/<platform>/<problem_id>")
+@admin_required
+async def api_problem_detail(platform, problem_id):
+    return await _problem_detail(platform, problem_id)
+
+
+@api.get("/me/problems/<platform>/<problem_id>")
+@member_required
+async def api_me_problem_detail(platform, problem_id):
+    return await _problem_detail(platform, problem_id)
+
+
+@api.get("/admin/database")
+@admin_required
+async def api_database_status():
+    db = await get_db()
+    try:
+        return jsonify(await problem_bank_status(db))
+    finally:
+        await db.close()
+
+
+@api.post("/admin/database/init")
+@admin_required
+async def api_initialize_database():
+    data = await request.get_json(silent=True)
+    if data is not None and data != {}:
+        return jsonify({"success": False, "code": "invalid_request", "message": "初始化不接受参数，使用服务器配置的数据库。"}), 400
+    db = await connect_db(Path(current_app.config["DB_PATH"]))
+    try:
+        status = await problem_bank_status(db)
+        return jsonify({"success": True, "message": "数据库初始化完成，已有数据已保留。", **status})
+    finally:
+        await db.close()
+
+
+@api.post("/admin/problems/sync")
+@admin_required
+async def api_sync_problems():
+    try:
+        options = sync_options(await request.get_json(silent=True))
+    except ValueError as error:
+        return jsonify({"success": False, "code": "invalid_request", "message": str(error)}), 400
+    submitter = current_app.config.get("PLUGIN_CONFIG", {}).get("_problem_sync_submitter")
+    if not callable(submitter):
+        return jsonify({"success": False, "code": "unavailable", "message": "题目采集服务未配置。"}), 503
+    task = submitter(options)
+    if task is None:
+        return jsonify({"success": False, "code": "problem_sync_busy", "message": "已有题目采集任务，请等待完成或取消后重试。"}), 409
+    return jsonify({"success": True, "status": "queued", "task": task}), 202
 
 
 @api.route("/problems/<platform>/<problem_id>/state", methods=["PUT"])

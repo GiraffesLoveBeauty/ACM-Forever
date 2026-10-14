@@ -1,0 +1,28 @@
+{
+  "name": "acm-forever-web",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite --configLoader native --host 127.0.0.1",
+    "build": "vite build --configLoader native",
+    "test": "node --test tests/*.test.mjs",
+    "preview": "vite preview --configLoader native --host 127.0.0.1",
+    "format": "prettier --write src tests vite.config.js index.html package.json"
+  },
+  "dependencies": {
+    "dompurify": "^3.2.7",
+    "marked": "^16.4.0",
+    "vue": "^3.5.22",
+    "vue-router": "^4.5.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.1",
+    "prettier": "3.6.2",
+    "vite": "^7.1.9"
+  }
+}

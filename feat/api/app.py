@@ -71,6 +71,7 @@ def create_app():
     app.config["MAX_CONTENT_LENGTH"] = 3 * 1024 * 1024
     app.config["BOT_API_TOKEN"] = os.getenv("ACM_BOT_API_TOKEN", "").strip()
     app.config["WEBUI_PUBLIC_DIR"] = Path(__file__).parent / "acm_api" / "public"
+    app.config["WEBUI_DIST_DIR"] = Path(__file__).parent.parent / "web" / "dist"
     root_ids = _csv_env("ACM_ROOT_QQ_IDS")
     initial_admin_ids = _csv_env("ACM_ADMIN_QQ_IDS")
     crawler_config = {
@@ -119,6 +120,7 @@ def create_app():
         ),
         "_task_provider": task_manager.snapshots,
         "_task_canceller": task_manager.cancel,
+        "_problem_sync_submitter": task_manager.submit_problem_sync,
         "_account_sync_submitter": task_manager.submit_account_sync,
         "_all_account_sync_submitter": task_manager.submit_all_accounts_sync,
         "_registration_sync_submitter": lambda qq_id: task_manager.submit_account_sync(
@@ -168,6 +170,7 @@ def create_app():
 
     @app.after_serving
     async def close_service():
+        await task_manager.close()
         await practice_jobs.close()
         await sync_engine.close()
 
@@ -188,7 +191,16 @@ def create_app():
         identity = await _session_identity()
         if identity and identity["must_change_password"]:
             return redirect("/change-password.html?" + urlencode({"next": "/"}))
-        return await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], "index.html")
+        return await vue_entry()
+
+    async def vue_entry(filename="index.html"):
+        dist = app.config["WEBUI_DIST_DIR"]
+        if not (dist / "index.html").is_file():
+            return (
+                "Vue frontend has not been built. Run pnpm install and pnpm build in feat/web.",
+                503,
+            )
+        return await send_from_directory(dist, filename)
 
     @app.get("/<path:filename>")
     async def webui_static(filename):
@@ -197,6 +209,15 @@ def create_app():
         if filename.startswith("assets/") and extension in {
             ".css", ".js", ".png", ".jpg", ".jpeg", ".svg", ".woff", ".woff2", ".otf", ".ico",
         }:
+            dist_dir = Path(app.config["WEBUI_DIST_DIR"]).resolve()
+            dist_asset = (dist_dir / filename).resolve()
+            try:
+                dist_asset.relative_to(dist_dir)
+                in_dist = True
+            except ValueError:
+                in_dist = False
+            if in_dist and dist_asset.is_file():
+                return await send_from_directory(dist_dir, filename)
             response = await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], filename)
             if extension == ".css":
                 response.headers["Content-Type"] = "text/css; charset=utf-8"
@@ -214,7 +235,7 @@ def create_app():
             params["section"] = legacy
             target = "/admin.html?" + urlencode(params)
         if filename in _RETIRED_PAGES:
-            return await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], filename)
+            return await vue_entry("retired.html")
         if identity and identity["must_change_password"] and filename != "change-password.html":
             return redirect("/change-password.html?" + urlencode({"next": target}))
         if filename in _ADMIN_PAGES:
@@ -235,7 +256,7 @@ def create_app():
             return redirect("/login.html?" + urlencode({"next": target}))
         if target != request.full_path.rstrip("?"):
             return redirect(target)
-        return await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], filename)
+        return await vue_entry()
 
     @app.get("/uploads/avatars/<filename>")
     async def uploaded_avatar(filename):
@@ -250,10 +271,11 @@ def create_app():
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
+        problem_images = " https://*.codeforces.com https://codeforces.com https://img.atcoder.jp https://atcoder.jp" if request.path == "/problem.html" else ""
         response.headers.setdefault(
             "Content-Security-Policy",
             "default-src 'self'; base-uri 'self'; object-src 'none'; "
-            "frame-ancestors 'none'; connect-src 'self'; img-src 'self' data:; "
+            f"frame-ancestors 'none'; connect-src 'self'; img-src 'self' data:{problem_images}; "
             "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'",
         )
         if response.content_type == "application/json":
@@ -287,7 +309,7 @@ def create_app():
 _PUBLIC_PAGES = {
     "index.html", "login.html", "post.html", "forum-moderation.html",
     "change-password.html", "home.html", "admin.html",
-    "leaderboard.html", "challenge.html", "reviews.html", "problem-bank.html",
+    "leaderboard.html", "challenge.html", "reviews.html", "problem-bank.html", "problem.html",
     "submissions.html", "workspace.html", "contest-review.html", "member.html", "compose.html",
     "tasks.html", "settings.html", "cf-practice.html",
 }

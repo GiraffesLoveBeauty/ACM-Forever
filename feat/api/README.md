@@ -27,6 +27,8 @@ python -m api
 
 服务默认监听 `127.0.0.1:8088`，同时提供独立 WebUI 和 API，沿用梓喵原 WebUI 端口。生产环境通过反向代理提供 HTTPS 和访问控制；若需要通过服务器地址直接访问，应按服务器防火墙策略设置 `ACM_API_HOST`。
 
+前端已迁移到 `../web` 中的 Vue 3 + Vite。开发时另开终端在 `feat/web` 执行 `pnpm install --frozen-lockfile`、`pnpm dev`，访问 `127.0.0.1:5173`。要在 `8088` 访问完整网站，先执行 `pnpm build`；服务读取 `feat/web/dist`，没有构建制品时页面返回 `503`，API 不受影响。部署工作流会自动构建并同步制品。详见 [Vue 前端 README](../web/README.md)。
+
 ## 数据库与部署
 
 设置 `ACM_DATABASE_PATH` 指向持久化 SQLite 文件。本仓库的 GitHub Actions 会将 `feat/` 同步到服务器 `/home/WYJ/acm-forever-feat`，因此生产数据库必须放在该同步目录之外，例如：
@@ -42,6 +44,23 @@ GitHub Actions 会在 `/home/WYJ/acm-forever-data/.env` 已存在时安装依赖
 服务器当前实际使用的数据库路径、服务运行状态和梓喵接入情况，应以服务器环境文件与运行检查为准，不能仅凭仓库代码推断。若要把旧数据库切换到本服务，先停止会写入旧库的服务并制作可恢复备份（包含 WAL 状态），再设置 `ACM_DATABASE_PATH`、启动 API 并核对关键数据；确认 Web 与梓喵都经 API 正常读写后，再按运维流程停用旧写入路径。不要在没有备份和核验的情况下覆盖生产数据库。
 
 首次启动时，服务会自动建立数据库表结构。若数据库中没有 Web 账号，可配置 `ACM_BOOTSTRAP_ROOT_QQ_ID` 和 `ACM_BOOTSTRAP_ROOT_PASSWORD` 初始化一个 root 账号；初始化成功后应移除这两个变量。也可先在环境中配置旧式管理员登录账号与密码，但应优先使用数据库账号登录。
+
+### 单独初始化数据库与题目采集
+
+安装 API 依赖后，可以在服务器部署目录执行初始化，无需启动 HTTP 服务，也无需设置 Web 会话密钥：
+
+```bash
+cd /home/WYJ/acm-forever-feat
+python3 -m api.init_db --database /home/WYJ/acm-forever-data/acm_forever.db
+```
+
+省略 `--database` 时读取 `ACM_DATABASE_PATH`，未配置时使用当前目录的 `./data/acm_forever.db`。命令初始化服务所需的表结构与默认设置，可重复运行，保留已有业务数据；root 账号仍由服务启动时的配置创建。正常启动也会自动执行相同的表结构初始化。
+
+管理员在 **管理后台 → 题库管理 → 拉取题目** 中选择平台、填写比赛 ID 和题数，点击 **开始拉取**，即可触发服务器抓取公开 AtCoder 或 Codeforces 比赛的新题目。支持选填题号、选择题面语言和刷新已有题目；页面显示进度与失败原因，成功后自动刷新题库。离开页面后任务继续执行，可在 **同步任务** 查看或取消。
+
+同一页面的 **初始化数据库** 按钮补齐服务端 SQLite 表结构并显示平台题库统计，保留已有数据。选择 **拉取范围 → 该平台全部题目** 后无需填写比赛 ID，服务器先导入公开目录，再按 **每批处理题数** 自动拉取所有题面与样例；每批题数不限制总数量。默认跳过成功题目，取消或重启后再次运行可继续未完成题目并重试失败题目。全量任务逐题限速，可能运行数小时。
+
+网页调用 `POST /api/admin/problems/sync`，使用现有 Web `admin/root` 会话与 CSRF，返回 202 和任务 ID，进度及取消复用 `/api/tasks`。题目正文与样例写入同一条 `crawler_problems` 记录，并原子更新 `recommendations`，使既有题库列表能够展示新题目。默认跳过成功题目，可显式刷新；失败保留已有正文和样例。CF 当前支持普通公开比赛，题号兼容 `1843A/cf_1843A`，与既有提交记录统一存为 `cf_1843A`；元数据和页面共用 CF 请求节流。详细参数和调用示例见 [API 调用指南](../../docs/api.md#管理员采集新题目)。
 
 ## 环境变量
 
@@ -83,7 +102,7 @@ WebUI API 以原 WebUI 路由为兼容基线。常用路由包括：
 - `/api/member/<qq_id>`、`/api/user`、`/api/me/profile`
 - `POST /api/me/avatar`、`DELETE /api/me/avatar`：当前成员头像上传与重置
 - `/api/admin/members`：成员搜索与分页
-- `/api/problems`、`/api/me/problems`：题库查询和收藏
+- `/api/problems`、`/api/me/problems`：题库查询和收藏；各自的 `/<platform>/<problem_id>` GET 接口读取已采集题面与样例。列表的“打开题目”进入 `/problem.html` 站内详情页，支持公式与样例复制；仅有目录时显示等待采集提示。图片仍由原站 HTTPS 加载。
 - `/api/training/*`、`/api/me/training/*`、`/api/contest/reviews`、`/api/me/contest/reviews`
 - `/api/stats`、`/api/leaderboard`、`/api/me/leaderboard`
 - `/api/admin/cf/*`：管理员近期 AC 汇总、全量历史候选查重与持久化刷新任务
@@ -112,7 +131,7 @@ Bot 服务接口包括：
 
 ## 统一管理后台
 
-管理员统一从 `/admin.html` 进入。左侧菜单和顶部修改密码、主题、退出、自助调色保持固定，原生 JavaScript 路由只替换右侧内容。后台菜单不读取历史 `nav_order` / `nav_hidden` 配置，字号设置仍可使用。
+管理员统一从 `/admin.html` 进入。左侧菜单和顶部修改密码、主题、退出、自助调色保持固定，Vue Router 根据查询参数切换右侧 Vue 组件。后台菜单不读取历史 `nav_order` / `nav_hidden` 配置，字号设置仍可使用。
 
 | 地址 | 功能 |
 | --- | --- |
@@ -126,9 +145,9 @@ Bot 服务接口包括：
 | `/admin.html?section=moderation&tab=reports` | 举报处理；`tab=posts` 为话题审核 |
 | `/admin.html?section=settings` | 外观、比赛播报、QQBot 管理员 |
 
-直接打开、刷新、前进后退均按地址恢复模块。CF 默认分区初始化只替换当前历史项；主动点击或用键盘切换分区才新增历史项，从侧栏进入 CF 后按一次后退可回到原模块。未知 `section` 回到成员账号并提示；不合法的 `tab/qq_id` 清理后显示默认分区或列表。Web 角色仅在成员账号维护；成员详情显示 Web 角色，不再修改权限。QQBot 管理员名单在全局设置维护，与 Web 角色分别存储，只有 Web root 可写。
+直接打开、刷新、前进后退均按地址恢复模块。CF 默认分区初始化不额外新增历史项；主动点击或用键盘切换分区才新增历史项，从侧栏进入 CF 后按一次后退可回到原模块。未知 `section` 回到成员账号并提示；不合法的 `tab/qq_id` 清理后显示默认分区或列表。Web 角色仅在成员账号维护；成员详情显示 Web 角色，不再修改权限。QQBot 管理员名单在全局设置维护，与 Web 角色分别存储，只有 Web root 可写。
 
-每个功能模块通过 `assets/admin/common.js` 获得独立内容根节点、API、AbortSignal、监听器和定时器，在进入 / 退出时管理生命周期。离开时取消页面查询和轮询，旧响应不会替换新模块。账号发放结果切换前提示复制，离开后清除临时密码，不写入模块缓存、浏览历史或浏览器存储。CF 已提交的后台任务继续运行；`assets/admin/cf-sync.js` 在模块内存中保存待确认提交，提交确认请求独立于模块生命周期，最多等待 30 秒，沿用公共 API 的会话与 CSRF 校验。确认回调只保存任务编号或错误；同一后台页面内切换模块后返回，恢复同一个任务的轮询并重新核验候选结果，等待确认与执行期间禁用重复同步和候选操作。任务即使在返回前已完成也不会重新提交；确认失败在当前或返回后的 CF 模块显示错误并允许重试。该内存不跨整页刷新或关闭保存。
+每个功能模块通过 Vue 组件与 `feat/web/src/lib/api.js` 管理请求、监听器和定时器的生命周期。离开时取消页面查询和轮询，旧响应不会替换新模块。账号发放结果切换前提示复制，离开后清除临时密码，不写入模块缓存、浏览历史或浏览器存储。CF 已提交的后台任务继续运行；`feat/web/src/lib/admin.js` 在模块内存中保存待确认提交，提交确认请求独立于组件生命周期，最多等待 30 秒，沿用公共 API 的会话与 CSRF 校验。确认回调只保存任务编号或错误；同一后台页面内切换模块后返回，恢复同一个任务的轮询并重新核验候选结果，等待确认与执行期间禁用重复同步和候选操作。任务即使在返回前已完成也不会重新提交；确认失败在当前或返回后的 CF 模块显示错误并允许重试。该内存不跨整页刷新或关闭保存。
 
 普通成员导航仅保留论坛、排行榜、个人中心。个人中心保留最近 AC 摘要和今日训练、题库、赛事复盘入口；管理员打开这些共用旧路径会转入后台对应模块，普通成员继续使用前台。旧成员详情地址保留 `qq_id`；登录、强制改密保留目标路径及参数。普通成员访问后台页面仍由服务端返回 403，各业务接口保持权限和 CSRF 校验。
 
@@ -138,7 +157,7 @@ Bot 服务接口包括：
 
 ```powershell
 python -m unittest discover -s feat/api/tests -p "test_*.py"
-node --test feat/api/tests/admin-history.test.cjs feat/api/tests/cf-sync.test.cjs feat/api/tests/theme-colors.test.cjs feat/api/tests/theme-performance.test.cjs
+node --test feat/api/tests/admin-history.test.cjs feat/api/tests/admin-problem-sync.test.cjs feat/api/tests/cf-sync.test.cjs feat/api/tests/theme-colors.test.cjs feat/api/tests/theme-performance.test.cjs
 ```
 
 本地浏览器联调、演示数据库和截图应置于仓库外，使用合成数据和模拟 OJ 响应。当前服务器工作流在 `feat/**` 改动合并 `main` 后自动部署，合并前仍需跨人评审、联调验收及运维确认。

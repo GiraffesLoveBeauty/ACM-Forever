@@ -133,6 +133,116 @@ response.raise_for_status()
 
 赛事状态统一为 `todo/unsolved/queued/solved/reviewed/ignored`，其中 `reviewed` 可正常保存，`queued` 仅表示待补题状态，不创建复习或计划队列。`rating` 接受整数或 null。任何赛事 `note_md` 写请求均返回 410。所有写请求继续执行 CSRF 校验，模块路由不是权限边界。
 
+## 管理员采集新题目
+
+### 网页操作
+
+题库管理顶部的 **服务端数据库 → 初始化数据库** 会补齐 SQLite 表结构，保留已有账号、设置、题目及样例；页面显示各平台目录数量、已采集数量、失败数量和样例组数。服务启动仍自动初始化，也可使用已有 `python -m api.init_db` 命令。
+
+题库列表右侧的 **打开题目** 进入 `/problem.html?platform=codeforces&problem_id=cf_1843A` 等站内详情页，读取服务端已保存的题面与样例。管理员使用 `GET /api/problems/<platform>/<problem_id>`，普通成员使用 `GET /api/me/problems/<platform>/<problem_id>`；都要求登录且完成首次改密。返回题名、难度、标签、原题链接 `problem_url`、`statement_html/statement_text`、题面语言、`samples`、采集时间、最近采集状态和 `content_available`。读取不触发爬虫；题目不存在返回 404，只收录目录时返回 200 且 `content_available=false`，提示等待采集或管理员重试。更新失败但仍有旧题面时继续展示已保存内容。详情页的“查看原题”按钮在新标签页打开数据库中记录的原题链接，正文尚未采集时也可使用。
+
+详情页清理外部 HTML，保留样例空格和换行并提供复制按钮；公式使用本地 KaTeX 0.19.0 输出 MathML（[配置说明](https://katex.org/docs/autorender)）。题面图片目前仍从 AtCoder / Codeforces 的 HTTPS 域名加载，尚未存入本地数据库；其它来源的图片显示占位文字。仅详情页允许这些图片域名，其它页面继续使用原有内容安全策略。
+
+管理员或 Root 登录后，在 **管理后台 → 题库管理 → 拉取题目** 中选择 AtCoder / Codeforces，填写比赛 ID 和本次最多拉取题数（1–100），点击 **开始拉取**。可以指定题号（逗号或空格分隔）；留空时按比赛题序处理。AtCoder 可选英文或日文，Codeforces 使用英文且暂不支持 Gym。
+
+将 **拉取范围** 切换为 **该平台全部题目** 时，不需要比赛 ID 或题号，题数输入变为 **每批处理题数**（1–100，默认 100）。点击 **拉取该平台全部题目** 后，服务器先分批导入整个公开目录，再自动处理全部待采题目；批次大小不是总数量上限。页面显示目录导入进度、题面进度与批次，目录导入及批次完成后刷新题库与数据库统计。
+
+默认跳过成功采集的题目；勾选 **重新拉取已有题目** 时更新已有题面与样例。页面自动显示任务进度、成功 / 失败数量和失败原因，完成后刷新题库列表。题数只是本次上限，实际数量受比赛题目数及已采集数量影响。
+
+拉取过程中不能重复提交。离开页面后后台任务继续执行，返回题库管理时恢复进行中的任务。也可在 **同步任务** 中查看或取消；任务取消后已入库题目会保留。
+
+### 后端接口
+
+`GET /api/admin/database` 返回 `initialized`、`missing_tables` 和 `platforms` 统计数组（`platform/total/collected/failed/samples`）。`POST /api/admin/database/init` 使用服务器配置的数据库执行初始化，接受空请求或 `{}`，不接受文件路径或重置参数，返回 `success/message` 及相同统计。两者要求管理员或 Root 会话；初始化还须携带 CSRF。初始化可以重复执行，保留已有数据。
+
+`POST /api/admin/problems/sync` 让服务器直接抓取公开 AtCoder 或 Codeforces 题目，并写入服务端 `ACM_DATABASE_PATH` 指定的 SQLite。使用 Web `admin/root` 登录 Cookie，必须携带 `X-CSRF-Token`。未登录返回 401，普通成员或缺少 CSRF 返回 403，需要首次改密时返回 428。
+
+请求示例：
+
+```json
+{
+  "platform": "atcoder",
+  "contest_id": "abc370",
+  "problem_ids": ["abc370_a", "abc370_b"],
+  "limit": 20,
+  "language": "en",
+  "refresh": false
+}
+```
+
+| 参数 | 规则 |
+| --- | --- |
+| `platform` | `atcoder`（默认）或 `codeforces` |
+| `scope` | `contest`（默认，单场比赛）或 `platform`（该平台全部题目） |
+| `contest_id` | `scope=contest` 必填；AtCoder 比赛 ID 为字符串，如 `abc370`，最长 100 个字符；CF 为 1–99999 的普通公开比赛 ID，可传整数或数字字符串，当前不支持 Gym；全平台模式不传此字段 |
+| `problem_ids` | 可省略，最多 100 个题号；空数组表示该比赛全部题目，重复题号去重；题号必须属于指定比赛；CF 接受 `1843A` 或 `cf_1843A`，统一保存为 `cf_1843A`，与既有提交记录一致 |
+| `limit` | 仅用于单场比赛，本次最多尝试的题面数量，整数 1–100，默认 20；先跳过成功题目，再按原站题序取前若干道 |
+| `batch_size` | 仅用于全平台采集，每批处理题数，整数 1–100，默认 100；自动处理所有批次，不限制总题数 |
+| `language` | AtCoder 为 `en`（默认）或 `ja`，缺失英文时回退到日文；CF 当前只支持 `en`；单条记录只保存一种语言 |
+| `refresh` | 布尔，默认 false；true 时重新采集已保存的题目 |
+
+只采集指定比赛的新题目时，传 `{"contest_id":"abc370"}` 即可。重复调用会继续处理尚未成功的题目；同一题的重复采集更新已有记录。参数类型、未知参数或不支持的平台返回 JSON 400 `invalid_request`。比赛及题号是否公开存在在异步抓取时核实；核实失败记录在任务结果中，不写入无效题目。这个接口不接受题面 JSON 或任意抓取 URL。
+
+CF 请求示例：
+
+```json
+{"platform":"codeforces","contest_id":1843,"problem_ids":["1843A","1843B"],"limit":10}
+```
+
+CF 元数据来自匿名 `contest.standings` 的题目列表（仅传 `contestId`），正文与样例来自原站题目页面。页面访问受限、HTTP 错误或解析失败时报告失败，不使用空白题面代替实际内容。
+
+全平台请求示例：
+
+```json
+{"platform":"atcoder","scope":"platform","batch_size":100,"language":"en","refresh":false}
+```
+
+将 `platform` 改为 `codeforces` 可拉取 CF 整个平台。全平台模式不接受 `contest_id/problem_ids/limit`。AtCoder 目录来自 [AtCoder Problems 题目数据集](https://github.com/kenkoooo/AtCoderProblems/blob/master/doc/api.md)，CF 目录来自官方 [`problemset.problems`](https://codeforces.com/apiHelp/methods#problemset.problems)。范围为这些公开目录中的可访问题目，CF 不包含 Gym、私有比赛或自定义 problemset；目录索引可能有延迟。题面与样例仍取自原站。目录去重后写入 `crawler_problems` 与 `recommendations`，未下载题面时为 `last_fetch_status=never`，题库可先展示目录；正文尚未采集时，站内详情页显示等待提示。
+
+全量采集逐题限速，可能持续数小时。每道成功题目立即提交，失败题目保留元数据并记录 `last_error`；个别失败继续处理后续题目。取消或服务重启后再次以 `refresh=false` 运行，跳过成功且语言相同的题目，重新处理失败及尚未采集的题目。`refresh=true` 会重新处理全平台所有题目。单场比赛仍按 `limit` 截取，全平台自动处理全部批次。
+
+CF 历史比赛中的纯数字题序也包含在目录中，例如比赛 921 的题序 `01` 保存为 `cf_92101`，指定题号时可使用 `92101/cf_92101`。
+
+成功提交返回 202：
+
+```json
+{
+  "success": true,
+  "status": "queued",
+  "task": {"id": "任务ID", "merged": false}
+}
+```
+
+同一个 API 进程同时运行一个题目采集任务，相同参数的进行中请求合并为同一任务（`merged=true`）；其他采集请求返回 409 `problem_sync_busy`，可等待或取消当前任务。AtCoder 题目请求串行执行，前一次结束后至少等待 1.5 秒；CF 元数据与题面请求共用现有 CF 请求节流，至少间隔 2.1 秒。单次请求超时为 30 秒。
+
+登录方式沿用上文的 `session` 与 `csrf_token`，触发和查询示例：
+
+```python
+response = session.post(
+    f"{base_url}/api/admin/problems/sync",
+    headers={"X-CSRF-Token": csrf_token},
+    json={"contest_id": "abc370", "problem_ids": ["abc370_a"]},
+    timeout=15,
+)
+response.raise_for_status()
+task_id = response.json()["task"]["id"]
+
+response = session.get(f"{base_url}/api/tasks", timeout=15)
+response.raise_for_status()
+task = next(item for item in response.json() if item["id"] == task_id)
+print(task["status"], task["progress"], task["result"])
+```
+
+`GET /api/tasks` 返回任务数组。题目任务 `kind=题目采集`，`progress` 含 `done/total` 和正在采集的 `problem_id`，`result` 含比赛 ID、发现数量、筛选数量、跳过数量、本次尝试数量、剩余待采数量、成功/失败数量、样例组数及错误清单。可每 2–3 秒查询，直到 `status` 为 `completed/partial/failed/cancelled`。个别题目失败时继续采集，成功和失败并存时为 `partial`；比赛列表获取失败等整体错误保存为 `result.error`。202 仅表示接受任务，是否成功以最终状态和计数为准。
+
+`result.scope=platform` 表示全平台任务；`metadata_count` 是已导入目录题数，`batch_count/completed_batches` 是题面总批次 / 已完成批次。`progress.phase` 为 `catalog/metadata/statements`，目录阶段有 `metadata_done/metadata_total`，题面阶段有当前 `batch`。全平台的 `remaining_count` 表示本任务尚未尝试的题数，失败题数单独统计。任务错误列表最多显示前 100 条，超出时 `failure_details_truncated=true`；完整逐题错误保存在数据库对应行中。
+
+取消仍使用 `POST /api/tasks/<任务ID>/cancel`，要求同样的管理员 Cookie 与 CSRF。任务记录保存在进程内，服务重启后清空；已入库的数据保留，再次提交时可跳过成功题目。
+
+成功的题面 HTML（包含样例章节）、纯文本及 `samples` JSON 数组存于 `crawler_problems` 的同一行，没有独立样例表。样例保留输入输出的空格与换行，CF 的逐行 div 和旧版 br 排版会还原为换行。AtCoder 空白处理详见 [采集说明](crawler-samples.md#样例直接保存在题目中)。同时原子更新现有 `recommendations`，使 `GET /api/problems` 和成员题库列表能够展示新题。AtCoder 官方列表不提供估算难度和算法标签，新题的这些信息为空，已有数据在刷新时保留；CF 保存元数据中的 Rating 与 tags，缺失 Rating 为 null。下载、解析或数据库写入失败时保留已有题面与样例，并在已有题目行中记录最近失败。
+
+服务启动会自动建表；也可先在部署目录运行 `python3 -m api.init_db --database /home/WYJ/acm-forever-data/acm_forever.db`，详见 [服务端初始化说明](../feat/api/README.md#单独初始化数据库与题目采集)。
+
 ## 已下线的 Web 功能
 
 待复习 / 待复盘、提交时间线、笔记与计划工作区及其 Web 专属接口已下线。旧页面 `reviews.html/submissions.html/workspace.html` 显示“功能已下线”，可返回个人中心或管理中心。以下路由保留原身份及 CSRF 守卫，已授权调用统一返回 `410`、`code=feature_retired`，不读写历史学习数据：

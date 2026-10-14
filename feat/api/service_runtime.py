@@ -9,6 +9,7 @@ import aiosqlite
 
 from .acm_api.constants import PLATFORM_SYNC_CONCURRENCY
 from .acm_api.database import connect_db
+from .acm_api.problem_sync import ProblemSync
 from .acm_api.sync_service import SyncMixin
 
 
@@ -120,6 +121,23 @@ class WebTaskManager:
     def __init__(self, sync_engine: SyncEngine):
         self.sync_engine = sync_engine
         self.tasks = {}
+        self.problem_sync = ProblemSync(sync_engine.db_path)
+
+    def submit_problem_sync(self, options):
+        for item in self.tasks.values():
+            if item.get("kind") == "题目采集" and item["status"] in {"queued", "running"}:
+                if item["options"] == options:
+                    return {"id": item["id"], "merged": True}
+                return None
+        task_id = uuid.uuid4().hex[:12]
+        item = {
+            "id": task_id, "kind": "题目采集", "platform": options["platform"], "options": dict(options),
+            "status": "queued", "started_at": None, "finished_at": None, "result": None,
+            "progress": {"done": 0, "total": 0},
+        }
+        self.tasks[task_id] = item
+        item["_task"] = asyncio.create_task(self.problem_sync.run(options, item))
+        return {"id": task_id, "merged": False}
 
     def submit_account_sync(self, qq_id, platforms, days=0):
         normalized = []
@@ -186,6 +204,7 @@ class WebTaskManager:
         keys = (
             "id", "kind", "qq_id", "platform", "days", "status",
             "started_at", "finished_at", "result",
+            "progress",
         )
         return [{key: item.get(key) for key in keys} for item in self.tasks.values()]
 
@@ -195,7 +214,19 @@ class WebTaskManager:
         if not task or task.done():
             return False
         task.cancel()
+        if item["kind"] == "题目采集":
+            item.update(status="cancelled", finished_at=int(time.time()))
         return True
+
+    async def close(self):
+        pending = []
+        for task_id, item in self.tasks.items():
+            task = item.get("_task")
+            if task and not task.done():
+                self.cancel(task_id)
+                pending.append(task)
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
 
 
 async def create_web_challenge(db_path, platform="", tag="", difficulty=None, owner_qq_id=None):
