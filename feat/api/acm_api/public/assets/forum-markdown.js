@@ -15,6 +15,56 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
     return slashCount % 2 === 1;
   };
   const codeMask = new Uint8Array(text.length);
+  const markRawHtmlCodeRanges = () => {
+    const htmlTokens = [];
+    const collectHtmlTokens = tokens => {
+      for (const token of tokens || []) {
+        if (token.type === "html") htmlTokens.push(token.raw);
+        if (token.tokens) collectHtmlTokens(token.tokens);
+        if (token.items) for (const item of token.items) collectHtmlTokens(item.tokens);
+      }
+    };
+    collectHtmlTokens(window.marked.lexer(text, { gfm: true }));
+
+    const codeElements = [];
+    let sourceCursor = 0;
+    for (const raw of htmlTokens) {
+      if (!raw) continue;
+      const tokenStart = text.indexOf(raw, sourceCursor);
+      if (tokenStart < 0) continue;
+      const tagPattern = /<\/?(code|pre)\b[^>]*>/gi;
+      let tag;
+      while ((tag = tagPattern.exec(raw))) {
+        codeElements.push({
+          name: tag[1].toLowerCase(),
+          closing: /^<\//.test(tag[0]),
+          selfClosing: /\/\s*>$/.test(tag[0]),
+          start: tokenStart + tag.index,
+          end: tokenStart + tag.index + tag[0].length
+        });
+      }
+      sourceCursor = tokenStart + raw.length;
+    }
+
+    const openElements = [];
+    let rangeStart = -1;
+    for (const element of codeElements) {
+      if (!element.closing && !element.selfClosing) {
+        if (!openElements.length) rangeStart = element.start;
+        openElements.push(element.name);
+      } else if (element.closing) {
+        const matchingIndex = openElements.lastIndexOf(element.name);
+        if (matchingIndex < 0) continue;
+        openElements.length = matchingIndex;
+        if (!openElements.length) {
+          codeMask.fill(1, rangeStart, element.end);
+          rangeStart = -1;
+        }
+      }
+    }
+    if (rangeStart >= 0) codeMask.fill(1, rangeStart);
+  };
+  markRawHtmlCodeRanges();
   const indentationColumns = value => {
     let columns = 0;
     for (const character of value) columns = character === "\t" ? columns + 4 - columns % 4 : columns + 1;
@@ -44,7 +94,18 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
       listContextQuoteDepth = quoteDepth;
     } else {
       if (quoteDepth < listContextQuoteDepth) { listContentIndents = []; listContextQuoteDepth = quoteDepth; }
-      if (line.trim()) while (listContentIndents.length && contentIndent < listContentIndents[listContentIndents.length - 1]) listContentIndents.pop();
+      const nestedListMarker = line.match(/^([\t ]+)([-+*]|\d{1,9}[.)])[\t ]+/);
+      let recognizedNestedListMarker = false;
+      if (nestedListMarker && listContentIndents.length && quoteDepth === listContextQuoteDepth) {
+        const markerIndent = indentationColumns(nestedListMarker[1]);
+        if (markerIndent >= listContentIndents[listContentIndents.length - 1]) {
+          recognizedNestedListMarker = true;
+          while (listContentIndents.length && listContentIndents[listContentIndents.length - 1] > markerIndent) listContentIndents.pop();
+          const contentColumn = markerIndent + indentationColumns(nestedListMarker[2] + nestedListMarker[0].slice(nestedListMarker[1].length + nestedListMarker[2].length));
+          if (listContentIndents[listContentIndents.length - 1] !== contentColumn) listContentIndents.push(contentColumn);
+        }
+      }
+      if (!recognizedNestedListMarker && line.trim()) while (listContentIndents.length && contentIndent < listContentIndents[listContentIndents.length - 1]) listContentIndents.pop();
     }
     const listIndent = listContentIndents[listContentIndents.length - 1] || 0;
     const fenceMatch = line.match(/^(?:(?: {0,3}>[\t ]?| {0,3}(?:[-+*]|\d{1,9}[.)])[\t ]+))* {0,3}(`{3,}|~{3,})/);
