@@ -15,15 +15,38 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
     return slashCount % 2 === 1;
   };
   const codeMask = new Uint8Array(text.length);
+  const indentationColumns = value => {
+    let columns = 0;
+    for (const character of value) columns = character === "\t" ? columns + 4 - columns % 4 : columns + 1;
+    return columns;
+  };
   let fence = null;
+  let listContentIndents = [];
+  let listContextQuoteDepth = 0;
   for (let lineStart = 0; lineStart < text.length;) {
     const newline = text.indexOf("\n", lineStart);
     const lineEnd = newline < 0 ? text.length : newline;
     const line = text.slice(lineStart, lineEnd);
     const containerPrefix = line.match(/^(?:(?: {0,3}>[\t ]?| {0,3}(?:[-+*]|\d{1,9}[.)])[\t ]+))*/)[0];
     const quoteDepth = (containerPrefix.match(/>/g) || []).length;
-    const listIndent = /(?:[-+*]|\d{1,9}[.)])[\t ]+/.test(containerPrefix) ? containerPrefix.length : 0;
-    const contentIndent = containerPrefix.length + (line.slice(containerPrefix.length).match(/^[\t ]*/)?.[0].length || 0);
+    const contentIndent = indentationColumns(containerPrefix + (line.slice(containerPrefix.length).match(/^[\t ]*/)?.[0] || ""));
+    const listMarkers = [...containerPrefix.matchAll(/([-+*]|\d{1,9}[.)])[\t ]+/g)];
+    if (listMarkers.length) {
+      if (listContextQuoteDepth !== quoteDepth) listContentIndents = [];
+      const nextListIndents = listContentIndents.filter(indent => indent <= indentationColumns(containerPrefix.slice(0, listMarkers[0].index)));
+      for (const marker of listMarkers) {
+        const markerIndent = indentationColumns(containerPrefix.slice(0, marker.index));
+        while (nextListIndents.length && nextListIndents[nextListIndents.length - 1] > markerIndent) nextListIndents.pop();
+        const contentColumn = indentationColumns(containerPrefix.slice(0, marker.index + marker[0].length));
+        if (nextListIndents[nextListIndents.length - 1] !== contentColumn) nextListIndents.push(contentColumn);
+      }
+      listContentIndents = nextListIndents;
+      listContextQuoteDepth = quoteDepth;
+    } else {
+      if (quoteDepth < listContextQuoteDepth) { listContentIndents = []; listContextQuoteDepth = quoteDepth; }
+      if (line.trim()) while (listContentIndents.length && contentIndent < listContentIndents[listContentIndents.length - 1]) listContentIndents.pop();
+    }
+    const listIndent = listContentIndents[listContentIndents.length - 1] || 0;
     const fenceMatch = line.match(/^(?:(?: {0,3}>[\t ]?| {0,3}(?:[-+*]|\d{1,9}[.)])[\t ]+))*[\t ]{0,3}(`{3,}|~{3,})/);
     const lineLimit = newline < 0 ? lineEnd : newline + 1;
     if (fence && (quoteDepth < fence.quoteDepth || line.trim() && fence.listIndent > contentIndent)) fence = null;
@@ -36,8 +59,7 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
       fence = { character: fenceMatch[1][0], length: fenceMatch[1].length, quoteDepth, listIndent };
     }
     if (!fence && !codeMask[lineStart]) {
-      const indentation = line.slice(containerPrefix.length).match(/^[\t ]*/)[0];
-      if (indentation.includes("\t") || indentation.length >= 4) codeMask.fill(1, lineStart, lineLimit);
+      if (contentIndent - listIndent >= 4) codeMask.fill(1, lineStart, lineLimit);
     }
     lineStart = lineLimit;
   }
