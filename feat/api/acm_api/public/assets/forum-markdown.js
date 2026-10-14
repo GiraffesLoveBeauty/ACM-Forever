@@ -14,16 +14,60 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
     for (let cursor = index - 1; cursor >= 0 && value[cursor] === "\\"; cursor--) slashCount++;
     return slashCount % 2 === 1;
   };
+  const codeMask = new Uint8Array(text.length);
+  let fence = null;
+  for (let lineStart = 0; lineStart < text.length;) {
+    const newline = text.indexOf("\n", lineStart);
+    const lineEnd = newline < 0 ? text.length : newline;
+    const line = text.slice(lineStart, lineEnd);
+    const fenceMatch = line.match(/^(?:(?: {0,3}>[\t ]?| {0,3}(?:[-+*]|\d{1,9}[.)])[\t ]+))*[\t ]{0,3}(`{3,}|~{3,})/);
+    const lineLimit = newline < 0 ? lineEnd : newline + 1;
+    if (fence) {
+      codeMask.fill(1, lineStart, lineLimit);
+      if (fenceMatch && fenceMatch[1][0] === fence.character && fenceMatch[1].length >= fence.length
+          && !fenceMatch[1].slice(1).includes(fence.character) && !line.slice(fenceMatch[0].length).trim()) fence = null;
+    } else if (fenceMatch && (fenceMatch[1][0] !== "`" || !line.slice(fenceMatch[0].length).includes("`"))) {
+      codeMask.fill(1, lineStart, lineLimit);
+      fence = { character: fenceMatch[1][0], length: fenceMatch[1].length };
+    }
+    lineStart = lineLimit;
+  }
+  const backtickRuns = new Map();
+  for (let index = 0; index < text.length;) {
+    if (text[index] !== "`" || codeMask[index]) { index++; continue; }
+    let end = index + 1;
+    while (end < text.length && text[end] === "`") end++;
+    const length = end - index;
+    if (!backtickRuns.has(length)) backtickRuns.set(length, []);
+    backtickRuns.get(length).push(index);
+    index = end;
+  }
+  for (const [length, runs] of backtickRuns) {
+    let closingIndex = 0;
+    for (const opening of runs) {
+      if (codeMask[opening]) continue;
+      while (closingIndex < runs.length && (runs[closingIndex] <= opening || codeMask[runs[closingIndex]])) closingIndex++;
+      if (closingIndex < runs.length) {
+        codeMask.fill(1, opening, runs[closingIndex] + length);
+        closingIndex++;
+      }
+    }
+  }
   const findClosingDelimiter = (value, start, delimiter, singleLine) => {
     for (let cursor = start; cursor < value.length; cursor++) {
       if (singleLine && value[cursor] === "\n") return -1;
-      if (value.startsWith(delimiter, cursor) && !isEscapedAt(value, cursor)) return cursor;
+      if (!codeMask[cursor] && value.startsWith(delimiter, cursor) && !isEscapedAt(value, cursor)) return cursor;
     }
     return -1;
   };
   const noCloserThrough = new Map();
   let protectedText = "";
   for (let index = 0; index < text.length;) {
+    if (codeMask[index]) {
+      protectedText += text[index];
+      index++;
+      continue;
+    }
     let openingDelimiter = null;
     let closingDelimiter = null;
     let singleLine = false;
