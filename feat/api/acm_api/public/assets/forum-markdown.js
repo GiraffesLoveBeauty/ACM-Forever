@@ -21,6 +21,17 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
     }
     return -1;
   };
+  const hasBlockquotePrefix = prefix => {
+    let remaining = prefix;
+    while (remaining) {
+      const quote = remaining.match(/^[\t ]{0,3}>[\t ]?/);
+      if (quote) return true;
+      const listItem = remaining.match(/^[\t ]{0,3}(?:[-+*]|\d{1,9}[.)])[\t ]+/);
+      if (!listItem) return false;
+      remaining = remaining.slice(listItem[0].length);
+    }
+    return false;
+  };
   const noCloserThrough = new Map();
   let protectedText = "";
   for (let index = 0; index < text.length;) {
@@ -48,7 +59,7 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
         const formula = text.slice(index, closingIndex + closingDelimiter.length);
         const placeholder = `${placeholderPrefix}${formulas.length}TOKEN`;
         const lineStart = text.lastIndexOf("\n", index - 1) + 1;
-        const formulaIsInBlockquote = /^(?:[\t ]{0,3}>[\t ]?)+/.test(text.slice(lineStart, index));
+        const formulaIsInBlockquote = hasBlockquotePrefix(text.slice(lineStart, index));
         formulas.push({ placeholder, formula, formulaIsInBlockquote });
         protectedText += placeholder;
         noCloserThrough.delete(closingDelimiter);

@@ -73,7 +73,7 @@
   <script src="/assets/vendor/purify.min.js"></script>
   <script src="/assets/vendor/katex/katex.min.js?v=0.19.0"></script>
   <script src="/assets/vendor/katex/auto-render.min.js?v=0.19.0"></script>
-  <script src="/assets/forum-markdown.js?v=forum-math-6"></script>
+  <script src="/assets/forum-markdown.js?v=forum-math-7"></script>
   <script src="/assets/app.js?v=forum-composer-1"></script>
   <script>
     const titleInput=document.getElementById('draft-title');
@@ -241,13 +241,16 @@
       let offset=0;
       for(const token of tokens){
         const raw=String(token.raw||'');
+        if(!raw)continue;
+        const startOffset=source.indexOf(raw,offset);
+        if(startOffset<0)continue;
         if(token.type==='heading'&&token.depth===1&&raw){
           const inlineHtml=window.marked.parseInline(token.text||'',{gfm:true});
           const titleNode=document.createElement('div');
           titleNode.innerHTML=window.DOMPurify.sanitize(inlineHtml);
-          return {startOffset:offset,endOffset:offset+raw.length,title:titleNode.textContent.trim()};
+          return {startOffset,endOffset:startOffset+raw.length,title:titleNode.textContent.trim()};
         }
-        offset+=raw.length;
+        offset=startOffset+raw.length;
       }
       return null;
     }
