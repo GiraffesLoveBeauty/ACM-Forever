@@ -108,7 +108,17 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
       if (!recognizedNestedListMarker && line.trim()) while (listContentIndents.length && contentIndent < listContentIndents[listContentIndents.length - 1]) listContentIndents.pop();
     }
     const listIndent = listContentIndents[listContentIndents.length - 1] || 0;
-    const fenceMatch = line.match(/^(?:(?: {0,3}>[\t ]?| {0,3}(?:[-+*]|\d{1,9}[.)])[\t ]+))* {0,3}(`{3,}|~{3,})/);
+    let fenceMatch = line.match(/^(?:(?: {0,3}>[\t ]?| {0,3}(?:[-+*]|\d{1,9}[.)])[\t ]+))* {0,3}(`{3,}|~{3,})/);
+    if (!fenceMatch && listIndent) {
+      const container = line.slice(0, containerPrefix.length);
+      const indentedFence = line.slice(containerPrefix.length).match(/^([\t ]*)(`{3,}|~{3,})/);
+      if (indentedFence) {
+        const fenceColumn = indentationColumns(container + indentedFence[1]);
+        if (fenceColumn >= listIndent && fenceColumn - listIndent <= 3) {
+          fenceMatch = [line.slice(0, containerPrefix.length + indentedFence[0].length), indentedFence[2]];
+        }
+      }
+    }
     const lineLimit = newline < 0 ? lineEnd : newline + 1;
     if (fence && (quoteDepth < fence.quoteDepth || line.trim() && fence.listIndent > contentIndent)) fence = null;
     if (fence) {
