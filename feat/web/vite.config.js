@@ -1,9 +1,9 @@
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
-import { resolve } from 'node:path';
-import { cpSync, mkdirSync, createReadStream, readFileSync, writeFileSync } from 'node:fs';
+import { resolve, relative, sep, extname } from 'node:path';
+import { cpSync, mkdirSync, createReadStream, existsSync, readFileSync, writeFileSync } from 'node:fs';
 
-// Media stays at its historical URL; legacy business scripts are never shipped.
+// Shared public assets keep their historical URLs; legacy HTML pages are not part of the Vue build.
 const media = ['icpc-logo.png', 'default-avatar.png', 'hero-halftone.svg'];
 export default defineConfig({
   plugins: [
@@ -18,10 +18,26 @@ export default defineConfig({
       },
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
-          const filename = req.url?.split('?')[0].replace('/assets/', '');
-          if (!req.url?.startsWith('/assets/') || !media.includes(filename)) return next();
-          res.setHeader('Content-Type', filename.endsWith('.svg') ? 'image/svg+xml' : 'image/png');
-          createReadStream(resolve('../api/acm_api/public/assets', filename)).pipe(res);
+          const pathname = req.url?.split('?')[0] || '';
+          if (!pathname.startsWith('/assets/')) return next();
+          const assetRoot = resolve('../api/acm_api/public');
+          const assetPath = resolve(assetRoot, pathname.slice(1));
+          const assetRelative = relative(assetRoot, assetPath);
+          if (
+            !assetRelative || assetRelative.startsWith(`..${sep}`) || assetRelative === '..' ||
+            !existsSync(assetPath)
+          ) return next();
+          const contentTypes = {
+            '.css': 'text/css; charset=utf-8',
+            '.js': 'text/javascript; charset=utf-8',
+            '.otf': 'font/otf',
+            '.png': 'image/png',
+            '.svg': 'image/svg+xml',
+            '.woff': 'font/woff',
+            '.woff2': 'font/woff2',
+          };
+          res.setHeader('Content-Type', contentTypes[extname(assetPath)] || 'application/octet-stream');
+          createReadStream(assetPath).pipe(res);
         });
       },
       closeBundle() {

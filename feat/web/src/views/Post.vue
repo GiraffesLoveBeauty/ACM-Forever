@@ -74,6 +74,20 @@ async function action(kind) {
     busy.value = false;
   }
 }
+async function deletePost() {
+  if (loginRequired() || busy.value) return;
+  if (!confirm('确定删除这篇帖子吗？删除后会从论坛中移除。')) return;
+  busy.value = true;
+  try {
+    await request(`/forum/posts/${route.query.id}`, { method: 'DELETE' });
+    notify('帖子已删除');
+    await router.push('/index.html');
+  } catch (e) {
+    showError(e);
+  } finally {
+    busy.value = false;
+  }
+}
 async function comment() {
   if (loginRequired() || busy.value) return;
   busy.value = true;
@@ -158,6 +172,7 @@ onBeforeUnmount(() => observer?.disconnect());
           <div
             ref="article"
             class="forum-article-body forum-markdown"
+            v-forum-math
             v-html="markdown(post.body)"
           ></div>
           <div class="forum-detail-actions">
@@ -171,6 +186,12 @@ onBeforeUnmount(() => observer?.disconnect());
             ><button class="btn" :disabled="busy" @click="action('bookmark')">
               {{ post.viewer_bookmarked ? '★ 已收藏' : '☆ 收藏' }}</button
             ><button class="btn" :disabled="busy" @click="action('report')">举报</button
+            ><button
+              v-if="post.viewer_is_author"
+              class="btn forum-delete-post"
+              :disabled="busy"
+              @click="deletePost"
+            >删除帖子</button
             ><span>◉ {{ post.views_count }} 阅读</span>
           </div>
         </article>

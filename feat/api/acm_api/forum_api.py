@@ -125,10 +125,11 @@ async def post_detail(post_id):
             "c.slug AS category_slug,c.name AS category_name,CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,u.avatar_url AS author_avatar_url,"
             "(SELECT COUNT(*) FROM forum_post_likes l WHERE l.post_id=p.id) AS likes_count,"
             "EXISTS(SELECT 1 FROM forum_post_likes vl WHERE vl.post_id=p.id AND vl.qq_id=?) AS viewer_liked,"
-            "EXISTS(SELECT 1 FROM forum_bookmarks vb WHERE vb.post_id=p.id AND vb.qq_id=?) AS viewer_bookmarked "
+            "EXISTS(SELECT 1 FROM forum_bookmarks vb WHERE vb.post_id=p.id AND vb.qq_id=?) AS viewer_bookmarked,"
+            "CASE WHEN p.author_qq_id=? AND ?<>'' THEN 1 ELSE 0 END AS viewer_is_author "
             "FROM forum_posts p JOIN users u ON u.qq_id=p.author_qq_id "
             "JOIN forum_categories c ON c.id=p.category_id WHERE p.id=? AND p.status='published'",
-            (viewer, viewer, post_id),
+            (viewer, viewer, viewer, viewer, post_id),
         ) as cursor:
             row = await cursor.fetchone()
         if not row:
@@ -544,7 +545,7 @@ async def moderation_reports():
     db = await get_db()
     try:
         async with db.execute(
-            "SELECT r.id,r.post_id,r.reason,r.created_at,p.title,"
+            "SELECT r.id,r.post_id,r.reason,r.created_at,p.title,p.body,p.status AS post_status,"
             "CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS reporter_name "
             "FROM forum_reports r JOIN forum_posts p ON p.id=r.post_id "
             "JOIN users u ON u.qq_id=r.reporter_qq_id WHERE r.status='pending' ORDER BY r.created_at LIMIT 200"

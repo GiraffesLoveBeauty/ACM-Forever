@@ -209,7 +209,19 @@ def create_app():
         if filename.startswith("assets/") and extension in {
             ".css", ".js", ".png", ".jpg", ".jpeg", ".svg", ".woff", ".woff2", ".otf", ".ico",
         }:
-            return await send_from_directory(app.config["WEBUI_DIST_DIR"], filename)
+            dist_dir = Path(app.config["WEBUI_DIST_DIR"]).resolve()
+            dist_asset = (dist_dir / filename).resolve()
+            try:
+                dist_asset.relative_to(dist_dir)
+                in_dist = True
+            except ValueError:
+                in_dist = False
+            if in_dist and dist_asset.is_file():
+                return await send_from_directory(dist_dir, filename)
+            response = await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], filename)
+            if extension == ".css":
+                response.headers["Content-Type"] = "text/css; charset=utf-8"
+            return response
         if filename not in _PUBLIC_PAGES:
             abort(404)
 
