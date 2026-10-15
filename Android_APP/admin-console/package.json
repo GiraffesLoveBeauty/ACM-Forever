@@ -1,0 +1,1 @@
+{"name":"acmforever-mobile-admin","private":true,"type":"module","scripts":{"build":"node ../../feat/web/node_modules/vite/bin/vite.js build --config vite.config.mjs"}}

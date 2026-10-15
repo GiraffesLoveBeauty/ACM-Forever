@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">打一辈子爱臭美</string>
+    <string name="default_api_base_url" translatable="false">https://cjluacmpanel.tail1b9e55.ts.net</string>
+    <!-- Reserved for the future release API; no fabricated endpoint is requested. -->
+    <string name="default_update_manifest_url" translatable="false"></string>
+</resources>

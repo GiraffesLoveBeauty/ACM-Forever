@@ -1,0 +1,10 @@
+# Local Android Studio and Gradle state
+app/.gradle/
+app/.idea/
+app/local.properties
+app/**/build/
+
+# Release signing material and local APK copies
+*.jks
+*.keystore
+dist/
