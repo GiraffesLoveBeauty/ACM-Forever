@@ -403,7 +403,7 @@ function unload(event) {
 }
 function pagehide() {
   if (!finished && revision !== savedRevision) persistRecovery();
-  if (!finished && !disposed && revision !== savedRevision && !saving)
+  if (!finished && !disposed && id.value != null && revision !== savedRevision && !saving)
     save({ keepalive: true }).catch(() => {
       /* The page is leaving; a failed request must not report a successful save. */
     });
@@ -428,11 +428,8 @@ onMounted(async () => {
   window.addEventListener('beforeunload', unload);
   window.addEventListener('pagehide', pagehide);
   try {
-    try { recoveryTabId = sessionStorage.getItem('acm-forum-compose-tab-id') || ''; } catch { recoveryTabId = ''; }
-    if (!recoveryTabId) {
-      recoveryTabId = window.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-      try { sessionStorage.setItem('acm-forum-compose-tab-id', recoveryTabId); } catch { /* Local recovery still works with this page token. */ }
-    }
+    // sessionStorage is copied when a tab is duplicated, so each editor instance needs a fresh key.
+    recoveryTabId = window.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
     id.value = route.query.draft_id || null;
     // Read the same user's local copy before any request so offline starts can recover it.
     discoverRecovery();
