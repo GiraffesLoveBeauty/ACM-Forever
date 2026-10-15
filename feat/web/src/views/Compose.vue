@@ -451,7 +451,15 @@ onMounted(async () => {
         });
         discoverRecovery(payload());
         message.value = '已读取草稿';
-      } else showError(results[2].reason);
+      } else {
+        showError(results[2].reason);
+        if (results[2].reason?.status === 404) {
+          // Keep the recovery candidate discovered under the missing draft ID,
+          // but make subsequent saves create a fresh draft instead of PUTting to a 404.
+          id.value = null;
+          await router.replace({ path: '/compose.html', query: {} });
+        }
+      }
     } else message.value = '新话题尚未保存';
   } catch (e) {
     showError(e);

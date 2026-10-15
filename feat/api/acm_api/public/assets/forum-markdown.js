@@ -145,17 +145,62 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
       }
     }
   }
+  const syntaxMask = new Uint8Array(text.length);
+  const maskSyntax = (start, end) => syntaxMask.fill(1, start, end);
+  // Formula delimiters inside link destinations and markup attributes are data,
+  // not visible Markdown text. Keep link labels available for formula rendering.
+  for (let index = 0; index < text.length; index++) {
+    if (text[index] !== "<" || codeMask[index] || isEscapedAt(text, index)) continue;
+    const end = text.indexOf(">", index + 1);
+    if (end < 0 || text.slice(index, end).includes("\n")) continue;
+    const contents = text.slice(index + 1, end);
+    if (/^(?:\/?[a-z][\w:-]*(?:\s[^<>]*|\s*\/)?|!--[\s\S]*|![A-Z][^<>]*)$/i.test(contents)
+        || /^(?:[a-z][a-z\d+.-]{1,31}:[^ <>]*|[^ <>@]+@[^ <>@]+\.[^ <>@]+)$/i.test(contents)) {
+      maskSyntax(index, end + 1);
+      index = end;
+    }
+  }
+  for (let index = 0; index < text.length; index++) {
+    if (text[index] !== "]" || codeMask[index] || syntaxMask[index] || isEscapedAt(text, index)
+        || text[index + 1] !== "(") continue;
+    let depth = 0;
+    for (let cursor = index + 2; cursor < text.length; cursor++) {
+      if (codeMask[cursor] || isEscapedAt(text, cursor)) continue;
+      if (text[cursor] === "(") depth++;
+      else if (text[cursor] === ")") {
+        if (depth === 0) {
+          maskSyntax(index + 1, cursor + 1);
+          index = cursor;
+          break;
+        }
+        depth--;
+      }
+    }
+  }
+  const maskMatches = pattern => {
+    let match;
+    while ((match = pattern.exec(text))) {
+      let hasCode = false;
+      for (let index = match.index; index < pattern.lastIndex; index++) {
+        if (codeMask[index]) { hasCode = true; break; }
+      }
+      if (!hasCode) maskSyntax(match.index, pattern.lastIndex);
+    }
+  };
+  maskMatches(/\b(?:https?:\/\/|www\.)[^\s<>]+/gi);
+  maskMatches(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi);
+  maskMatches(/^[\t ]{0,3}\[[^\]\n]+\]:[^\n]*/gm);
   const findClosingDelimiter = (value, start, delimiter, singleLine) => {
     for (let cursor = start; cursor < value.length; cursor++) {
       if (singleLine && value[cursor] === "\n") return -1;
-      if (!codeMask[cursor] && value.startsWith(delimiter, cursor) && !isEscapedAt(value, cursor)) return cursor;
+      if (!codeMask[cursor] && !syntaxMask[cursor] && value.startsWith(delimiter, cursor) && !isEscapedAt(value, cursor)) return cursor;
     }
     return -1;
   };
   const noCloserThrough = new Map();
   let protectedText = "";
   for (let index = 0; index < text.length;) {
-    if (codeMask[index]) {
+    if (codeMask[index] || syntaxMask[index]) {
       protectedText += text[index];
       index++;
       continue;
