@@ -65,6 +65,11 @@ const router = createRouter({
       component: () => import('./views/Admin.vue'),
       meta: { admin: true, title: '管理后台' },
     },
+    {
+      path: '/problem.html',
+      component: () => import('./views/Problem.vue'),
+      meta: { title: '题目详情' },
+    },
     ...Object.entries(legacy).map(([path, section]) => ({
       path,
       component: () => import('./views/MemberTool.vue'),

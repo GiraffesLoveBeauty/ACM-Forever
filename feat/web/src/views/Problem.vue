@@ -1,0 +1,147 @@
+<script setup>
+import { computed, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
+import { auth, date, useRequests } from '../lib/api.js';
+import { originalProblemUrl, renderProblemContent } from '../lib/problem-content.js';
+
+const route = useRoute(),
+  request = useRequests();
+const detail = ref(null),
+  busy = ref(false),
+  error = ref(''),
+  copyMessage = ref('');
+const back = computed(() =>
+  ['admin', 'root'].includes(auth.role) ? '/admin.html?section=problems' : '/problem-bank.html',
+);
+const original = computed(() => originalProblemUrl(detail.value?.problem_url));
+const samples = computed(() => (Array.isArray(detail.value?.samples) ? detail.value.samples : []));
+const content = computed(() =>
+  detail.value?.content_available
+    ? renderProblemContent(detail.value)
+    : { html: '', samplesEmbedded: false },
+);
+let revision = 0;
+async function load() {
+  const current = ++revision;
+  detail.value = null;
+  error.value = '';
+  copyMessage.value = '';
+  busy.value = true;
+  document.title = '题目详情 · ACM Forever';
+  try {
+    const { platform, problem_id: id } = route.query;
+    if (typeof platform !== 'string' || !platform || typeof id !== 'string' || !id)
+      throw Error('缺少题目平台或题号，请从题库打开题目。');
+    const data = await request(
+      `/problems/${encodeURIComponent(platform)}/${encodeURIComponent(id)}`,
+      {},
+      'problem-detail',
+    );
+    if (current !== revision) return;
+    detail.value = data;
+    document.title = `${data.problem_name || id} · ACM Forever`;
+  } catch (e) {
+    if (current === revision && e.name !== 'AbortError') error.value = e.message;
+  } finally {
+    if (current === revision) busy.value = false;
+  }
+}
+async function copySample(index, kind, button) {
+  if (!['input', 'output'].includes(kind) || !Number.isInteger(index) || !samples.value[index])
+    return;
+  const current = revision;
+  try {
+    await navigator.clipboard.writeText(String(samples.value[index][kind] ?? ''));
+    if (current !== revision) return;
+    copyMessage.value = `已复制样例 ${index + 1} ${kind === 'input' ? '输入' : '输出'}`;
+    if (button) button.textContent = '已复制';
+  } catch {
+    if (current === revision) copyMessage.value = '复制失败，请选择样例文本后手动复制。';
+  }
+}
+function copyEmbedded(event) {
+  const button = event.target.closest?.('button[data-sample-index][data-sample-kind]');
+  if (button && event.currentTarget.contains(button))
+    copySample(Number(button.dataset.sampleIndex), button.dataset.sampleKind, button);
+}
+watch(() => [route.query.platform, route.query.problem_id], load, { immediate: true });
+</script>
+<template>
+  <main class="community-main problem-page">
+    <RouterLink class="forum-back-link" :to="back">← 返回题库</RouterLink>
+    <h1>{{ detail?.problem_name || route.query.problem_id || '题目详情' }}</h1>
+    <div v-if="detail" class="problem-overview">
+      <div id="problem-meta" class="chips">
+        <span class="chip">{{
+          { codeforces: 'Codeforces', atcoder: 'AtCoder' }[detail.platform] || detail.platform
+        }}</span>
+        <span class="chip">{{ detail.problem_id }}</span>
+        <span class="chip">难度 {{ detail.problem_rating ?? '未知' }}</span>
+        <span v-for="tag in detail.tags" :key="tag" class="chip">{{ tag }}</span>
+        <span v-if="detail.statement_language" class="chip">{{
+          detail.statement_language === 'ja' ? '日文题面' : '英文题面'
+        }}</span>
+      </div>
+      <a
+        v-if="original"
+        id="problem-original"
+        class="btn"
+        :href="original"
+        target="_blank"
+        rel="noopener noreferrer"
+        >查看原题 ↗</a
+      >
+    </div>
+    <p v-if="busy" role="status">正在读取已采集题目…</p>
+    <section v-else-if="error" class="card" role="alert">
+      <p>无法打开题目：{{ error }}</p>
+      <button class="btn" @click="load">重试</button>
+    </section>
+    <template v-else-if="detail">
+      <p id="problem-message" class="muted">
+        <template v-if="detail.content_available"
+          >已采集题面 · {{ samples.length }} 组样例<span v-if="detail.statement_fetched_at">
+            · 采集于 {{ date(detail.statement_fetched_at) }}</span
+          ><span v-if="detail.last_fetch_status === 'failed'">
+            · 最近更新失败，展示上次保存的内容</span
+          ></template
+        >
+        <template v-else>已收录题目目录，正文与样例尚未就绪。</template>
+      </p>
+      <article
+        v-if="detail.content_available"
+        id="problem-statement"
+        class="card problem-statement"
+        @click="copyEmbedded"
+        v-html="content.html"
+      ></article>
+      <section v-else class="card">
+        <h2>题面尚未采集</h2>
+        <p v-if="detail.last_fetch_status === 'failed'">
+          这道题目上次采集失败，请管理员在题库管理中重新拉取。
+        </p>
+        <p v-else>
+          如果正在拉取该平台全部题目，请等待任务处理到这道题目后重新检查。也可请管理员按比赛或题号采集。
+        </p>
+        <button class="btn" @click="load">重新检查</button>
+      </section>
+      <section
+        v-if="samples.length && !content.samplesEmbedded"
+        id="problem-samples"
+        class="card problem-statement problem-samples"
+      >
+        <h2>样例</h2>
+        <div v-for="(sample, index) in samples" :key="index" class="problem-sample-grid">
+          <div v-for="kind in ['input', 'output']" :key="kind">
+            <h3>样例 {{ index + 1 }} · {{ kind === 'input' ? '输入' : '输出' }}</h3>
+            <pre>{{ sample[kind] }}</pre>
+            <button class="btn problem-copy" @click="copySample(index, kind)">
+              复制样例 {{ index + 1 }} {{ kind === 'input' ? '输入' : '输出' }}
+            </button>
+          </div>
+        </div>
+      </section>
+      <p role="status">{{ copyMessage }}</p>
+    </template>
+  </main>
+</template>
