@@ -8,6 +8,7 @@ import '../../api/acm_api/public/assets/forum-home-layout.css';
 import '../../api/acm_api/public/assets/community-art.css';
 import '../../api/acm_api/public/assets/admin.css';
 import '../../api/acm_api/public/assets/cf-practice.css';
+import '../../api/acm_api/public/assets/problem.css';
 import '../../api/acm_api/public/assets/theme-editor.css';
 import '../../api/acm_api/public/assets/endfield-theme.css';
 import './style.css';

@@ -1,7 +1,7 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue';
 import { useRoute } from 'vue-router';
-import { auth, useRequests, external, showError, notify } from '../lib/api.js';
+import { auth, useRequests, showError, notify } from '../lib/api.js';
 import { adminFilters } from '../lib/admin.js';
 import Pager from '../components/Pager.vue';
 import ProblemCollection from '../components/ProblemCollection.vue';
@@ -79,20 +79,29 @@ onMounted(() => load());
       ><button class="btn primary">筛选题目</button>
     </form>
     <p class="muted">共 {{ total }} 道题目 · 数据来自本地同步库</p>
-    <article v-for="row in rows" :key="`${row.platform}-${row.problem_id}`" class="list-item">
-      <span
-        ><b>{{ row.platform }} · {{ row.problem_id }}</b
-        ><br />{{ row.problem_name || '未命名题目' }}<br /><small
-          >难度 {{ row.problem_rating ?? '未知' }} · {{ row.tags || '无标签' }}</small
-        ></span
-      ><span class="chips"
-        ><button class="btn" :disabled="busy" @click="favorite(row)">
-          {{ row.is_favorite ? '取消收藏' : '收藏' }}</button
-        ><a class="btn" :href="external(row.problem_url)" target="_blank" rel="noopener"
-          >打开题目</a
-        ></span
-      >
-    </article>
+    <div id="problem-list">
+      <article v-for="row in rows" :key="`${row.platform}-${row.problem_id}`" class="list-item">
+        <span
+          ><b>{{ row.platform }} · {{ row.problem_id }}</b
+          ><br />{{ row.problem_name || '未命名题目' }}<br /><small
+            >难度 {{ row.problem_rating ?? '未知' }} · {{ row.tags || '无标签' }}</small
+          ></span
+        ><span class="chips"
+          ><button class="btn" :disabled="busy" @click="favorite(row)">
+            {{ row.is_favorite ? '取消收藏' : '收藏' }}</button
+          ><RouterLink
+            class="btn"
+            :to="{
+              path: '/problem.html',
+              query: { platform: row.platform, problem_id: row.problem_id },
+            }"
+            target="_blank"
+            rel="noopener"
+            >打开题目</RouterLink
+          ></span
+        >
+      </article>
+    </div>
     <p v-if="!rows.length" class="empty">没有匹配题目，请调整筛选或同步数据。</p>
     <Pager :page="page" :total="total" :busy="busy" @change="load" />
   </section>
