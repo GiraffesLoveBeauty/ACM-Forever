@@ -47,6 +47,14 @@ function removeRecoveryKey(key) {
     // Private browsing or storage quotas can disable local recovery.
   }
 }
+function markRecoveryHandled(key) {
+  try {
+    const stored = localStorage.getItem(key);
+    if (stored) localStorage.setItem(`acm-forum-compose-handled:${key}`, stored);
+  } catch {
+    // Handled markers are best-effort; the recovery copy remains available.
+  }
+}
 function persistRecovery() {
   const key = recoveryCandidate.value && !recoveryResolved
     ? workingRecoveryKey()
@@ -82,13 +90,31 @@ function migrateRecovery(previousId, nextId) {
 function discoverRecovery(serverPayload) {
   const key = recoveryKey(), workingKey = workingRecoveryKey();
   let candidate = null;
+  recoveryCandidate.value = null;
+  recoveryKeyForCandidate.value = '';
+  recoveryResolved = true;
   try {
-    for (const candidateKey of [key, workingKey]) {
+    const prefix = `acm-forum-compose:${auth.qq_id || 'member'}:${id.value == null ? 'new' : id.value}:tab:`;
+    for (let index = 0; index < localStorage.length; index++) {
+      const candidateKey = localStorage.key(index);
+      if (!candidateKey?.startsWith(prefix)) continue;
+      const suffix = candidateKey.slice(prefix.length);
+      if (!/^[^:]+(?::working)?$/.test(suffix)) continue;
+      const handledKey = `acm-forum-compose-handled:${candidateKey}`;
       const stored = localStorage.getItem(candidateKey);
       if (!stored) continue;
-      const parsed = JSON.parse(stored);
-      if (parsed?.payload && (!candidate || Number(parsed.updated_at || 0) > Number(candidate.value.updated_at || 0)))
-        candidate = { key: candidateKey, value: parsed };
+      if (localStorage.getItem(handledKey) === stored) continue;
+      try {
+        const parsed = JSON.parse(stored);
+        if (
+          parsed?.payload && typeof parsed.payload.title === 'string' &&
+          typeof parsed.payload.body === 'string' &&
+          (!candidate || Number(parsed.updated_at || 0) > Number(candidate.value.updated_at || 0))
+        )
+          candidate = { key: candidateKey, value: parsed };
+      } catch {
+        // Ignore a corrupt tab copy and keep searching for a valid recovery.
+      }
     }
     if (!candidate) {
       const legacyKey = `acm-forum-compose:${auth.qq_id || 'member'}:${id.value == null ? 'new' : id.value}`;
@@ -109,11 +135,12 @@ function discoverRecovery(serverPayload) {
       }
     }
     const local = candidate.value.payload;
-    if (
+    if (serverPayload &&
       local.title === serverPayload.title && local.body === serverPayload.body &&
       String(local.category_id || '') === String(serverPayload.category_id || '')
     ) {
-      removeRecoveryKey(candidate.key);
+      if (candidate.key === key || candidate.key === workingKey) removeRecoveryKey(candidate.key);
+      else markRecoveryHandled(candidate.key);
       return;
     }
     recoveryCandidate.value = local;
@@ -132,6 +159,7 @@ function markDirty() {
 }
 function restoreRecovery() {
   if (!recoveryCandidate.value) return;
+  const candidateKey = recoveryKeyForCandidate.value;
   loading = true;
   Object.assign(form, {
     title: recoveryCandidate.value.title || '',
@@ -140,6 +168,8 @@ function restoreRecovery() {
   });
   loading = false;
   recoveryResolved = true;
+  if (candidateKey && candidateKey !== recoveryKey() && candidateKey !== workingRecoveryKey())
+    markRecoveryHandled(candidateKey);
   removeRecoveryKey(recoveryKey());
   removeRecoveryKey(workingRecoveryKey());
   recoveryCandidate.value = null;
@@ -147,6 +177,9 @@ function restoreRecovery() {
   markDirty();
 }
 function discardRecovery() {
+  const candidateKey = recoveryKeyForCandidate.value;
+  if (candidateKey && candidateKey !== recoveryKey() && candidateKey !== workingRecoveryKey())
+    markRecoveryHandled(candidateKey);
   removeRecoveryKey(recoveryKey());
   removeRecoveryKey(workingRecoveryKey());
   recoveryCandidate.value = null;
@@ -400,12 +433,33 @@ onMounted(async () => {
       recoveryTabId = window.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
       try { sessionStorage.setItem('acm-forum-compose-tab-id', recoveryTabId); } catch { /* Local recovery still works with this page token. */ }
     }
-    categories.value = await request('/forum/categories');
-    await list();
-    if (route.query.draft_id) await choose(route.query.draft_id);
-    else discoverRecovery(payload());
+    id.value = route.query.draft_id || null;
+    // Read the same user's local copy before any request so offline starts can recover it.
+    discoverRecovery();
+    const results = await Promise.allSettled([
+      request('/forum/categories'),
+      list(),
+      route.query.draft_id ? request(`/forum/drafts/${route.query.draft_id}`, {}, 'draft') : Promise.resolve(null),
+    ]);
+    if (results[0].status === 'fulfilled') categories.value = results[0].value;
+    else showError(results[0].reason);
+    if (results[1].status === 'rejected') showError(results[1].reason);
+    if (route.query.draft_id) {
+      if (results[2].status === 'fulfilled') {
+        loading = true;
+        Object.assign(form, {
+          title: results[2].value.title || '',
+          body: results[2].value.body || '',
+          category_id: results[2].value.category_id || null,
+        });
+        discoverRecovery(payload());
+        message.value = '已读取草稿';
+      } else showError(results[2].reason);
+    } else message.value = '新话题尚未保存';
   } catch (e) {
     showError(e);
+  } finally {
+    loading = false;
   }
 });
 onBeforeUnmount(() => {
