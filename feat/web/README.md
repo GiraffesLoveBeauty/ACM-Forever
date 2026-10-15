@@ -43,6 +43,12 @@ Web 管理员和 Root 在 **管理后台 → 题库管理** 顶部使用 **初�
 
 入口组件为 `src/components/ProblemCollection.vue`，请求和恢复逻辑在 `src/lib/problem-collection.js`，`ProblemTaskProgress.vue` 同时用于题库和同步任务页。使用现有数据库、采集和任务 API，无需修改后端权限或数据库结构。
 
+## 本地题目详情
+
+管理员和成员题库中的 **打开题目** 均进入 `/problem.html?platform=...&problem_id=...`，读取 SQLite 中已采集的题面和样例。详情页的 **查看原题** 才会打开平台原始网址。目录已收录但题面尚未采集时，页面显示等待或失败提示，可点击 **重新检查**；查看题目本身不会启动采集。
+
+`src/views/Problem.vue` 使用现有题目详情 API；成员请求自动映射到 `/api/me/problems/...`。`src/lib/problem-content.js` 通过 DOMPurify 过滤题面 HTML，限制图片来源，并使用 KaTeX MathML 渲染 CF / AtCoder 公式。优先在原题面样例位置显示保存的输入输出，保留空格与换行并支持复制；无法匹配位置时在正文后补充样例。
+
 ## 状态与安全约定
 
 - 所有页面加载在离开时取消，替代查询取消旧请求；定时轮询随模块销毁停止。
@@ -67,6 +73,8 @@ pnpm test
 `tests/session-view.test.mjs` 使用 Vue 自带的 SFC 编译器和内存渲染器，挂载实际 App、Header、Forum、PostCard 及 Vue Router；主题编辑器和图形组件使用空占位。11 个用例覆盖同页退出、切换账号、退出失败、取消离开、401、延迟响应、匿名加载失败、受保护页面移除、重复导航、后台缓存清理和会话过期响应。
 
 `tests/problem-collection.test.mjs` 挂载实际题库、采集表单和任务页，覆盖管理员入口、成员隔离、请求参数与 CSRF、初始化、取消、完成后刷新、离页恢复、迟到的提交确认和账号切换；采集请求使用模拟响应，不会访问 OJ 或改动本地题库。
+
+`tests/problem-detail.test.mjs` 使用 jsdom 验证真实题面消毒、公式与样例 DOM，并挂载题库和详情组件验证站内链接、独立原题按钮、成员请求、未采集状态、样例复制以及迟到响应的处理。
 
 这些组件测试使用模拟 HTTP 响应，不覆盖浏览器布局、Cookie 或关闭页面的 keepalive 行为。API 合约测试另用临时数据库及 Quart 测试客户端验证实际注销、账号切换后的列表与详情状态隔离；不修改本地开发数据库。
 
