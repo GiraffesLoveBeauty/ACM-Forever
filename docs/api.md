@@ -12,6 +12,43 @@
 
 不要把服务端 Token 写进网页、App、桌面程序或公开仓库。客户端应用应由自己的服务端调用内部接口，再只向客户端提供所需数据。`/internal/v1/*` 不接受 Web 登录 Cookie 代替 Bearer Token。
 
+## 公开排行榜的当日统计与分页
+
+复用 `GET /api/community/leaderboard` 及 `GET /api/mobile/v1/leaderboard`，新增两个可选查询参数：
+
+- `period=today`：北京时间当天 00:00（包含）到次日 00:00（不包含），覆盖 `days` 的滚动窗口；不传时保留原有 `days` 语义。未知 period 返回 400。
+- `positive_only=1`：按所选 platforms 的 `total_count > 0` 过滤，然后搜索、计算 total 和分页。不传时保持原网页包含零 AC 成员的行为。
+- `page_size` 支持 5–100；App 提供 5、10、20、100。page 非整数、小于 1 或超过总页数均返回第 1 页，空榜按 1 页处理。
+
+响应保留 rows/total/page/page_size 等原字段，补充 `period`、布尔 `positive_only`、`timezone`、`start_time/end_time`。当日响应 timezone 为 `Asia/Shanghai`，时间戳为当日边界；普通周期对应新增时间字段为 null。平台计数仍为区间内去重题数，不返回逐题记录或私密身份字段。新增参数不涉及数据库结构变更。
+
+App 通过响应字段确认服务器支持当日统计；旧服务器忽略 period 时显示“无API接口”，不会将最近 24 小时或近 7 日当作当日数据。其他周期兼容旧服务器：读取完整公开分页后先过滤零 AC，再计算本地分页与排名，避免仅过滤当前页造成总页数错误。
+
+## Android App 专用接口（v1）
+
+`/api/mobile/v1/*` 在现有 API 服务中提供，沿用相同监听地址与数据库。手机通过 HTTPS 请求后端，数据库连接与服务端密钥由后端管理。它补充移动端需要的公开身份和资料，原 Web API 的路径及响应保持兼容。
+
+| 方法与路径 | 权限与返回 |
+| --- | --- |
+| `GET /api/mobile/v1/capabilities` | 公开；返回 `api_version: 1` 和 `features` 能力对象 |
+| `GET /api/mobile/v1/leaderboard` | 公开；参数及统计口径与 `/api/community/leaderboard` 相同，rows 增加稳定 `public_member_id` |
+| `GET /api/mobile/v1/forum/posts` | 公开；沿用论坛的 `q/category/sort/page/page_size`，rows 增加 `author_public_member_id` |
+| `GET /api/mobile/v1/forum/posts/<id>` | 公开；仅已发布话题及评论，帖子和评论均增加 `author_public_member_id` |
+| `GET /api/mobile/v1/members/<public_member_id>` | 公开；用户名、头像、身份、座右铭、五个平台生涯通过题数及合计；不存在返回 404 |
+| `GET /api/mobile/v1/members/<public_member_id>/posts` | 公开；仅该成员已发布的话题，返回 `rows/total/page/page_size`，支持原论坛筛选及分页 |
+| `GET /api/mobile/v1/me/public-profile` | 登录成员；返回本人的公开资料与稳定 ID，用于 App 定位自身主页 |
+| `PUT /api/mobile/v1/me/public-profile` | 登录成员 + CSRF；只允许正文 `{"motto":"座右铭"}`，只能编辑会话本人 |
+
+能力字段为 `public_member_ids/member_profiles/member_posts/own_public_profile/edit_motto`。客户端复用已有 API，缺少的公开身份及主页功能使用这些增量接口。能力接口 404/405 时公开论坛与排名回退原 API；相应新功能未提供时，在对应内容区域显示红色“无API接口”。断网显示“无网络”，另区分未配置服务器、超时、401/403/428、服务器错误及某个成员/帖子不存在。错误方框保留内容区域高度，成功空列表显示暂无内容；不提供演示数据或接口记录菜单。
+
+公开资料包含 `public_member_id/name/avatar_url/status/motto/platform_counts/total_count`，另保留 `cf_count/luogu_count/nowcoder_count/atcoder_count/cjlu_count` 统计别名。平台键是 `codeforces/luogu/nowcoder/atcoder/cjlu`，通过题数按各平台题目 ID 去重，`total_count` 为五个平台的合计。公开用户名使用社区昵称；旧排行榜仍按现有规则展示昵称或 CF handle。App 通过稳定 ID 关联，不能依昵称或头像匹配。
+
+公开响应不包含 QQ、真实姓名、学校、OJ 绑定字段、逐题记录、收藏、草稿和未发布帖子。公开 ID 为随机生成的 32 字符标识，不是认证凭据。首次数据库初始化创建 `mobile_public_profiles` 表，为已有成员分配 ID；已有用户和做题数据保持原值。新增成员在后续初始化或移动端列表/本人资料请求时补充分配，重复执行保留已有 ID 和座右铭。
+
+座右铭必须为字符串，去首尾空白后最多 100 个 Unicode 字符，空字符串清除；多余字段或无效类型返回 400。认证复用 `/api/auth/login`、`/api/auth/me`、`/api/auth/logout`：未登录/停用/失效会话返回 401、CSRF 失败返回 403、初始密码未修改返回 428。不支持通过公开成员路径 PUT 编辑他人。
+
+新增接口没有使内网地址自动公开。Tailscale 内网部署需要手机也有该内网访问权限；提供公网入口时由运维配置 HTTPS 和访问控制。上线前备份实际数据库（含 WAL 状态）并验证增量初始化，发布流程沿用仓库评审与运维要求。
+
 ## 服务地址
 
 本地默认地址为 `http://127.0.0.1:8088`。部署后将 `ACM_API_BASE_URL` 设置为实际可访问的服务根地址，例如 `https://your-domain.example`；不要在 URL 后追加 `/api` 或 `/internal/v1`，示例会自行拼接路径。

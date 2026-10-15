@@ -6,7 +6,8 @@
 
 - `/api/*`：移植的 WebUI API，包含登录与账号管理、成员信息、提交记录、训练与挑战、学习计划、统计分析、审核与复盘、排行榜等功能。Web 端使用 Cookie 会话和 CSRF 校验。
 - `/api/forum/*`：公开话题列表与详情、分类、搜索、热门与待回答筛选；登录成员可以发帖、评论、回复、点赞、收藏和举报。新话题进入管理员审核队列，审核与举报处理都需要 Web 管理员权限。
-- `/api/community/leaderboard`：公开展示昵称、身份和各平台 AC 统计，不返回 QQ 号、真实姓名或学校字段。
+- `/api/community/leaderboard`：公开展示昵称、身份和各平台 AC 统计，不返回 QQ 号、真实姓名或学校字段。可选 `period=today` 按北京时间当日统计，`positive_only=1` 在分页前排除零 AC 成员；与移动端公开排名共享查询，默认保持原网页语义。响应包含实际 page/total/page_size 及周期确认字段，详见 API 指南。
+- `/api/mobile/v1/*`：Android App 专用能力查询、带稳定公开 ID 的排名与论坛、公开成员资料/帖子及本人座右铭编辑；复用现有数据库和 Web 会话权限，完整路径见 [api.md（API 调用指南）](../../docs/api.md#android-app-专用接口v1)。
 - `/internal/v1/*`：供受信任的梓喵服务使用的机器接口，使用 `Authorization: Bearer <ACM_BOT_API_TOKEN>` 认证，覆盖成员资料与绑定、提交和统计查询、排行榜与速报、训练和挑战、推荐题目、播报设置、账号验证及同步任务。
 - `/health`：服务和数据库健康检查。
 
@@ -30,6 +31,8 @@ python -m api
 前端已迁移到 `../web` 中的 Vue 3 + Vite。开发时另开终端在 `feat/web` 执行 `pnpm install --frozen-lockfile`、`pnpm dev`，访问 `127.0.0.1:5173`。要在 `8088` 访问完整网站，先执行 `pnpm build`；服务读取 `feat/web/dist`，没有构建制品时页面返回 `503`，API 不受影响。部署工作流会自动构建并同步制品。详见 [Vue 前端 README](../web/README.md)。
 
 ## 数据库与部署
+
+移动端新增 `mobile_public_profiles` 映射表，按既有可重复初始化方式创建，保留原成员数据和做题记录。初始为现有成员分配随机稳定公开 ID；新增成员在后续初始化或移动端请求时补充，既有 ID 和座右铭不会被覆盖。生产更新前应由运维备份数据库并验证，不能用 App 直接连接或分发数据库文件。具体公开范围、字段与权限见 API 调用指南。
 
 设置 `ACM_DATABASE_PATH` 指向持久化 SQLite 文件。本仓库的 GitHub Actions 会将 `feat/` 同步到服务器 `/home/WYJ/acm-forever-feat`，因此生产数据库必须放在该同步目录之外，例如：
 
