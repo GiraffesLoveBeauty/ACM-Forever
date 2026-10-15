@@ -1,15 +1,17 @@
 <script setup>
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, onMounted, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { auth, useRequests, external, showError, notify } from '../lib/api.js';
 import { adminFilters } from '../lib/admin.js';
 import Pager from '../components/Pager.vue';
+import ProblemCollection from '../components/ProblemCollection.vue';
 const route = useRoute(),
   request = useRequests(),
   rows = ref([]),
   total = ref(0),
   page = ref(1),
   busy = ref(false);
+const manager = computed(() => ['admin', 'root'].includes(auth.role));
 const form = reactive(
   adminFilters.problems || {
     owner_qq_id: route.query.qq_id || auth.qq_id || '',
@@ -56,6 +58,7 @@ async function favorite(row) {
 onMounted(() => load());
 </script>
 <template>
+  <ProblemCollection v-if="manager" @published="load(page)" />
   <section class="admin-panel">
     <form class="filters" @submit.prevent="load()">
       <label v-if="auth.role !== 'member'"

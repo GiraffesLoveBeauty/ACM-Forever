@@ -41,6 +41,17 @@ function node(type, text = '') {
     children: [],
     parent: null,
     listeners: new Map(),
+    getRootNode() {
+      return globalThis.document;
+    },
+    get options() {
+      const collect = (target) =>
+        target.type === 'option' ? [target] : target.children.flatMap(collect);
+      return this.children.flatMap(collect);
+    },
+    get multiple() {
+      return Boolean(this.props.multiple);
+    },
     addEventListener(name, handler) {
       this.listeners.set(name, handler);
     },
@@ -71,7 +82,10 @@ const renderer = createRenderer({
     target.children = [];
     target.text = text;
   },
-  patchProp: (target, key, previous, value) => (target.props[key] = value),
+  patchProp(target, key, previous, value) {
+    target.props[key] = value;
+    if (['value', 'checked', 'selected'].includes(key)) target[key] = value;
+  },
   insert,
   remove,
   parentNode: (target) => target.parent,

@@ -29,6 +29,7 @@ const defaultCfMemory = () => ({
   recheck: false,
 });
 export const cfMemory = defaultCfMemory();
+export const problemMemory = { taskId: null, submission: null };
 export const adminFilters = {};
 let sessionVersion = 0;
 export function adminSessionVersion() {
@@ -37,5 +38,6 @@ export function adminSessionVersion() {
 export function resetAdminSession() {
   sessionVersion++;
   Object.assign(cfMemory, defaultCfMemory());
+  Object.assign(problemMemory, { taskId: null, submission: null });
   for (const key of Object.keys(adminFilters)) delete adminFilters[key];
 }

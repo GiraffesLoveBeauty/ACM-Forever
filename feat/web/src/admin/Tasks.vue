@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { useRequests, date, showError } from '../lib/api.js';
+import ProblemTaskProgress from '../components/ProblemTaskProgress.vue';
 const request = useRequests(),
   rows = ref([]);
 let timer,
@@ -46,15 +47,18 @@ onBeforeUnmount(() => {
   <section class="admin-panel">
     <div class="filters">
       <button class="btn primary" @click="load">刷新任务</button
+      ><RouterLink class="btn" to="/admin.html?section=problems">拉取题目</RouterLink
       ><span class="muted">离开此模块停止刷新，后台任务继续执行。</span>
     </div>
     <article v-for="task in rows" :key="task.id" class="list-item">
       <span
         ><b>{{ task.kind }} · #{{ task.id }}</b
-        ><br />成员 {{ task.qq_id || '全部' }} · 平台 {{ task.platform || '全部' }} ·
-        {{ task.status }}<br /><small
-          >{{ describe(task.result) }} · {{ date(task.finished_at || task.started_at) }}</small
-        ></span
+        ><ProblemTaskProgress v-if="task.kind === '题目采集'" :task="task" />
+        <template v-else
+          ><br />成员 {{ task.qq_id || '全部' }} · 平台 {{ task.platform || '全部' }} ·
+          {{ task.status }}<br /><small>{{ describe(task.result) }}</small></template
+        >
+        <br /><small>{{ date(task.finished_at || task.started_at) }}</small></span
       ><button
         v-if="['queued', 'running'].includes(task.status)"
         class="btn"
