@@ -14,6 +14,7 @@ from .acm_api.bot_api import bot_api
 from .acm_api.auth_service import hash_password, validate_password
 from .acm_api.database import connect_db
 from .acm_api.forum_api import forum_api
+from .acm_api.mobile_api import mobile_api
 from .acm_api.cf_practice import PracticeQuery
 from .acm_api.cf_practice_api import cf_practice_api
 from .acm_api.cf_practice_jobs import PracticeJobs
@@ -288,6 +289,7 @@ def create_app():
     app.register_blueprint(api, url_prefix="/api")
     app.register_blueprint(bot_api, url_prefix="/internal/v1")
     app.register_blueprint(forum_api, url_prefix="/api")
+    app.register_blueprint(mobile_api, url_prefix="/api/mobile/v1")
     app.register_blueprint(cf_practice_api, url_prefix="/api")
     app.sync_engine = sync_engine
     app.task_manager = task_manager

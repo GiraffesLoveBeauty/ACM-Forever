@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 import aiosqlite
 
 from .problem_bank import initialize_problem_bank
+from .mobile_profiles import initialize_mobile_profiles
 
 
 @asynccontextmanager
@@ -271,6 +272,7 @@ async def connect_db(db_path):
             (platform, int(time.time())),
         )
     await db.execute("UPDATE users SET name = cf_handle WHERE cf_handle IS NOT NULL AND TRIM(cf_handle) <> '' AND (name IS NULL OR TRIM(name) = '' OR name = qq_id)")
+    await initialize_mobile_profiles(db)
     await db.commit()
     return db
 

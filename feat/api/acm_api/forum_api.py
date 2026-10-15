@@ -1,5 +1,6 @@
 """Public discussion forum API and authenticated member actions."""
 import time
+from datetime import datetime, timedelta, timezone
 
 from quart import Blueprint, jsonify, request
 
@@ -11,6 +12,7 @@ from .backend_api import (
     get_db,
     member_required,
 )
+from .mobile_profiles import prepare_public_profiles
 
 forum_api = Blueprint("forum_api", __name__)
 
@@ -22,10 +24,24 @@ async def _viewer_id():
 
 @forum_api.get("/community/leaderboard")
 async def community_leaderboard():
+    return await public_leaderboard()
+
+
+async def public_leaderboard(include_public_id=False):
     days, page, page_size, sort_key, search, platforms = _leaderboard_options(request.args)
+    period = str(request.args.get("period", "")).strip().lower()
+    if period not in {"", "today"}:
+        return jsonify({"message": "统计周期无效。"}), 400
+    positive_only = request.args.get("positive_only", "0") == "1"
+    start_time = end_time = None
+    if period == "today":
+        midnight = datetime.now(timezone(timedelta(hours=8))).replace(hour=0, minute=0, second=0, microsecond=0)
+        start_time, end_time = int(midnight.timestamp()), int((midnight + timedelta(days=1)).timestamp())
     db = await get_db()
     try:
-        rows, _ = await _fetch_leaderboard(db, days, 1, 0, sort_key, "", platforms, paginate=False)
+        rows, _ = await _fetch_leaderboard(db, days, 1, 0, sort_key, "", platforms, paginate=False, start_time=start_time, end_time=end_time)
+        if positive_only:
+            rows = [row for row in rows if row["total_count"] > 0]
         for row in rows:
             if not row.get("name") or str(row.get("name")) == str(row.get("qq_id")):
                 row["name"] = "ACM 成员"
@@ -33,6 +49,7 @@ async def community_leaderboard():
             needle = search.casefold()
             rows = [row for row in rows if needle in str(row.get("name") or "").casefold() or needle in str(row.get("status") or "").casefold()]
         total = len(rows)
+        page = page if page <= max(1, (total + page_size - 1) // page_size) else 1
         start = (page - 1) * page_size
         public_rows = [
             {key: row.get(key) for key in (
@@ -41,9 +58,23 @@ async def community_leaderboard():
             )}
             for row in rows[start:start + page_size]
         ]
+        if include_public_id and public_rows:
+            await prepare_public_profiles(db)
+            selected = rows[start:start + page_size]
+            placeholders = ",".join("?" for _ in selected)
+            async with db.execute(
+                f"SELECT qq_id,public_member_id FROM mobile_public_profiles WHERE qq_id IN ({placeholders})",
+                tuple(row["qq_id"] for row in selected),
+            ) as cursor:
+                identities = {row["qq_id"]: row["public_member_id"] for row in await cursor.fetchall()}
+            for public, source in zip(public_rows, selected):
+                public["public_member_id"] = identities[source["qq_id"]]
         return jsonify({
             "rows": public_rows, "total": total, "page": page, "page_size": page_size,
             "days": days, "sort": sort_key, "search": search, "platforms": list(platforms),
+            "period": period, "positive_only": positive_only,
+            "timezone": "Asia/Shanghai" if period == "today" else None,
+            "start_time": start_time, "end_time": end_time,
         })
     finally:
         await db.close()
@@ -65,6 +96,10 @@ async def categories():
 
 @forum_api.get("/forum/posts")
 async def posts():
+    return await public_posts()
+
+
+async def public_posts(author_qq_id=None):
     try:
         page = max(1, int(request.args.get("page", "1")))
         page_size = min(30, max(5, int(request.args.get("page_size", "12"))))
@@ -83,6 +118,9 @@ async def posts():
     if category:
         where.append("c.slug=?")
         params.append(category)
+    if author_qq_id is not None:
+        where.append("p.author_qq_id=?")
+        params.append(author_qq_id)
     where_sql = " AND ".join(where)
     order_sql = {
         "latest": "p.is_pinned DESC,p.created_at DESC,p.id DESC",
