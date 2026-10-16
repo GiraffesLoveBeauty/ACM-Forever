@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { after, afterEach, beforeEach, test } from 'node:test';
 import { JSDOM } from 'jsdom';
+import { h, ref } from 'vue';
 import { setAuth } from '../src/lib/api.js';
 import { originalProblemUrl, renderProblemContent } from '../src/lib/problem-content.js';
 import { cleanupCompiled, find, loadSfc, mount, settle, textOf } from './helpers/vue-harness.mjs';
 
 const Problem = (await import(await loadSfc('src/views/Problem.vue'))).default;
+const PdfPreview = (await import(await loadSfc('src/components/PdfPreview.vue'))).default;
 const Problems = (await import(await loadSfc('src/admin/Problems.vue'))).default;
 const keys = ['document', 'Document', 'Node', 'ShadowRoot', 'navigator', 'fetch', 'location'];
 const originals = new Map(
@@ -29,6 +31,35 @@ const saved = (extra = {}) => ({
   ...extra,
 });
 let dom, mounted, calls, copied, responseData, responseStatus, holdId, held;
+let pdfOpened, pdfRendered, pdfDestroyed, pdfHold, pdfDelayed, pdfFailure;
+const renderer = {
+  openPdf(src) {
+    pdfOpened.push(src);
+    const document = {
+      numPages: 2,
+      async getPage(number) {
+        return {
+          getViewport: ({ scale }) => ({ width: 600 * scale, height: 800 * scale }),
+          render(context) {
+            pdfRendered.push({ number, viewport: context.viewport });
+            return { promise: Promise.resolve(), cancel() {} };
+          },
+        };
+      },
+    };
+    const promise = pdfFailure
+      ? Promise.reject(Error('Unavailable'))
+      : pdfHold
+        ? new Promise((resolve) => pdfDelayed.push(() => resolve(document)))
+        : Promise.resolve(document);
+    return {
+      promise,
+      async destroy() {
+        pdfDestroyed.push(src);
+      },
+    };
+  },
+};
 const response = (data, status = 200) => new Response(JSON.stringify(data), { status });
 beforeEach(() => {
   dom = new JSDOM('<!doctype html><html><body></body></html>', {
@@ -59,6 +90,12 @@ beforeEach(() => {
   };
   mounted = null;
   calls = [];
+  pdfOpened = [];
+  pdfRendered = [];
+  pdfDestroyed = [];
+  pdfDelayed = [];
+  pdfHold = false;
+  pdfFailure = false;
   copied = [];
   held = [];
   holdId = '';
@@ -86,6 +123,7 @@ beforeEach(() => {
 afterEach(async () => {
   mounted?.unmount();
   held.forEach((resolve) => resolve());
+  pdfDelayed.forEach((resolve) => resolve());
   await settle();
   setAuth({ authenticated: false }, true);
   dom.window.close();
@@ -107,6 +145,7 @@ async function page(
       { path: '/problem-bank.html', component: Problems },
     ],
     path,
+    { loadPdfRenderer: async () => renderer },
   );
   return mounted;
 }
@@ -307,4 +346,111 @@ test('leaving the page cancels its pending detail request', async () => {
   mounted.unmount();
   mounted = null;
   assert.equal(calls[0].options.signal.aborted, true);
+});
+
+test('PDF detail opens saved bytes on this site for both members and administrators', async () => {
+  for (const role of ['member', 'admin']) {
+    setAuth({ authenticated: true, qq_id: '12345678', role }, true);
+    responseData = saved({
+      problem_id: 'cf_497D',
+      statement_format: 'pdf',
+      statement_html: null,
+      statement_text: null,
+      samples: [],
+    });
+    await page(Problem, '/problem.html?platform=codeforces&problem_id=cf_497D');
+    const panel = element('problem-pdf');
+    assert.ok(panel);
+    assert.equal(element('problem-statement'), undefined);
+    assert.ok(textOf(panel).includes('样例见 PDF 原文'));
+    const preview = find(panel, (node) => node.type === 'canvas')[0];
+    assert.ok(preview, 'PDF is rendered in the detail page');
+    assert.equal(
+      pdfOpened.at(-1),
+      `/api/${role === 'member' ? 'me/' : ''}problems/codeforces/cf_497D/statement.pdf`,
+    );
+    assert.equal(pdfRendered.at(-1).number, 1);
+    const link = find(panel, (node) => node.type === 'a')[0];
+    assert.equal(
+      link.props.href,
+      `/api/${role === 'member' ? 'me/' : ''}problems/codeforces/cf_497D/statement.pdf`,
+    );
+    assert.equal(link.props.target, '_blank');
+    assert.ok(!textOf(mounted.root).includes('0 组样例'));
+    assert.ok(!textOf(mounted.root).includes('题面尚未采集'));
+    assert.ok(element('problem-original'));
+    mounted.unmount();
+    mounted = null;
+  }
+});
+
+test('HTML statements with no samples still show the stored statement', async () => {
+  responseData = saved({
+    statement_html: '<p>Print the answer. No input is provided.</p>',
+    samples: [],
+  });
+  await page();
+  assert.ok(element('problem-statement').props.innerHTML.includes('No input is provided.'));
+  assert.equal(element('problem-samples'), undefined);
+  assert.equal(element('problem-pdf'), undefined);
+});
+
+async function previewPage(source) {
+  const component = { setup: () => () => h(PdfPreview, { src: source.value }) };
+  mounted = await mount(component, [{ path: '/', component }], '/', {
+    loadPdfRenderer: async () => renderer,
+  });
+}
+function previewButton(label) {
+  const button = find(
+    mounted.root,
+    (node) =>
+      node.type === 'button' && (textOf(node) === label || node.props['aria-label'] === label),
+  )[0];
+  assert.ok(button, label);
+  return button;
+}
+test('PDF page navigation and zoom redraw the document without fetching it again', async () => {
+  await previewPage(ref('/api/me/problems/codeforces/cf_497D/statement.pdf'));
+  assert.equal(previewButton('上一页').props.disabled, true);
+  assert.ok(textOf(mounted.root).includes('第 1 / 2 页'));
+  previewButton('下一页').props.onClick();
+  await settle();
+  assert.equal(pdfRendered.at(-1).number, 2);
+  assert.equal(previewButton('下一页').props.disabled, true);
+  previewButton('放大 PDF').props.onClick();
+  await settle();
+  assert.ok(Math.abs(pdfRendered.at(-1).viewport.width - 1000) < 0.001);
+  previewButton('适应宽度').props.onClick();
+  await settle();
+  assert.equal(pdfRendered.at(-1).viewport.width, 800);
+  assert.equal(pdfOpened.length, 1);
+});
+test('changing PDF source or leaving destroys old loading tasks and ignores delayed results', async () => {
+  const source = ref('/old.pdf');
+  pdfHold = true;
+  await previewPage(source);
+  assert.equal(pdfOpened.length, 1);
+  source.value = '/new.pdf';
+  pdfHold = false;
+  await settle();
+  assert.deepEqual(pdfDestroyed, ['/old.pdf']);
+  assert.equal(pdfRendered.length, 1);
+  pdfDelayed.forEach((resolve) => resolve());
+  pdfDelayed = [];
+  await settle();
+  assert.equal(pdfRendered.length, 1);
+  mounted.unmount();
+  mounted = null;
+  assert.deepEqual(pdfDestroyed, ['/old.pdf', '/new.pdf']);
+});
+test('PDF load errors expose retry and a retry can render successfully', async () => {
+  pdfFailure = true;
+  await previewPage(ref('/statement.pdf'));
+  assert.ok(textOf(mounted.root).includes('PDF 加载失败'));
+  pdfFailure = false;
+  await previewButton('重新加载').props.onClick();
+  await settle();
+  assert.equal(pdfRendered.length, 1);
+  assert.ok(!textOf(mounted.root).includes('PDF 加载失败'));
 });

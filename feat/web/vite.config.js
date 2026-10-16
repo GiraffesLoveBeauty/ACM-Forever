@@ -20,8 +20,9 @@ export default defineConfig({
         server.middlewares.use((req, res, next) => {
           const pathname = req.url?.split('?')[0] || '';
           if (!pathname.startsWith('/assets/')) return next();
-          const assetRoot = resolve('../api/acm_api/public');
-          const assetPath = resolve(assetRoot, pathname.slice(1));
+          const pdfAsset = pathname.startsWith('/assets/pdfjs/');
+          const assetRoot = pdfAsset ? resolve('node_modules/pdfjs-dist') : resolve('../api/acm_api/public');
+          const assetPath = resolve(assetRoot, pdfAsset ? pathname.slice('/assets/pdfjs/'.length) : pathname.slice(1));
           const assetRelative = relative(assetRoot, assetPath);
           if (
             !assetRelative || assetRelative.startsWith(`..${sep}`) || assetRelative === '..' ||
@@ -44,6 +45,8 @@ export default defineConfig({
         mkdirSync('dist/assets', { recursive: true });
         for (const file of media)
           cpSync(resolve('../api/acm_api/public/assets', file), resolve('dist/assets', file));
+        for (const folder of ['cmaps', 'standard_fonts'])
+          cpSync(resolve('node_modules/pdfjs-dist', folder), resolve('dist/assets/pdfjs', folder), { recursive: true });
         const html = readFileSync('dist/index.html', 'utf8');
         writeFileSync(
           'dist/retired.html',

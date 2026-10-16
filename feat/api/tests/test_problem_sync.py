@@ -3,12 +3,13 @@
 import asyncio
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -37,12 +38,53 @@ CF_BODY = b'''<div class="problem-statement"><div class="header"><div class="tit
 <div class="output"><div class="title">Output</div><pre>5<br>6<br></pre></div>
 </div></div>'''
 
+CF_NO_SAMPLES = b'''<div class="problem-statement"><p>Print the name of the language.</p>
+<div class="input-specification"><p>This test is empty.</p></div><div class="sample-test"></div></div>'''
+
+
+def sample_pdf():
+    """A self-contained one-page PDF fixture, with no network or PDF package dependency."""
+    stream = b'BT /F1 12 Tf 72 720 Td (Synthetic statement and sample: OK) Tj ET'
+    objects = [b'<< /Type /Catalog /Pages 2 0 R >>', b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+               b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+               b'<< /Length ' + str(len(stream)).encode() + b' >>\nstream\n' + stream + b'\nendstream',
+               b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>']
+    raw, offsets = b'%PDF-1.4\n', [0]
+    for index, obj in enumerate(objects, 1):
+        offsets.append(len(raw))
+        raw += str(index).encode() + b' 0 obj\n' + obj + b'\nendobj\n'
+    start = len(raw)
+    raw += b'xref\n0 6\n0000000000 65535 f \n'
+    raw += b''.join(f'{offset:010d} 00000 n \n'.encode() for offset in offsets[1:])
+    return raw + f'trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{start}\n%%EOF\n'.encode()
+
+
+CF_PDF = sample_pdf()
+
 CATALOG = [{"id": "abc370_a", "contest_id": "abc370", "problem_index": "A", "name": "First"},
            {"id": "abc371_a", "contest_id": "abc371", "problem_index": "A", "name": "Second"},
            {"id": "abc372_a", "contest_id": "abc372", "problem_index": "A", "name": "Third"}]
 
 
 class TaskListTests(unittest.TestCase):
+    def test_cf_empty_sample_container_is_valid_but_incomplete_pairs_remain_invalid(self):
+        self.assertEqual(parse_codeforces(CF_NO_SAMPLES, 'https://codeforces.com/contest/171/problem/E')['samples'], [])
+        empty_input = CF_BODY.replace(b'<div class="test-example-line"> 1 2</div><div class="test-example-line">3 4 </div>', b'')
+        self.assertEqual(parse_codeforces(empty_input, 'https://codeforces.com')['samples'][0]['input'], '')
+        for raw in [b'<div class="problem-statement"><div class="sample-test"><div class="output"><pre>x</pre></div></div></div>',
+                    b'<div class="problem-statement"><div class="sample-test"><div class="input">missing pre</div></div></div>']:
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                parse_codeforces(raw, 'https://codeforces.com')
+
+    def test_cf_pdf_is_preserved_as_bytes_and_truncated_documents_are_rejected(self):
+        content = parse_codeforces(CF_PDF, 'https://codeforces.com/contest/497/problem/D')
+        self.assertEqual(content['statement_pdf'], CF_PDF)
+        self.assertIsNone(content['statement_html'])
+        self.assertEqual(content['samples'], [])
+        for raw in [CF_PDF[:-20], b'%PDF-invalid\n%%EOF', b'%PDF-1.4\n' + b'x' * (20 * 1024 * 1024) + b'%%EOF']:
+            with self.subTest(length=len(raw)), self.assertRaises(ValueError):
+                parse_codeforces(raw, 'https://codeforces.com')
+
     def test_historical_cf_numeric_indices_are_kept_in_the_catalog_and_explicit_requests(self):
         items = cf_catalog_metadata([{"contestId": 921, "index": index, "name": "Example"} for index in ("01", "14")])
         self.assertEqual([row["problem_id"] for row in items], ["cf_92101", "cf_92114"])
@@ -138,6 +180,123 @@ class ProblemSyncTests(unittest.IsolatedAsyncioTestCase):
         task_id = (await response.get_json())["task"]["id"]
         await self.app.task_manager.tasks[task_id]["_task"]
         return next(task for task in self.app.task_manager.snapshots() if task["id"] == task_id)
+
+    async def test_cf_no_samples_and_pdf_succeed_skip_on_resume_and_survive_failed_refresh(self):
+        metadata = {'problems': [{'contestId': 171, 'index': 'E', 'name': 'No samples'},
+                                 {'contestId': 497, 'index': 'D', 'name': 'PDF statement'}]}
+        async def download(http, url):
+            return CF_NO_SAMPLES if '/171/' in url else CF_PDF
+        async with self.app.test_app():
+            client = self.app.test_client()
+            headers = await self.login(client)
+            with patch('feat.api.acm_api.problem_sync.cf_request', return_value=metadata), patch.object(self.app.task_manager.problem_sync, 'download', side_effect=download) as fetch:
+                task = await self.submit_platform(client, headers, platform='codeforces', batch_size=1)
+                self.assertEqual(task['status'], 'completed')
+                self.assertEqual(task['result']['success_count'], 2)
+                self.assertEqual(task['result']['failure_count'], 0)
+                resumed = await self.submit_platform(client, headers, platform='codeforces')
+                self.assertEqual(resumed['result']['skipped_count'], 2)
+                self.assertEqual(fetch.await_count, 2)
+            status = await (await client.get('/api/admin/database')).get_json()
+            self.assertEqual(status['platforms'][0]['collected'], 2)
+            for pid, fmt in [('cf_171E', 'html'), ('cf_497D', 'pdf')]:
+                detail = await (await client.get('/api/problems/codeforces/' + pid)).get_json()
+                self.assertTrue(detail['content_available'])
+                self.assertEqual(detail['statement_format'], fmt)
+                self.assertEqual(detail['samples'], [])
+            pdf_metadata = {'problems': [metadata['problems'][1]]}
+            with patch('feat.api.acm_api.problem_sync.cf_request', return_value=pdf_metadata), patch.object(self.app.task_manager.problem_sync, 'download', return_value=CF_PDF[:-20]):
+                failed = await self.submit(client, headers, platform='codeforces', contest_id=497, refresh=True)
+            self.assertEqual(failed['status'], 'failed')
+            detail = await (await client.get('/api/problems/codeforces/cf_497D')).get_json()
+            self.assertTrue(detail['content_available'])
+            self.assertEqual(detail['last_fetch_status'], 'failed')
+            self.assertEqual(await (await client.get('/api/problems/codeforces/cf_497D/statement.pdf')).get_data(), CF_PDF)
+
+    async def test_pdf_delivery_uses_saved_bytes_ranges_and_existing_role_and_password_guards(self):
+        metadata = {'platform': 'codeforces', 'problem_id': 'cf_497D', 'contest_id': '497',
+                    'problem_name': 'PDF', 'problem_url': 'https://codeforces.com/contest/497/problem/D'}
+        db = await connect_db(self.db_path)
+        try:
+            await save_problem(db, metadata, {**parse_codeforces(CF_PDF, metadata['problem_url']),
+                'requested_language': 'en', 'source_url': metadata['problem_url'], 'sha256': 'test-pdf'})
+        finally:
+            await db.close()
+        async with self.app.test_app():
+            client = self.app.test_client()
+            path = '/api/problems/codeforces/cf_497D/statement.pdf'
+            member_path = path.replace('/problems/', '/me/problems/')
+            self.assertEqual((await client.get(path)).status_code, 401)
+            self.assertEqual((await client.get(member_path)).status_code, 401)
+            await self.login(client)
+            with patch.object(self.app.task_manager.problem_sync, 'download') as fetch:
+                response = await client.get(path)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.mimetype, 'application/pdf')
+                self.assertEqual(await response.get_data(), CF_PDF)
+                self.assertEqual(response.headers['Cache-Control'], 'no-store')
+                self.assertIn('inline;', response.headers['Content-Disposition'])
+                self.assertEqual(response.headers['X-Content-Type-Options'], 'nosniff')
+                self.assertEqual(response.headers['X-Frame-Options'], 'DENY')
+                self.assertIn("frame-ancestors 'none'", response.headers['Content-Security-Policy'])
+                self.assertEqual((await client.get('/problem.html')).headers['X-Frame-Options'], 'DENY')
+                self.assertIn("frame-ancestors 'none'", (await client.get('/problem.html')).headers['Content-Security-Policy'])
+                partial = await client.get(path, headers={'Range': 'bytes=0-9'})
+                self.assertEqual(partial.status_code, 206)
+                self.assertEqual(partial.headers['X-Frame-Options'], 'DENY')
+                self.assertEqual(await partial.get_data(), CF_PDF[:10])
+                self.assertEqual((await client.get(path.replace('cf_497D', 'missing'))).status_code, 404)
+                self.assertEqual((await client.get(path, headers={'Range': 'bytes=999999-'})).status_code, 416)
+                await self.write("UPDATE web_accounts SET role='member'")
+                self.assertEqual((await client.get(path)).status_code, 403)
+                member_pdf = await client.get(member_path)
+                self.assertEqual(await member_pdf.get_data(), CF_PDF)
+                self.assertEqual(member_pdf.headers['X-Frame-Options'], 'DENY')
+                await self.write('UPDATE web_accounts SET must_change_password=1')
+                self.assertEqual((await client.get(member_path)).status_code, 428)
+                fetch.assert_not_called()
+
+    async def test_pdf_preview_assets_include_worker_modules_and_scoped_font_resources(self):
+        dist = Path(self.directory.name) / 'web-dist'
+        assets = dist / 'assets'
+        (assets / 'pdfjs' / 'standard_fonts').mkdir(parents=True)
+        (assets / 'pdfjs' / 'cmaps').mkdir()
+        fixtures = {'pdf.worker-test.mjs': b'export const worker = true;',
+                    'pdfjs/standard_fonts/font.pfb': b'font-bytes',
+                    'pdfjs/standard_fonts/font.ttf': b'ttf-bytes',
+                    'pdfjs/cmaps/test.bcmap': b'cmap-bytes'}
+        for name, raw in fixtures.items():
+            (assets / name).write_bytes(raw)
+        (assets / 'unrelated.pfb').write_bytes(b'not-a-preview-asset')
+        self.app.config['WEBUI_DIST_DIR'] = dist
+        async with self.app.test_app():
+            client = self.app.test_client()
+            for name, raw in fixtures.items():
+                response = await client.get('/assets/' + name)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(await response.get_data(), raw)
+                if name.endswith('.mjs'):
+                    self.assertEqual(response.mimetype, 'text/javascript')
+            self.assertEqual((await client.get('/assets/unrelated.pfb')).status_code, 404)
+
+    async def test_existing_database_gets_pdf_column_without_losing_html_or_samples(self):
+        metadata = {'platform': 'atcoder', 'problem_id': 'abc370_a', 'contest_id': 'abc370',
+                    'problem_name': 'Old body', 'problem_url': 'https://atcoder.jp/contests/abc370/tasks/abc370_a'}
+        from feat.api.acm_api.problem_content import parse_atcoder
+        db = await connect_db(self.db_path)
+        try:
+            await save_problem(db, metadata, {**parse_atcoder(BODY, metadata['problem_url']),
+                'requested_language': 'en', 'source_url': metadata['problem_url'], 'sha256': 'old-hash'})
+        finally:
+            await db.close()
+        with closing(sqlite3.connect(self.db_path)) as legacy:
+            with legacy:
+                legacy.execute('ALTER TABLE crawler_problems DROP COLUMN statement_pdf')
+        for _ in range(2):
+            rows = await self.query('SELECT statement_pdf,statement_sha256,sample_count FROM crawler_problems')
+            self.assertIsNone(rows[0]['statement_pdf'])
+            self.assertEqual(rows[0]['statement_sha256'], 'old-hash')
+            self.assertEqual(rows[0]['sample_count'], 1)
 
     async def test_sync_requires_login_admin_csrf_and_password_change(self):
         async with self.app.test_app():

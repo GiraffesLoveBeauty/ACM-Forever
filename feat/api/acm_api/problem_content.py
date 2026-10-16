@@ -198,6 +198,14 @@ def parse_atcoder_tasks(raw, contest_id):
 
 
 def parse_codeforces(raw, source_url):
+    if raw.startswith(b"%PDF-"):
+        if len(raw) > 20 * 1024 * 1024:
+            raise ValueError("CF PDF 题面超过 20 MiB")
+        if not re.match(rb"%PDF-(?:1\.\d|2\.0)\b", raw) or b"%%EOF" not in raw[-1024:]:
+            raise ValueError("CF PDF 题面不完整或格式无效")
+        # Keep the original document: extracting text would lose diagrams and sample layout.
+        return {"statement_html": None, "statement_text": None, "statement_pdf": raw,
+                "statement_language": "en", "samples": []}
     parser = TreeParser()
     parser.feed(raw.decode("utf-8-sig"))
     parser.close()
@@ -222,7 +230,10 @@ def parse_codeforces(raw, source_url):
                      if "test-example-line" in (node.attrs.get("class") or "").split()]
             text = "\n".join(node.text() for node in lines) + "\n" if lines else pre.text()
             values[kind].append(text.replace("\r\n", "\n").replace("\r", "\n"))
-        if not values["input"] or len(values["input"]) != len(values["output"]):
+        # Some legitimate problems (e.g. 171E) have an empty sample-test container.
+        if not values["input"] and not values["output"]:
+            continue
+        if len(values["input"]) != len(values["output"]):
             raise ValueError("CF 样例的输入和输出不完整")
         for sample_input, sample_output in zip(values["input"], values["output"]):
             samples.append({"index": len(samples) + 1, "input": sample_input, "output": sample_output})

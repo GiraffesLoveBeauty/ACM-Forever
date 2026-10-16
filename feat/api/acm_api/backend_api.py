@@ -1406,7 +1406,7 @@ async def _problem_detail(platform, problem_id):
     try:
         async with db.execute(
             "SELECT platform,problem_id,contest_id,problem_name,problem_rating,problem_url,tags,"
-            "statement_html,statement_text,statement_language,samples,statement_fetched_at,last_fetch_status "
+            "statement_html,statement_text,length(statement_pdf)>0 AS has_pdf,statement_language,samples,statement_fetched_at,last_fetch_status "
             "FROM crawler_problems WHERE platform=? AND problem_id=?", (platform, problem_id),
         ) as cursor:
             row = await cursor.fetchone()
@@ -1433,7 +1433,9 @@ async def _problem_detail(platform, problem_id):
                 "statement_html": None, "statement_text": None, "statement_language": None,
                 "samples": [], "statement_fetched_at": None, "last_fetch_status": "never",
             }
-        detail["content_available"] = bool(detail["statement_html"] or detail["statement_text"])
+        has_pdf = bool(detail.pop("has_pdf", False))
+        detail["statement_format"] = "pdf" if has_pdf else "html" if detail["statement_html"] else "text" if detail["statement_text"] else None
+        detail["content_available"] = bool(has_pdf or detail["statement_html"] or detail["statement_text"])
         return jsonify(detail)
     finally:
         await db.close()
@@ -1449,6 +1451,38 @@ async def api_problem_detail(platform, problem_id):
 @member_required
 async def api_me_problem_detail(platform, problem_id):
     return await _problem_detail(platform, problem_id)
+
+
+async def _problem_pdf(platform, problem_id):
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT statement_pdf FROM crawler_problems WHERE platform=? AND problem_id=?",
+            (platform, problem_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row or not row["statement_pdf"]:
+            return jsonify({"success": False, "message": "这道题目没有已保存的 PDF 题面。"}), 404
+        raw = row["statement_pdf"]
+        response = Response(raw, mimetype="application/pdf", headers={
+            "Content-Disposition": 'inline; filename="statement.pdf"', "Cache-Control": "no-store",
+        })
+        await response.make_conditional(request, accept_ranges=True, complete_length=len(raw))
+        return response
+    finally:
+        await db.close()
+
+
+@api.get("/problems/<platform>/<problem_id>/statement.pdf")
+@admin_required
+async def api_problem_pdf(platform, problem_id):
+    return await _problem_pdf(platform, problem_id)
+
+
+@api.get("/me/problems/<platform>/<problem_id>/statement.pdf")
+@member_required
+async def api_me_problem_pdf(platform, problem_id):
+    return await _problem_pdf(platform, problem_id)
 
 
 @api.get("/admin/database")

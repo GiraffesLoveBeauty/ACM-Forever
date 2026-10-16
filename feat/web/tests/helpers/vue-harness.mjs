@@ -41,6 +41,7 @@ function node(type, text = '') {
     children: [],
     parent: null,
     listeners: new Map(),
+    ...(type === 'canvas' ? { getContext: () => ({}), style: {} } : {}),
     getRootNode() {
       return globalThis.document;
     },
@@ -116,10 +117,11 @@ export async function settle() {
     await nextTick();
   }
 }
-export async function mount(App, routes, path = '/index.html') {
+export async function mount(App, routes, path = '/index.html', providers = {}) {
   const root = node('root');
   const router = createRouter({ history: createMemoryHistory(), routes });
   const app = renderer.createApp(App);
+  for (const [key, value] of Object.entries(providers)) app.provide(key, value);
   app.use(router);
   await router.push(path);
   await router.isReady();

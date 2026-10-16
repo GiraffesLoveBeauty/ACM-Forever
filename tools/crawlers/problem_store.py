@@ -22,6 +22,9 @@ class ProblemStore:
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.executescript(SCHEMA_FILE.read_text(encoding="utf-8"))
+        columns = {row[1] for row in self.connection.execute("PRAGMA table_info(crawler_problems)")}
+        if "statement_pdf" not in columns:
+            self.connection.execute("ALTER TABLE crawler_problems ADD COLUMN statement_pdf BLOB")
 
     def close(self):
         self.connection.close()
@@ -48,7 +51,7 @@ class ProblemStore:
     def completed_ids(self, platform, language):
         return {row[0] for row in self.connection.execute(
             "SELECT problem_id FROM crawler_problems WHERE platform=? AND requested_language=? "
-            "AND last_fetch_status='ok' AND statement_html IS NOT NULL", (platform, language),
+            "AND last_fetch_status='ok' AND (statement_html IS NOT NULL OR statement_pdf IS NOT NULL)", (platform, language),
         )}
 
     def save_content(self, platform, problem_id, content):
@@ -58,15 +61,15 @@ class ProblemStore:
             ).fetchone()
             if row is None:
                 raise ValueError("题目元数据尚未入库")
-            if row["sample_count"] and not content["samples"]:
+            if row["sample_count"] and not content["samples"] and not content.get("statement_pdf"):
                 raise ValueError("新页面未解析到样例，保留已有题面和样例")
             now = utc_now()
             self.connection.execute(
-                """UPDATE crawler_problems SET statement_html=?,statement_text=?,statement_language=?,
+                """UPDATE crawler_problems SET statement_html=?,statement_text=?,statement_pdf=?,statement_language=?,
                 requested_language=?,samples=?,sample_count=?,statement_source_url=?,statement_sha256=?,
                 statement_fetched_at=?,last_fetch_status='ok',last_attempt_at=?,last_error=NULL,updated_at=?
                 WHERE platform=? AND problem_id=?""",
-                (content["statement_html"], content["statement_text"], content["statement_language"],
+                (content["statement_html"], content["statement_text"], content.get("statement_pdf"), content["statement_language"],
                  content["requested_language"], json.dumps(content["samples"], ensure_ascii=False),
                  len(content["samples"]), content["source_url"], content["sha256"], now, now, now, platform, problem_id),
             )
@@ -80,7 +83,7 @@ class ProblemStore:
 
     def counts(self, platform):
         row = self.connection.execute(
-            "SELECT COUNT(*),SUM(statement_html IS NOT NULL),COALESCE(SUM(sample_count),0) "
+            "SELECT COUNT(*),SUM(statement_html IS NOT NULL OR statement_pdf IS NOT NULL),COALESCE(SUM(sample_count),0) "
             "FROM crawler_problems WHERE platform=?", (platform,),
         ).fetchone()
         return {"metadata_count": row[0], "statement_count": row[1] or 0, "sample_count": row[2]}

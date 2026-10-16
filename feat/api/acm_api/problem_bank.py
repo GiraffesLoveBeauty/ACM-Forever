@@ -14,6 +14,10 @@ async def initialize_problem_bank(db):
     for statement in schema.split(";"):
         if statement.strip():
             await db.execute(statement)
+    async with db.execute("PRAGMA table_info(crawler_problems)") as cursor:
+        columns = {row[1] for row in await cursor.fetchall()}
+    if "statement_pdf" not in columns:
+        await db.execute("ALTER TABLE crawler_problems ADD COLUMN statement_pdf BLOB")
 
 
 async def problem_bank_status(db):
@@ -24,7 +28,7 @@ async def problem_bank_status(db):
     if "crawler_problems" in tables:
         async with db.execute(
             "SELECT platform,COUNT(*) AS total,"
-            "SUM(CASE WHEN last_fetch_status='ok' AND statement_html IS NOT NULL THEN 1 ELSE 0 END) AS collected,"
+            "SUM(CASE WHEN last_fetch_status='ok' AND (statement_html IS NOT NULL OR statement_pdf IS NOT NULL) THEN 1 ELSE 0 END) AS collected,"
             "SUM(CASE WHEN last_fetch_status='failed' THEN 1 ELSE 0 END) AS failed,"
             "SUM(sample_count) AS samples FROM crawler_problems GROUP BY platform ORDER BY platform"
         ) as cursor:
@@ -90,22 +94,22 @@ async def save_problem(db, metadata, content):
             (metadata["platform"], metadata["problem_id"]),
         ) as cursor:
             old = await cursor.fetchone()
-        if old and old["sample_count"] and not content["samples"]:
+        if old and old["sample_count"] and not content["samples"] and not content.get("statement_pdf"):
             raise ValueError("新页面未解析到样例，保留已有题面和样例")
         merged = merge_metadata(old, metadata)
         now = utc_now()
         await db.execute(
             """INSERT INTO crawler_problems
             (platform,problem_id,contest_id,problem_index,problem_name,problem_rating,problem_url,
-             tags,metadata_json,statement_html,statement_text,statement_language,requested_language,
+             tags,metadata_json,statement_html,statement_text,statement_pdf,statement_language,requested_language,
              samples,sample_count,statement_source_url,statement_sha256,statement_fetched_at,
              last_fetch_status,last_attempt_at,last_error,created_at,updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ok',?,NULL,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ok',?,NULL,?,?)
             ON CONFLICT(platform,problem_id) DO UPDATE SET
             contest_id=excluded.contest_id,problem_index=excluded.problem_index,
             problem_name=excluded.problem_name,problem_rating=excluded.problem_rating,
             problem_url=excluded.problem_url,tags=excluded.tags,metadata_json=excluded.metadata_json,
-            statement_html=excluded.statement_html,statement_text=excluded.statement_text,
+            statement_html=excluded.statement_html,statement_text=excluded.statement_text,statement_pdf=excluded.statement_pdf,
             statement_language=excluded.statement_language,requested_language=excluded.requested_language,
             samples=excluded.samples,sample_count=excluded.sample_count,
             statement_source_url=excluded.statement_source_url,statement_sha256=excluded.statement_sha256,
@@ -114,7 +118,7 @@ async def save_problem(db, metadata, content):
             (merged["platform"], merged["problem_id"], merged["contest_id"], merged.get("problem_index"),
              merged["problem_name"], merged.get("problem_rating"), merged["problem_url"],
              json.dumps(merged.get("tags", []), ensure_ascii=False), json.dumps(merged, ensure_ascii=False),
-             content["statement_html"], content["statement_text"], content["statement_language"],
+             content["statement_html"], content["statement_text"], content.get("statement_pdf"), content["statement_language"],
              content["requested_language"], json.dumps(content["samples"], ensure_ascii=False),
              len(content["samples"]), content["source_url"], content["sha256"], now, now, now, now),
         )
