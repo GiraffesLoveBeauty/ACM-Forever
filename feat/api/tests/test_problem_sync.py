@@ -40,6 +40,10 @@ CF_BODY = b'''<div class="problem-statement"><div class="header"><div class="tit
 
 CF_NO_SAMPLES = b'''<div class="problem-statement"><p>Print the name of the language.</p>
 <div class="input-specification"><p>This test is empty.</p></div><div class="sample-test"></div></div>'''
+CF_UNRECOGNIZED_SAMPLES = CF_NO_SAMPLES.replace(
+    b'<div class="sample-test"></div>',
+    b'<div class="sample-test"><div class="unknown"><pre>1\n2\n</pre></div></div>',
+)
 
 
 def sample_pdf():
@@ -68,12 +72,26 @@ CATALOG = [{"id": "abc370_a", "contest_id": "abc370", "problem_index": "A", "nam
 
 class TaskListTests(unittest.TestCase):
     def test_cf_empty_sample_container_is_valid_but_incomplete_pairs_remain_invalid(self):
-        self.assertEqual(parse_codeforces(CF_NO_SAMPLES, 'https://codeforces.com/contest/171/problem/E')['samples'], [])
+        for empty in [b'', b' \n\t', b' \n<!-- No examples -->\n']:
+            raw = CF_NO_SAMPLES.replace(b'class="sample-test">', b'class="sample-test">' + empty)
+            with self.subTest(empty=empty):
+                self.assertEqual(parse_codeforces(raw, 'https://codeforces.com/contest/171/problem/E')['samples'], [])
         empty_input = CF_BODY.replace(b'<div class="test-example-line"> 1 2</div><div class="test-example-line">3 4 </div>', b'')
         self.assertEqual(parse_codeforces(empty_input, 'https://codeforces.com')['samples'][0]['input'], '')
         for raw in [b'<div class="problem-statement"><div class="sample-test"><div class="output"><pre>x</pre></div></div></div>',
                     b'<div class="problem-statement"><div class="sample-test"><div class="input">missing pre</div></div></div>']:
             with self.subTest(raw=raw), self.assertRaises(ValueError):
+                parse_codeforces(raw, 'https://codeforces.com')
+
+    def test_cf_nonempty_unrecognized_sample_containers_are_rejected(self):
+        for child in [b'1 2', b'<pre>1\n2\n</pre>', b'<div></div>', b'<img src="sample.png">',
+                      b'<script>sample()</script>', b'<style>.sample {}</style>']:
+            raw = CF_NO_SAMPLES.replace(b'class="sample-test">', b'class="sample-test">' + child)
+            with self.subTest(child=child), self.assertRaisesRegex(ValueError, 'CF 样例区非空'):
+                parse_codeforces(raw, 'https://codeforces.com')
+        valid_then_broken = CF_BODY.rsplit(b'</div>', 1)[0] + b'<div class="sample-test"><pre>3</pre></div></div>'
+        for raw in [CF_UNRECOGNIZED_SAMPLES, valid_then_broken]:
+            with self.subTest(raw=raw), self.assertRaisesRegex(ValueError, 'CF 样例区非空'):
                 parse_codeforces(raw, 'https://codeforces.com')
 
     def test_cf_pdf_is_preserved_as_bytes_and_truncated_documents_are_rejected(self):
@@ -212,6 +230,50 @@ class ProblemSyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(detail['content_available'])
             self.assertEqual(detail['last_fetch_status'], 'failed')
             self.assertEqual(await (await client.get('/api/problems/codeforces/cf_497D/statement.pdf')).get_data(), CF_PDF)
+
+    async def test_cf_unrecognized_samples_fail_preserve_old_content_and_retry_without_refresh(self):
+        catalog = {'problems': [{'contestId': 171, 'index': 'E', 'name': 'Previously empty'},
+                                {'contestId': 1843, 'index': 'A', 'name': 'First collection'}]}
+        metadata = cf_catalog_metadata(catalog['problems'])[0]
+        content = parse_codeforces(CF_NO_SAMPLES, metadata['problem_url'])
+        db = await connect_db(self.db_path)
+        try:
+            await save_problem(db, metadata, {**content, 'requested_language': 'en',
+                'source_url': metadata['problem_url'], 'sha256': 'previous-empty-samples'})
+        finally:
+            await db.close()
+        async with self.app.test_app():
+            client = self.app.test_client()
+            headers = await self.login(client)
+            with patch('feat.api.acm_api.problem_sync.cf_request', return_value=catalog):
+                with patch.object(self.app.task_manager.problem_sync, 'download', return_value=CF_UNRECOGNIZED_SAMPLES) as fetch:
+                    failed = await self.submit_platform(client, headers, platform='codeforces', refresh=True)
+                    self.assertEqual(fetch.await_count, 2)
+                self.assertEqual(failed['status'], 'failed')
+                self.assertEqual(failed['result']['success_count'], 0)
+                self.assertEqual(failed['result']['failure_count'], 2)
+                rows = {row['problem_id']: row for row in await self.query('SELECT * FROM crawler_problems')}
+                for row in rows.values():
+                    self.assertEqual(row['last_fetch_status'], 'failed')
+                    self.assertIn('CF 样例区非空', row['last_error'])
+                    self.assertEqual(json.loads(row['samples']), [])
+                    self.assertEqual(row['sample_count'], 0)
+                self.assertEqual(rows['cf_171E']['statement_html'], content['statement_html'])
+                self.assertEqual(rows['cf_171E']['statement_sha256'], 'previous-empty-samples')
+                self.assertIsNone(rows['cf_1843A']['statement_html'])
+                self.assertIsNone(rows['cf_1843A']['statement_sha256'])
+                with patch.object(self.app.task_manager.problem_sync, 'download', return_value=CF_BODY) as fetch:
+                    resumed = await self.submit_platform(client, headers, platform='codeforces')
+                    self.assertEqual(fetch.await_count, 2)
+            self.assertEqual(resumed['status'], 'completed')
+            self.assertEqual(resumed['result']['success_count'], 2)
+            self.assertEqual(resumed['result']['skipped_count'], 0)
+            expected = parse_codeforces(CF_BODY, 'https://codeforces.com')['samples']
+            for row in await self.query('SELECT last_fetch_status,samples,sample_count,last_error FROM crawler_problems'):
+                self.assertEqual(row['last_fetch_status'], 'ok')
+                self.assertEqual(json.loads(row['samples']), expected)
+                self.assertEqual(row['sample_count'], 1)
+                self.assertIsNone(row['last_error'])
 
     async def test_pdf_delivery_uses_saved_bytes_ranges_and_existing_role_and_password_guards(self):
         metadata = {'platform': 'codeforces', 'problem_id': 'cf_497D', 'contest_id': '497',

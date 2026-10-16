@@ -232,6 +232,8 @@ def parse_codeforces(raw, source_url):
             values[kind].append(text.replace("\r\n", "\n").replace("\r", "\n"))
         # Some legitimate problems (e.g. 171E) have an empty sample-test container.
         if not values["input"] and not values["output"]:
+            if any(isinstance(child, Node) or child.strip() for child in group.children):
+                raise ValueError("CF 样例区非空，但无法识别输入和输出")
             continue
         if len(values["input"]) != len(values["output"]):
             raise ValueError("CF 样例的输入和输出不完整")
