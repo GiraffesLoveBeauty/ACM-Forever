@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { auth, date, useRequests } from '../lib/api.js';
 import { originalProblemUrl, renderProblemContent } from '../lib/problem-content.js';
+import PdfPreview from '../components/PdfPreview.vue';
 
 const route = useRoute(),
   request = useRequests();
@@ -15,8 +16,14 @@ const back = computed(() =>
 );
 const original = computed(() => originalProblemUrl(detail.value?.problem_url));
 const samples = computed(() => (Array.isArray(detail.value?.samples) ? detail.value.samples : []));
+const pdf = computed(() => detail.value?.statement_format === 'pdf');
+const pdfUrl = computed(() =>
+  detail.value
+    ? `/api/${auth.role === 'member' ? 'me/' : ''}problems/${encodeURIComponent(detail.value.platform)}/${encodeURIComponent(detail.value.problem_id)}/statement.pdf`
+    : '',
+);
 const content = computed(() =>
-  detail.value?.content_available
+  detail.value?.content_available && !pdf.value
     ? renderProblemContent(detail.value)
     : { html: '', samplesEmbedded: false },
 );
@@ -100,7 +107,8 @@ watch(() => [route.query.platform, route.query.problem_id], load, { immediate: t
     <template v-else-if="detail">
       <p id="problem-message" class="muted">
         <template v-if="detail.content_available"
-          >已采集题面 · {{ samples.length }} 组样例<span v-if="detail.statement_fetched_at">
+          >已采集{{ pdf ? ' PDF' : '' }}题面<span v-if="!pdf"> · {{ samples.length }} 组样例</span
+          ><span v-if="detail.statement_fetched_at">
             · 采集于 {{ date(detail.statement_fetched_at) }}</span
           ><span v-if="detail.last_fetch_status === 'failed'">
             · 最近更新失败，展示上次保存的内容</span
@@ -108,8 +116,19 @@ watch(() => [route.query.platform, route.query.problem_id], load, { immediate: t
         >
         <template v-else>已收录题目目录，正文与样例尚未就绪。</template>
       </p>
+      <section
+        v-if="detail.content_available && pdf"
+        id="problem-pdf"
+        class="card problem-statement"
+      >
+        <h2>PDF 题面</h2>
+        <p>可在下方直接阅读已采集的题面、图示与样例。</p>
+        <PdfPreview :src="pdfUrl" />
+        <a class="btn" :href="pdfUrl" target="_blank" rel="noopener noreferrer">打开已采集 PDF</a>
+        <p class="muted">预览未显示时可单独打开 PDF。样例见 PDF 原文，暂不拆分为可复制字段。</p>
+      </section>
       <article
-        v-if="detail.content_available"
+        v-else-if="detail.content_available"
         id="problem-statement"
         class="card problem-statement"
         @click="copyEmbedded"

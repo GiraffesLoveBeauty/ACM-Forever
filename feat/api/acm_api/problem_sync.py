@@ -215,7 +215,7 @@ class ProblemSync:
                 result["scope_count"] = len(items)
                 async with db.execute(
                     "SELECT problem_id FROM crawler_problems WHERE platform=? "
-                    "AND last_fetch_status='ok' AND statement_html IS NOT NULL AND requested_language=?",
+                    "AND last_fetch_status='ok' AND (statement_html IS NOT NULL OR statement_pdf IS NOT NULL) AND requested_language=?",
                     (options["platform"], options["language"]),
                 ) as cursor:
                     completed = {row[0] for row in await cursor.fetchall()} if not options["refresh"] else set()

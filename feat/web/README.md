@@ -4,7 +4,7 @@ Vue 3 + Vue Router + Vite。社区、个人中心、训练工具及 9 个管理�
 
 ## 本地开发
 
-需要 Node.js 22.12 或更新版本、pnpm 11.25.0。先按 [API README](../api/README.md) 启动后端，默认端口 `8088`，再在本目录执行：
+需要 Node.js 22.13 或更新版本、pnpm 11.25.0。先按 [API README](../api/README.md) 启动后端，默认端口 `8088`，再在本目录执行：
 
 ```powershell
 pnpm install --frozen-lockfile
@@ -48,6 +48,10 @@ Web 管理员和 Root 在 **管理后台 → 题库管理** 顶部使用 **初�
 管理员和成员题库中的 **打开题目** 均进入 `/problem.html?platform=...&problem_id=...`，读取 SQLite 中已采集的题面和样例。详情页的 **查看原题** 才会打开平台原始网址。目录已收录但题面尚未采集时，页面显示等待或失败提示，可点击 **重新检查**；查看题目本身不会启动采集。
 
 `src/views/Problem.vue` 使用现有题目详情 API；成员请求自动映射到 `/api/me/problems/...`。`src/lib/problem-content.js` 通过 DOMPurify 过滤题面 HTML，限制图片来源，并使用 KaTeX MathML 渲染 CF / AtCoder 公式。优先在原题面样例位置显示保存的输入输出，保留空格与换行并支持复制；无法匹配位置时在正文后补充样例。
+
+无样例题目仍显示已保存正文。PDF 题面在详情页内嵌预览，从本站读取 SQLite 中的原始文件，并保留 **打开已采集 PDF** 供单独阅读；原文件包含的图示、公式与样例按原文保留，暂不拆成可复制样例字段。查看原题依然使用独立按钮。
+
+`PdfPreview.vue` 使用本地 PDF.js 绘制当前页，支持翻页、缩放和适应宽度；离页或切换题目时销毁加载任务及 Worker。渲染器按需加载，字体与字符映射资源由 Vite 打包到 `assets/pdfjs/`，无需浏览器内置 PDF 插件或外部 CDN。
 
 ## 状态与安全约定
 

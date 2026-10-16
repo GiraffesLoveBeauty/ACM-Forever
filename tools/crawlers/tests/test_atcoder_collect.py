@@ -137,6 +137,30 @@ class StoreTests(unittest.TestCase):
             self.store.save_content("atcoder", "abc001_1", content(statement(body="New body", sample_output="10\n")))
         self.assertEqual(dict(self.row()), old_row)
 
+    def test_pdf_bytes_are_saved_counted_and_survive_metadata_refresh(self):
+        pdf = b'%PDF-1.4\nfixture\n%%EOF\n'
+        replacement = {**content(), 'statement_html': None, 'statement_text': None,
+                       'statement_pdf': pdf, 'samples': []}
+        self.store.save_content('atcoder', 'abc001_1', replacement)
+        self.store.import_metadata([{**metadata(), 'problem_name': 'Updated catalog'}])
+        self.assertEqual(self.row()['statement_pdf'], pdf)
+        self.assertEqual(self.store.completed_ids('atcoder', 'en'), {'abc001_1'})
+        self.assertEqual(self.store.counts('atcoder')['statement_count'], 1)
+        self.store.save_content('atcoder', 'abc001_1', content())
+        self.assertIsNone(self.row()['statement_pdf'], 'an HTML refresh clears an obsolete PDF')
+
+    def test_existing_local_store_adds_pdf_column_without_losing_content(self):
+        self.store.save_content('atcoder', 'abc001_1', content())
+        self.store.close()
+        with closing(sqlite3.connect(self.path)) as legacy:
+            with legacy:
+                legacy.execute('ALTER TABLE crawler_problems DROP COLUMN statement_pdf')
+        self.store = ProblemStore(self.path)
+        self.addCleanup(self.store.close)
+        self.assertIsNone(self.row()['statement_pdf'])
+        self.assertEqual(self.row()['sample_count'], 1)
+        self.assertEqual(self.row()['statement_html'], content()['statement_html'])
+
 
 class CollectorTests(unittest.TestCase):
     def run_collect(self, directory, *options):
