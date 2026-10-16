@@ -108,10 +108,6 @@ public final class AdminActivity extends Activity {
                     if(closed)return;
                     if(body==null||body.length()>1024*1024)throw new IllegalArgumentException("请求过大");
                     Object value=api.adminRequest(method,path,body.isEmpty()?null:new JSONObject(body));
-                    if(path.equals("/api/auth/logout")){
-                        android.content.SharedPreferences prefs=getSharedPreferences("acmforever_settings",MODE_PRIVATE);
-                        prefs.edit().putBoolean("auto_login",false).apply();new SessionVault(prefs).clearPassword();
-                    }
                     respond(id,200,value,"");
                 }catch(Exception e){respond(id,e instanceof ApiClient.ApiException?((ApiClient.ApiException)e).status:0,e instanceof ApiClient.ApiException?((ApiClient.ApiException)e).details:null,FailureState.title(e));}
                 finally{queued.decrementAndGet();}

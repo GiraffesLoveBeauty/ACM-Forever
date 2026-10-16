@@ -34,7 +34,6 @@ import android.widget.CheckBox;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.net.URLEncoder;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -54,7 +53,8 @@ public final class MainActivity extends Activity {
 
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final ExecutorService avatarIo = Executors.newFixedThreadPool(2);
-    private final ApiClient api = new ApiClient();
+    private ApiClient api;
+    private AcmApplication application;
     private LinearLayout root;
     private LinearLayout content;
     private EditText search;
@@ -90,7 +90,6 @@ public final class MainActivity extends Activity {
     private TextView composeStatus;
     private boolean loginBusy;
     private SessionVault sessionVault;
-    private volatile boolean sessionSaveFailed;
     private volatile boolean passwordSaveFailed;
     private boolean returnFromAdmin;
     private String searchScope = "forum";
@@ -111,6 +110,8 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        application = (AcmApplication) getApplication();
+        api = application.api();
         preferences = getSharedPreferences("acmforever_settings", MODE_PRIVATE);
         String defaultBase = getString(R.string.default_api_base_url);
         try {
@@ -121,15 +122,16 @@ public final class MainActivity extends Activity {
             api.setBaseUrl(defaultBase);
         }
         updates = new UpdateManager(this, io);
-        api.setNetworkAvailable(this::networkAvailable);
+        if (api.isLoggedIn() && state != null && state.getLong("session_generation", -1) == api.sessionGeneration()) restoreNavigation(state);
         buildShell();
-        sessionVault = new SessionVault(preferences);
+        search.setText(query);
+        updateSearchHeader();
+        sessionVault = application.vault();
         loginIdentifier = preferences.getString("remembered_account", "");
-        api.setSessionChanged(() -> {
-            try { if (!sessionVault.save(api.getBaseUrl(), api.exportSession())) sessionSaveFailed = true; }
-            catch (Exception e) { sessionVault.clear(); sessionSaveFailed = true; }
-        });
-        if (preferences.getBoolean("auto_login", false)) {
+        if (api.isLoggedIn()) {
+            // Rotation recreates the screen, not the process-owned Cookie/CSRF state.
+            loadScreen();
+        } else if (preferences.getBoolean("auto_login", false)) {
             loginDestination = "forum";
             showLoginWaiting();
             io.execute(() -> {
@@ -156,7 +158,53 @@ public final class MainActivity extends Activity {
         if (returnFromAdmin) { returnFromAdmin = false; loadScreen(); }
     }
 
+    @Override protected void onSaveInstanceState(Bundle state) {
+        super.onSaveInstanceState(state);
+        // UI state only: cookies, CSRF and passwords stay out of saved instance state.
+        state.putLong("session_generation", api.sessionGeneration());
+        state.putString("screen", "login_wait".equals(screen) ? "account" : screen);
+        state.putString("query", query); state.putString("category", category); state.putString("sort", sort);
+        state.putString("days", days); state.putString("platform", platform); state.putInt("page", page);
+        state.putInt("rank_page_size", rankPageSize); state.putString("rank_sort", rankSort);
+        state.putStringArrayList("rank_platforms", new java.util.ArrayList<>(rankPlatforms));
+        state.putInt("post_id", postId); state.putString("problem_state", problemState);
+        state.putString("member_return", memberReturnScreen);
+        state.putString("member_preview", memberPreview == null ? "" : memberPreview.toString());
+        if (selectedProblem != null) {
+            state.putString("problem_platform", selectedProblem.optString("platform"));
+            state.putString("problem_id", selectedProblem.optString("problem_id"));
+        }
+        state.putString("search_scope", searchScope); state.putString("search_return", searchReturn);
+        state.putString("compose_title", composeTitle); state.putString("compose_body", composeBody);
+        state.putInt("compose_category", composeCategoryId); state.putInt("compose_draft", composeDraftId);
+        state.putLong("compose_revision", composeRevision); state.putLong("compose_saved_revision", composeSavedRevision);
+        state.putInt("comment_post", commentPostId); state.putString("comment_body", commentBody); state.putInt("comment_parent", commentParent);
+    }
+
+    private void restoreNavigation(Bundle state) {
+        screen = state.getString("screen", "forum");
+        query = state.getString("query", ""); category = state.getString("category", ""); sort = state.getString("sort", "latest");
+        days = state.getString("days", "7"); platform = state.getString("platform", ""); page = state.getInt("page", 1);
+        rankPageSize = state.getInt("rank_page_size", 20); rankSort = state.getString("rank_sort", "total_count");
+        java.util.ArrayList<String> platforms = state.getStringArrayList("rank_platforms");
+        if (platforms != null && !platforms.isEmpty()) { rankPlatforms.clear(); rankPlatforms.addAll(platforms); }
+        postId = state.getInt("post_id", 0); problemState = state.getString("problem_state", "");
+        memberReturnScreen = state.getString("member_return", "forum");
+        try {
+            String member = state.getString("member_preview", "");
+            memberPreview = member.isEmpty() ? null : new JSONObject(member);
+            if (state.containsKey("problem_id")) selectedProblem = new JSONObject()
+                    .put("platform", state.getString("problem_platform")).put("problem_id", state.getString("problem_id"));
+        } catch (org.json.JSONException ignored) { memberPreview = null; selectedProblem = null; }
+        searchScope = state.getString("search_scope", "forum"); searchReturn = state.getString("search_return", "forum");
+        composeTitle = state.getString("compose_title", ""); composeBody = state.getString("compose_body", "");
+        composeCategoryId = state.getInt("compose_category", 0); composeDraftId = state.getInt("compose_draft", 0);
+        composeRevision = state.getLong("compose_revision", 0); composeSavedRevision = state.getLong("compose_saved_revision", 0);
+        commentPostId = state.getInt("comment_post", 0); commentBody = state.getString("comment_body", ""); commentParent = state.getInt("comment_parent", 0);
+    }
+
     @Override protected void onDestroy() {
+        ++requestSerial;
         ModalDialogs.close(this);
         if (updates != null) updates.close();
         io.shutdownNow();
@@ -434,17 +482,21 @@ public final class MainActivity extends Activity {
         query = "";
         page = 1;
         search.setText("");
-        search.setEnabled(java.util.Arrays.asList("forum", "rank", "problems").contains(next));
-        String hint = "搜索论坛话题";
-        if ("rank".equals(next)) hint = "搜索公开昵称";
-        if ("problems".equals(next)) hint = "搜索题名或标签";
-        if ("mine".equals(next)) hint = "个人中心";
-        if ("account".equals(next)) hint = "账号设置";
-        if ("member".equals(next)) hint = "成员主页";
-        if ("compose".equals(next)) hint = "发帖编辑";
-        search.setHint(hint);
+        updateSearchHeader();
         refreshNav();
         loadScreen();
+    }
+
+    private void updateSearchHeader() {
+        search.setEnabled(java.util.Arrays.asList("forum", "rank", "problems").contains(screen));
+        String hint = "搜索论坛话题";
+        if ("rank".equals(screen)) hint = "搜索公开昵称";
+        if ("problems".equals(screen)) hint = "搜索题名或标签";
+        if ("mine".equals(screen)) hint = "个人中心";
+        if ("account".equals(screen)) hint = "账号设置";
+        if ("member".equals(screen)) hint = "成员主页";
+        if ("compose".equals(screen)) hint = "发帖编辑";
+        search.setHint(hint);
     }
 
     private void loadScreen() {
@@ -1662,7 +1714,7 @@ public final class MainActivity extends Activity {
                     runOnUiThread(() -> {
                         if (isFinishing() || isDestroyed()) return;
                         finishLoginWaiting();
-                        if (sessionSaveFailed) { sessionSaveFailed = false; message("登录成功，但无法安全保存会话；下次请重新登录。"); }
+                        if (application.consumeSessionSaveFailure()) message("登录成功，但无法安全保存会话；下次请重新登录。");
                         if (passwordSaveFailed) { passwordSaveFailed = false; message("登录成功，但设备无法安全保存密码；下次请手动输入。"); }
                         if (result.optBoolean("must_change_password")) {
                             show("account");
@@ -1752,9 +1804,19 @@ public final class MainActivity extends Activity {
         menuRow(settings, "关于 ACMforever", "0.1.12 · 调试版", () -> message("打一辈子爱臭美 / ACMforever\n版本 0.1.12 · 调试版"));
         Button logout = action("退出登录", false);
         logout.setOnClickListener(view -> {
+            logout.setEnabled(false);
             io.execute(() -> {
-                try { api.logout(); sessionVault.clearPassword(); preferences.edit().putBoolean("auto_login", false).apply(); runOnUiThread(() -> { clearComposer(); commentBody = ""; commentParent = 0; selectedProblem = null; memberPreview = null; loginDestination = "account"; loadScreen(); }); }
-                catch (Exception e) { runOnUiThread(() -> failureDialog(e)); }
+                Exception remoteFailure = null;
+                try { api.logout(); }
+                catch (Exception e) { remoteFailure = e; }
+                Exception logoutFailure = remoteFailure;
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    clearComposer(); commentBody = ""; commentParent = 0;
+                    selectedProblem = null; memberPreview = null; loginDestination = "account";
+                    show("account");
+                    if (logoutFailure != null) message("已退出本机登录。服务端注销未确认：" + FailureState.title(logoutFailure));
+                });
             });
         });
         content.addView(logout);
@@ -1977,7 +2039,7 @@ public final class MainActivity extends Activity {
                 })).show();
     }
 
-    private String encode(String value) { return URLEncoder.encode(value, StandardCharsets.UTF_8); }
+    private String encode(String value) { return UrlEncoding.form(value); }
 
     private void message(String value) {
         new ModalDialogs.Builder(this).setMessage(value).setPositiveButton("知道了", null).show();

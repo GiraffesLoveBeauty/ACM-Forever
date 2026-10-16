@@ -26,11 +26,14 @@ final class ApiClient {
     private volatile String csrfToken = "";
     private volatile boolean mustChangePassword;
     private volatile String role = "";
+    private volatile long sessionGeneration;
     private volatile JSONObject mobileFeatures;
     private volatile long mobileCheckedAt;
     private Runnable sessionChanged = () -> {};
+    private Runnable loggedOut = () -> {};
     private final java.util.IdentityHashMap<java.net.HttpCookie, Long> cookieExpiry = new java.util.IdentityHashMap<>();
     void setSessionChanged(Runnable listener) { sessionChanged = listener; }
+    void setLoggedOut(Runnable listener) { loggedOut = listener; }
 
     synchronized String exportSession() throws Exception {
         if (!isLoggedIn()) return "";
@@ -109,6 +112,7 @@ final class ApiClient {
     void setBaseUrl(String value) {
         String checked = checkedBaseUrl(value);
         if (!checked.equals(baseUrl)) {
+            ++sessionGeneration;
             cookies.getCookieStore().removeAll();
             csrfToken = "";
             mustChangePassword = false;
@@ -127,6 +131,8 @@ final class ApiClient {
     boolean isLoggedIn() {
         return !csrfToken.isEmpty();
     }
+
+    long sessionGeneration() { return sessionGeneration; }
 
     boolean requiresPasswordChange() { return mustChangePassword; }
 
@@ -178,8 +184,8 @@ final class ApiClient {
 
     JSONObject leaderboard(String range, String sort, String platforms, String search, int page, int size) throws Exception {
         String suffix="?days="+("today".equals(range)?"7":range)+"&period="+("today".equals(range)?"today":"")
-                +"&positive_only=1&sort="+sort+"&platforms="+java.net.URLEncoder.encode(platforms, StandardCharsets.UTF_8)
-                +"&search="+java.net.URLEncoder.encode(search, StandardCharsets.UTF_8);
+                +"&positive_only=1&sort="+sort+"&platforms="+UrlEncoding.form(platforms)
+                +"&search="+UrlEncoding.form(search);
         String path=leaderboardPath(suffix);
         JSONObject result=getObject(path+"&page="+page+"&page_size="+size);
         if("today".equals(range)&&(!"today".equals(result.optString("period"))||!"Asia/Shanghai".equals(result.optString("timezone"))))
@@ -261,6 +267,7 @@ final class ApiClient {
             if (!session.optBoolean("authenticated") || session.optString("csrf_token", "").isEmpty())
                 throw new org.json.JSONException("服务器未确认登录会话");
             csrfToken = session.getString("csrf_token");
+            ++sessionGeneration;
             mustChangePassword = session.optBoolean("must_change_password");
             role = session.optString("role", "");
             sessionChanged.run();
@@ -269,6 +276,7 @@ final class ApiClient {
     }
 
     private void clearSession() {
+        ++sessionGeneration;
         csrfToken = ""; mustChangePassword = false; role = "";
         cookies.getCookieStore().removeAll();
         cookieExpiry.clear();
@@ -276,8 +284,12 @@ final class ApiClient {
     }
 
     void logout() throws Exception {
-        if (!csrfToken.isEmpty()) request("POST", "/api/auth/logout", new JSONObject());
-        clearSession();
+        try {
+            if (!csrfToken.isEmpty()) request("POST", "/api/auth/logout", new JSONObject());
+        } finally {
+            try { clearSession(); }
+            finally { loggedOut.run(); }
+        }
     }
 
     JSONObject createPost(int categoryId, String title, String body) throws Exception {
@@ -325,7 +337,7 @@ final class ApiClient {
     }
 
     private static String segment(String value) {
-        return java.net.URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+        return UrlEncoding.form(value).replace("+", "%20");
     }
 
     JSONObject writeObject(String method, String path, JSONObject body) throws Exception {
