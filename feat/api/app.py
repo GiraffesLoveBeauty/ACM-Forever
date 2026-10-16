@@ -207,10 +207,26 @@ def create_app():
     async def webui_static(filename):
         filename = filename.replace("\\", "/")
         extension = Path(filename).suffix.lower()
-        if filename.startswith("assets/") and extension in {
-            ".css", ".js", ".png", ".jpg", ".jpeg", ".svg", ".woff", ".woff2", ".otf", ".ico",
-        }:
-            return await send_from_directory(app.config["WEBUI_DIST_DIR"], filename)
+        pdf_asset = filename.startswith("assets/pdfjs/") and extension in {".bcmap", ".pfb", ".ttf"}
+        if filename.startswith("assets/") and (pdf_asset or extension in {
+            ".css", ".js", ".mjs", ".png", ".jpg", ".jpeg", ".svg", ".woff", ".woff2", ".otf", ".ico",
+        }):
+            dist_dir = Path(app.config["WEBUI_DIST_DIR"]).resolve()
+            dist_asset = (dist_dir / filename).resolve()
+            try:
+                dist_asset.relative_to(dist_dir)
+                in_dist = True
+            except ValueError:
+                in_dist = False
+            if in_dist and dist_asset.is_file():
+                response = await send_from_directory(dist_dir, filename)
+                if extension == ".mjs":
+                    response.headers["Content-Type"] = "text/javascript; charset=utf-8"
+                return response
+            response = await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], filename)
+            if extension == ".css":
+                response.headers["Content-Type"] = "text/css; charset=utf-8"
+            return response
         if filename not in _PUBLIC_PAGES:
             abort(404)
 

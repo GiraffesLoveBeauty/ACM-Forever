@@ -8,6 +8,7 @@ const request = useRequests(),
   tab = ref('posts'),
   posts = ref([]),
   busy = ref(false),
+  deletingPostId = ref(null),
   input = ref(),
   preview = ref(''),
   note = ref('选择图片后会自动压缩并上传（最大 2 MB）');
@@ -47,6 +48,18 @@ async function content() {
     posts.value = await request(`/forum/mine/${tab.value}`, {}, 'mine');
   } catch (e) {
     showError(e);
+  }
+}
+async function deletePost(item) {
+  if (deletingPostId.value !== null || !confirm(`确定删除「${item.title}」吗？删除后无法恢复。`)) return;
+  deletingPostId.value = item.id;
+  try {
+    await request(`/forum/posts/${item.id}`, { method: 'DELETE' });
+    await content();
+  } catch (e) {
+    showError(e);
+  } finally {
+    deletingPostId.value = null;
   }
 }
 async function rename() {
@@ -227,23 +240,45 @@ onBeforeUnmount(() => {
         </button>
       </div>
       <div class="personal-content-list">
-        <RouterLink
+        <article
           v-for="item in posts"
           :key="item.id"
           class="personal-community-item"
-          :to="`/post.html?id=${item.id}`"
-          ><span class="personal-community-icon">{{ tab === 'posts' ? '↗' : '☆' }}</span
-          ><span class="personal-community-copy"
-            ><b>{{ item.title }}</b
-            ><small
-              >{{ item.category_name }} ·
-              {{
-                { pending: '待审核', published: '已发布', rejected: '未通过' }[item.status] ||
-                item.author_name
-              }}</small
-            ></span
-          ></RouterLink
         >
+          <RouterLink
+            v-if="tab === 'bookmarks' || item.status === 'published'"
+            class="personal-community-link"
+            :to="`/post.html?id=${item.id}`"
+          >
+            <span class="personal-community-icon">{{ tab === 'posts' ? '↗' : '☆' }}</span>
+            <span class="personal-community-copy"
+              ><b>{{ item.title }}</b
+              ><small
+                >{{ item.category_name }} ·
+                {{
+                  { pending: '待审核', published: '已发布', rejected: '未通过' }[item.status] ||
+                  item.author_name
+                }}</small
+              ></span
+            >
+          </RouterLink>
+          <div v-else class="personal-community-link">
+            <span class="personal-community-icon">↗</span>
+            <span class="personal-community-copy"
+              ><b>{{ item.title }}</b
+              ><small
+                >{{ item.category_name }} ·
+                {{ { pending: '待审核', rejected: '未通过' }[item.status] || item.author_name }}</small
+              ></span
+            >
+          </div>
+          <button
+            v-if="tab === 'posts'"
+            class="btn personal-community-delete"
+            :disabled="deletingPostId !== null"
+            @click="deletePost(item)"
+          >{{ deletingPostId === item.id ? '删除中…' : '删除' }}</button>
+        </article>
         <p v-if="!posts.length" class="empty">这里还没有内容，去论坛看看吧。</p>
       </div>
     </section>

@@ -1,6 +1,8 @@
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 export function markdown(source) {
+  if (typeof window !== 'undefined' && window.renderForumMarkdown)
+    return window.renderForumMarkdown(String(source || ''));
   return DOMPurify.sanitize(marked.parse(String(source || ''), { gfm: true, breaks: true }), {
     ALLOWED_TAGS: [
       'a',

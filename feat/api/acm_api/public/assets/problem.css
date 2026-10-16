@@ -25,6 +25,12 @@
 .problem-statement math[display="block"]{display:block;overflow:auto;padding:12px 0}
 .problem-copy{font-size:12px;margin:0 0 10px}
 .problem-samples{margin-top:20px}
+.pdf-preview{margin:20px 0;border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden}
+.pdf-preview-toolbar{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;padding:12px;background:var(--panel)}
+.pdf-preview-toolbar .btn{font:inherit;min-height:36px;padding:6px 12px}
+.pdf-preview-page{width:100%;overflow:auto;max-height:85vh;background:#e5e7eb}
+.pdf-preview-page canvas{display:block;max-width:none;margin:0 auto;background:#fff}
+.pdf-preview>p{padding:0 14px}
 .problem-sample-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
 .problem-sample-grid>div{min-width:0}
 .problem-sample-grid h3{margin-top:20px}

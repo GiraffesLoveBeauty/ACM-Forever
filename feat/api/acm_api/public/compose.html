@@ -5,8 +5,10 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>写话题 · ACM Forever</title>
   <link rel="stylesheet" href="/assets/app.css?v=palette-theme-4">
-  <link rel="stylesheet" href="/assets/forum.css?v=forum-header-avatar-4">
-<link rel="stylesheet" href="/assets/endfield-theme.css?v=industrial-7"></head>
+  <link rel="stylesheet" href="/assets/forum.css?v=forum-composer-4">
+  <link rel="stylesheet" href="/assets/endfield-theme.css?v=industrial-7">
+  <link rel="stylesheet" href="/assets/vendor/katex/katex.min.css?v=0.19.0">
+</head>
 <body class="forum-page compose-page endfield-design">
   <header class="forum-header">
     <a class="forum-brand" href="/index.html"><img class="icpc-brand-logo" src="/assets/icpc-logo.png" alt="ICPC 官方标志"><span>ACM <b>Forever</b><small>计量 ACMer 学习社区</small></span></a>
@@ -18,35 +20,39 @@
     <div class="compose-topline"><a href="/index.html">← 返回论坛</a><span class="compose-save-state" id="save-state" role="status">新话题尚未保存</span></div>
     <div class="compose-grid">
       <section class="compose-editor-panel">
-        <div class="compose-heading"><span class="panel-eyebrow">WRITE SOMETHING GOOD</span><h1>发布新话题</h1><p>写下问题、题解或训练心得。草稿会自动保存到你的账号。</p></div>
-        <label class="compose-field">选择版块<select id="draft-category"><option value="">选择一个版块</option></select></label>
-        <label class="compose-field">话题标题<input id="draft-title" maxlength="120" placeholder="用一句话概括你想讨论的内容"></label>
+        <div class="compose-recovery" id="compose-recovery" role="status" hidden><span>发现一份尚未同步到账号的本地内容。</span><div><button type="button" id="restore-recovery" disabled>恢复内容</button><button type="button" id="discard-recovery" disabled>丢弃</button></div></div>
+        <div class="compose-heading"><span class="panel-eyebrow">WRITE SOMETHING GOOD</span><h1>发布新话题</h1><p>写下问题、题解或训练心得。草稿自动保存到账号，也会暂存在此浏览器中。</p></div>
+        <label class="compose-field">选择版块<select id="draft-category" disabled><option value="">选择一个版块</option></select></label>
+        <label class="compose-field">话题标题<input id="draft-title" placeholder="用一句话概括你想讨论的内容" disabled><small class="compose-title-count" id="title-count">0 / 120</small></label>
         <section class="compose-body-field" aria-label="话题正文">
-          <div class="compose-body-label"><span>正文 <small>支持 Markdown</small></span><div class="compose-view-tabs"><button type="button" class="active" data-compose-view="write">编辑</button><button type="button" data-compose-view="preview">预览</button></div></div>
+          <div class="compose-body-label"><span>正文 <small>支持 Markdown</small></span><div class="compose-view-tabs" role="tablist" aria-label="正文视图"><button type="button" role="tab" aria-controls="draft-body" aria-selected="true" class="active" data-compose-view="write" disabled>编辑</button><button type="button" role="tab" aria-controls="draft-preview" aria-selected="false" data-compose-view="preview" disabled>预览</button></div></div>
           <div class="markdown-toolbar" role="toolbar" aria-label="Markdown 格式工具">
-            <button type="button" data-markdown="h1" title="一级标题">H1</button>
-            <button type="button" data-markdown="h2" title="二级标题">H2</button>
+            <button type="button" id="import-markdown" title="从本地文件导入 Markdown" disabled>导入 .md</button>
+            <input id="markdown-file" class="compose-markdown-file" type="file" accept=".md,.markdown,text/markdown,text/plain" aria-label="选择 Markdown 文件" disabled hidden>
             <span class="toolbar-divider"></span>
-            <button type="button" data-markdown="bold" title="加粗"><b>B</b></button>
-            <button type="button" data-markdown="italic" title="斜体"><i>I</i></button>
-            <button type="button" data-markdown="strike" title="删除线"><s>S</s></button>
+            <button type="button" data-markdown="h1" title="一级标题" disabled>H1</button>
+            <button type="button" data-markdown="h2" title="二级标题" disabled>H2</button>
             <span class="toolbar-divider"></span>
-            <button type="button" data-markdown="quote" title="引用">❝</button>
-            <button type="button" data-markdown="ul" title="无序列表">• 列表</button>
-            <button type="button" data-markdown="ol" title="有序列表">1. 列表</button>
-            <button type="button" data-markdown="code" title="行内代码">&lt;/&gt;</button>
-            <button type="button" data-markdown="codeblock" title="代码块">代码块</button>
-            <button type="button" data-markdown="link" title="插入链接">链接</button>
+            <button type="button" data-markdown="bold" title="加粗" disabled><b>B</b></button>
+            <button type="button" data-markdown="italic" title="斜体" disabled><i>I</i></button>
+            <button type="button" data-markdown="strike" title="删除线" disabled><s>S</s></button>
+            <span class="toolbar-divider"></span>
+            <button type="button" data-markdown="quote" title="引用" disabled>❝</button>
+            <button type="button" data-markdown="ul" title="无序列表" disabled>• 列表</button>
+            <button type="button" data-markdown="ol" title="有序列表" disabled>1. 列表</button>
+            <button type="button" data-markdown="code" title="行内代码" disabled>&lt;/&gt;</button>
+            <button type="button" data-markdown="codeblock" title="代码块" disabled>代码块</button>
+            <button type="button" data-markdown="link" title="插入链接" disabled>链接</button>
           </div>
-          <textarea id="draft-body" maxlength="20000" rows="18" placeholder="从这里开始写…&#10;&#10;你可以使用工具栏插入标题、粗体、列表或代码块，也可以直接写 Markdown。" spellcheck="true"></textarea>
+          <textarea id="draft-body" rows="18" aria-label="话题正文，支持 Markdown" aria-describedby="body-help body-count" placeholder="从这里开始写…&#10;&#10;你可以使用工具栏插入标题、粗体、列表或代码块，也可以直接写 Markdown。" spellcheck="true" disabled></textarea>
           <article id="draft-preview" class="forum-markdown compose-preview" hidden></article>
-          <div class="compose-editor-foot"><span>支持标题、粗体、斜体、引用、列表、代码、链接等常用 Markdown 语法。</span><span id="body-count">0 / 20000</span></div>
+          <div class="compose-editor-foot"><span id="body-help">支持标题、粗体、斜体、引用、列表、代码、链接等常用 Markdown 语法。快捷键：Ctrl/⌘+B 加粗，Ctrl/⌘+I 斜体，Ctrl/⌘+K 链接。</span><span id="body-count">0 / 20000</span></div>
         </section>
         <p class="compose-form-message" id="compose-message" role="alert"></p>
         <div class="compose-actions">
-          <button class="btn compose-delete" id="delete-draft" type="button" hidden>删除草稿</button>
-          <button class="btn" id="save-draft" type="button">保存草稿</button>
-          <button class="btn primary" id="submit-draft" type="button">提交审核</button>
+          <button class="btn compose-delete" id="delete-draft" type="button" disabled hidden>删除草稿</button>
+          <button class="btn" id="save-draft" type="button" disabled>保存草稿</button>
+          <button class="btn primary" id="submit-draft" type="button" disabled>提交审核</button>
         </div>
       </section>
 
@@ -57,8 +63,8 @@
         </section>
         <section class="compose-side-card compose-markdown-guide">
           <span class="panel-eyebrow">QUICK GUIDE</span><h2>Markdown 小抄</h2>
-          <div><code># 一级标题</code><code>## 二级标题</code><code>**重点内容**</code><code>*强调内容*</code><code>`代码片段`</code><code>- 列表项目</code></div>
-          <p>编辑时随时切换到“预览”，确认格式后再提交。</p>
+          <div><code># 一级标题</code><code>## 二级标题</code><code>**重点内容**</code><code>*强调内容*</code><code>`代码片段`</code><code>- 列表项目</code><code>$E=mc^2$</code><code>$$\sum_{i=1}^{n} i$$</code></div>
+          <p>支持行内与独立 LaTeX 公式；编辑时切换到“预览”确认效果。</p>
         </section>
       </aside>
     </div>
@@ -66,7 +72,9 @@
 
   <script src="/assets/vendor/marked.min.js"></script>
   <script src="/assets/vendor/purify.min.js"></script>
-  <script src="/assets/forum-markdown.js?v=markdown-composer-1"></script>
+  <script src="/assets/vendor/katex/katex.min.js?v=0.19.0"></script>
+  <script src="/assets/vendor/katex/auto-render.min.js?v=0.19.0"></script>
+  <script src="/assets/forum-markdown.js?v=forum-math-9"></script>
   <script src="/assets/app.js?v=industrial-4"></script>
   <script>
     const titleInput=document.getElementById('draft-title');
@@ -75,43 +83,120 @@
     const saveState=document.getElementById('save-state');
     const messageBox=document.getElementById('compose-message');
     const draftList=document.getElementById('draft-list');
+    const recoveryBox=document.getElementById('compose-recovery');
+    let recoveryOwner='member',recoveryTabId='',recoveryTabInstanceId='',recoveryTabStartedAt=0,recoveryTabChannel=null,pageReady=false,localOnly=false,categoriesLoaded=false,deletingDraft=false,submitting=false,markdownImportGeneration=0,markdownImportPromises=new Set();
     const queryDraftId=new URLSearchParams(location.search).get('draft_id');
     let draftId=queryDraftId&&/^\d+$/.test(queryDraftId)?Number(queryDraftId):null;
-    let revision=0,savedRevision=-1,saveTimer=null,savePromise=null;
+    let revision=0,savedRevision=-1,saveTimer=null,savePromise=null,recoveryCandidate=null,recoveryCandidateKey=null,recoveryCandidateSourceKey=null,recoveryCandidateSourceValue=null,recoveryWorkingKey=null,recoveryCategoryId=null;
 
-    function draftPayload(){return {title:titleInput.value,body:bodyInput.value,category_id:categoryInput.value||null}}
+    function draftPayload(){return {title:titleInput.value,body:bodyInput.value,category_id:categoryInput.value||(!categoriesLoaded?recoveryCategoryId:null)}}
+    function createRecoveryToken(){return window.crypto?.randomUUID?.()||`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}
+    function persistRecoveryTabId(){try{sessionStorage.setItem('acm-forum-compose-tab-id',recoveryTabId)}catch{}}
+    async function initializeRecoveryTabId(){try{recoveryTabId=sessionStorage.getItem('acm-forum-compose-tab-id')||''}catch{}if(!recoveryTabId){recoveryTabId=createRecoveryToken();persistRecoveryTabId()}recoveryTabInstanceId=createRecoveryToken();recoveryTabStartedAt=Number(window.performance?.timeOrigin)||Date.now();const messageKey='acm-forum-compose-recovery-tab-announcement';const handleAnnouncement=message=>{if(message?.owner!==recoveryOwner||message.tabId!==recoveryTabId||message.instanceId===recoveryTabInstanceId)return;const thisTabStartedFirst=recoveryTabStartedAt<Number(message.startedAt)||recoveryTabStartedAt===Number(message.startedAt)&&recoveryTabInstanceId<String(message.instanceId);if(!thisTabStartedFirst){recoveryTabId=createRecoveryToken();persistRecoveryTabId()}announce()};const announce=()=>{const message={owner:recoveryOwner,tabId:recoveryTabId,instanceId:recoveryTabInstanceId,startedAt:recoveryTabStartedAt};try{recoveryTabChannel?.postMessage(message)}catch{}try{localStorage.setItem(messageKey,JSON.stringify({...message,nonce:createRecoveryToken()}))}catch{}};if('BroadcastChannel'in window){try{recoveryTabChannel=new BroadcastChannel('acm-forum-compose-recovery-tabs');recoveryTabChannel.addEventListener('message',event=>handleAnnouncement(event.data))}catch{recoveryTabChannel=null}}window.addEventListener('storage',event=>{if(event.key!==messageKey||!event.newValue)return;try{handleAnnouncement(JSON.parse(event.newValue))}catch{}});announce();await new Promise(resolve=>setTimeout(resolve,100))}
+    function recoveryKey(id=draftId){return `acm-forum-compose:${recoveryOwner}:${id===null?`new:${recoveryTabId||'tab'}`:`${id}:tab:${recoveryTabId||'tab'}`}`}
+    function recoveryKeyPrefix(id=draftId){return `acm-forum-compose:${recoveryOwner}:${id===null?'new:':`${id}:tab:`}`}
+    function legacyRecoveryKey(id=draftId){return `acm-forum-compose:${recoveryOwner}:${id===null?'new':id}`}
+    function legacyNewRecoveryKey(){return `acm-forum-compose:${recoveryOwner}:new`}
     function setSaveState(text,kind=''){saveState.textContent=text;saveState.dataset.state=kind}
-    function updatePreview(){document.getElementById('draft-preview').innerHTML=window.renderForumMarkdown(bodyInput.value);document.getElementById('body-count').textContent=`${bodyInput.value.length} / 20000`}
+    function limitCodePoints(input,limit){const value=input.value,points=Array.from(value);if(points.length<=limit)return;const cursor=input.selectionStart??value.length;const next=points.slice(0,limit).join('');const nextCursor=Array.from(value.slice(0,cursor)).slice(0,limit).join('').length;input.value=next;input.setSelectionRange(nextCursor,nextCursor)}
+    function updatePreview(){const preview=document.getElementById('draft-preview');preview.innerHTML=window.renderForumMarkdown(bodyInput.value);window.renderForumMath(preview);document.getElementById('body-count').textContent=`${Array.from(bodyInput.value).length} / 20000`;document.getElementById('title-count').textContent=`${Array.from(titleInput.value).length} / 120`}
     function formatTime(value){if(!value)return '刚刚';return new Date(Number(value)*1000).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+    function samePayload(a,b){return a&&b&&a.title===b.title&&a.body===b.body&&String(a.category_id||'')===String(b.category_id||'')}
+    function recoveryHandledKey(key){return `acm-forum-compose-handled:${key}`}
+    function recoveryFingerprint(value){let first=2166136261,second=5381;for(let index=0;index<value.length;index++){const code=value.charCodeAt(index);first=Math.imul(first^code,16777619);second=Math.imul(second,33)^code}return `${value.length}:${first>>>0}:${second>>>0}`}
+    function persistRecovery(payload=draftPayload(),keyOverride=null){
+      const key=keyOverride||(recoveryCandidate?.payload&&!recoveryBox.hidden?(recoveryWorkingKey||=`${recoveryKey()}:pending:${recoveryTabInstanceId||recoveryTabId||'tab'}`):(recoveryWorkingKey||recoveryKey()));
+      try{localStorage.setItem(key,JSON.stringify({payload,updated_at:Date.now()}));localStorage.removeItem(recoveryHandledKey(key));return true}catch{return false}
+    }
+    function clearRecoveryWorkingCopy(){if(recoveryWorkingKey)clearRecovery(recoveryWorkingKey);recoveryWorkingKey=null}
+    function migrateRecoveryCandidate(previousKey,nextKey){
+      if(!recoveryCandidate?.payload||recoveryBox.hidden)return true;
+      const sourceKey=recoveryCandidateKey||previousKey,candidateKey=`${nextKey}:candidate:${recoveryTabInstanceId||recoveryTabId||'tab'}`;
+      if(sourceKey===candidateKey)return true;
+      try{
+        const stored=localStorage.getItem(sourceKey)||JSON.stringify(recoveryCandidate);
+        localStorage.setItem(candidateKey,stored);localStorage.removeItem(recoveryHandledKey(candidateKey));
+        try{if(localStorage.getItem(sourceKey)===stored)localStorage.setItem(recoveryHandledKey(sourceKey),recoveryFingerprint(stored))}catch{}
+        clearRecoveryCandidateSource();recoveryCandidateKey=candidateKey;return true;
+      }catch{return false}
+    }
+    function migrateRecoveryWorkingCopy(previousKey,nextKey){
+      const candidatePending=recoveryCandidate?.payload&&!recoveryBox.hidden;
+      const sourceKey=recoveryWorkingKey||(candidatePending?null:previousKey);
+      if(!sourceKey)return true;
+      if(sourceKey===nextKey){recoveryWorkingKey=nextKey;return true}
+      try{
+        const stored=localStorage.getItem(sourceKey);
+        if(stored){localStorage.setItem(nextKey,stored);localStorage.removeItem(recoveryHandledKey(nextKey))}
+        clearRecovery(sourceKey);recoveryWorkingKey=nextKey;return true;
+      }catch{recoveryWorkingKey=sourceKey;return false}
+    }
+    function clearRecovery(...keys){try{keys.forEach(key=>{localStorage.removeItem(key);localStorage.removeItem(recoveryHandledKey(key))})}catch{}}
+    function clearRecoveryCandidateSource(markSourceHandled=true){if(!recoveryCandidateSourceKey||!recoveryCandidateSourceValue)return;if(markSourceHandled)try{if(localStorage.getItem(recoveryCandidateSourceKey)===recoveryCandidateSourceValue)localStorage.setItem(recoveryHandledKey(recoveryCandidateSourceKey),recoveryFingerprint(recoveryCandidateSourceValue))}catch{}recoveryCandidateSourceKey=null;recoveryCandidateSourceValue=null}
+    function findRecoveryCopy(id,excludeKey){
+      const prefix=recoveryKeyPrefix(id);let latest=null;const keys=[];
+      try{for(let index=0;index<localStorage.length;index++)keys.push(localStorage.key(index))}catch{return null}
+      for(const key of keys){
+        if(!key||key===excludeKey||!key.startsWith(prefix))continue;
+        try{
+          const stored=localStorage.getItem(key);if(!stored)continue;
+          const handledKey=recoveryHandledKey(key),handledValue=localStorage.getItem(handledKey);
+          if(handledValue===recoveryFingerprint(stored))continue;
+          if(handledValue)localStorage.removeItem(handledKey);
+          const recovery=JSON.parse(stored);if(!recovery?.payload)continue;
+          if(!latest||Number(recovery.updated_at||0)>Number(latest.recovery.updated_at||0))latest={key,stored,recovery};
+        }catch{continue}
+      }
+      return latest;
+    }
+    function offerRecovery(serverPayload,key=recoveryKey(),legacyKey=legacyRecoveryKey(draftId),scopeId=draftId){
+      let copiedFromKey=null,copiedSourceValue=null;
+      try{let stored=localStorage.getItem(key);if(stored){const handledKey=recoveryHandledKey(key),handledValue=localStorage.getItem(handledKey);if(handledValue===recoveryFingerprint(stored)){clearRecovery(key);stored=null}else if(handledValue)localStorage.removeItem(handledKey)}if(!stored&&legacyKey&&legacyKey!==key){stored=localStorage.getItem(legacyKey);if(stored){try{localStorage.setItem(key,stored);localStorage.removeItem(legacyKey)}catch{}}}if(!stored){const nearby=findRecoveryCopy(scopeId,key);if(nearby){stored=nearby.stored;try{localStorage.setItem(key,stored);copiedFromKey=nearby.key;copiedSourceValue=nearby.stored}catch{}}}recoveryCandidate=JSON.parse(stored||'null')}catch{recoveryCandidate=null}
+      recoveryCandidateKey=key;
+      recoveryCandidateSourceKey=copiedFromKey;
+      recoveryCandidateSourceValue=copiedSourceValue;
+      if(!recoveryCandidate?.payload){recoveryCandidate=null;recoveryCandidateKey=null;recoveryCandidateSourceKey=null;recoveryCandidateSourceValue=null;return}
+      if(samePayload(recoveryCandidate.payload,serverPayload)){clearRecovery(key);clearRecoveryCandidateSource();recoveryCandidate=null;recoveryCandidateKey=null;return}
+      recoveryBox.hidden=false;
+    }
     async function loadDraftList(){
       try{
         const rows=await api('/forum/drafts');
-        draftList.innerHTML=rows.map(item=>`<a class="compose-draft-item ${Number(item.id)===draftId?'active':''}" href="/compose.html?draft_id=${Number(item.id)}"><span class="compose-draft-icon">✎</span><span class="compose-draft-copy"><b>${esc(item.title||'未命名草稿')}</b><small>${esc(item.category_name||'未选择版块')} · ${formatTime(item.updated_at)}</small></span></a>`).join('')||'<div class="empty">还没有保存的草稿。</div>';
+        draftList.innerHTML=rows.map(item=>`<a class="compose-draft-item ${Number(item.id)===draftId?'active':''}" href="/compose.html?draft_id=${Number(item.id)}"><span class="compose-draft-icon" aria-hidden="true">✎</span><span class="compose-draft-copy"><b>${esc(item.title||'未命名草稿')}</b><small>${esc(item.category_name||'未选择版块')} · ${formatTime(item.updated_at)}</small></span></a>`).join('')||'<div class="empty">还没有保存的草稿。</div>';
       }catch(error){draftList.innerHTML=`<div class="empty">${esc(error.message)}</div>`}
     }
     async function saveDraft(force=false){
       if(savePromise){await savePromise;if(savedRevision<revision)return saveDraft(force);return draftId}
       if(!force&&draftId===null&&revision===0)return null;
       if(draftId!==null&&savedRevision===revision)return draftId;
-      const currentRevision=revision;
-      setSaveState('正在保存…','saving');messageBox.textContent='';
+      clearTimeout(saveTimer);
+      if(localOnly){const recoverySaved=persistRecovery(draftPayload());throw Error(recoverySaved?'服务器草稿状态尚未确认；本地内容已保留，请恢复连接并重新加载后再保存。':'服务器不可用，且浏览器本地恢复保存失败，请立即复制正文。')}
+      const currentRevision=revision,payload=draftPayload(),oldRecoveryKey=recoveryKey();
+      setSaveState('正在保存…','saving');messageBox.textContent='';messageBox.classList.remove('success');
       savePromise=(async()=>{
         const result=draftId===null
-          ?await api('/forum/drafts',{method:'POST',body:JSON.stringify(draftPayload())})
-          :await api(`/forum/drafts/${draftId}`,{method:'PUT',body:JSON.stringify(draftPayload())});
+          ?await api('/forum/drafts',{method:'POST',body:JSON.stringify(payload)})
+          :await api(`/forum/drafts/${draftId}`,{method:'PUT',body:JSON.stringify(payload)});
         draftId=Number(result.id);
+        const currentRecoveryKey=recoveryKey();if(oldRecoveryKey!==currentRecoveryKey){migrateRecoveryCandidate(oldRecoveryKey,currentRecoveryKey);migrateRecoveryWorkingCopy(oldRecoveryKey,currentRecoveryKey)}
         savedRevision=currentRevision;
-        document.getElementById('delete-draft').hidden=false;
+        document.getElementById('delete-draft').hidden=false;document.getElementById('delete-draft').disabled=deletingDraft;
         history.replaceState(null,'',`/compose.html?draft_id=${draftId}`);
+        if(savedRevision===revision){
+          if(recoveryCandidate?.payload&&!recoveryBox.hidden)clearRecoveryWorkingCopy();
+          else{clearRecovery(oldRecoveryKey,recoveryKey(),recoveryCandidateKey);clearRecoveryCandidateSource();clearRecoveryWorkingCopy();recoveryBox.hidden=true;recoveryCandidate=null;recoveryCandidateKey=null}
+        }
+        else persistRecovery();
         setSaveState(`已保存 · ${formatTime(result.updated_at)}`,'saved');
-        await loadDraftList();
+        loadDraftList();
       })();
-      try{await savePromise}catch(error){setSaveState('保存失败，请重试','error');messageBox.textContent=error.message;throw error}finally{savePromise=null}
+      try{await savePromise}catch(error){const recoverySaved=persistRecovery(draftPayload());setSaveState(recoverySaved?'保存失败，内容已保存在此浏览器':'服务器和浏览器本地保存均失败','error');messageBox.textContent=recoverySaved?`${error.message}。内容已写入浏览器本地恢复副本，网络恢复后可重试。`:`${error.message}。浏览器本地恢复也失败，请立即复制正文以免丢失。`;throw error}finally{savePromise=null}
       if(savedRevision<revision)return saveDraft(force);
       return draftId;
     }
-    function scheduleSave(){revision++;setSaveState('有未保存的修改','dirty');messageBox.textContent='';updatePreview();clearTimeout(saveTimer);saveTimer=setTimeout(()=>saveDraft().catch(()=>{}),900)}
+    function scheduleSave(){if(!pageReady)return false;limitCodePoints(titleInput,120);limitCodePoints(bodyInput,20000);revision++;const payload=draftPayload();if(localOnly&&!categoriesLoaded&&recoveryCandidate?.payload)payload.category_id=recoveryCandidate.payload.category_id||null;const recoverySaved=persistRecovery(payload);setSaveState(!recoverySaved?'本地恢复保存失败，请复制内容':localOnly?'仅保存在此浏览器':'有未保存的修改',!recoverySaved||localOnly?'error':'dirty');messageBox.textContent=!recoverySaved?'浏览器无法保存本地恢复副本，请立即复制正文。':localOnly?'服务器暂不可用，内容已保存在此浏览器。恢复连接后请重新加载再保存。':'';messageBox.classList.remove('success');updatePreview();clearTimeout(saveTimer);if(!localOnly)saveTimer=setTimeout(()=>saveDraft().catch(()=>{}),900);return recoverySaved}
     function applyMarkdown(kind){
+      markdownImportGeneration++;
       const start=bodyInput.selectionStart,end=bodyInput.selectionEnd;
       const selected=bodyInput.value.slice(start,end);
       const presets={bold:['**','**','重点内容'],italic:['*','*','强调内容'],strike:['~~','~~','删除线内容'],code:['`','`','code'],link:['[','](https://)','链接文字'],h1:['# ','','一级标题'],h2:['## ','','二级标题'],quote:['> ','','引用内容'],ul:['- ','','列表项目'],ol:['1. ','','列表项目'],codeblock:['```\n','\n```','在这里写代码']};
@@ -127,47 +212,170 @@
     async function loadCategories(){
       const rows=await api('/forum/categories');
       categoryInput.innerHTML='<option value="">选择一个版块</option>'+rows.map(item=>`<option value="${Number(item.id)}">${esc(item.name)}</option>`).join('');
+      categoriesLoaded=true;
     }
     async function loadCurrentDraft(){
-      if(draftId===null){savedRevision=0;document.getElementById('delete-draft').hidden=true;setSaveState('新话题尚未保存');return}
-      const draft=await api(`/forum/drafts/${draftId}`);
+      if(draftId===null){savedRevision=0;document.getElementById('delete-draft').hidden=true;setSaveState('新话题尚未保存');offerRecovery({title:'',body:'',category_id:null});return}
+      let draft;
+      try{draft=await api(`/forum/drafts/${draftId}`)}catch(error){
+        if(error.message!=='草稿不存在。')throw error;
+        const staleDraftId=draftId,staleRecoveryKey=recoveryKey(staleDraftId),staleLegacyRecoveryKey=legacyRecoveryKey(staleDraftId);
+        draftId=null;revision=0;savedRevision=0;titleInput.value='';bodyInput.value='';categoryInput.value='';
+        document.getElementById('delete-draft').hidden=true;history.replaceState(null,'','/compose.html');
+        setSaveState('原草稿不存在，可恢复本地内容');offerRecovery({title:'',body:'',category_id:null},staleRecoveryKey,staleLegacyRecoveryKey,staleDraftId);updatePreview();
+        return;
+      }
       titleInput.value=draft.title||'';bodyInput.value=draft.body||'';categoryInput.value=draft.category_id||'';
       revision=0;savedRevision=0;document.getElementById('delete-draft').hidden=false;
-      setSaveState(`已保存 · ${formatTime(draft.updated_at)}`,'saved');updatePreview();
+      setSaveState(`已保存 · ${formatTime(draft.updated_at)}`,'saved');offerRecovery({title:titleInput.value,body:bodyInput.value,category_id:categoryInput.value});updatePreview();
+    }
+    function validateForSubmit(){
+      const title=titleInput.value.trim(),body=bodyInput.value.trim();
+      if(!categoryInput.value)return '请先选择帖子版块。';
+      if(Array.from(title).length<4)return '标题至少需要 4 个字符。';
+      if(Array.from(title).length>120)return '标题不能超过 120 个字符。';
+      if(Array.from(body).length<5)return '正文至少需要 5 个字符。';
+      if(Array.from(body).length>20000)return '正文不能超过 20000 个字符。';
+      return '';
+    }
+    function findFirstMarkdownH1(source){
+      const tokens=window.marked.lexer(source,{gfm:true});
+      let offset=0;
+      for(const token of tokens){
+        const raw=String(token.raw||'');
+        if(!raw)continue;
+        let startOffset=source.indexOf(raw,offset);
+        if(token.type==='heading'&&token.depth===1){
+          while(startOffset>=0){
+            const lineStart=source.lastIndexOf('\n',startOffset-1)+1;
+            if(/^[\t ]{0,3}$/.test(source.slice(lineStart,startOffset)))break;
+            startOffset=source.indexOf(raw,startOffset+1);
+          }
+        }
+        if(startOffset<0)continue;
+        if(token.type==='heading'&&token.depth===1&&raw){
+          const inlineHtml=window.marked.parseInline(token.text||'',{gfm:true});
+          const titleNode=document.createElement('div');
+          titleNode.innerHTML=window.DOMPurify.sanitize(inlineHtml);
+          return {startOffset,endOffset:startOffset+raw.length,title:titleNode.textContent.trim()};
+        }
+        offset=startOffset+raw.length;
+      }
+      return null;
+    }
+    async function importMarkdown(file){
+      if(submitting)return;
+      if(!file)return;
+      if(!/\.(md|markdown)$/i.test(file.name)){messageBox.classList.remove('success');messageBox.textContent='请选择 .md 或 .markdown 文件。';return}
+      if(file.size>102400){messageBox.classList.remove('success');messageBox.textContent='文件不能超过 100 KB。';return}
+      if((titleInput.value.trim()||bodyInput.value.trim())&&!confirm('导入 Markdown 会替换当前标题和正文，确定继续吗？'))return;
+      const generation=++markdownImportGeneration;
+      try{
+        const importedText=await file.text();
+        if(generation!==markdownImportGeneration)return;
+        const text=importedText.replace(/^\uFEFF/,'').replace(/\r\n?/g,'\n');
+        const heading=findFirstMarkdownH1(text);
+        let body=text,title=Array.from(file.name.replace(/\.(md|markdown)$/i,'')).slice(0,120).join('');
+        if(heading){
+          title=Array.from(heading.title).slice(0,120).join('');
+          body=(text.slice(0,heading.startOffset)+text.slice(heading.endOffset)).replace(/^\n+/, '');
+        }
+        if(Array.from(body).length>20000)throw Error('Markdown 正文超过 20000 个字符，请精简后再导入。');
+        titleInput.value=title;bodyInput.value=body;const recoverySaved=scheduleSave();if(recoverySaved){messageBox.classList.add('success');messageBox.textContent='Markdown 已导入，草稿正在自动保存。'}else{messageBox.classList.remove('success');messageBox.textContent='Markdown 已导入，但浏览器本地恢复保存失败，请立即复制正文。'}
+      }catch(error){if(generation!==markdownImportGeneration)return;messageBox.classList.remove('success');messageBox.textContent=error.message||'无法读取这个文件。'}
     }
     async function submitDraft(){
-      const button=document.getElementById('submit-draft');button.disabled=true;messageBox.textContent='';
-      try{const id=await saveDraft(true);const result=await api(`/forum/drafts/${id}/submit`,{method:'POST',body:JSON.stringify({})});setSaveState('已提交审核','saved');messageBox.classList.add('success');messageBox.textContent=result.message;setTimeout(()=>location.href='/index.html',1100)}
-      catch(error){messageBox.classList.remove('success');messageBox.textContent=error.message;button.disabled=false}
+      if(submitting)return;
+      submitting=true;
+      const editorControls=[...document.querySelectorAll('.compose-editor-panel input,.compose-editor-panel select,.compose-editor-panel textarea,.compose-editor-panel button')];editorControls.forEach(control=>control.disabled=true);
+      if(markdownImportPromises.size)await Promise.all([...markdownImportPromises]);
+      const error=validateForSubmit();
+      if(recoveryCandidate?.payload&&!recoveryBox.hidden){submitting=false;editorControls.forEach(control=>control.disabled=false);messageBox.classList.remove('success');messageBox.textContent='请先恢复或丢弃本地恢复内容，再提交草稿。';return}
+      if(error){submitting=false;editorControls.forEach(control=>control.disabled=false);messageBox.classList.remove('success');messageBox.textContent=error;return}
+      messageBox.textContent='';
+      try{const id=await saveDraft(true);const result=await api(`/forum/drafts/${id}/submit`,{method:'POST',body:JSON.stringify({})});if(recoveryCandidate?.payload&&!recoveryBox.hidden)clearRecoveryWorkingCopy();else{clearRecovery(recoveryKey(),legacyRecoveryKey());clearRecoveryCandidateSource();clearRecoveryWorkingCopy()}setSaveState('已提交审核','saved');messageBox.classList.add('success');messageBox.textContent=result.message;setTimeout(()=>location.href='/index.html',1100)}
+      catch(error){submitting=false;messageBox.classList.remove('success');messageBox.textContent=error.message;editorControls.forEach(control=>control.disabled=false)}
     }
     async function deleteDraft(){
       if(draftId===null)return;
+      if(recoveryCandidate?.payload&&!recoveryBox.hidden){messageBox.classList.remove('success');messageBox.textContent='请先恢复或丢弃本地恢复内容，再删除草稿。';return}
       if(!confirm('确定删除这篇草稿吗？'))return;
-      try{await api(`/forum/drafts/${draftId}`,{method:'DELETE'});draftId=null;revision=0;savedRevision=-1;titleInput.value='';bodyInput.value='';categoryInput.value='';history.replaceState(null,'','/compose.html');document.getElementById('delete-draft').hidden=true;setSaveState('新话题尚未保存');updatePreview();await loadDraftList()}
-      catch(error){messageBox.textContent=error.message}
+      const button=document.getElementById('delete-draft'),editorControls=[...document.querySelectorAll('.compose-editor-panel input,.compose-editor-panel select,.compose-editor-panel textarea,.compose-editor-panel button')];deletingDraft=true;editorControls.forEach(control=>control.disabled=true);clearTimeout(saveTimer);
+      try{
+        if(markdownImportPromises.size)await Promise.all([...markdownImportPromises]);
+        if(savePromise||savedRevision<revision)await saveDraft(true);
+        const oldKey=recoveryKey(),oldLegacyKey=legacyRecoveryKey();await api(`/forum/drafts/${draftId}`,{method:'DELETE'});clearRecovery(oldKey,oldLegacyKey,recoveryCandidateKey);clearRecoveryCandidateSource();recoveryCandidate=null;recoveryCandidateKey=null;recoveryBox.hidden=true;
+        draftId=null;revision=0;savedRevision=0;titleInput.value='';bodyInput.value='';categoryInput.value='';history.replaceState(null,'','/compose.html');button.hidden=true;deletingDraft=false;editorControls.forEach(control=>{control.disabled=control===button});setSaveState('新话题尚未保存');updatePreview();await loadDraftList()
+      }catch(error){deletingDraft=false;messageBox.textContent=error.message;editorControls.forEach(control=>control.disabled=false)}
     }
     function showView(view){
       const writing=view==='write';bodyInput.hidden=!writing;document.getElementById('draft-preview').hidden=writing;
-      document.querySelectorAll('[data-compose-view]').forEach(button=>button.classList.toggle('active',button.dataset.composeView===view));
+      document.querySelectorAll('[data-compose-view]').forEach(button=>{const active=button.dataset.composeView===view;button.classList.toggle('active',active);button.setAttribute('aria-selected',String(active))});
       if(!writing)updatePreview();
     }
     window.PAGE_LOAD=async()=>{
-      try{await loadCategories();await loadCurrentDraft();await loadDraftList()}
-      catch(error){messageBox.textContent=error.message;setSaveState('编辑器加载失败','error')}
+      recoveryOwner=String(window.AUTH?.qq_id||'member');
+      await initializeRecoveryTabId();
+      try{await loadCategories();await loadCurrentDraft();await loadDraftList();pageReady=true;document.querySelectorAll('.compose-editor-panel input,.compose-editor-panel select,.compose-editor-panel textarea,.compose-editor-panel button').forEach(control=>control.disabled=false)}
+      catch(error){
+        messageBox.textContent=error.message;setSaveState('服务器加载失败，本地编辑可继续','error');
+        if(!['请先登录','请先修改初始密码'].includes(error.message)){
+          localOnly=true;pageReady=true;
+          offerRecovery({title:'',body:'',category_id:null},recoveryKey());
+          document.querySelectorAll('.compose-editor-panel input,.compose-editor-panel select,.compose-editor-panel textarea,.compose-editor-panel button').forEach(control=>control.disabled=false);
+          document.getElementById('save-draft').disabled=true;document.getElementById('submit-draft').disabled=true;document.getElementById('delete-draft').disabled=true;
+          if(!categoriesLoaded)categoryInput.disabled=true;
+          await loadDraftList();
+        }
+      }
       updatePreview();
     };
-    [titleInput,bodyInput,categoryInput].forEach(input=>input.addEventListener('input',scheduleSave));
-    categoryInput.addEventListener('change',scheduleSave);
+    [titleInput,bodyInput].forEach(input=>{
+      input.addEventListener('input',event=>{markdownImportGeneration++;if(event.isComposing){updatePreview();return}scheduleSave()});
+      input.addEventListener('compositionend',scheduleSave);
+    });
+    categoryInput.addEventListener('change',()=>{recoveryCategoryId=categoryInput.value||null;scheduleSave()});
     document.querySelectorAll('[data-markdown]').forEach(button=>button.addEventListener('click',()=>{showView('write');applyMarkdown(button.dataset.markdown)}));
     document.querySelectorAll('[data-compose-view]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.composeView)));
     document.getElementById('save-draft').addEventListener('click',()=>saveDraft(true).catch(()=>{}));
     document.getElementById('submit-draft').addEventListener('click',submitDraft);
     document.getElementById('delete-draft').addEventListener('click',deleteDraft);
+    document.getElementById('import-markdown').addEventListener('click',()=>document.getElementById('markdown-file').click());
+    document.getElementById('markdown-file').addEventListener('change',event=>{const input=event.currentTarget,file=input.files?.[0];input.value='';const task=importMarkdown(file);markdownImportPromises.add(task);task.finally(()=>markdownImportPromises.delete(task))});
+    document.getElementById('restore-recovery').addEventListener('click',()=>{
+      if(!recoveryCandidate?.payload)return;
+      markdownImportGeneration++;
+      titleInput.value=recoveryCandidate.payload.title||'';bodyInput.value=recoveryCandidate.payload.body||'';categoryInput.value=recoveryCandidate.payload.category_id||'';if(!categoriesLoaded)recoveryCategoryId=recoveryCandidate.payload.category_id||null;
+      const recoverySaved=scheduleSave();if(!recoverySaved){messageBox.classList.remove('success');messageBox.textContent='恢复内容已载入，但浏览器本地恢复保存失败；正在尝试保存到服务器，请立即复制正文。';return}
+      recoveryBox.hidden=true;
+    });
+    document.getElementById('discard-recovery').addEventListener('click',()=>{clearRecovery(recoveryCandidateKey||recoveryKey());clearRecoveryCandidateSource(false);recoveryCandidate=null;recoveryCandidateKey=null;recoveryBox.hidden=true});
+    bodyInput.addEventListener('keydown',event=>{
+      if(!(event.ctrlKey||event.metaKey)||event.altKey)return;
+      const key=event.key.toLowerCase(),kind=key==='b'?'bold':key==='i'?'italic':key==='k'?'link':null;
+      if(kind){event.preventDefault();applyMarkdown(kind)}
+    });
+    document.addEventListener('click',event=>{
+      const link=event.target.closest('a[href]');
+      if(!link||event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey||link.target)return;
+      const target=new URL(link.href,location.href);
+      if(target.origin!==location.origin||!target.pathname.endsWith('/compose.html'))return;
+      if(target.pathname===location.pathname&&target.search===location.search&&savedRevision===revision&&!savePromise)return;
+      event.preventDefault();
+      if(localOnly){location.href=target.href;return}
+      saveDraft().catch(()=>{}).then(()=>{if(!saveState.dataset.state||saveState.dataset.state!=='error')location.href=target.href});
+    });
+    document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='hidden'||savedRevision===revision)return;if(draftId===null){clearTimeout(saveTimer);saveTimer=null;if(revision>0)persistRecovery();return}saveDraft().catch(()=>{})});
     window.addEventListener('pagehide',()=>{
       clearTimeout(saveTimer);
-      if(savePromise||savedRevision===revision||(!draftId&&revision===0))return;
+      if(!pageReady||savedRevision===revision||(!draftId&&revision===0))return;
+      const payload=draftPayload();
+      if(localOnly&&!categoriesLoaded&&recoveryCandidate?.payload)payload.category_id=recoveryCandidate.payload.category_id||null;
+      persistRecovery(payload);
+      if(localOnly||!draftId)return;
+      if(savePromise)return;
       const method=draftId?'PUT':'POST',path=draftId?`/forum/drafts/${draftId}`:'/forum/drafts';
-      api(path,{method,body:JSON.stringify(draftPayload()),keepalive:true}).catch(()=>{});
+      api(path,{method,body:JSON.stringify(payload),keepalive:true}).then(()=>{if(recoveryCandidate?.payload&&!recoveryBox.hidden)clearRecoveryWorkingCopy();else{clearRecovery(recoveryKey());clearRecoveryCandidateSource();clearRecoveryWorkingCopy()}}).catch(()=>{});
     });
   </script>
 </body>

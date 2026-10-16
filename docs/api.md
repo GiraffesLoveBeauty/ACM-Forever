@@ -180,6 +180,14 @@ response.raise_for_status()
 
 详情页清理外部 HTML，保留样例空格和换行并提供复制按钮；公式使用本地 KaTeX 0.19.0 输出 MathML（[配置说明](https://katex.org/docs/autorender)）。题面图片目前仍从 AtCoder / Codeforces 的 HTTPS 域名加载，尚未存入本地数据库；其它来源的图片显示占位文字。仅详情页允许这些图片域名，其它页面继续使用原有内容安全策略。
 
+CF 原题未提供样例时（如 171E 的空样例区），采集成功并返回 `samples=[]`；存在一侧输入或输出、缺少 `pre` 等损坏样例仍报错。已有样例的 HTML 刷新结果意外变空时，继续保留旧题面和样例。
+
+PDF 题面（如 497D）将原始字节保存到 SQLite 的 `crawler_problems.statement_pdf`，详情返回 `statement_format="pdf"`、`content_available=true`；JSON 不包含二进制。HTML / 纯文本题面分别返回 `statement_format="html"` / `"text"`，未采集时为 null。详情页的 **打开已采集 PDF** 使用本站 `GET /api/problems/<platform>/<problem_id>/statement.pdf`，成员使用 `/api/me/problems/<platform>/<problem_id>/statement.pdf`；权限与详情接口相同，支持字节范围读取，未保存 PDF 返回 404。PDF 中的图示、公式和样例按原文件保留，暂不拆分为结构化 `samples`，不计入样例组数。PDF 校验文件头、结束标记和 20 MiB 上限；不完整文件采集失败且保留旧内容。
+
+旧数据库在启动或初始化时自动补充可空的 `statement_pdf` 列，保留已有题目。已成功保存的 PDF 与 HTML 一样计入已采集统计，并在默认重复采集时跳过。
+
+PDF 在题目详情页内通过本地 PDF.js 绘制，支持翻页、缩放和适应宽度，同时保留单独打开按钮。渲染器、Worker、字体和字符映射资源均随前端构建部署；PDF 仍通过本站鉴权接口读取，不放宽页面的禁止嵌入策略。
+
 管理员或 Root 登录后，在 **管理后台 → 题库管理 → 拉取题目** 中选择 AtCoder / Codeforces，填写比赛 ID 和本次最多拉取题数（1–100），点击 **开始拉取**。可以指定题号（逗号或空格分隔）；留空时按比赛题序处理。AtCoder 可选英文或日文，Codeforces 使用英文且暂不支持 Gym。
 
 将 **拉取范围** 切换为 **该平台全部题目** 时，不需要比赛 ID 或题号，题数输入变为 **每批处理题数**（1–100，默认 100）。点击 **拉取该平台全部题目** 后，服务器先分批导入整个公开目录，再自动处理全部待采题目；批次大小不是总数量上限。页面显示目录导入进度、题面进度与批次，目录导入及批次完成后刷新题库与数据库统计。

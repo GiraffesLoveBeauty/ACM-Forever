@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS crawler_problems (
     metadata_json TEXT NOT NULL,
     statement_html TEXT,
     statement_text TEXT,
+    statement_pdf BLOB,
     statement_language TEXT,
     requested_language TEXT,
     samples TEXT NOT NULL DEFAULT '[]',
