@@ -62,6 +62,8 @@ python3 -m api.init_db --database /home/WYJ/acm-forever-data/acm_forever.db
 
 网页调用 `POST /api/admin/problems/sync`，使用现有 Web `admin/root` 会话与 CSRF，返回 202 和任务 ID，进度及取消复用 `/api/tasks`。题目正文与样例写入同一条 `crawler_problems` 记录，并原子更新 `recommendations`，使既有题库列表能够展示新题目。默认跳过成功题目，可显式刷新；失败保留已有正文和样例。CF 当前支持普通公开比赛，题号兼容 `1843A/cf_1843A`，与既有提交记录统一存为 `cf_1843A`；元数据和页面共用 CF 请求节流。详细参数和调用示例见 [API 调用指南](../../docs/api.md#管理员采集新题目)。
 
+CF 支持没有样例的题目及直接返回 PDF 的题面。PDF 原文件存入 SQLite，详情页通过本站接口打开，图示与样例保留在 PDF 中，暂不拆分为结构化样例。启动或初始化时自动给旧题库补充 `statement_pdf BLOB` 列，不清空数据；失败记录可再次按比赛 / 指定题号采集，默认只跳过成功题目。
+
 ## 环境变量
 
 | 变量 | 用途 |
