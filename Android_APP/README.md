@@ -41,7 +41,9 @@
 
 “记住我”只保存账号。“保存密码”另行选择，使用设备 Keystore 密钥加密，密码不以明文写入偏好或日志。CSRF 不持久化。自动会话 AES-GCM 加密，最长 30 日且不超过 Cookie 期限，启动联网验证；退出或关闭自动登录清除保存会话。应用禁用备份，设备密钥无法跨设备恢复。
 
-发布方后续填写 `res/values/strings.xml` 的 `default_update_manifest_url`，或保留已配置的旧清单地址；当前默认空值，没有臆造的发布 API。清单契约见 [方案与规范.md](docs/方案与规范.md)。APK 下载后复制进私有缓存并同时计算 SHA-256，再核对实际包名、versionCode 和签名；只给系统安装器临时只读访问。首次侧载需要允许安装未知应用，仍须用户确认安装。正式发布后包名和签名固定，versionCode 递增。
+正式版本使用 GitHub Release 提供更新：`default_update_manifest_url` 指向固定的 `releases/latest/download/update.json`，发布工作流构建签名 APK、计算 SHA-256，并把 APK 与清单附加到对应 Release。清单跳转会逐步校验 HTTPS，拒绝降级到 HTTP。发布前须在仓库 Actions secrets 配置 `ANDROID_RELEASE_KEYSTORE_BASE64`、`ANDROID_RELEASE_KEY_ALIAS`、`ANDROID_RELEASE_KEYSTORE_PASSWORD` 和 `ANDROID_RELEASE_KEY_PASSWORD`；密钥不得提交 Git。发布标签必须对应高于当前 `versionCode 13` 的版本。详见 [.github/workflows/android-release.yml](../.github/workflows/android-release.yml)。
+
+APK 下载后复制进私有缓存并计算 SHA-256，再核对实际包名、versionCode 和签名；只给系统安装器临时只读访问。系统下载任务和待安装文件状态保存在本机，Activity 旋转或系统回收后可继续校验/安装。首次侧载需要允许安装未知应用，仍须用户确认安装。正式发布后包名和签名固定，versionCode 递增。
 
 ## 目录
 

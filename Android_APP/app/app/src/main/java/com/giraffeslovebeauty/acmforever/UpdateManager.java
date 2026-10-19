@@ -5,6 +5,7 @@ import android.app.AlertDialog;
 import android.app.DownloadManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
@@ -27,8 +28,15 @@ import java.util.concurrent.ExecutorService;
 
 /** User-confirmed APK update from a project-controlled HTTPS server. */
 final class UpdateManager {
+    private static final String PREFS = "acmforever_update_state";
+    private static final String KEY_DOWNLOAD_ID = "download_id";
+    private static final String KEY_EXPECTED_SHA256 = "expected_sha256";
+    private static final String KEY_EXPECTED_VERSION = "expected_version";
+    private static final String KEY_PENDING_APK = "pending_apk";
+    private static final String KEY_WAITING_FOR_PERMISSION = "waiting_for_permission";
     private final Activity activity;
     private final ExecutorService io;
+    private final SharedPreferences state;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private long downloadId = -1;
     private Uri pendingApk;
@@ -40,10 +48,18 @@ final class UpdateManager {
     private long expectedVersion;
     private boolean verifying;
     private AlertDialog updatePrompt;
+    private boolean pollScheduled;
 
     UpdateManager(Activity activity, ExecutorService io) {
         this.activity = activity;
         this.io = io;
+        state = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        downloadId = state.getLong(KEY_DOWNLOAD_ID, -1);
+        expectedSha256 = state.getString(KEY_EXPECTED_SHA256, "");
+        expectedVersion = state.getLong(KEY_EXPECTED_VERSION, 0);
+        String pending = state.getString(KEY_PENDING_APK, "");
+        pendingApk = pending.isEmpty() ? null : Uri.parse(pending);
+        waitingForInstallPermission = state.getBoolean(KEY_WAITING_FOR_PERMISSION, false);
     }
 
     static String checkedManifestUrl(String value) {
@@ -79,27 +95,7 @@ final class UpdateManager {
         io.execute(() -> {
             try {
                 if (!networkAvailable()) throw new ApiClient.NoNetworkException();
-                URL url = new URL(address);
-                HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-                connection.setConnectTimeout(15000);
-                connection.setReadTimeout(15000);
-                connection.setInstanceFollowRedirects(false);
-                connection.setRequestProperty("Accept", "application/json");
-                String body;
-                try {
-                    int status = connection.getResponseCode();
-                    if (status != 200) throw new ApiClient.ApiException(status, "版本清单HTTP " + status, false);
-                    try (InputStream stream = connection.getInputStream()) {
-                        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-                        byte[] chunk = new byte[4096];
-                        int count;
-                        while ((count = stream.read(chunk)) != -1) {
-                            if (buffer.size() + count > 32768) throw new IllegalStateException("版本清单过大。");
-                            buffer.write(chunk, 0, count);
-                        }
-                        body = new String(buffer.toByteArray(), StandardCharsets.UTF_8);
-                    }
-                } finally { connection.disconnect(); }
+                String body = fetchManifest(address);
                 JSONObject manifest = new JSONObject(body);
                 String packageName = manifest.getString("packageName");
                 if (!activity.getPackageName().equals(packageName)) throw new IllegalStateException("更新包名与当前 App 不一致。");
@@ -129,6 +125,40 @@ final class UpdateManager {
         });
     }
 
+    private static String fetchManifest(String address) throws Exception {
+        String current = address;
+        for (int redirects = 0; redirects <= 5; redirects++) {
+            HttpURLConnection connection = (HttpURLConnection) new URL(current).openConnection();
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(15000);
+            connection.setInstanceFollowRedirects(false);
+            connection.setRequestProperty("Accept", "application/json");
+            try {
+                int status = connection.getResponseCode();
+                if (status == HttpURLConnection.HTTP_MOVED_PERM || status == HttpURLConnection.HTTP_MOVED_TEMP
+                        || status == HttpURLConnection.HTTP_SEE_OTHER || status == 307 || status == 308) {
+                    String location = connection.getHeaderField("Location");
+                    if (location == null || redirects == 5) throw new IllegalStateException("版本清单重定向无效。");
+                    current = checkedHttpsUrl(new URI(current).resolve(location).toString());
+                    continue;
+                }
+                if (status != HttpURLConnection.HTTP_OK)
+                    throw new ApiClient.ApiException(status, "版本清单HTTP " + status, false);
+                try (InputStream stream = connection.getInputStream()) {
+                    ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                    byte[] chunk = new byte[4096];
+                    int count;
+                    while ((count = stream.read(chunk)) != -1) {
+                        if (buffer.size() + count > 32768) throw new IllegalStateException("版本清单过大。");
+                        buffer.write(chunk, 0, count);
+                    }
+                    return new String(buffer.toByteArray(), StandardCharsets.UTF_8);
+                }
+            } finally { connection.disconnect(); }
+        }
+        throw new IllegalStateException("版本清单重定向次数过多。");
+    }
+
     private void startDownload(String apkUrl, String sha, long versionCode) {
         if (closed || verifying || pendingApk != null) return;
         if (downloadId != -1) { notice("已有更新正在下载。"); return; }
@@ -144,9 +174,20 @@ final class UpdateManager {
                     "acmforever-" + versionCode + "-" + System.currentTimeMillis() + ".apk");
             DownloadManager manager = (DownloadManager) activity.getSystemService(Context.DOWNLOAD_SERVICE);
             downloadId = manager.enqueue(request);
+            if (!state.edit().putLong(KEY_DOWNLOAD_ID, downloadId)
+                    .putString(KEY_EXPECTED_SHA256, sha).putLong(KEY_EXPECTED_VERSION, versionCode).commit()) {
+                manager.remove(downloadId);
+                throw new IllegalStateException("无法保存更新任务状态。");
+            }
             notice("已开始下载。进度可在系统通知中查看。");
-            ui.postDelayed(this::pollDownload, 1000);
-        } catch (Exception e) { downloadId = -1; notice("下载启动失败：" + e.getMessage()); }
+            schedulePoll(1000);
+        } catch (Exception e) { clearDownloadState(); notice("下载启动失败：" + e.getMessage()); }
+    }
+
+    private void schedulePoll(long delayMillis) {
+        if (closed || downloadId == -1 || pollScheduled || verifying) return;
+        pollScheduled = true;
+        ui.postDelayed(() -> { pollScheduled = false; pollDownload(); }, delayMillis);
     }
 
     private void pollDownload() {
@@ -154,18 +195,20 @@ final class UpdateManager {
         DownloadManager manager = (DownloadManager) activity.getSystemService(Context.DOWNLOAD_SERVICE);
         DownloadManager.Query query = new DownloadManager.Query().setFilterById(downloadId);
         try (Cursor cursor = manager.query(query)) {
-            if (cursor == null || !cursor.moveToFirst()) { downloadId = -1; notice("下载任务不存在。"); return; }
+            if (cursor == null || !cursor.moveToFirst()) { clearDownloadState(); notice("下载任务不存在。"); return; }
             int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
             if (status == DownloadManager.STATUS_SUCCESSFUL) {
                 Uri uri = manager.getUriForDownloadedFile(downloadId);
-                downloadId = -1;
-                if (uri == null) { notice("下载完成但找不到 APK。"); return; }
+                if (uri == null) { clearDownloadState(); notice("下载完成但找不到 APK。"); return; }
                 verifyAndInstall(uri);
             } else if (status == DownloadManager.STATUS_FAILED) {
-                downloadId = -1;
+                clearDownloadState();
                 showFailure(!networkAvailable() ? "无网络" : "APK下载失败");
-            } else ui.postDelayed(this::pollDownload, 1000);
-        } catch (Exception e) { downloadId = -1; notice("下载状态读取失败：" + e.getMessage()); }
+            } else schedulePoll(1000);
+        } catch (Exception ignored) {
+            // A temporary DownloadManager query failure must not orphan the persisted task.
+            schedulePoll(3000);
+        }
     }
 
     private void verifyAndInstall(Uri apk) {
@@ -204,13 +247,26 @@ final class UpdateManager {
                         throw new IllegalStateException("更新 APK 签名不匹配。");
                 }
                 final Uri privateApk = Uri.parse("content://" + activity.getPackageName() + ".updates/" + verified.getName());
+                boolean saved = state.edit().remove(KEY_DOWNLOAD_ID).remove(KEY_EXPECTED_SHA256).remove(KEY_EXPECTED_VERSION)
+                        .putString(KEY_PENDING_APK, privateApk.toString())
+                        .putBoolean(KEY_WAITING_FOR_PERMISSION, false).commit();
+                if (!saved) throw new IllegalStateException("无法保存待安装状态。");
                 ui.post(() -> {
                     verifying = false;
                     if (closed) return;
+                    downloadId = -1;
                     pendingApk = privateApk;
                     requestInstall();
                 });
-            } catch (Exception e) { if (verified != null) verified.delete(); ui.post(() -> { verifying = false; notice("APK 校验失败：" + e.getMessage()); }); }
+            } catch (Exception e) {
+                if (verified != null) verified.delete();
+                ui.post(() -> {
+                    verifying = false;
+                    if (closed) return;
+                    clearDownloadState();
+                    notice("APK 校验失败：" + e.getMessage());
+                });
+            }
         });
     }
 
@@ -218,9 +274,10 @@ final class UpdateManager {
         if (pendingApk == null || closed) return;
         if (!activity.getPackageManager().canRequestPackageInstalls()) {
             waitingForInstallPermission = true;
+            persistPendingState();
             new ModalDialogs.Builder(activity).setTitle("允许安装更新")
                     .setMessage("安卓需要你为本 App 允许安装未知应用。授权后仍会显示系统安装确认页。")
-                    .setNegativeButton("取消", (dialog, which) -> { waitingForInstallPermission = false; pendingApk = null; })
+                    .setNegativeButton("取消", (dialog, which) -> clearPendingState())
                     .setPositiveButton("打开设置", (dialog, which) -> {
                         Intent settings = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                                 Uri.parse("package:" + activity.getPackageName()));
@@ -229,21 +286,41 @@ final class UpdateManager {
             return;
         }
         waitingForInstallPermission = false;
+        persistPendingState();
         Intent install = new Intent(Intent.ACTION_VIEW);
         install.setDataAndType(pendingApk, "application/vnd.android.package-archive");
         install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        try { activity.startActivity(install); pendingApk = null; }
+        try { activity.startActivity(install); clearPendingState(); }
         catch (Exception e) { notice("无法启动系统安装器：" + e.getMessage()); }
     }
 
     void resumePendingInstall() {
-        if (waitingForInstallPermission && pendingApk != null && activity.getPackageManager().canRequestPackageInstalls()) {
-            requestInstall();
-        }
+        if (pendingApk != null) requestInstall();
+        else if (downloadId != -1) schedulePoll(0);
     }
 
     private void finishCheck() { checking = false; if (checkingDialog != null) { checkingDialog.dismiss(); checkingDialog = null; } }
     void close() { closed = true; finishCheck(); if(updatePrompt != null) updatePrompt.dismiss(); ui.removeCallbacksAndMessages(null); }
+
+    private void clearDownloadState() {
+        downloadId = -1;
+        expectedSha256 = "";
+        expectedVersion = 0;
+        state.edit().remove(KEY_DOWNLOAD_ID).remove(KEY_EXPECTED_SHA256).remove(KEY_EXPECTED_VERSION).commit();
+    }
+
+    private void persistPendingState() {
+        SharedPreferences.Editor editor = state.edit().putBoolean(KEY_WAITING_FOR_PERMISSION, waitingForInstallPermission);
+        if (pendingApk == null) editor.remove(KEY_PENDING_APK);
+        else editor.putString(KEY_PENDING_APK, pendingApk.toString());
+        editor.commit();
+    }
+
+    private void clearPendingState() {
+        waitingForInstallPermission = false;
+        pendingApk = null;
+        state.edit().remove(KEY_PENDING_APK).remove(KEY_WAITING_FOR_PERMISSION).commit();
+    }
 
     private void notice(String message) {
         if (closed || activity.isFinishing()) return;

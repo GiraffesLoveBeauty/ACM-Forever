@@ -2,6 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
+def releaseKeyStorePath = System.getenv('ANDROID_KEYSTORE_PATH')
+
 android {
     namespace 'com.giraffeslovebeauty.acmforever'
     compileSdk 35
@@ -14,9 +16,21 @@ android {
         versionName '0.1.12'
     }
 
+    signingConfigs {
+        release {
+            if (releaseKeyStorePath) {
+                storeFile file(releaseKeyStorePath)
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
+            if (releaseKeyStorePath) signingConfig signingConfigs.release
         }
     }
 
