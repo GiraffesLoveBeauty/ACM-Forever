@@ -1,0 +1,37 @@
+.env
+.env.*
+!.env.example
+.venv/
+cache/
+outputs/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local logs, writer locks and temporary files.
+*.log
+*.log.*
+logs/
+*.lock
+*.tmp
+.tmp-*
+.override-*
+
+# Backup/recovery artifacts belong outside the repository.
+/backups/
+/backups-*/
+/restores/
+/restore-*/
+/isolated/
+/recovery/
+/tmp/
+/temp/
+
+# Third-party statements and private evaluation splits stay local until rights
+# and team sharing policy are explicitly confirmed. Mock fixtures live in tests/.
+/data/
+
+# Do not archive actual manual events or snapshots; retain the portable settings.
+/manual_labels/*.jsonl
+/manual_labels/*.json
+!/manual_labels/settings.json

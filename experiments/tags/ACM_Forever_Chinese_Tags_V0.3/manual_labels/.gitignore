@@ -1,0 +1,4 @@
+# Persistent local corrections: back up explicitly; never put these under cache/outputs.
+overrides.jsonl
+*.lock
+.override-*.tmp
