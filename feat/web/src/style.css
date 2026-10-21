@@ -368,6 +368,42 @@ html body.endfield-design .admin-welcome .industrial-hero-copy {
   max-width: 100%;
   overflow-x: auto;
 }
+.problem-database-table {
+  min-width: 1080px;
+}
+.problem-database-title {
+  min-width: 210px;
+  white-space: normal !important;
+}
+.problem-database-title small,
+.problem-database-status + small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  white-space: normal;
+}
+.problem-database-tags {
+  max-width: 200px;
+  white-space: normal !important;
+}
+.problem-database-status {
+  display: inline-flex;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--subtle-bg);
+  color: var(--muted);
+  font-size: 10px;
+}
+.problem-database-status.ready {
+  border-color: color-mix(in srgb, var(--brand-strong) 30%, var(--line));
+  color: var(--brand-strong);
+}
+.problem-database-status.failed {
+  border-color: color-mix(in srgb, #b42318 30%, var(--line));
+  color: #b42318;
+}
 .table-wrap table {
   min-width: 580px;
 }
