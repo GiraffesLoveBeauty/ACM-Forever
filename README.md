@@ -22,3 +22,4 @@
 - [api.md（API 调用指南）](docs/api.md)
 - [README.md（Vue 前端开发与构建）](feat/web/README.md)
 - [crawler-samples.md（采集命令、JSON 字段与 SQLite 入库）](docs/crawler-samples.md)
+- [issue-52-member-training.md（普通成员训练闭环实施与验收）](docs/issue-52-member-training.md)

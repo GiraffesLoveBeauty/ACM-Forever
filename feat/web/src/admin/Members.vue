@@ -51,10 +51,50 @@ async function load() {
   }
 }
 async function save() {
+  const bindings = ['cf_handle', 'luogu_id', 'nowcoder_id', 'atcoder_handle', 'cjlu_username'];
+  const changed = bindings.filter(
+    (key) =>
+      String(form[key] || '')
+        .trim()
+        .toLowerCase() !==
+      String(detail.value.user[key] || '')
+        .trim()
+        .toLowerCase(),
+  );
+  if (
+    changed.length &&
+    !confirm(
+      '确认修改该成员的 OJ 绑定？受影响平台的 AC、提交证据与同步状态将被清理，进行中的挑战将结束；收藏与历史资料保留。\n' +
+        changed
+          .map(
+            (key) =>
+              `${fields[key]}：${detail.value.user[key] || '未绑定'} → ${form[key] || '解绑'}`,
+          )
+          .join('\n'),
+    )
+  )
+    return;
+  const expected_bindings = Object.fromEntries(
+    bindings.map((key) => [key, detail.value.user[key] || '']),
+  );
+  const binding_versions = Object.fromEntries(
+    ['codeforces', 'luogu', 'nowcoder', 'atcoder', 'cjlu'].map((platform) => [
+      platform,
+      detail.value.user[
+        platform === 'codeforces' ? 'cf_binding_version' : platform + '_binding_version'
+      ] || 0,
+    ]),
+  );
   try {
     const result = await request('/user', {
       method: 'PUT',
-      body: { qq_id: route.query.qq_id, ...form },
+      body: {
+        qq_id: route.query.qq_id,
+        ...form,
+        confirm_bindings: changed.length > 0,
+        expected_bindings,
+        binding_versions,
+      },
     });
     notify(result.message || '成员资料已保存');
     await load();

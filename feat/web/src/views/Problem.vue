@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router';
 import { auth, date, useRequests } from '../lib/api.js';
 import { originalProblemUrl, renderProblemContent } from '../lib/problem-content.js';
 import PdfPreview from '../components/PdfPreview.vue';
+import { problemReturn } from '../lib/member-problems.js';
 
 const route = useRoute(),
   request = useRequests();
@@ -11,9 +12,7 @@ const detail = ref(null),
   busy = ref(false),
   error = ref(''),
   copyMessage = ref('');
-const back = computed(() =>
-  ['admin', 'root'].includes(auth.role) ? '/admin.html?section=problems' : '/problem-bank.html',
-);
+const back = computed(() => problemReturn(route.query.from, ['admin', 'root'].includes(auth.role)));
 const original = computed(() => originalProblemUrl(detail.value?.problem_url));
 const samples = computed(() => (Array.isArray(detail.value?.samples) ? detail.value.samples : []));
 const pdf = computed(() => detail.value?.statement_format === 'pdf');
@@ -75,7 +74,9 @@ watch(() => [route.query.platform, route.query.problem_id], load, { immediate: t
 </script>
 <template>
   <main class="community-main problem-page">
-    <RouterLink class="forum-back-link" :to="back">← 返回题库</RouterLink>
+    <RouterLink class="forum-back-link" :to="back"
+      >← {{ back === '/home.html' ? '返回个人中心' : '返回题库' }}</RouterLink
+    >
     <h1>{{ detail?.problem_name || route.query.problem_id || '题目详情' }}</h1>
     <div v-if="detail" class="problem-overview">
       <div id="problem-meta" class="chips">

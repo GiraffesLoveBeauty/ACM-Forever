@@ -142,6 +142,19 @@ async def connect_db(db_path):
         await db.execute("ALTER TABLE users ADD COLUMN avatar_url TEXT")
     if "cf_binding_version" not in user_cols:
         await db.execute("ALTER TABLE users ADD COLUMN cf_binding_version INTEGER NOT NULL DEFAULT 0")
+    for platform in ("luogu", "nowcoder", "atcoder", "cjlu"):
+        version = platform + "_binding_version"
+        if version not in user_cols:
+            await db.execute(f"ALTER TABLE users ADD COLUMN {version} INTEGER NOT NULL DEFAULT 0")
+    async with db.execute("PRAGMA table_info(account_bind_verifications)") as cursor:
+        verification_cols = {row["name"] for row in await cursor.fetchall()}
+    for name, definition in (("verification_id", "TEXT"), ("expected_binding", "TEXT"), ("binding_version", "INTEGER"), ("validated_at", "INTEGER NOT NULL DEFAULT 0")):
+        if name not in verification_cols:
+            await db.execute(f"ALTER TABLE account_bind_verifications ADD COLUMN {name} {definition}")
+    await db.execute("CREATE TABLE IF NOT EXISTS binding_rate_limits(qq_id TEXT NOT NULL,platform TEXT NOT NULL,action TEXT NOT NULL,window_start INTEGER NOT NULL,attempts INTEGER NOT NULL,last_at INTEGER NOT NULL,PRIMARY KEY(qq_id,platform,action))")
+    await db.execute("CREATE TABLE IF NOT EXISTS binding_audit(id INTEGER PRIMARY KEY AUTOINCREMENT,actor_qq_id TEXT NOT NULL,target_qq_id TEXT NOT NULL,platform TEXT NOT NULL,action TEXT NOT NULL,result TEXT NOT NULL,created_at INTEGER NOT NULL)")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_binding_audit_member ON binding_audit(target_qq_id,created_at)")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_submissions_member_platform_time ON submissions(user_qq_id,platform,submit_time DESC,problem_id)")
     # 老库迁移：补充牛客 / AtCoder / 校OJ 列
     async with db.execute("PRAGMA table_info(users)") as cursor:
         user_cols = {row["name"] for row in await cursor.fetchall()}
@@ -261,6 +274,17 @@ async def connect_db(db_path):
         "DELETE FROM user_platform_sync_state WHERE user_qq_id=NEW.qq_id AND platform='codeforces'; "
         "UPDATE random_challenges SET status='abandoned' WHERE qq_id=NEW.qq_id AND platform='codeforces' AND status='active'; END"
     )
+    for platform, field in (("codeforces", "cf_handle"), ("luogu", "luogu_id"), ("nowcoder", "nowcoder_id"), ("atcoder", "atcoder_handle"), ("cjlu", "cjlu_username")):
+        # Generations live on users, so deleting sync state cannot reset an ABA rebind.
+        cleanup = "" if platform == "codeforces" else (
+            f"UPDATE users SET {platform}_binding_version=OLD.{platform}_binding_version+1,last_sync_timestamp=0 WHERE qq_id=NEW.qq_id; "
+            f"DELETE FROM submissions WHERE user_qq_id=NEW.qq_id AND platform='{platform}'; "
+            f"DELETE FROM submission_attempts WHERE owner_qq_id=NEW.qq_id AND platform='{platform}'; "
+            f"DELETE FROM user_platform_sync_state WHERE user_qq_id=NEW.qq_id AND platform='{platform}'; "
+            f"UPDATE random_challenges SET status='abandoned' WHERE qq_id=NEW.qq_id AND platform='{platform}' AND status='active'; "
+        )
+        alias = "cf" if platform == "codeforces" else platform
+        await db.execute(f"CREATE TRIGGER IF NOT EXISTS users_binding_reset_{platform} AFTER UPDATE OF {field} ON users WHEN LOWER(TRIM(COALESCE(NEW.{field},'')))<>LOWER(TRIM(COALESCE(OLD.{field},''))) BEGIN " + cleanup + f"DELETE FROM account_bind_verifications WHERE qq_id=NEW.qq_id AND platform IN ('{platform}','{alias}'); END")
     for platform, field in (("codeforces", "cf_handle"), ("luogu", "luogu_id"), ("nowcoder", "nowcoder_id"), ("atcoder", "atcoder_handle"), ("cjlu", "cjlu_username")):
         await db.execute(
             "INSERT OR IGNORE INTO user_platform_sync_state "

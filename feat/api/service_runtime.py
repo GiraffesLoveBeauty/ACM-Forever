@@ -8,7 +8,8 @@ import aiohttp
 import aiosqlite
 
 from .acm_api.constants import PLATFORM_SYNC_CONCURRENCY
-from .acm_api.database import connect_db
+from .acm_api.database import connect_db, isolated_connection
+from .acm_api.binding_service import platform_spec
 from .acm_api.problem_sync import ProblemSync
 from .acm_api.sync_service import SyncMixin
 
@@ -52,11 +53,20 @@ class SyncEngine(SyncMixin):
         task["started_at"] = int(time.time())
         results = {}
         try:
+            async with isolated_connection(self.db) as connection:
+                async with connection.execute("SELECT * FROM users WHERE qq_id=?", (str(qq_id),)) as cursor:
+                    user = await cursor.fetchone()
+            task["bindings"] = {}
+            if user:
+                for platform in platforms:
+                    _, field, version = platform_spec(platform)
+                    task["bindings"][platform] = {"account": user[field] or "", "version": int(user[version])}
             async with self._sync_cycle_lock:
                 for platform in platforms:
                     try:
                         results[platform] = await self.sync_single_platform_for_days(
-                            qq_id, platform, days, incremental=incremental
+                            qq_id, platform, days, incremental=incremental,
+                            expected_binding=task["bindings"].get(platform),
                         )
                     except asyncio.CancelledError:
                         raise
@@ -204,7 +214,7 @@ class WebTaskManager:
         keys = (
             "id", "kind", "qq_id", "platform", "days", "status",
             "started_at", "finished_at", "result",
-            "progress",
+            "progress", "bindings",
         )
         return [{key: item.get(key) for key in keys} for item in self.tasks.values()]
 
