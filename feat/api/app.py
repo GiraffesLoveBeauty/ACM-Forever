@@ -246,7 +246,7 @@ def create_app():
             if not identity:
                 return redirect("/login.html?" + urlencode({"next": target}))
             if identity["role"] not in {"admin", "root"}:
-                abort(403)
+                return ('<html lang="zh-CN"><meta charset="utf-8"><title>无权访问</title><h1>无权访问</h1><p>此页面仅限管理员。</p><a href="/home.html">返回个人中心</a></html>', 403)
         elif filename == "change-password.html":
             if not identity:
                 return redirect("/login.html?" + urlencode({"next": target}))
@@ -315,9 +315,9 @@ _PUBLIC_PAGES = {
     "change-password.html", "home.html", "admin.html",
     "leaderboard.html", "challenge.html", "reviews.html", "problem-bank.html", "problem.html",
     "submissions.html", "workspace.html", "contest-review.html", "member.html", "compose.html",
-    "tasks.html", "settings.html", "cf-practice.html",
+    "tasks.html", "settings.html", "cf-practice.html", "auth-unavailable.html", "forbidden.html",
 }
-_ANONYMOUS_PAGES = {"index.html", "login.html", "post.html", "leaderboard.html"}
+_ANONYMOUS_PAGES = {"index.html", "login.html", "post.html", "leaderboard.html", "auth-unavailable.html", "forbidden.html"}
 _ADMIN_PAGES = {"admin.html", "member.html", "tasks.html", "settings.html", "forum-moderation.html", "cf-practice.html"}
 _RETIRED_PAGES = {"reviews.html", "submissions.html", "workspace.html"}
 _LEGACY_ADMIN_PAGES = {"member.html": "members", "challenge.html": "training", "problem-bank.html": "problems", "contest-review.html": "contests", "tasks.html": "tasks", "settings.html": "settings", "forum-moderation.html": "moderation", "cf-practice.html": "cf-practice"}

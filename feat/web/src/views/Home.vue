@@ -3,8 +3,12 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import { useRequests, auth, avatar, external, date, showError } from '../lib/api.js';
 import { compressAvatar } from '../lib/avatar.js';
 import CommunityArt from '../components/CommunityArt.vue';
+import OjBindings from '../components/OjBindings.vue';
+import { problemLink } from '../lib/member-problems.js';
 const request = useRequests(),
   profile = ref(),
+  profileBusy = ref(true),
+  profileError = ref(''),
   tab = ref('posts'),
   posts = ref([]),
   busy = ref(false),
@@ -12,10 +16,19 @@ const request = useRequests(),
   input = ref(),
   preview = ref(''),
   note = ref('选择图片后会自动压缩并上传（最大 2 MB）');
+let syncTimer,
+  profileRevision = 0;
 let avatarRevision = 0,
   disposed = false;
 const stats = computed(() => {
-  const counts = profile.value?.platform_counts || {};
+  if (!profile.value || profileError.value)
+    return [
+      ['—', '累计 AC', '✦'],
+      ['—', 'Codeforces', 'CF'],
+      ['—', 'AtCoder', 'At'],
+      ['—', '其他平台', '＋'],
+    ];
+  const counts = profile.value.platform_counts || {};
   return [
     [profile.value?.total_count || 0, '累计 AC', '✦'],
     [counts.codeforces || 0, 'Codeforces', 'CF'],
@@ -34,13 +47,26 @@ function clearPreview() {
   preview.value = '';
 }
 async function load() {
+  const operation = ++profileRevision;
+  clearTimeout(syncTimer);
+  profileBusy.value = true;
+  profileError.value = '';
   const version = avatarRevision;
   try {
     const data = await request('/me/profile', {}, 'profile');
+    if (operation !== profileRevision) return;
     if (version !== avatarRevision) data.user.avatar_url = auth.avatar_url;
     profile.value = data;
+    clearTimeout(syncTimer);
+    if (
+      !disposed &&
+      data.bindings?.some((binding) => ['queued', 'running'].includes(binding.sync_status))
+    )
+      syncTimer = setTimeout(load, 3000);
   } catch (e) {
-    showError(e);
+    if (operation === profileRevision && e.name !== 'AbortError') profileError.value = e.message;
+  } finally {
+    if (operation === profileRevision) profileBusy.value = false;
   }
 }
 async function content() {
@@ -51,7 +77,8 @@ async function content() {
   }
 }
 async function deletePost(item) {
-  if (deletingPostId.value !== null || !confirm(`确定删除「${item.title}」吗？删除后无法恢复。`)) return;
+  if (deletingPostId.value !== null || !confirm(`确定删除「${item.title}」吗？删除后无法恢复。`))
+    return;
   deletingPostId.value = item.id;
   try {
     await request(`/forum/posts/${item.id}`, { method: 'DELETE' });
@@ -117,6 +144,7 @@ watch(tab, content);
 onMounted(() => Promise.allSettled([load(), content()]));
 onBeforeUnmount(() => {
   disposed = true;
+  clearTimeout(syncTimer);
   clearPreview();
 });
 </script>
@@ -130,6 +158,11 @@ onBeforeUnmount(() => {
       <CommunityArt scene="journey" /><RouterLink class="personal-rank-link" to="/leaderboard.html"
         ><span>社区排行榜</span><b>查看大家的进度　↗</b></RouterLink
       >
+    </section>
+    <p v-if="profileBusy" role="status">正在加载个人资料…</p>
+    <section v-else-if="profileError" class="card" role="alert">
+      <p>个人资料加载失败：{{ profileError }}</p>
+      <button class="btn" @click="load">重试</button>
     </section>
     <section class="profile-stat-grid grid kpis">
       <div v-for="([count, label, icon], i) in stats" :key="i" class="card profile-stat-card">
@@ -190,15 +223,22 @@ onBeforeUnmount(() => {
             class="binding-row"
           >
             <span>{{ label }}</span
-            ><b>{{ profile?.user[key] || '未设置' }}</b>
+            ><b>{{
+              profileBusy ? '加载中…' : profileError ? '暂不可用' : profile?.user[key] || '未设置'
+            }}</b>
           </div>
         </div>
       </section>
       <section class="community-panel recent-panel">
-        <div class="panel-heading"><h2>最近 AC</h2></div>
+        <div class="panel-heading">
+          <h2>最近 AC</h2>
+          <RouterLink class="panel-text-link" to="/problem-bank.html?scope=solved"
+            >查看全部已 AC 题目 ↗</RouterLink
+          >
+        </div>
         <div class="list">
           <div
-            v-for="(item, i) in profile?.recent_ac?.slice(0, 6) || []"
+            v-for="(item, i) in (profileError ? [] : profile?.recent_ac?.slice(0, 6)) || []"
             :key="i"
             class="recent-ac-row"
           >
@@ -209,20 +249,27 @@ onBeforeUnmount(() => {
                 >{{ item.platform }} · {{ item.problem_rating || '难度未知' }} ·
                 {{ date(item.submit_time) }}</small
               ></span
-            ><a
-              v-if="item.problem_url"
+            ><RouterLink
               class="recent-ac-open"
-              :href="external(item.problem_url)"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="打开题目"
-              >↗</a
+              :to="problemLink(item, '/home.html')"
+              aria-label="查看站内题面"
+              >查看题面 ↗</RouterLink
             >
           </div>
-          <p v-if="!profile?.recent_ac?.length" class="empty">暂无 AC 记录</p>
+          <p
+            v-if="profile && !profileBusy && !profileError && !profile.recent_ac?.length"
+            class="empty"
+          >
+            暂未同步到已 AC 题目，请检查 OJ 绑定与同步状态。
+          </p>
         </div>
       </section>
     </div>
+    <OjBindings
+      v-if="profile && !profileError"
+      :bindings="profile.bindings || []"
+      @refresh="load"
+    />
     <section class="community-panel personal-community-panel">
       <div class="panel-heading">
         <h2>我的社区内容</h2>
@@ -240,11 +287,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
       <div class="personal-content-list">
-        <article
-          v-for="item in posts"
-          :key="item.id"
-          class="personal-community-item"
-        >
+        <article v-for="item in posts" :key="item.id" class="personal-community-item">
           <RouterLink
             v-if="tab === 'bookmarks' || item.status === 'published'"
             class="personal-community-link"
@@ -268,7 +311,9 @@ onBeforeUnmount(() => {
               ><b>{{ item.title }}</b
               ><small
                 >{{ item.category_name }} ·
-                {{ { pending: '待审核', rejected: '未通过' }[item.status] || item.author_name }}</small
+                {{
+                  { pending: '待审核', rejected: '未通过' }[item.status] || item.author_name
+                }}</small
               ></span
             >
           </div>
@@ -277,7 +322,9 @@ onBeforeUnmount(() => {
             class="btn personal-community-delete"
             :disabled="deletingPostId !== null"
             @click="deletePost(item)"
-          >{{ deletingPostId === item.id ? '删除中…' : '删除' }}</button>
+          >
+            {{ deletingPostId === item.id ? '删除中…' : '删除' }}
+          </button>
         </article>
         <p v-if="!posts.length" class="empty">这里还没有内容，去论坛看看吧。</p>
       </div>

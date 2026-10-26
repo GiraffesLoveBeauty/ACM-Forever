@@ -33,6 +33,8 @@ from .cf_client import cf_request
 from .problem_sync import sync_options
 from .problem_bank import problem_bank_status
 from .database import connect_db
+from . import binding_service
+from .binding_service import clear_platform_records as _clear_platform_records
 
 LOG = logging.getLogger("acm_api")
 api = Blueprint("api", __name__)
@@ -203,25 +205,20 @@ def _changed_account_platforms(account_values, existing=None):
     return changed
 
 
-async def _clear_platform_records(db, qq_id, platform):
-    """清理旧账号证据和同步游标，历史学习资料保留存档。"""
-    tables = [
-        ("submissions", "user_qq_id"),
-        ("submission_attempts", "owner_qq_id"),
-    ]
-    for table, owner_field in tables:
-        await db.execute(
-            f"DELETE FROM {table} WHERE {owner_field}=? AND platform=?", (qq_id, platform)
-        )
-    await db.execute(
-        "UPDATE random_challenges SET status='abandoned' "
-        "WHERE qq_id=? AND platform=? AND status='active'",
-        (qq_id, platform),
-    )
-    await db.execute(
-        "DELETE FROM user_platform_sync_state WHERE user_qq_id=? AND platform=?",
-        (qq_id, platform),
-    )
+def _admin_binding_confirmation(data, existing, changed):
+    if not changed:
+        return None
+    expected = data.get("expected_bindings")
+    versions = data.get("binding_versions")
+    if data.get("confirm_bindings") is not True or not isinstance(expected, dict) or not isinstance(versions, dict):
+        return jsonify({"success": False, "code": "confirmation_required", "message": "修改 OJ 绑定前请确认数据清理影响，并提交当前绑定及版本。"}), 400
+    for platform, _, _ in changed:
+        _, field, version = binding_service.platform_spec(platform)
+        original = (existing[field] or "").strip() if existing else ""
+        generation = int(existing[version]) if existing else 0
+        if expected.get(field) != original or type(versions.get(platform)) is not int or versions[platform] != generation:
+            return jsonify({"success": False, "code": "binding_changed", "message": "成员绑定已变化，请刷新资料后重新确认。"}), 409
+    return None
 
 
 async def get_db():
@@ -942,6 +939,7 @@ async def api_register_user():
         name = _field(data, "name", 100)
         if not _valid_qq(qq_id_str) or not name:
             return jsonify({"success": False, "message": "QQ号必须为4-12位数字，用户名不能为空。"}), 400
+        await db.execute("BEGIN IMMEDIATE")
         async with db.execute("SELECT * FROM users WHERE qq_id = ?", (qq_id_str,)) as cursor:
             existing_user = await cursor.fetchone()
         account_values = {
@@ -949,6 +947,13 @@ async def api_register_user():
             for _, field, _ in _ACCOUNT_FIELDS
         }
         changed_platforms = _changed_account_platforms(account_values, existing_user)
+        confirmation_error = _admin_binding_confirmation(data, existing_user, changed_platforms)
+        if confirmation_error:
+            await db.rollback()
+            for platform, _, _ in changed_platforms:
+                await binding_service.audit(db, session.get("webui_qq_id") or "legacy-admin", qq_id_str, platform, "admin_binding_update", "binding_changed" if confirmation_error[1] == 409 else "confirmation_required")
+            await db.commit()
+            return confirmation_error
         await db.execute(
             "INSERT INTO users (qq_id, name, cf_handle, luogu_id, nowcoder_id, atcoder_handle, cjlu_username, status, school, last_sync_timestamp) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
@@ -963,6 +968,7 @@ async def api_register_user():
         )
         for platform, _, _ in changed_platforms:
             await _clear_platform_records(db, qq_id_str, platform)
+            await binding_service.audit(db, session.get("webui_qq_id") or "legacy-admin", qq_id_str, platform, "admin_binding_update")
         await db.commit()
         message = "注册/更新成功！"
         task_id = None
@@ -1207,16 +1213,24 @@ async def api_update_user():
             return jsonify({"success": False, "message": "QQ号必须为4-12位数字。"}), 400
         values = [_field(data, key, 64 if key == "status" else 128) for key in ("name", "real_name", "cf_handle", "luogu_id", "nowcoder_id", "atcoder_handle", "cjlu_username", "status", "school")]
         if not values[0]: values[0] = values[2] or qq_id
+        await db.execute("BEGIN IMMEDIATE")
         async with db.execute("SELECT * FROM users WHERE qq_id=?", (qq_id,)) as cursor:
             existing = await cursor.fetchone()
             if not existing: return jsonify({"success": False, "message": "用户不存在，请先注册。"}), 404
         if "real_name" not in data:
             values[1] = existing["real_name"]
         account_values = {
-            field: values[index]
+            field: values[index] if field in data else existing[field]
             for index, (_, field, _) in enumerate(_ACCOUNT_FIELDS, start=2)
         }
         changed_platforms = _changed_account_platforms(account_values, existing)
+        confirmation_error = _admin_binding_confirmation(data, existing, changed_platforms)
+        if confirmation_error:
+            await db.rollback()
+            for platform, _, _ in changed_platforms:
+                await binding_service.audit(db, session.get("webui_qq_id") or "legacy-admin", qq_id, platform, "admin_binding_update", "binding_changed" if confirmation_error[1] == 409 else "confirmation_required")
+            await db.commit()
+            return confirmation_error
         values[2] = account_values["cf_handle"] or ""
         values[3] = account_values["luogu_id"] or ""
         values[4] = account_values["nowcoder_id"] or ""
@@ -1225,6 +1239,7 @@ async def api_update_user():
         await db.execute("UPDATE users SET name=?, real_name=?, cf_handle=?, luogu_id=?, nowcoder_id=?, atcoder_handle=?, cjlu_username=?, status=?, school=? WHERE qq_id=?", tuple(value or None for value in values) + (qq_id,))
         for platform, _, _ in changed_platforms:
             await _clear_platform_records(db, qq_id, platform)
+            await binding_service.audit(db, session.get("webui_qq_id") or "legacy-admin", qq_id, platform, "admin_binding_update")
         await db.commit()
         sync_platforms = [platform for platform, _, has_account in changed_platforms if has_account]
         task_id = None
@@ -1749,6 +1764,7 @@ async def api_me_profile():
             "platform_counts": platform_counts,
             "total_count": total,
             "recent_ac": recent_ac,
+            "bindings": await binding_service.bindings_summary(db, qq_id),
         })
     finally:
         await db.close()
@@ -1927,8 +1943,14 @@ async def api_me_problems():
     state = _field(request.args, "state", 20)
     db = await get_db()
     try:
+        scope = request.args.get("scope", "all")
+        if scope not in {"all", "solved"}:
+            return jsonify({"success": False, "message": "无效的题目范围。"}), 400
         query = _PROBLEM_QUERY
         params = [qq_id]
+        if scope == "solved":
+            query = "SELECT p.*,ac.ac_at FROM (" + query + ") p JOIN (SELECT platform,problem_id,MAX(submit_time) AS ac_at FROM submissions WHERE user_qq_id=? GROUP BY platform,problem_id) ac ON ac.platform=p.platform AND ac.problem_id=p.problem_id WHERE 1=1"
+            params.append(qq_id)
         if platform:
             query += " AND p.platform=?"
             params.append(platform)
@@ -1936,18 +1958,22 @@ async def api_me_problems():
             query += " AND (p.problem_name LIKE ? OR p.problem_id LIKE ? OR COALESCE(p.tags,'') LIKE ?)"
             params.extend([f"%{tag}%", f"%{tag}%", f"%{tag}%"])
         if state == "favorite":
-            query += " AND COALESCE(s.is_favorite,0)=1"
+            query += " AND p.is_favorite=1" if scope == "solved" else " AND COALESCE(s.is_favorite,0)=1"
         elif state == "inbox":
-            query += " AND COALESCE(s.state,'inbox')='inbox'"
+            if scope == "solved":
+                query += " AND NOT EXISTS(SELECT 1 FROM user_problem_state prior WHERE prior.owner_qq_id=? AND prior.platform=p.platform AND prior.problem_id=p.problem_id AND COALESCE(prior.state,'inbox')<>'inbox')"
+                params.append(qq_id)
+            else:
+                query += " AND COALESCE(s.state,'inbox')='inbox'"
         count_query = "SELECT COUNT(*) FROM (" + query + ") filtered"
         async with db.execute(count_query, tuple(params)) as cursor:
             total = int((await cursor.fetchone())[0])
         try:
             page = max(1, int(request.args.get("page", 1)))
-            size = max(1, min(500, int(request.args.get("page_size", 500))))
+            size = max(1, min(100 if scope == "solved" else 500, int(request.args.get("page_size", 20 if scope == "solved" else 500))))
         except (TypeError, ValueError):
             return jsonify({"success": False, "message": "分页参数必须为整数。"}), 400
-        query += " ORDER BY CAST(p.problem_rating AS INTEGER),p.platform,p.problem_id LIMIT ? OFFSET ?"
+        query += (" ORDER BY ac_at DESC,p.platform,p.problem_id" if scope == "solved" else " ORDER BY CAST(p.problem_rating AS INTEGER),p.platform,p.problem_id") + " LIMIT ? OFFSET ?"
         async with db.execute(query, tuple(params + [size, (page - 1) * size])) as cursor:
             items = [dict(row) for row in await cursor.fetchall()]
         return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": size})
@@ -2226,3 +2252,75 @@ async def api_export_leaderboard():
         return response
     finally:
         await db.close()
+
+
+async def _member_binding_operation(platform, action):
+    db = await get_db()
+    qq_id = _me_qq_id()
+    try:
+        data = await request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({"success": False, "message": "请求必须是 JSON 对象。"}), 400
+        canonical, _, _ = binding_service.platform_spec(platform)
+        if action == "verification":
+            result = await binding_service.create_verification(db, qq_id, canonical, data)
+        elif action == "confirm":
+            result = await binding_service.confirm_verification(db, qq_id, canonical, data)
+        elif action == "unbind":
+            result = await binding_service.unbind(db, qq_id, canonical, data)
+        else:
+            await binding_service.reserve(db, qq_id, canonical, "sync")
+            account, _ = await binding_service.snapshot(db, qq_id, canonical)
+            if not account:
+                raise binding_service.BindingError("请先绑定平台账号。", "not_bound", 400)
+            result = {"success": True, "message": ""}
+        if action in {"confirm", "sync"}:
+            sync_identity = await binding_service.snapshot(db, qq_id, canonical)
+            submitter = current_app.config.get("PLUGIN_CONFIG", {}).get("_account_sync_submitter")
+            try:
+                task = submitter(qq_id, [canonical]) if callable(submitter) else None
+            except Exception:
+                LOG.exception("绑定已保存，但同步调度失败")
+                task = None
+            if not task:
+                await binding_service.mark_dispatch_failure(db, qq_id, canonical, sync_identity)
+            result.update(task_id=task["id"] if task else None, sync_status="queued" if task else "failed")
+            result["message"] = result.get("message", "") + ("同步已排队。" if task else "同步未能排队，可稍后重试；已保存的绑定与数据保持有效。")
+        return jsonify(result), (202 if result.get("task_id") else 200)
+    except binding_service.BindingError as error:
+        await db.rollback()
+        await binding_service.audit(db, qq_id, qq_id, str(platform)[:24], action, error.code)
+        await db.commit()
+        return jsonify({"success": False, "code": error.code, "message": str(error)}), error.status
+    except (aiohttp.ClientError, TimeoutError, binding_service.CFUnavailable):
+        await db.rollback()
+        return jsonify({"success": False, "code": "upstream_unavailable", "message": "平台资料暂时不可用，请稍后重试。"}), 503
+    except sqlite3.IntegrityError:
+        await db.rollback()
+        return jsonify({"success": False, "code": "account_occupied", "message": "该 OJ 账号已被占用，请刷新后重新验证。"}), 409
+    finally:
+        await db.close()
+
+
+@api.post("/me/bindings/<platform>/verification")
+@member_required
+async def api_me_binding_verification(platform):
+    return await _member_binding_operation(platform, "verification")
+
+
+@api.post("/me/bindings/<platform>/confirm")
+@member_required
+async def api_me_binding_confirm(platform):
+    return await _member_binding_operation(platform, "confirm")
+
+
+@api.delete("/me/bindings/<platform>")
+@member_required
+async def api_me_binding_delete(platform):
+    return await _member_binding_operation(platform, "unbind")
+
+
+@api.post("/me/bindings/<platform>/sync")
+@member_required
+async def api_me_binding_sync(platform):
+    return await _member_binding_operation(platform, "sync")

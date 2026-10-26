@@ -41,6 +41,16 @@ const router = createRouter({
       meta: { title: '发布话题' },
     },
     {
+      path: '/auth-unavailable.html',
+      component: () => import('./views/Notice.vue'),
+      meta: { public: true, title: '暂时无法确认登录状态', authError: true },
+    },
+    {
+      path: '/forbidden.html',
+      component: () => import('./views/Notice.vue'),
+      meta: { public: true, title: '无权访问', forbidden: true },
+    },
+    {
       path: '/home.html',
       component: () => import('./views/Home.vue'),
       meta: { title: '个人中心', body: 'personal-page' },
@@ -72,11 +82,14 @@ const router = createRouter({
     },
     ...Object.entries(legacy).map(([path, section]) => ({
       path,
-      component: () => import('./views/MemberTool.vue'),
+      component:
+        section === 'problems'
+          ? () => import('./views/MemberProblems.vue')
+          : () => import('./views/MemberTool.vue'),
       meta: {
         section,
         admin: !['training', 'problems', 'contests'].includes(section),
-        title: sections[section],
+        title: section === 'problems' ? '题库' : sections[section],
       },
     })),
     ...['reviews', 'submissions', 'workspace'].map((page) => ({
@@ -98,7 +111,7 @@ router.beforeEach(async (to) => {
   try {
     await initializeAuth();
   } catch {
-    if (!to.meta.public) return false;
+    if (!to.meta.public) return { path: '/auth-unavailable.html', query: { next: to.fullPath } };
   }
   const target = to.fullPath;
   if (
@@ -114,7 +127,7 @@ router.beforeEach(async (to) => {
     const next = safeNext(to.query.next);
     return next.split(/[?#]/)[0] === '/login.html' ? '/index.html' : next;
   }
-  if (to.meta.admin && !['admin', 'root'].includes(auth.role)) return { path: '/home.html' };
+  if (to.meta.admin && !['admin', 'root'].includes(auth.role)) return { path: '/forbidden.html' };
   if (to.meta.section && ['admin', 'root'].includes(auth.role))
     return { path: '/admin.html', query: { ...to.query, section: to.meta.section } };
   if (to.path === '/admin.html') {
