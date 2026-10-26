@@ -133,6 +133,40 @@ response.raise_for_status()
 
 赛事状态统一为 `todo/unsolved/queued/solved/reviewed/ignored`，其中 `reviewed` 可正常保存，`queued` 仅表示待补题状态，不创建复习或计划队列。`rating` 接受整数或 null。任何赛事 `note_md` 写请求均返回 410。所有写请求继续执行 CSRF 校验，模块路由不是权限边界。
 
+## 普通成员训练闭环
+
+成员入口为 `/home.html`、`/problem-bank.html` 和 `/problem.html`。`/problem-bank.html?scope=solved` 展示本人 AC，默认仍为全站目录；管理员使用旧题库地址时仍进入统一后台。认证初始化失败进入 `/auth-unavailable.html?next=...`，可以重试原目标；普通成员访问后台，服务端直链返回 403，客户端导航提供无权限页面。
+
+### 本人 AC 与站内题面
+
+`GET /api/me/problems?scope=solved` 从会话读取 QQ，客户端的 `qq_id/owner_qq_id` 不改变归属。以平台和题号去重，返回 `ac_at`（Unix 秒），按最近 AC 时间倒序，再按平台、题号稳定排序。`platform/tag/state=favorite/page/page_size` 与总数使用相同条件；`tag` 同时匹配题名、题号和标签。本人范围默认每页 20、上限 100，默认全站目录仍为 500、上限 500。返回 `items/total/returned/page/page_size`；无效 `scope` 或非整数分页参数返回 400。
+
+个人中心的最近 AC 和成员题库均打开站内题面。`from` 仅接受 `/home.html` 或携带允许筛选参数的 `/problem-bank.html`；外部网址、管理地址和身份参数会被排除。详情及 PDF 读取复用 `/api/me/problems/<platform>/<problem_id>` 和后缀 `/statement.pdf`，不会触发采集。
+
+### 绑定与同步接口
+
+所有接口均要求完成首次改密的 Web 会话，写入必须带 `X-CSRF-Token`，操作对象仅为会话本人。`cf` 与 `codeforces` 在服务端统一为 `codeforces`。
+
+| 接口 | 请求 / 返回 |
+| --- | --- |
+| `GET /api/me/profile` | 新增 `bindings` 数组，每个平台包含 `platform/label/account/binding_status/self_service/sync_status/last_success_at/message/verification`；`verification` 是本人仍有效的验证信息或 null |
+| `POST /api/me/bindings/<platform>/verification` | JSON `account`；返回 `verification_id/account/code/expires_at/instructions`。验证码 10 分钟有效，重新申请替换旧验证 |
+| `POST /api/me/bindings/<platform>/confirm` | JSON `verification_id`；改绑还须提交 `password`、`confirmed:true`、`current_account`；服务端重新读取公开资料核验，成功消费验证并提交绑定 |
+| `DELETE /api/me/bindings/<platform>` | JSON `password`、`confirmed:true`、`current_account`；确认当前 Web 密码及目标账号后解绑 |
+| `POST /api/me/bindings/<platform>/sync` | 无需指定成员；仅调度本人已绑定的平台；同步创建成功返回 202 和 `task_id` |
+
+Web 归属验证当前实现 Codeforces：账号存在性使用已有验证器，归属只检查目标 `user.info` 的 `firstName/lastName/organization`。用户将验证码写入公开资料，不提供 OJ 密码。其他平台 `self_service=false`，保留查看、同步、密码确认后的解绑和管理员代操作；真实平台归属验证联测前不开放自助绑定 / 改绑。此次自动测试与浏览器测试使用模拟 CF 资料，真实账号的正向归属验证仍待联测。
+
+`binding_status` 为 `unbound/pending/bound`，同步为 `never/queued/running/success/failed`。`last_success_at` 为 Unix 秒，0 代表没有成功记录。`verification` 含 `account/verification_id/code/expires_at`，不能将该资料发给其他成员。服务重启后丢失的运行中任务显示失败并可重试；旧账号的任务不会使新绑定显示同步中。绑定提交与同步调度分别反馈：排队失败时响应仍表明绑定成功，`sync_status=failed`，刷新后仍能看到失败状态。
+
+限频按成员、平台、动作持久保存：申请验证码间隔 30 秒，确认与解绑间隔 3 秒，同步间隔 60 秒，每个动作最多 15 次 / 15 分钟；上游核验并发最多 4。常见错误为 `confirmation_required`（400）、`invalid_password`（403）、`ownership_unverified`（400）、`verification_expired/verification_changed/binding_changed/account_occupied`（409）、`rate_limited`（429）、`upstream_unavailable/verification_unavailable`（503）。仅浏览器提交“已验证”不会完成绑定。
+
+成功解绑 / 改绑在同一事务清理该成员该平台的 AC、提交证据、同步状态并结束活动挑战；收藏、历史笔记、复习与计划存档保留。每个平台使用持久绑定版本拦截旧同步批次，包括解绑后重绑同名账号的情况。
+
+管理员 `PUT /api/user`、`POST /api/register` 改动 OJ 绑定时，须附 `confirm_bindings:true`、`expected_bindings`（按字段名，如 `cf_handle`）和 `binding_versions`（按平台名，如 `codeforces`）。版本来自成员详情中的 `cf_binding_version/luogu_binding_version/nowcoder_binding_version/atcoder_binding_version/cjlu_binding_version`；新成员的预期账号为空、版本为 0。资料编辑省略的绑定字段不会被清空。成功与确认失败均记录操作者、目标、平台、动作、结果和时间，不保存提交的密码。
+
+迁移、备份与验收边界见 [issue-52-member-training.md（普通成员训练闭环）](issue-52-member-training.md)。
+
 ## 管理员采集新题目
 
 ### 网页操作
