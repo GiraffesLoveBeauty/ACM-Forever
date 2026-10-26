@@ -135,13 +135,15 @@ response.raise_for_status()
 
 ## 普通成员训练闭环
 
-成员入口为 `/home.html`、`/problem-bank.html` 和 `/problem.html`。`/problem-bank.html?scope=solved` 展示本人 AC，默认仍为全站目录；管理员使用旧题库地址时仍进入统一后台。认证初始化失败进入 `/auth-unavailable.html?next=...`，可以重试原目标；普通成员访问后台，服务端直链返回 403，客户端导航提供无权限页面。
+个人入口为 `/home.html`、`/my-problems.html` 和 `/problem.html`。个人中心的“查看全部已 AC”对 member / admin / root 均指向 `/my-problems.html?scope=solved`，仅展示会话本人的 AC；此地址需要登录，刷新、直链、登录及首次改密保留范围、筛选和页码。旧 `/problem-bank.html` 仍供普通成员使用，admin / root 访问时进入统一后台题库；两种个人题库地址默认展示全站目录，可切换“我已 AC”。
+
+认证初始化失败进入 `/auth-unavailable.html?next=...`。恢复页跳过自动认证初始化，首次请求超时（15 秒）后即可展示反馈，不会自行发起第二次认证；直接打开恢复页也不查询认证。用户点击“重试原页面”才重新请求并恢复原目标。普通成员访问后台，服务端直链返回 403，客户端导航提供无权限页面。
 
 ### 本人 AC 与站内题面
 
 `GET /api/me/problems?scope=solved` 从会话读取 QQ，客户端的 `qq_id/owner_qq_id` 不改变归属。以平台和题号去重，返回 `ac_at`（Unix 秒），按最近 AC 时间倒序，再按平台、题号稳定排序。`platform/tag/state=favorite/page/page_size` 与总数使用相同条件；`tag` 同时匹配题名、题号和标签。本人范围默认每页 20、上限 100，默认全站目录仍为 500、上限 500。返回 `items/total/returned/page/page_size`；无效 `scope` 或非整数分页参数返回 400。
 
-个人中心的最近 AC 和成员题库均打开站内题面。`from` 仅接受 `/home.html` 或携带允许筛选参数的 `/problem-bank.html`；外部网址、管理地址和身份参数会被排除。详情及 PDF 读取复用 `/api/me/problems/<platform>/<problem_id>` 和后缀 `/statement.pdf`，不会触发采集。
+个人中心的最近 AC 和个人题库均打开站内题面。`from` 仅接受 `/home.html`、携带允许筛选参数的 `/problem-bank.html` 或 `/my-problems.html`；外部网址、管理地址和身份参数会被排除，返回时保留实际个人入口。个人列表与收藏对所有角色均使用 `/api/me/problems`，归属只取会话本人；成员详情及 PDF 读取复用 `/api/me/problems/<platform>/<problem_id>` 和后缀 `/statement.pdf`，admin / root 的详情沿用原管理读取接口，两者均不会触发采集。
 
 ### 绑定与同步接口
 
