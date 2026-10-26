@@ -313,7 +313,7 @@ def create_app():
 _PUBLIC_PAGES = {
     "index.html", "login.html", "post.html", "forum-moderation.html",
     "change-password.html", "home.html", "admin.html",
-    "leaderboard.html", "challenge.html", "reviews.html", "problem-bank.html", "problem.html",
+    "leaderboard.html", "challenge.html", "reviews.html", "problem-bank.html", "my-problems.html", "problem.html",
     "submissions.html", "workspace.html", "contest-review.html", "member.html", "compose.html",
     "tasks.html", "settings.html", "cf-practice.html", "auth-unavailable.html", "forbidden.html",
 }

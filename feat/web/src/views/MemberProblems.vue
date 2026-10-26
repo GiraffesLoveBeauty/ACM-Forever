@@ -36,7 +36,7 @@ async function load() {
   }
 }
 function navigate(page = 1) {
-  router.push({ path: '/problem-bank.html', query: memberQuery({ ...form, page }) });
+  router.push({ path: route.path, query: memberQuery({ ...form, page }) });
 }
 function scope(value) {
   Object.assign(form, current.value, { scope: value });

@@ -80,7 +80,7 @@ beforeEach(() => {
         ],
         total: 25,
       });
-    if (url.startsWith('/api/me/problems/'))
+    if (url.startsWith('/api/me/problems/') || url.startsWith('/api/problems/'))
       return response({
         platform: 'codeforces',
         problem_id: 'cf_1A',
@@ -123,6 +123,7 @@ const click = async (node) => {
 const routes = [
   { path: '/home.html', component: Home },
   { path: '/problem-bank.html', component: Problems },
+  { path: '/my-problems.html', component: Problems },
   { path: '/problem.html', component: Problem },
 ];
 
@@ -141,6 +142,13 @@ test('member filters and return sources exclude owner/admin state and external U
   assert.equal(
     problemReturn('/problem-bank.html?scope=solved&page=3&qq_id=99999999'),
     '/problem-bank.html?scope=solved&page=3',
+  );
+  assert.equal(
+    problemReturn(
+      '/my-problems.html?scope=solved&page=2&platform=codeforces&owner_qq_id=99999999',
+      true,
+    ),
+    '/my-problems.html?scope=solved&platform=codeforces&page=2',
   );
   for (const source of [
     'https://evil.test',
@@ -178,7 +186,7 @@ test('Home recent AC and complete list point to member-owned internal statement 
   const url = new URL(recent.props.href, 'https://acm.test');
   assert.equal(url.pathname, '/problem.html');
   assert.equal(url.searchParams.get('from'), '/home.html');
-  assert.equal(links('查看全部已 AC')[0].props.href, '/problem-bank.html?scope=solved');
+  assert.equal(links('查看全部已 AC')[0].props.href, '/my-problems.html?scope=solved');
 });
 
 test('MemberProblems reads URL filters and never inherits administrator owner selections', async () => {
@@ -257,35 +265,144 @@ test('binding form requires current password and confirmation; cancellation clea
   assert.equal(calls.filter((item) => item.url.includes('/bindings/')).length, 0);
 });
 
-test('actual route guard exposes retry after auth failure and retains the requested module', async () => {
-  // Stub only SFC loading, keep the actual guard and real session initialization.
+let guardId = 0;
+async function loadActualGuard() {
+  // Use a fresh initialization promise for each case; stub only SFC loading.
+  const apiUrl = new URL(`../src/lib/api.js?member-training=${++guardId}`, import.meta.url).href;
+  const session = await import(apiUrl);
   let source = await readFile(new URL('../src/router.js', import.meta.url), 'utf8');
   source = source
     .replace(
       "from 'vue-router'",
       `from '${new URL('../node_modules/vue-router/dist/vue-router.mjs', import.meta.url).href}'`,
     )
-    .replace("from './lib/api.js'", `from '${new URL('../src/lib/api.js', import.meta.url).href}'`)
+    .replace("from './lib/api.js'", `from '${apiUrl}'`)
     .replace(
       /\(\) => import\('\.\/views\/[^']+'\)/g,
       '() => Promise.resolve({default:{render(){return null}}})',
     );
-  let unavailable = true;
-  globalThis.fetch = async () => {
-    if (unavailable) throw Error('offline');
-    return response({ authenticated: true, role: 'member', qq_id: '12345678' });
-  };
   realRouter = (
     await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'))
   ).default;
+  return { router: realRouter, session };
+}
+
+test('actual route guard exposes retry after auth failure and retains the requested module', async () => {
+  let unavailable = true;
+  let requests = 0;
+  globalThis.fetch = async () => {
+    requests++;
+    if (unavailable) throw Error('offline');
+    return response({ authenticated: true, role: 'member', qq_id: '12345678' });
+  };
+  await loadActualGuard();
   await realRouter.push('/home.html?source=training');
   assert.equal(realRouter.currentRoute.value.path, '/auth-unavailable.html');
   assert.equal(realRouter.currentRoute.value.query.next, '/home.html?source=training');
+  assert.equal(requests, 1);
   unavailable = false;
   await realRouter.push(realRouter.currentRoute.value.query.next);
+  assert.equal(requests, 2);
   assert.equal(realRouter.currentRoute.value.fullPath, '/home.html?source=training');
   await realRouter.push('/admin.html');
   assert.equal(realRouter.currentRoute.value.path, '/forbidden.html');
   await realRouter.push('/problem-bank.html?scope=solved');
   assert.equal(realRouter.currentRoute.value.meta.title, '题库');
 });
+
+test('authentication timeout reaches recovery after one request and retries only on navigation', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let unavailable = true;
+  let requests = 0;
+  globalThis.fetch = async (_url, options) => {
+    requests++;
+    if (unavailable)
+      await new Promise((_resolve, reject) =>
+        options.signal.addEventListener(
+          'abort',
+          () => reject(new DOMException('Timed out', 'AbortError')),
+          { once: true },
+        ),
+      );
+    return response({ authenticated: true, role: 'member', qq_id: '12345678' });
+  };
+  await loadActualGuard();
+  const navigation = realRouter.push('/my-problems.html?scope=solved&page=2');
+  await settle();
+  assert.equal(requests, 1);
+  t.mock.timers.tick(15000);
+  await settle();
+  // Check before awaiting navigation: the broken guard starts another pending request here.
+  assert.equal(requests, 1);
+  assert.equal(realRouter.currentRoute.value.path, '/auth-unavailable.html');
+  await navigation;
+  assert.equal(realRouter.currentRoute.value.query.next, '/my-problems.html?scope=solved&page=2');
+  unavailable = false;
+  await realRouter.push(realRouter.currentRoute.value.query.next);
+  assert.equal(requests, 2);
+  assert.equal(realRouter.currentRoute.value.fullPath, '/my-problems.html?scope=solved&page=2');
+});
+
+test('direct authentication recovery opens without starting session initialization', async () => {
+  let requests = 0;
+  globalThis.fetch = async () => {
+    requests++;
+    throw Error('Recovery must not request authentication');
+  };
+  await loadActualGuard();
+  await realRouter.push({
+    path: '/auth-unavailable.html',
+    query: { next: '/home.html?source=training' },
+  });
+  assert.equal(realRouter.currentRoute.value.path, '/auth-unavailable.html');
+  assert.equal(realRouter.currentRoute.value.query.next, '/home.html?source=training');
+  assert.equal(requests, 0);
+});
+
+for (const role of ['member', 'admin', 'root']) {
+  test(`${role} Home complete AC link stays in personal problems during filtering and statement round trips`, async () => {
+    setAuth({ authenticated: true, role, qq_id: '12345678', csrf_token: 'test-only' }, true);
+    mounted = await mount(View, routes, '/home.html');
+    await click(links('查看全部已 AC')[0]);
+    assert.equal(mounted.router.currentRoute.value.fullPath, '/my-problems.html?scope=solved');
+    assert(
+      calls.some(({ url }) => url.startsWith('/api/me/problems?') && url.includes('scope=solved')),
+    );
+    await click(buttons('下一页')[0]);
+    assert.equal(
+      mounted.router.currentRoute.value.fullPath,
+      '/my-problems.html?scope=solved&page=2',
+    );
+    await click(links('查看题面')[0]);
+    assert.equal(links('返回题库')[0].props.href, '/my-problems.html?scope=solved&page=2');
+    await click(links('返回题库')[0]);
+    assert.equal(
+      mounted.router.currentRoute.value.fullPath,
+      '/my-problems.html?scope=solved&page=2',
+    );
+    await click(buttons('清除筛选')[0]);
+    assert.equal(mounted.router.currentRoute.value.fullPath, '/my-problems.html?scope=solved');
+    await click(buttons('收藏')[0]);
+    assert(
+      calls.some(
+        ({ url, body }) => url === '/api/me/problems/codeforces/cf_1A/state' && body.is_favorite,
+      ),
+    );
+    assert(!calls.some(({ url }) => url.startsWith('/api/problems?')));
+  });
+
+  test(`${role} actual guard preserves personal AC address and the legacy catalog role behavior`, async () => {
+    globalThis.fetch = async (url) =>
+      response(url === '/api/auth/me' ? { authenticated: true, role, qq_id: '12345678' } : {});
+    await loadActualGuard();
+    const target = '/my-problems.html?scope=solved&platform=codeforces&page=2';
+    await realRouter.push(target);
+    assert.equal(realRouter.currentRoute.value.fullPath, target);
+    await realRouter.push('/problem-bank.html?scope=solved');
+    assert.equal(
+      realRouter.currentRoute.value.path,
+      role === 'member' ? '/problem-bank.html' : '/admin.html',
+    );
+    if (role !== 'member') assert.equal(realRouter.currentRoute.value.query.section, 'problems');
+  });
+}

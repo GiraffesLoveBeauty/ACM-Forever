@@ -26,10 +26,10 @@ export function problemReturn(value, manager = false) {
         value.startsWith('/') &&
         !value.startsWith('//') &&
         url.origin === 'https://acm.invalid' &&
-        url.pathname === '/problem-bank.html'
+        ['/problem-bank.html', '/my-problems.html'].includes(url.pathname)
       ) {
         const query = new URLSearchParams(memberQuery(Object.fromEntries(url.searchParams)));
-        return '/problem-bank.html' + (query.size ? '?' + query : '');
+        return url.pathname + (query.size ? '?' + query : '');
       }
     } catch {
       /* Fall back to a known entry. */

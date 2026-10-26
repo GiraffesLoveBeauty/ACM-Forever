@@ -2,7 +2,7 @@ import asyncio
 import time
 import unittest
 import aiosqlite
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit
 from unittest.mock import AsyncMock, patch
 import aiohttp
 
@@ -55,6 +55,51 @@ class MemberTrainingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await client.get("/api/me/problems?scope=solved&page=x")).status_code, 400)
             self.assertEqual((await (await client.get("/api/me/problems?scope=solved")).get_json())["page_size"], 20)
             self.assertEqual((await (await client.get("/api/me/problems?scope=solved&page_size=9999")).get_json())["page_size"], 100)
+
+    async def test_personal_problem_page_and_data_stay_session_owned_for_all_web_roles(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            await self.account_login(client, role="member")
+            for owner, pid in [("12345678", "Own"), ("99999999", "Other")]:
+                await self.sql("INSERT INTO submissions(user_qq_id,platform,problem_id,problem_name,submit_time) VALUES(?,'atcoder',?,?,1)", (owner, pid, pid))
+            await self.sql("INSERT INTO recommendations(platform,problem_id,problem_name,problem_url) VALUES('atcoder','CatalogOnly','目录题','https://atcoder.jp')")
+            target = "/my-problems.html?scope=solved&platform=atcoder&page=2"
+            for role in ("member", "admin", "root"):
+                with self.subTest(role=role):
+                    await self.sql("UPDATE web_accounts SET role=?,credential_version=credential_version+1 WHERE qq_id='12345678'", (role,))
+                    login = await client.post("/api/auth/login", json={"qq_id": "12345678", "password": "Test-Password-123!"})
+                    self.assertEqual(login.status_code, 200)
+                    response = await client.get(target)
+                    self.assertEqual(response.status_code, 200)
+                    self.assertNotIn("Location", response.headers)
+                    personal = await (await client.get("/api/me/problems?scope=solved&owner_qq_id=99999999&qq_id=99999999")).get_json()
+                    self.assertEqual(personal["total"], 1)
+                    self.assertEqual([item["problem_id"] for item in personal["items"]], ["Own"])
+                    legacy = await client.get("/problem-bank.html?scope=solved")
+                    if role == "member":
+                        self.assertEqual(legacy.status_code, 200)
+                    else:
+                        self.assertEqual(legacy.status_code, 302)
+                        self.assertEqual(urlsplit(legacy.headers["Location"]).path, "/admin.html")
+                        self.assertEqual(parse_qs(urlsplit(legacy.headers["Location"]).query)["section"], ["problems"])
+                        catalog = await (await client.get("/api/problems?scope=solved")).get_json()
+                        self.assertEqual(catalog["total"], 3)
+
+    async def test_personal_problem_login_and_forced_password_preserve_the_full_target(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            target = "/my-problems.html?scope=solved&platform=atcoder&page=2"
+            anonymous = await client.get(target)
+            self.assertEqual(anonymous.status_code, 302)
+            self.assertEqual(urlsplit(anonymous.headers["Location"]).path, "/login.html")
+            self.assertEqual(parse_qs(urlsplit(anonymous.headers["Location"]).query)["next"], [target])
+            await self.account_login(client, role="root", change=1)
+            forced = await client.get(target)
+            self.assertEqual(forced.status_code, 302)
+            self.assertEqual(urlsplit(forced.headers["Location"]).path, "/change-password.html")
+            self.assertEqual(parse_qs(urlsplit(forced.headers["Location"]).query)["next"], [target])
+            await self.sql("UPDATE web_accounts SET must_change_password=0 WHERE qq_id='12345678'")
+            self.assertEqual((await client.get(target)).status_code, 200)
 
     async def test_binding_endpoints_require_session_csrf_and_ignore_other_owner(self):
         async with self.app.test_app():

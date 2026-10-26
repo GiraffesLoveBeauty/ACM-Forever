@@ -232,7 +232,7 @@ onBeforeUnmount(() => {
       <section class="community-panel recent-panel">
         <div class="panel-heading">
           <h2>最近 AC</h2>
-          <RouterLink class="panel-text-link" to="/problem-bank.html?scope=solved"
+          <RouterLink class="panel-text-link" to="/my-problems.html?scope=solved"
             >查看全部已 AC 题目 ↗</RouterLink
           >
         </div>

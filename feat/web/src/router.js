@@ -76,6 +76,11 @@ const router = createRouter({
       meta: { admin: true, title: '管理后台' },
     },
     {
+      path: '/my-problems.html',
+      component: () => import('./views/MemberProblems.vue'),
+      meta: { title: '题库' },
+    },
+    {
       path: '/problem.html',
       component: () => import('./views/Problem.vue'),
       meta: { title: '题目详情' },
@@ -108,6 +113,8 @@ const router = createRouter({
   },
 });
 router.beforeEach(async (to) => {
+  // Recovery must mount immediately; only an explicit retry starts authentication again.
+  if (to.meta.authError) return;
   try {
     await initializeAuth();
   } catch {
