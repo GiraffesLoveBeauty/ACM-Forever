@@ -325,9 +325,95 @@ test('officially omitted output shows an explanation without an answer copy butt
   assert.ok(textOf(panel).includes(note));
   assert.deepEqual(find(panel, (node) => node.type === 'pre').map(textOf), ['1\n']);
   const buttons = find(panel, (node) => node.type === 'button');
-  assert.deepEqual(buttons.map((button) => textOf(button).trim()), ['复制样例 1 输入']);
+  assert.deepEqual(
+    buttons.map((button) => textOf(button).trim()),
+    ['复制样例 1 输入'],
+  );
   await buttons[0].props.onClick();
   assert.deepEqual(copied, ['1\n']);
+});
+
+test('official ZIP samples show input/output explanations and safe attachment links without copy buttons', async () => {
+  const attachment = {
+    url: 'https://img.atcoder.jp/example/samples.zip',
+    name: '官方入出力例 ZIP',
+  };
+  responseData = saved({
+    platform: 'atcoder',
+    statement_html: '<p>Sample input and output are provided in an archive.</p>',
+    samples: [
+      {
+        index: 1,
+        input: null,
+        output: null,
+        input_note: 'Input is provided in the official archive.',
+        output_note: 'Output is provided in the official archive.',
+        attachments: [attachment],
+      },
+    ],
+  });
+  await page(Problem, '/problem.html?platform=atcoder&problem_id=attachment_only');
+  const panel = element('problem-samples');
+  assert.ok(textOf(panel).includes('样例 1 · 输入说明'));
+  assert.ok(textOf(panel).includes(responseData.samples[0].input_note));
+  assert.ok(textOf(panel).includes('样例 1 · 输出说明'));
+  assert.ok(textOf(panel).includes(responseData.samples[0].output_note));
+  assert.equal(find(panel, (node) => node.type === 'button').length, 0);
+  assert.equal(find(panel, (node) => node.type === 'pre').length, 0);
+  assert.deepEqual(copied, []);
+  const links = find(panel, (node) => node.type === 'a');
+  assert.equal(links.length, 1);
+  assert.equal(links[0].props.href, attachment.url);
+  assert.equal(links[0].props.target, '_blank');
+  assert.equal(links[0].props.rel, 'noopener noreferrer');
+  assert.equal(textOf(links[0]), attachment.name);
+});
+
+test('sample attachment links reject malformed lists, foreign hosts, credentials, ports and non-ZIP files', async () => {
+  const invalid = [
+    null,
+    {},
+    { url: 123 },
+    { url: '/samples.zip' },
+    { url: 'javascript:alert(1)' },
+    { url: 'http://img.atcoder.jp/samples.zip' },
+    { url: 'https://evil.test/samples.zip' },
+    { url: 'https://img.atcoder.jp.evil.test/samples.zip' },
+    { url: 'https://user:password@img.atcoder.jp/samples.zip' },
+    { url: 'https://img.atcoder.jp:444/samples.zip' },
+    { url: 'https://img.atcoder.jp/samples.txt' },
+    { url: 'https://img.atcoder.jp/samples.zip/other' },
+  ];
+  responseData = saved({
+    platform: 'atcoder',
+    statement_html: '<p>Official attached samples.</p>',
+    samples: [
+      ...[undefined, null, {}, 'https://img.atcoder.jp/samples.zip', invalid].map(
+        (attachments) => ({
+          input: null,
+          output: null,
+          input_note: 'Input in ZIP.',
+          output_note: 'Output in ZIP.',
+          attachments,
+        }),
+      ),
+      {
+        input: null,
+        output: null,
+        input_note: 'Input in ZIP.',
+        output_note: 'Output in ZIP.',
+        attachments: [...invalid, { url: 'https://img.atcoder.jp/official/sample.ZIP', name: '' }],
+      },
+    ],
+  });
+  await page(Problem, '/problem.html?platform=atcoder&problem_id=attachment_only');
+  const links = find(element('problem-samples'), (node) => node.type === 'a');
+  assert.deepEqual(
+    links.map((link) => link.props.href),
+    ['https://img.atcoder.jp/official/sample.ZIP'],
+  );
+  assert.equal(textOf(links[0]), '官方样例 ZIP');
+  assert.equal(find(element('problem-samples'), (node) => node.type === 'button').length, 0);
 });
 
 test('missing parameters and 404 show local errors rather than redirecting', async () => {
