@@ -53,7 +53,11 @@ async function load() {
   }
 }
 async function copySample(index, kind, button) {
-  if (!['input', 'output'].includes(kind) || !Number.isInteger(index) || !samples.value[index])
+  if (
+    !['input', 'output'].includes(kind) ||
+    !Number.isInteger(index) ||
+    typeof samples.value[index]?.[kind] !== 'string'
+  )
     return;
   const current = revision;
   try {
@@ -153,11 +157,17 @@ watch(() => [route.query.platform, route.query.problem_id], load, { immediate: t
         <h2>样例</h2>
         <div v-for="(sample, index) in samples" :key="index" class="problem-sample-grid">
           <div v-for="kind in ['input', 'output']" :key="kind">
-            <h3>样例 {{ index + 1 }} · {{ kind === 'input' ? '输入' : '输出' }}</h3>
-            <pre>{{ sample[kind] }}</pre>
-            <button class="btn problem-copy" @click="copySample(index, kind)">
-              复制样例 {{ index + 1 }} {{ kind === 'input' ? '输入' : '输出' }}
-            </button>
+            <template v-if="kind === 'output' && sample.output === null && sample.output_note">
+              <h3>样例 {{ index + 1 }} · 输出说明</h3>
+              <p>{{ sample.output_note }}</p>
+            </template>
+            <template v-else>
+              <h3>样例 {{ index + 1 }} · {{ kind === 'input' ? '输入' : '输出' }}</h3>
+              <pre>{{ sample[kind] }}</pre>
+              <button class="btn problem-copy" @click="copySample(index, kind)">
+                复制样例 {{ index + 1 }} {{ kind === 'input' ? '输入' : '输出' }}
+              </button>
+            </template>
           </div>
         </div>
       </section>
