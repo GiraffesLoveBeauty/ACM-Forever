@@ -163,6 +163,8 @@ class ProblemSync:
             await asyncio.sleep(max(0, self._next_request_at - time.monotonic()))
             try:
                 async with session.get(url) as response:
+                    if response.status == 404 and url.startswith("https://atcoder.jp/"):
+                        raise ValueError(f"AtCoder 原站返回 HTTP 404，题目可能未公开或已移除：{url}")
                     response.raise_for_status()
                     return await response.read()
             finally:

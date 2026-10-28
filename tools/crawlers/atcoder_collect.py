@@ -64,6 +64,10 @@ def collect(items, store, language, output_dir, html_dir=None):
                 try:
                     with urlopen(request, timeout=30) as response:
                         raw = response.read()
+                except HTTPError as error:
+                    if error.code == 404:
+                        raise ValueError(f"AtCoder 原站返回 HTTP 404，题目可能未公开或已移除：{source_url}") from error
+                    raise
                 finally:
                     next_request = time.monotonic() + 1.5
             content = parse_atcoder(raw, source_url, language)

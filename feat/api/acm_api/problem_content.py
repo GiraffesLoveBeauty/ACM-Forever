@@ -98,30 +98,104 @@ def sample_heading(text):
     return None
 
 
-def parse_samples(root):
+def heading_blocks(root):
+    """Keep each heading's body bounded by the next heading, including nested markup."""
     nodes = list(root.walk())
-    samples = {}
-    for position, node in enumerate(nodes):
-        heading = sample_heading(node.text()) if node.tag in HEADING_TAGS else None
-        if heading is None:
-            continue
-        kind, number = heading
+    headings = [position for position, node in enumerate(nodes) if node.tag in HEADING_TAGS]
+    return [(nodes[start], nodes[start + 1:end])
+            for start, end in zip(headings, headings[1:] + [len(nodes)])]
+
+
+def block_text(nodes):
+    # Read direct text once; calling text() on every ancestor would duplicate it.
+    return " ".join(child for node in nodes if node.tag not in {"script", "style"}
+                    for child in node.children if isinstance(child, str))
+
+
+def parse_samples(root, apg=False):
+    blocks = heading_blocks(root)
+    candidates = []
+    answer_level = None
+    no_input = False
+    for position, (node, body) in enumerate(blocks):
+        title = " ".join(node.text().split())
+        heading = sample_heading(title)
+        level = int(node.tag[1])
+        numbered = bool(re.search(r"\d", title))
+        if apg:
+            if title in {"回答例", "解答例"}:
+                answer_level = level
+                continue
+            if answer_level is not None:
+                if level <= answer_level and (heading is None or numbered):
+                    answer_level = None
+                else:
+                    continue
+        if title.lower() in {"input", "入力"}:
+            no_input = no_input or bool(re.fullmatch(
+                r"(?:no input (?:is given|is provided)(?: for this problem)?|"
+                r"this problem (?:provides|has|requires) no input|"
+                r"(?:the )?input(?: given from standard input)? is empty|"
+                r"(?:今回、|この問題に|この問題では|標準入力から与えられる)?"
+                r"入力は(?:ありません|与えられない|与えられません|空である|空です))[.。]?",
+                " ".join(block_text(body).split()), re.IGNORECASE))
+        if heading is not None:
+            candidates.append((position, node, body, heading, numbered))
+    if apg and candidates:
+        # APG exercises repeat unnumbered examples inside the prose (h4/h5),
+        # then publish their official numbered samples at a higher heading level.
+        formal = [int(node.tag[1]) for _, node, _, _, numbered in candidates if numbered]
+        if formal:
+            level = min(formal)
+            candidates = [entry for entry in candidates if entry[4] or int(entry[1].tag[1]) <= level]
+    omission = re.compile(r"出力は[^。]*記載しません")
+    omitted_output = any(heading[0] == "output" and omission.search(block_text(body))
+                         for _, _, body, heading, _ in candidates)
+    entries = []
+    for position, node, body, (kind, number), _ in candidates:
         if number < 1:
             raise ValueError("样例编号必须为正整数")
-        pre = None
-        for candidate in nodes[position + 1:]:
-            if candidate.tag in HEADING_TAGS:
-                break
-            if candidate.tag == "pre":
-                pre = candidate
-                break
+        pre = next((candidate for candidate in body if candidate.tag == "pre"), None)
+        note = None
         if pre is None:
-            raise ValueError(f"样例 {number} 的 {kind} 缺少 pre 内容")
+            paragraphs = [candidate.text().strip() for candidate in body if candidate.tag == "p"]
+            description = "\n".join(paragraph for paragraph in paragraphs if paragraph)
+            # The omitted-output format explicitly declares the omission in its
+            # first sample, then gives only optimal-cost descriptions afterwards.
+            if (kind == "output" and omitted_output and description
+                    and (omission.search(description) or re.search(r"最小のコスト", description))):
+                note = description
+                value = None
+            else:
+                raise ValueError(f"样例 {number} 的 {kind} 缺少 pre 内容")
+        else:
+            value = pre.text().replace("\r\n", "\n").replace("\r", "\n")
+        entries.append((kind, number, value, note, position))
+
+    outputs = [number for kind, number, *_ in entries if kind == "output"]
+    inputs = [number for kind, number, *_ in entries if kind == "input"]
+    count = len(inputs)
+    if (len(outputs) != len(set(outputs)) and len(entries) == count * 2
+            and inputs == list(range(1, count + 1))
+            and all(entry[0] == ("input" if i % 2 == 0 else "output")
+                    for i, entry in enumerate(entries))
+            and all(entries[i + 1][4] == entries[i][4] + 1 for i in range(0, len(entries), 2))
+            and all(1 <= number <= count for number in outputs)):
+        # A few historical statements misnumber an output heading. Only recover
+        # unambiguous adjacent pairs with consecutive, unique input numbers.
+        entries = [(kind, entries[i - 1][1] if kind == "output" else number, value, note, position)
+                   for i, (kind, number, value, note, position) in enumerate(entries)]
+    samples = {}
+    for kind, number, value, note, _ in entries:
         pair = samples.setdefault(number, {"index": number})
         if kind in pair:
             raise ValueError(f"样例 {number} 的 {kind} 重复出现")
-        pair[kind] = pre.text().replace("\r\n", "\n").replace("\r", "\n")
+        pair[kind] = value
+        if note:
+            pair[kind + "_note"] = note
     for number, pair in samples.items():
+        if "input" not in pair and no_input:
+            pair["input"] = ""
         if "input" not in pair or "output" not in pair:
             raise ValueError(f"样例 {number} 的输入和输出不完整")
     return [samples[number] for number in sorted(samples)]
@@ -150,12 +224,18 @@ def parse_atcoder(raw, source_url, preferred_language="en"):
     plain = "\n".join(line.strip() for line in plain.splitlines())
     plain = re.sub(r"\n{3,}", "\n\n", plain).strip()
     if not plain:
-        raise ValueError("题面内容为空")
+        raise ValueError("AtCoder 原站未提供题面正文（空题面，可能为系统测试或未公开题目）")
+    apg = bool(re.match(r"/contests/apg4b(?:python)?/tasks/", urlsplit(source_url).path, re.IGNORECASE))
+    title = next((node.text().strip() for node in parser.root.walk()
+                  if "h2" in (node.attrs.get("class") or "").split()), "")
+    lesson = apg and bool(re.match(r"[A-Z]+\s*-\s*\d+\.\d+", title))
     return {
         "statement_html": statement.inner_html(source_url).strip(),
         "statement_text": plain,
         "statement_language": language,
-        "samples": parse_samples(statement),
+        # APG lessons contain independent exercises and demonstrations; retain
+        # these in the statement rather than treating them as one judge's samples.
+        "samples": [] if lesson else parse_samples(statement, apg=apg),
     }
 
 
