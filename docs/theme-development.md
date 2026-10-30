@@ -106,6 +106,10 @@ html[data-design-template='genshin-dawn'] body.endfield-design .forum-welcome {
 
 必须使用 `themeStorageKey` 和 `libraryStorageKey`，不要在组件中为新模板复制硬编码的配色键。原有存储格式、工业黄/清绿等预设与 legacy 明暗兼容保留。未知或已下线的模板 ID 回退原模板；不能因此清空用户偏好。
 
+运行时模板状态由 `ThemeEditor` 统一持有，模板选择也由其 `setTemplate` 持久化。其他组件通过 App 提供的 `getDesignTemplate` 在 `computed` 中读取，通过 `setDesignTemplate` 切换；不要再建一份本地模板状态或自行写入选择键。切换前保留已应用方案，装载新模板后再关闭编辑草稿，避免重新应用旧模板。
+
+仅属于某个模板的装饰按响应式模板状态条件挂载，切换时不重建图谱等业务组件。模板标识和样式门控属性的设置不依赖配色计算成功；非法草稿保留最近一次有效配色并显示错误，不能静默改变所选模板。
+
 存储受限时允许仅本页使用。切换模板前撤销未保存的编辑草稿，当前已应用方案在本页会话保留。不要把模板默认色写回另一个模板的存储空间。
 
 ## 5. 功能、资源和可用性要求
