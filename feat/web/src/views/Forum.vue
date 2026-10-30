@@ -3,6 +3,14 @@ import { ref, reactive, computed, onMounted, watch } from 'vue';
 import { useRequests, showError } from '../lib/api.js';
 import GraphArt from '../components/GraphArt.vue';
 import PostCard from '../components/PostCard.vue';
+const viewModeKey = 'acm.forum.view.v1';
+function savedViewMode() {
+  try {
+    return localStorage.getItem(viewModeKey) === 'grid' ? 'grid' : 'list';
+  } catch {
+    return 'list';
+  }
+}
 const request = useRequests(),
   categories = ref([]),
   posts = ref([]),
@@ -10,9 +18,18 @@ const request = useRequests(),
   total = ref(0),
   loading = ref(false),
   error = ref(''),
-  query = ref('');
+  query = ref(''),
+  viewMode = ref(savedViewMode());
 const filters = reactive({ sort: 'latest', category: '', q: '' });
 const page = ref(1);
+function changeViewMode(mode) {
+  viewMode.value = mode;
+  try {
+    localStorage.setItem(viewModeKey, mode);
+  } catch {
+    // The current page can still switch views when browser storage is unavailable.
+  }
+}
 const directory = computed(() => [
   {
     slug: '',
@@ -161,6 +178,37 @@ onMounted(async () => {
           </button>
         </div>
         <span class="muted">{{ total }} 个话题</span>
+        <div class="forum-view-switch" role="group" aria-label="话题显示方式">
+          <button
+            v-for="(label, value) in { list: '列表', grid: '网格' }"
+            :key="value"
+            type="button"
+            :class="{ active: viewMode === value }"
+            :aria-pressed="viewMode === value"
+            :aria-label="`${label}视图`"
+            aria-controls="forum-feed"
+            @click="changeViewMode(value)"
+          >
+            <svg
+              viewBox="0 0 20 20"
+              width="16"
+              height="16"
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+            >
+              <template v-if="value === 'grid'">
+                <rect x="3" y="3" width="5" height="5" />
+                <rect x="12" y="3" width="5" height="5" />
+                <rect x="3" y="12" width="5" height="5" />
+                <rect x="12" y="12" width="5" height="5" />
+              </template>
+              <path v-else d="M3 4h3v3H3zM9 5.5h8M3 13h3v3H3zM9 14.5h8" />
+            </svg>
+            {{ label }}
+          </button>
+        </div>
       </div>
       <div
         id="forum-feed"
@@ -176,7 +224,9 @@ onMounted(async () => {
         >
           <span class="spinner"></span>正在加载社区话题…
         </div>
-        <PostCard v-for="post in posts" :key="post.id" :post="post" />
+        <div v-if="posts.length" class="forum-feed-posts" :class="`forum-feed-posts-${viewMode}`">
+          <PostCard v-for="post in posts" :key="post.id" :post="post" />
+        </div>
         <div v-if="!loading && !posts.length" class="forum-empty">
           <h3>{{ error ? '话题加载失败' : '这里还没有话题' }}</h3>
           <p>{{ error || '来发布第一个讨论，开启社区交流吧。' }}</p>

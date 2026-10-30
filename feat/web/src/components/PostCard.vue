@@ -61,6 +61,25 @@ async function toggle(kind) {
       >
         <PostCover :src="post.cover_url" :alt="`${post.title}的封面`" class="forum-card-cover" />
       </RouterLink>
+      <RouterLink
+        v-else
+        class="forum-post-cover-link forum-post-cover-placeholder"
+        :to="`/post.html?id=${post.id}`"
+        :aria-label="`阅读：${post.title}`"
+      >
+        <svg
+          viewBox="0 0 48 48"
+          width="42"
+          height="42"
+          aria-hidden="true"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+        >
+          <path d="M12 7h16l8 8v26H12zM28 7v9h8M19 24h10M19 30h10" />
+        </svg>
+        <span>{{ post.category_name || '社区话题' }}</span>
+      </RouterLink>
     </div>
     <div class="forum-post-actions">
       <RouterLink :to="`/post.html?id=${post.id}#comments`"
