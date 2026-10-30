@@ -8,6 +8,8 @@ const route = useRoute();
 const themeEditor = ref();
 provide('openTheme', () => themeEditor.value?.open());
 provide('toggleTheme', () => themeEditor.value?.toggle());
+provide('setDesignTemplate', (template) => themeEditor.value?.setTemplate(template));
+provide('getDesignTemplate', () => themeEditor.value?.getTemplate?.());
 function imageError(event) {
   const image = event.target;
   if (
