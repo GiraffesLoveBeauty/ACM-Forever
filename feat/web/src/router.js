@@ -170,7 +170,7 @@ router.afterEach((to, from, failure) => {
   document.title = `${to.meta.title} · ACM Forever`;
   document.body.className =
     to.meta.admin && to.path === '/admin.html'
-      ? 'admin-console'
+      ? 'forum-page endfield-design admin-console'
       : `forum-page endfield-design ${to.meta.body || ''}`;
 });
 export default router;

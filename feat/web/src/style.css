@@ -21,6 +21,162 @@
 #app {
   min-height: 100vh;
 }
+.admin-home-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 210px) minmax(0, 1fr);
+  grid-template-areas:
+    'nav welcome'
+    'nav content';
+  align-items: start;
+  gap: 18px 24px;
+  width: min(94vw, 1560px);
+  margin: 26px auto 56px;
+}
+.admin-welcome {
+  grid-area: welcome;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 280px;
+}
+html body.endfield-design .admin-welcome {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 280px;
+}
+html body.endfield-design .admin-welcome .industrial-hero-copy {
+  max-width: 760px;
+}
+.admin-module-sidebar {
+  position: sticky;
+  top: 96px;
+  grid-area: nav;
+  min-width: 0;
+}
+.admin-module-card {
+  padding: 17px 15px 12px;
+}
+.admin-module-title {
+  margin: 0 8px 10px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 750;
+}
+.admin-module-nav {
+  display: grid;
+  gap: 3px;
+}
+.admin-module-group {
+  margin: 8px 8px 2px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+.admin-module-group:not(:first-child) {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.admin-module-nav a {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 9px;
+  padding: 0 9px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+.admin-module-nav a:hover,
+.admin-module-nav a.active {
+  background: var(--subtle-bg);
+  color: var(--brand-strong);
+}
+.admin-module-nav-icon {
+  width: 18px;
+  color: var(--brand);
+  font-size: 14px;
+  text-align: center;
+}
+.admin-module-nav a.active .admin-module-nav-icon {
+  color: var(--brand-strong);
+}
+.admin-module-note {
+  margin: 12px 8px 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10px;
+}
+.admin-module-note span {
+  margin-right: 5px;
+  color: var(--brand);
+  font-size: 8px;
+}
+.admin-workspace {
+  grid-area: content;
+  min-width: 0;
+}
+.admin-workspace .admin-module {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 1200px) {
+  .admin-home-layout {
+    grid-template-columns: minmax(165px, 190px) minmax(0, 1fr);
+    width: min(92vw, 1120px);
+    gap: 18px;
+  }
+}
+@media (max-width: 900px) {
+  .admin-home-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'welcome'
+      'nav'
+      'content';
+    width: calc(100% - 32px);
+    margin-top: 18px;
+  }
+  .admin-module-sidebar {
+    position: static;
+  }
+  .admin-module-card {
+    padding: 11px 12px;
+  }
+  .admin-module-title,
+  .admin-module-group,
+  .admin-module-note {
+    display: none;
+  }
+  .admin-module-nav {
+    display: flex;
+    gap: 5px;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+  .admin-module-nav a {
+    flex: none;
+    min-height: 36px;
+    padding-inline: 10px;
+    white-space: nowrap;
+  }
+}
+@media (max-width: 600px) {
+  .admin-home-layout {
+    width: calc(100% - 24px);
+    gap: 14px;
+    margin: 14px auto 32px;
+  }
+  .admin-welcome {
+    min-height: 170px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  html body.endfield-design .admin-welcome {
+    min-height: 0;
+    padding: 27px 22px 50px;
+  }
+}
 .auth-main {
   max-width: 480px;
   margin: 56px auto;
@@ -220,6 +376,42 @@
 .community-table-wrap {
   max-width: 100%;
   overflow-x: auto;
+}
+.problem-database-table {
+  min-width: 1080px;
+}
+.problem-database-title {
+  min-width: 210px;
+  white-space: normal !important;
+}
+.problem-database-title small,
+.problem-database-status + small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  white-space: normal;
+}
+.problem-database-tags {
+  max-width: 200px;
+  white-space: normal !important;
+}
+.problem-database-status {
+  display: inline-flex;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--subtle-bg);
+  color: var(--muted);
+  font-size: 10px;
+}
+.problem-database-status.ready {
+  border-color: color-mix(in srgb, var(--brand-strong) 30%, var(--line));
+  color: var(--brand-strong);
+}
+.problem-database-status.failed {
+  border-color: color-mix(in srgb, #b42318 30%, var(--line));
+  color: #b42318;
 }
 .table-wrap table {
   min-width: 580px;

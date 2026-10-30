@@ -23,7 +23,7 @@ onMounted(() => document.addEventListener('error', imageError, true));
 onBeforeUnmount(() => document.removeEventListener('error', imageError, true));
 </script>
 <template>
-  <Header v-if="route.path !== '/admin.html'" />
+  <Header />
   <RouterView v-slot="{ Component }">
     <component
       :is="Component"

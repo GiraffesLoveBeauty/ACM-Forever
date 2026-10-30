@@ -1,5 +1,5 @@
 <script setup>
-import { inject, ref, onMounted } from 'vue';
+import { computed, inject, ref, onMounted } from 'vue';
 import { useRouter, isNavigationFailure, NavigationFailureType } from 'vue-router';
 import { auth, logoutSession, avatar, showError, notify } from '../lib/api.js';
 import TemplateLibrary from './TemplateLibrary.vue';
@@ -34,6 +34,7 @@ function changeTemplate() {
 const openTheme = inject('openTheme');
 const toggleTheme = inject('toggleTheme');
 const router = useRouter();
+const canManage = computed(() => auth.authenticated && ['admin', 'root'].includes(auth.role));
 async function logout() {
   try {
     const failure = await router.push('/index.html');
@@ -61,9 +62,7 @@ async function logout() {
       ><RouterLink to="/leaderboard.html" active-class="active">♛ 排行榜</RouterLink
       ><RouterLink v-if="auth.authenticated" to="/home.html" active-class="active"
         >◉ 个人中心</RouterLink
-      ><RouterLink v-if="['admin', 'root'].includes(auth.role)" to="/admin.html"
-        >⚙ 管理后台</RouterLink
-      >
+      ><RouterLink v-if="canManage" to="/admin.html" active-class="active">⚙ 管理后台</RouterLink>
     </nav>
     <div class="forum-header-actions">
       <button
@@ -81,7 +80,7 @@ async function logout() {
       ><RouterLink
         v-else
         class="btn account-avatar-button"
-        :to="auth.role === 'member' ? '/home.html' : '/admin.html'"
+        :to="canManage ? '/admin.html' : '/home.html'"
         aria-label="账户中心"
         ><img
           class="header-account-avatar"

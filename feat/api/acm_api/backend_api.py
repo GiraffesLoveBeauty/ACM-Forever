@@ -1510,6 +1510,73 @@ async def api_database_status():
         await db.close()
 
 
+@api.get("/admin/database/problems")
+@admin_required
+async def api_database_problems():
+    query_text = _field(request.args, "q", 160)
+    platform = _field(request.args, "platform", 24)
+    status = _field(request.args, "status", 16) or "all"
+    if status not in {"all", "collected", "pending", "failed"}:
+        return jsonify({"success": False, "message": "无效的题面采集状态。"}), 400
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+        page_size = max(1, min(100, int(request.args.get("page_size", 20))))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "message": "分页参数必须为整数。"}), 400
+
+    has_content = (
+        "(COALESCE(statement_html,'')<>'' OR COALESCE(statement_text,'')<>'' "
+        "OR COALESCE(length(statement_pdf),0)>0)"
+    )
+    conditions = []
+    params = []
+    if platform:
+        conditions.append("platform=?")
+        params.append(platform)
+    if query_text:
+        pattern = f"%{query_text}%"
+        conditions.append("(problem_id LIKE ? OR problem_name LIKE ? OR contest_id LIKE ?)")
+        params.extend([pattern, pattern, pattern])
+    if status == "collected":
+        conditions.append(has_content)
+    elif status == "pending":
+        conditions.extend([f"NOT {has_content}", "last_fetch_status<>'failed'"])
+    elif status == "failed":
+        conditions.append("last_fetch_status='failed'")
+    where = " WHERE " + " AND ".join(conditions) if conditions else ""
+
+    db = await get_db()
+    try:
+        async with db.execute("SELECT COUNT(*) FROM crawler_problems" + where, tuple(params)) as cursor:
+            total = int((await cursor.fetchone())[0])
+        page = min(page, max(1, (total + page_size - 1) // page_size))
+        async with db.execute(
+            "SELECT platform,problem_id,contest_id,problem_index,problem_name,problem_rating,"
+            "problem_url,tags,statement_language,sample_count,last_fetch_status,"
+            f"CASE WHEN {has_content} THEN 1 ELSE 0 END AS content_available,"
+            "statement_fetched_at,updated_at FROM crawler_problems"
+            + where
+            + " ORDER BY updated_at DESC,platform,problem_id LIMIT ? OFFSET ?",
+            tuple(params + [page_size, (page - 1) * page_size]),
+        ) as cursor:
+            items = [dict(row) for row in await cursor.fetchall()]
+        for item in items:
+            try:
+                item["tags"] = json.loads(item["tags"] or "[]")
+            except (TypeError, ValueError):
+                item["tags"] = []
+            item["content_available"] = bool(item["content_available"])
+        return jsonify({
+            "items": items,
+            "total": total,
+            "returned": len(items),
+            "page": page,
+            "page_size": page_size,
+        })
+    finally:
+        await db.close()
+
+
 @api.post("/admin/database/init")
 @admin_required
 async def api_initialize_database():
