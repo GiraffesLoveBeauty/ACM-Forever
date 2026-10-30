@@ -70,6 +70,11 @@ const activeEdges = computed(
 </script>
 <template>
   <figure class="forum-algorithm-art" aria-label="空间算法图谱">
+    <div class="phase-tracks phase-tracks-in" aria-hidden="true"></div>
+    <div class="phase-tracks phase-tracks-out" aria-hidden="true"></div>
+    <div class="phase-triangles" aria-hidden="true">
+      <i v-for="n in 18" :key="n"></i>
+    </div>
     <div class="algorithm-disc" aria-hidden="true"></div>
     <div class="algorithm-square" aria-hidden="true"></div>
     <div class="algorithm-slice" aria-hidden="true"></div>

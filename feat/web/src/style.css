@@ -1,4 +1,11 @@
 /* Vue layout primitives; visual tokens remain shared with the industrial theme. */
+.phase-tracks,
+.phase-triangles {
+  display: none;
+}
+.forum-header-actions {
+  flex-wrap: wrap;
+}
 .problem-sync fieldset {
   border: 0;
   padding: 0;

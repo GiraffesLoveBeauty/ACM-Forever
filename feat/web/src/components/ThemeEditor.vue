@@ -5,7 +5,6 @@ import {
   OVERRIDE_KEYS,
   LABELS,
   PRESETS,
-  createDefaultTheme,
   presetProfile,
   deriveTokens,
   validateTheme,
@@ -14,6 +13,24 @@ import {
   repairProfile,
 } from '../lib/theme-colors.js';
 import { notify } from '../lib/api.js';
+import {
+  normalizeTemplate,
+  themeStorageKey,
+  libraryStorageKey,
+  templateTheme,
+  templateLabel,
+} from '../lib/design-template.js';
+let initialTemplate = 'original';
+try {
+  initialTemplate = normalizeTemplate(localStorage.getItem('acm.design-template.v1'));
+} catch {
+  /* Local-only fallback. */
+}
+const activeTemplate = ref(initialTemplate);
+const createDefaultTheme = () => templateTheme(activeTemplate.value);
+const themeKey = () => themeStorageKey(activeTemplate.value);
+const libraryKey = () => libraryStorageKey(activeTemplate.value);
+const templateName = computed(() => templateLabel(activeTemplate.value));
 const clone = (value) => JSON.parse(JSON.stringify(value));
 function read(key, fallback) {
   try {
@@ -24,37 +41,63 @@ function read(key, fallback) {
 }
 let stored;
 try {
-  stored = validateTheme(read('acm.theme.v1', createDefaultTheme()));
+  stored = validateTheme(read(themeKey(), createDefaultTheme()));
 } catch {
   stored = createDefaultTheme();
 }
 try {
   const legacyMode = localStorage.getItem('theme');
-  if (!localStorage.getItem('acm.theme.v1') && ['light', 'dark'].includes(legacyMode))
+  if (
+    activeTemplate.value === 'original' &&
+    !localStorage.getItem(themeKey()) &&
+    ['light', 'dark'].includes(legacyMode)
+  )
     stored.mode = legacyMode;
 } catch {
   /* The default theme also works without browser storage. */
 }
-const oldLibrary = read('acm.theme.library.v1', { version: 1, schemes: [] });
+function loadLibrary() {
+  const oldLibrary = read(libraryKey(), { version: 1, schemes: [] });
+  const items = Array.isArray(oldLibrary) ? oldLibrary : oldLibrary.schemes;
+  return (Array.isArray(items) ? items : [])
+    .flatMap((item) => {
+      try {
+        return [
+          {
+            id: String(item.id || item.name),
+            name: String(item.name).slice(0, 40),
+            theme: validateTheme(item.theme),
+          },
+        ];
+      } catch {
+        return [];
+      }
+    })
+    .slice(0, 12);
+}
 const current = ref(stored),
   draft = ref(clone(stored)),
-  library = ref(Array.isArray(oldLibrary) ? oldLibrary : oldLibrary.schemes);
-if (!Array.isArray(library.value)) library.value = [];
-library.value = library.value
-  .flatMap((item) => {
-    try {
-      return [
-        {
-          id: String(item.id || item.name),
-          name: String(item.name).slice(0, 40),
-          theme: validateTheme(item.theme),
-        },
-      ];
-    } catch {
-      return [];
-    }
-  })
-  .slice(0, 12);
+  library = ref(loadLibrary());
+const templateSessions = new Map();
+function setTemplate(value) {
+  const next = normalizeTemplate(value);
+  if (next === activeTemplate.value) return;
+  if (opened.value) close();
+  templateSessions.set(activeTemplate.value, {
+    theme: clone(current.value),
+    library: clone(library.value),
+  });
+  activeTemplate.value = next;
+  const cached = templateSessions.get(next);
+  try {
+    current.value = validateTheme(cached?.theme || read(themeKey(), createDefaultTheme()));
+  } catch {
+    current.value = createDefaultTheme();
+  }
+  library.value = cached ? clone(cached.library) : loadLibrary();
+  draft.value = clone(current.value);
+  apply(current.value);
+}
 const dialog = ref(),
   editMode = ref('light'),
   message = ref(''),
@@ -85,6 +128,7 @@ function apply(theme, forced) {
       node.dataset.customTheme = 'true';
       node.style.colorScheme = mode;
     }
+    document.documentElement.dataset.designTemplate = activeTemplate.value;
     document.documentElement.dataset.palette = 'custom';
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', tokens['--bg']);
   } catch (e) {
@@ -125,7 +169,7 @@ function close() {
 function save(persist = true) {
   try {
     current.value = validateTheme(clone(draft.value));
-    if (persist) localStorage.setItem('acm.theme.v1', JSON.stringify(current.value));
+    if (persist) localStorage.setItem(themeKey(), JSON.stringify(current.value));
     close();
   } catch (e) {
     message.value = e.message;
@@ -147,7 +191,7 @@ function repair() {
 }
 function persistLibrary() {
   localStorage.setItem(
-    'acm.theme.library.v1',
+    libraryKey(),
     JSON.stringify({
       version: 1,
       schemes: library.value.map(({ name, theme }) => ({ name, theme })),
@@ -209,12 +253,12 @@ function toggle() {
   current.value = theme;
   if (opened.value) close();
   try {
-    localStorage.setItem('acm.theme.v1', JSON.stringify(theme));
+    localStorage.setItem(themeKey(), JSON.stringify(theme));
   } catch {
     notify('存储不可用，主题仅在本页应用');
   }
 }
-defineExpose({ open, toggle });
+defineExpose({ open, toggle, setTemplate, getTemplate: () => activeTemplate.value });
 </script>
 <template>
   <dialog
@@ -232,6 +276,7 @@ defineExpose({ open, toggle });
       <h2 id="theme-heading">自助调色</h2>
       <button class="btn" @click="close">关闭</button>
     </div>
+    <p class="muted">当前：{{ templateName }}。配色、明暗模式和收藏方案分别保存。</p>
     <div class="filters">
       <label
         >保存模式<select v-model="draft.mode">
@@ -291,7 +336,7 @@ defineExpose({ open, toggle });
     </details>
     <div class="filters">
       <button class="btn" @click="repair">修复可读性</button
-      ><button class="btn" @click="draft = createDefaultTheme()">恢复默认</button
+      ><button class="btn" @click="draft = createDefaultTheme()">恢复此模板原配色</button
       ><button class="btn" @click="saveScheme">收藏方案</button>
     </div>
     <div v-for="scheme in library" :key="scheme.id" class="list-item">
