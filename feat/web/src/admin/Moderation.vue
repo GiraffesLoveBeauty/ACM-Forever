@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router';
 import { useRequests, showError, date } from '../lib/api.js';
 import { useParams } from '../lib/admin.js';
 import { markdown } from '../lib/markdown.js';
+import PostCover from '../components/PostCover.vue';
 const route = useRoute(),
   update = useParams(),
   request = useRequests(),
@@ -51,12 +52,17 @@ watch(tab, load, { immediate: true });
         ><time>{{ date(item.created_at) }}</time>
       </div>
       <h2>
-        <RouterLink v-if="tab === 'reports' && item.post_status === 'published'" :to="`/post.html?id=${item.post_id}`">{{
-          item.title
-        }}</RouterLink
+        <RouterLink
+          v-if="tab === 'reports' && item.post_status === 'published'"
+          :to="`/post.html?id=${item.post_id}`"
+          >{{ item.title }}</RouterLink
         ><template v-else
-          >{{ item.title }}<small v-if="tab === 'reports'" class="forum-report-status">
-            （{{ { removed: '帖子已删除', pending: '待审核', rejected: '未通过' }[item.post_status] || '帖子不可访问' }}）
+          >{{ item.title
+          }}<small v-if="tab === 'reports'" class="forum-report-status">
+            （{{
+              { removed: '帖子已删除', pending: '待审核', rejected: '未通过' }[item.post_status] ||
+              '帖子不可访问'
+            }}）
           </small></template
         >
       </h2>
@@ -64,6 +70,11 @@ watch(tab, load, { immediate: true });
         {{ tab === 'posts' ? '投稿人' : '举报人' }}：{{ item.author_name || item.reporter_name }}
       </p>
       <p v-if="tab === 'reports'" class="forum-report-reason">举报理由：{{ item.reason }}</p>
+      <PostCover
+        :src="item.cover_url"
+        :alt="`${item.title}的封面`"
+        class="forum-moderation-cover"
+      />
       <div
         v-if="item.body"
         class="forum-moderation-body forum-markdown"

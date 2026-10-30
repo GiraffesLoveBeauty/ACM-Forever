@@ -264,15 +264,26 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
     return placeholder;
   });
   const html = window.marked.parse(markdownSafeText, { gfm: true, breaks: true });
-  const safeHtml = window.DOMPurify.sanitize(html, {
+  let safeHtml = window.DOMPurify.sanitize(html, {
     ALLOWED_TAGS: [
       "a", "blockquote", "br", "code", "del", "em", "h1", "h2", "h3", "h4", "h5", "h6",
-      "hr", "li", "ol", "p", "pre", "strong", "sub", "sup", "table", "tbody", "td", "th",
+      "hr", "img", "li", "ol", "p", "pre", "strong", "sub", "sup", "table", "tbody", "td", "th",
       "thead", "tr", "ul",
     ],
-    ALLOWED_ATTR: ["href", "title", "class", "start"],
-    FORBID_TAGS: ["style", "iframe", "img", "video", "audio", "form"],
+    ALLOWED_ATTR: ["href", "title", "class", "start", "src", "alt"],
+    FORBID_TAGS: ["style", "iframe", "video", "audio", "form"],
   });
+  const imageContainer = document.createElement("template");
+  imageContainer.innerHTML = safeHtml;
+  for (const image of imageContainer.content.querySelectorAll("img")) {
+    if (!/^\/api\/forum\/images\/[a-f0-9]{32}$/.test(image.getAttribute("src") || "")) {
+      image.replaceWith(document.createTextNode(image.alt || "[图片未上传]"));
+      continue;
+    }
+    image.setAttribute("loading", "lazy");
+    image.setAttribute("decoding", "async");
+  }
+  safeHtml = imageContainer.innerHTML;
   const escapeHtml = value => value.replace(/[&<>"']/g, character => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   })[character]);
@@ -324,8 +335,8 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
   container.innerHTML = withFormulas;
   const placeholderPattern = new RegExp(`${placeholderPrefix}(\\d+)LITERAL`, "g");
   const restoreLiteralAttribute = value => value.replace(placeholderPattern, (placeholder, index) => escapedLiterals[Number(index)]?.text ?? placeholder);
-  container.querySelectorAll("[href], [title]").forEach(element => {
-    ["href", "title"].forEach(attribute => {
+  container.querySelectorAll("[href], [title], [alt]").forEach(element => {
+    ["href", "title", "alt"].forEach(attribute => {
       if (element.hasAttribute(attribute)) element.setAttribute(attribute, restoreLiteralAttribute(element.getAttribute(attribute)));
     });
   });

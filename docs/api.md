@@ -327,6 +327,8 @@ page = response.json()  # rows、total、page、page_size
 | `GET /api/forum/categories` | 公开 | 论坛分类 |
 | `GET /api/forum/posts` | 公开 | 帖子分页；支持 `page`、`page_size`、`sort`、`q`、`category` |
 | `GET /api/forum/posts/<id>` | 公开 | 帖子详情和已发布评论 |
+| `POST /api/forum/images` | Web 登录 + CSRF | 上传帖子图片；`multipart/form-data` 字段 `image`，接受静态 PNG/JPEG/WebP，最大 5 MB |
+| `GET /api/forum/images/<id>` | 按引用状态授权 | 已发布帖子中的图片公开；其余仅上传者、引用内容的作者及已提交帖子的审核员可读 |
 | `POST /api/me/avatar` | Web 登录 + CSRF | 上传当前成员头像；`multipart/form-data` 字段 `avatar`，接受 PNG/JPEG/WebP，最大 2 MB、最长边 4096 像素 |
 | `DELETE /api/me/avatar` | Web 登录 + CSRF | 移除当前头像并恢复默认头像 |
 | `POST /api/forum/posts` | Web 登录 + CSRF | 创建帖子；正文和标题通过审核后公开 |
@@ -346,6 +348,16 @@ page = response.json()  # rows、total、page、page_size
 `GET /api/me/profile` 的 `user` 对象包含 `avatar_url`；论坛帖子列表和详情中的作者以及详情评论也包含头像地址。Web 端会在上传前自动缩放并压缩常见图片格式；直接调用 API 的客户端应自行控制文件大小。头像图片保存在服务端数据目录，并通过 `/uploads/avatars/<随机文件名>` 提供；未设置头像的前端使用 `public/assets/default-avatar.png`。
 
 帖子正文按 Markdown 源文保存在数据库中，Web 端渲染前会清理 HTML。草稿属于登录成员本人，不能通过公开论坛 API 查看；保存草稿不会进入待审核队列，调用提交接口后才会转换成待审核帖子。
+
+### 帖子封面与正文图片
+
+上传接口返回 `201` 和 `{id, url, width, height, size_bytes}`。在草稿创建、保存或直接发帖的 JSON 中传入 `cover_image_id` 设置封面，传 `null` 移除封面；正文使用 `![说明](/api/forum/images/<id>)` 插入图片。列表、详情及审核记录返回可空的 `cover_url`，草稿详情同时返回 `cover_image_id`。旧客户端不传封面字段时按无封面保存。
+
+Web 编辑器支持选图、粘贴和拖入，接受最大 20 MB 的原图，上传前自动缩小至最长边 2560 像素并压缩；直接调用上传 API 时文件必须小于等于 5 MB，最长边不超过 10000 像素且不超过 2000 万像素。服务器实际解码并重编码为 WebP，移除原始文件名与 EXIF 元数据，不接受 SVG 或动图。每篇帖子最多引用 30 张图片，每个账号最多存储 1000 张、合计 200 MB。
+
+图片引用与草稿或帖子在同一事务中保存。其他成员的私有图片不能被引用；已公开图片可被其他帖子复用，已有合法引用在原帖删除后仍可用于本人草稿。未提交草稿中的图片不会向管理员开放；提交审核后审核员可查看，发布后访客可查看。图片不使用公开缓存，帖子移除后仅在仍有其他已发布引用时继续公开。移除封面或删除草稿会解除对应引用；删除帖子通过状态隐藏内容及图片。上传文件暂时保留并计入账号限额，当前不自动回收。
+
+元数据和引用存入 SQLite 的 `forum_images` / `forum_image_links`，文件保存在 `ACM_DATABASE_PATH` 所在目录的 `uploads/forum/`。备份或迁移时须同时保留数据库和上传目录。反向代理须允许至少 6 MB 的请求体（如 Nginx 的 `client_max_body_size 6m`），以容纳 5 MB 图片和 multipart 字段。Markdown 仅展示本站上传接口生成的图片，外链或 data URL 图片会显示替代文字。
 
 ## CF 练习赛选题管理员接口
 

@@ -183,6 +183,25 @@ async def connect_db(db_path):
         "created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)"
     )
     await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_drafts_author_updated ON forum_drafts(author_qq_id, updated_at DESC)")
+    for table in ("forum_posts", "forum_drafts"):
+        async with db.execute(f"PRAGMA table_info({table})") as cursor:
+            columns = {row["name"] for row in await cursor.fetchall()}
+        if "cover_image_id" not in columns:
+            await db.execute(f"ALTER TABLE {table} ADD COLUMN cover_image_id TEXT")
+    await db.execute(
+        "CREATE TABLE IF NOT EXISTS forum_images (id TEXT PRIMARY KEY, "
+        "owner_qq_id TEXT NOT NULL REFERENCES users(qq_id), width INTEGER NOT NULL, height INTEGER NOT NULL, "
+        "size_bytes INTEGER NOT NULL, created_at INTEGER NOT NULL)"
+    )
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_images_owner ON forum_images(owner_qq_id)")
+    await db.execute(
+        "CREATE TABLE IF NOT EXISTS forum_image_links (image_id TEXT NOT NULL REFERENCES forum_images(id), "
+        "draft_id INTEGER REFERENCES forum_drafts(id) ON DELETE CASCADE, "
+        "post_id INTEGER REFERENCES forum_posts(id) ON DELETE CASCADE, "
+        "CHECK((draft_id IS NULL) <> (post_id IS NULL)), UNIQUE(image_id,draft_id), UNIQUE(image_id,post_id))"
+    )
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_image_links_draft ON forum_image_links(draft_id)")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_image_links_post ON forum_image_links(post_id)")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_posts_status_created ON forum_posts(status, created_at DESC)")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_posts_category_created ON forum_posts(category_id, status, created_at DESC)")
     await db.execute(
