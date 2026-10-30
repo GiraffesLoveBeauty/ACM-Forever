@@ -1,10 +1,9 @@
 <script setup>
-import { ref, reactive, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { ref, reactive, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { api, useRequests, notify, showError, auth } from '../lib/api.js';
-import { markdown } from '../lib/markdown.js';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
+import { sourceFields } from '../lib/markdown-source.js';
+import MarkdownEditor from '../components/MarkdownEditor.vue';
 const route = useRoute(),
   router = useRouter(),
   request = useRequests();
@@ -13,8 +12,6 @@ const form = reactive({ title: '', body: '', category_id: null }),
   drafts = ref([]),
   id = ref(null),
   mode = ref('write'),
-  input = ref(),
-  fileInput = ref(),
   recoveryCandidate = ref(null),
   recoveryKeyForCandidate = ref(''),
   message = ref('新话题尚未保存'),
@@ -56,9 +53,7 @@ function markRecoveryHandled(key) {
   }
 }
 function persistRecovery() {
-  const key = recoveryCandidate.value && !recoveryResolved
-    ? workingRecoveryKey()
-    : recoveryKey();
+  const key = recoveryCandidate.value && !recoveryResolved ? workingRecoveryKey() : recoveryKey();
   try {
     localStorage.setItem(key, JSON.stringify({ payload: payload(), updated_at: Date.now() }));
     localStorage.removeItem(`acm-forum-compose-handled:${key}`);
@@ -71,7 +66,8 @@ function migrateRecovery(previousId, nextId) {
   const previousKeys = [recoveryKey(previousId), workingRecoveryKey(previousId)];
   const nextKeys = [recoveryKey(nextId), workingRecoveryKey(nextId)];
   for (let index = 0; index < previousKeys.length; index++) {
-    const previousKey = previousKeys[index], nextKey = nextKeys[index];
+    const previousKey = previousKeys[index],
+      nextKey = nextKeys[index];
     if (previousKey === nextKey) continue;
     try {
       const stored = localStorage.getItem(previousKey);
@@ -84,11 +80,14 @@ function migrateRecovery(previousId, nextId) {
       // Keep the previous key when the new location cannot be written.
     }
   }
-  if (recoveryKeyForCandidate.value === previousKeys[0]) recoveryKeyForCandidate.value = nextKeys[0];
-  else if (recoveryKeyForCandidate.value === previousKeys[1]) recoveryKeyForCandidate.value = nextKeys[1];
+  if (recoveryKeyForCandidate.value === previousKeys[0])
+    recoveryKeyForCandidate.value = nextKeys[0];
+  else if (recoveryKeyForCandidate.value === previousKeys[1])
+    recoveryKeyForCandidate.value = nextKeys[1];
 }
 function discoverRecovery(serverPayload) {
-  const key = recoveryKey(), workingKey = workingRecoveryKey();
+  const key = recoveryKey(),
+    workingKey = workingRecoveryKey();
   let candidate = null;
   recoveryCandidate.value = null;
   recoveryKeyForCandidate.value = '';
@@ -107,7 +106,8 @@ function discoverRecovery(serverPayload) {
       try {
         const parsed = JSON.parse(stored);
         if (
-          parsed?.payload && typeof parsed.payload.title === 'string' &&
+          parsed?.payload &&
+          typeof parsed.payload.title === 'string' &&
           typeof parsed.payload.body === 'string' &&
           (!candidate || Number(parsed.updated_at || 0) > Number(candidate.value.updated_at || 0))
         )
@@ -135,8 +135,10 @@ function discoverRecovery(serverPayload) {
       }
     }
     const local = candidate.value.payload;
-    if (serverPayload &&
-      local.title === serverPayload.title && local.body === serverPayload.body &&
+    if (
+      serverPayload &&
+      local.title === serverPayload.title &&
+      local.body === serverPayload.body &&
       String(local.category_id || '') === String(serverPayload.category_id || '')
     ) {
       if (candidate.key === key || candidate.key === workingKey) removeRecoveryKey(candidate.key);
@@ -187,62 +189,9 @@ function discardRecovery() {
   recoveryResolved = true;
   if (revision !== savedRevision) persistRecovery();
 }
-function findFirstMarkdownH1(source) {
-  let offset = 0;
-  for (const token of marked.lexer(source, { gfm: true })) {
-    const raw = String(token.raw || '');
-    if (!raw) continue;
-    let startOffset = source.indexOf(raw, offset);
-    if (token.type === 'heading' && token.depth === 1) {
-      while (startOffset >= 0) {
-        const lineStart = source.lastIndexOf('\n', startOffset - 1) + 1;
-        if (/^[\t ]{0,3}$/.test(source.slice(lineStart, startOffset))) break;
-        startOffset = source.indexOf(raw, startOffset + 1);
-      }
-    }
-    if (startOffset < 0) continue;
-    if (token.type === 'heading' && token.depth === 1) {
-      const inlineHtml = DOMPurify.sanitize(marked.parseInline(token.text || '', { gfm: true }));
-      const titleNode = document.createElement('div');
-      titleNode.innerHTML = inlineHtml;
-      return { startOffset, endOffset: startOffset + raw.length, title: titleNode.textContent.trim() };
-    }
-    offset = startOffset + raw.length;
-  }
-  return null;
-}
-async function importMarkdown(event) {
-  const file = event.target.files?.[0];
-  event.target.value = '';
-  if (!file || busy.value) return;
-  if (!/\.(md|markdown)$/i.test(file.name)) {
-    notify('请选择 .md 或 .markdown 文件。');
-    return;
-  }
-  if (file.size > 102400) {
-    notify('Markdown 文件不能超过 100 KB。');
-    return;
-  }
-  if ((form.title.trim() || form.body.trim()) && !confirm('导入 Markdown 会替换当前标题和正文，确定继续吗？')) return;
-  busy.value = true;
-  try {
-    const text = (await file.text()).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
-    const heading = findFirstMarkdownH1(text);
-    let title = Array.from(file.name.replace(/\.(md|markdown)$/i, '')).slice(0, 120).join('');
-    let body = text;
-    if (heading) {
-      title = Array.from(heading.title).slice(0, 120).join('');
-      body = (text.slice(0, heading.startOffset) + text.slice(heading.endOffset)).replace(/^\n+/, '');
-    }
-    if (Array.from(body).length > 20000) throw Error('Markdown 正文超过 20000 个字符，请精简后再导入。');
-    form.title = title;
-    form.body = body;
-    notify('Markdown 已导入，草稿正在自动保存。');
-  } catch (error) {
-    showError(error);
-  } finally {
-    busy.value = false;
-  }
+async function prepareImageUpload() {
+  await save();
+  return id.value;
 }
 async function list() {
   drafts.value = await request('/forum/drafts');
@@ -262,7 +211,7 @@ async function save({ keepalive = false } = {}) {
   saving = (async () => {
     while (revision !== savedRevision && !disposed) {
       const version = revision,
-        data = payload(),
+        data = { ...payload(), ...sourceFields(form) },
         previousId = id.value;
       message.value = '正在保存…';
       const result = await api(id.value ? `/forum/drafts/${id.value}` : '/forum/drafts', {
@@ -370,31 +319,6 @@ async function remove() {
     busy.value = false;
   }
 }
-const formats = {
-  h1: ['# ', ''],
-  h2: ['## ', ''],
-  bold: ['**', '**'],
-  italic: ['*', '*'],
-  strike: ['~~', '~~'],
-  quote: ['> ', ''],
-  ul: ['- ', ''],
-  ol: ['1. ', ''],
-  code: ['`', '`'],
-  codeblock: ['\n```\n', '\n```\n'],
-  link: ['[', '](https://)'],
-};
-async function format(kind) {
-  const node = input.value;
-  if (!node) return;
-  const start = node.selectionStart,
-    end = node.selectionEnd,
-    [before, after] = formats[kind];
-  const text = form.body.slice(start, end) || '文字';
-  form.body = form.body.slice(0, start) + before + text + after + form.body.slice(end);
-  await nextTick();
-  node.focus();
-  node.setSelectionRange(start + before.length, start + before.length + text.length);
-}
 function unload(event) {
   if (revision !== savedRevision || saving) {
     event.preventDefault();
@@ -429,14 +353,18 @@ onMounted(async () => {
   window.addEventListener('pagehide', pagehide);
   try {
     // sessionStorage is copied when a tab is duplicated, so each editor instance needs a fresh key.
-    recoveryTabId = window.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    recoveryTabId =
+      window.crypto?.randomUUID?.() ||
+      `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
     id.value = route.query.draft_id || null;
     // Read the same user's local copy before any request so offline starts can recover it.
     discoverRecovery();
     const results = await Promise.allSettled([
       request('/forum/categories'),
       list(),
-      route.query.draft_id ? request(`/forum/drafts/${route.query.draft_id}`, {}, 'draft') : Promise.resolve(null),
+      route.query.draft_id
+        ? request(`/forum/drafts/${route.query.draft_id}`, {}, 'draft')
+        : Promise.resolve(null),
     ]);
     if (results[0].status === 'fulfilled') categories.value = results[0].value;
     else showError(results[0].reason);
@@ -503,7 +431,7 @@ onBeforeUnmount(() => {
           >话题标题<input
             v-model="form.title"
             :disabled="busy"
-            maxlength="120"
+            maxlength="240"
             placeholder="用一句话概括你想讨论的内容"
         /></label>
         <section class="compose-body-field">
@@ -520,55 +448,16 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
-          <div
-            v-if="mode === 'write'"
-            class="markdown-toolbar"
-            role="toolbar"
-            aria-label="Markdown 格式工具"
-          >
-            <button type="button" :disabled="busy" @click="fileInput?.click()">导入 .md</button>
-            <input
-              ref="fileInput"
-              type="file"
-              accept=".md,.markdown,text/markdown,text/plain"
-              aria-label="选择 Markdown 文件"
-              hidden
-              :disabled="busy"
-              @change="importMarkdown"
-            />
-            <span class="toolbar-divider"></span>
-            <button
-              v-for="(label, key) in {
-                h1: 'H1',
-                h2: 'H2',
-                bold: 'B',
-                italic: 'I',
-                strike: 'S',
-                quote: '❝',
-                ul: '• 列表',
-                ol: '1. 列表',
-                code: '</>',
-                codeblock: '代码块',
-                link: '链接',
-              }"
-              :key="key"
-              :disabled="busy"
-              @click="format(key)"
-            >
-              {{ label }}
-            </button>
-          </div>
-          <textarea
-            v-if="mode === 'write'"
-            ref="input"
+          <MarkdownEditor
             v-model="form.body"
-            class="compose-textarea"
+            v-model:title="form.title"
+            :mode="mode"
             :disabled="busy"
-            rows="18"
-            maxlength="20000"
-            placeholder="记录你的思路…"
-          ></textarea>
-          <div v-else v-forum-math class="compose-preview forum-markdown" v-html="markdown(form.body)"></div>
+            document-type="forum_draft"
+            :document-id="id"
+            :prepare-upload="prepareImageUpload"
+            :download-url="id ? `/api/forum/drafts/${id}/markdown` : ''"
+          />
         </section>
         <div class="compose-actions">
           <button class="btn" :disabled="busy" @click="save().catch(showError)">保存草稿</button

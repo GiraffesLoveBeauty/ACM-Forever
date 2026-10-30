@@ -266,12 +266,12 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
   const html = window.marked.parse(markdownSafeText, { gfm: true, breaks: true });
   const safeHtml = window.DOMPurify.sanitize(html, {
     ALLOWED_TAGS: [
-      "a", "blockquote", "br", "code", "del", "em", "h1", "h2", "h3", "h4", "h5", "h6",
+      "img", "a", "blockquote", "br", "code", "del", "em", "h1", "h2", "h3", "h4", "h5", "h6",
       "hr", "li", "ol", "p", "pre", "strong", "sub", "sup", "table", "tbody", "td", "th",
       "thead", "tr", "ul",
     ],
-    ALLOWED_ATTR: ["href", "title", "class", "start"],
-    FORBID_TAGS: ["style", "iframe", "img", "video", "audio", "form"],
+    ALLOWED_ATTR: ["href", "title", "class", "start", "src", "alt"],
+    FORBID_TAGS: ["style", "iframe", "video", "audio", "form"],
   });
   const escapeHtml = value => value.replace(/[&<>"']/g, character => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -363,6 +363,15 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
       fragment.appendChild(document.createTextNode(node.nodeValue.slice(previousIndex)));
     }
     node.parentNode.replaceChild(fragment, node);
+  });
+  container.querySelectorAll("img").forEach(image => {
+    let allowed = false;
+    try {
+      const url = new URL(image.getAttribute("src"), location.origin);
+      allowed = url.origin === location.origin && !url.search && !url.hash && /^\/api\/markdown\/assets\/[a-f0-9]{32}$/.test(url.pathname);
+    } catch { /* An invalid URL is displayed as a missing resource. */ }
+    if (!allowed) image.replaceWith(document.createTextNode(`[图片待上传：${image.alt || "未关联资源"}]`));
+    else { image.loading = "lazy"; image.decoding = "async"; }
   });
   return container.innerHTML;
 };

@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useRequests, auth, avatar, date, showError, notify } from '../lib/api.js';
+import { downloadMarkdown } from '../lib/wiki.js';
 import { markdown } from '../lib/markdown.js';
 const route = useRoute(),
   router = useRouter(),
@@ -15,7 +16,17 @@ const post = ref(),
   input = ref(),
   toc = ref([]),
   activeHeading = ref('');
-let observer;
+let observer, downloadController;
+async function download() {
+  try {
+    downloadController?.abort();
+    downloadController = new AbortController();
+    await downloadMarkdown(`/api/forum/posts/${post.value.id}/markdown`, downloadController.signal);
+    notify('Markdown 已下载。');
+  } catch (e) {
+    if (e.name !== 'AbortError') showError(e);
+  }
+}
 const roots = computed(() => (post.value?.comments || []).filter((c) => !c.parent_id));
 async function load() {
   try {
@@ -116,7 +127,10 @@ watch(
   },
   { immediate: true },
 );
-onBeforeUnmount(() => observer?.disconnect());
+onBeforeUnmount(() => {
+  observer?.disconnect();
+  downloadController?.abort();
+});
 </script>
 <template>
   <main class="forum-post-layout">
@@ -176,6 +190,7 @@ onBeforeUnmount(() => observer?.disconnect());
             v-html="markdown(post.body)"
           ></div>
           <div class="forum-detail-actions">
+            <button class="btn" @click="download">下载 MD</button>
             <button
               class="btn"
               :class="{ 'is-active': post.viewer_liked }"
@@ -191,7 +206,8 @@ onBeforeUnmount(() => observer?.disconnect());
               class="btn forum-delete-post"
               :disabled="busy"
               @click="deletePost"
-            >删除帖子</button
+            >
+              删除帖子</button
             ><span>◉ {{ post.views_count }} 阅读</span>
           </div>
         </article>
