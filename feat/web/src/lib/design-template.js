@@ -22,6 +22,13 @@ export const DESIGN_TEMPLATES = Object.freeze([
     description: '放射图盘、四色轨道与三角标记。',
     preview: 'phase',
   },
+  {
+    id: 'angel-city',
+    category: 'arknights',
+    name: '天使之城',
+    description: '雾白城市、钴蓝坐标与镜像等高线。',
+    preview: 'angel-city',
+  },
 ]);
 export const normalizeTemplate = (value) =>
   DESIGN_TEMPLATES.some((template) => template.id === value) ? value : 'original';
@@ -52,6 +59,22 @@ export function templateTheme(template) {
       accent: '#d5f500',
     };
     theme.dark.overrides.hero = '#11171a';
+  }
+  if (normalizeTemplate(template) === 'angel-city') {
+    theme.light.colors = {
+      primary: '#202729',
+      background: '#f0f3f1',
+      surface: '#fcfdfc',
+      accent: '#155bd8',
+    };
+    theme.light.overrides.hero = '#edf2ef';
+    theme.dark.colors = {
+      primary: '#e4eeef',
+      background: '#111b22',
+      surface: '#1b2831',
+      accent: '#74adff',
+    };
+    theme.dark.overrides.hero = '#182630';
   }
   return theme;
 }
