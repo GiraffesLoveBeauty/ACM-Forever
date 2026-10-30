@@ -2,12 +2,18 @@ import assert from 'node:assert/strict';
 import { after, afterEach, beforeEach, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import { h, ref } from 'vue';
-import { createDefaultTheme, presetProfile } from '../src/lib/theme-colors.js';
+import {
+  createDefaultTheme,
+  presetProfile,
+  validateTheme,
+  contrastChecks,
+} from '../src/lib/theme-colors.js';
 import {
   themeStorageKey,
   libraryStorageKey,
   templateTheme,
   normalizeTemplate,
+  DESIGN_TEMPLATES,
 } from '../src/lib/design-template.js';
 import { cleanupCompiled, find, loadSfc, mount, settle, textOf } from './helpers/vue-harness.mjs';
 
@@ -91,6 +97,19 @@ test('original storage/defaults stay compatible and unknown templates fall back'
   assert.deepEqual(templateTheme('original'), createDefaultTheme());
   assert.equal(normalizeTemplate('__proto__'), 'original');
   assert.equal(themeStorageKey('removed-template'), 'acm.theme.v1');
+});
+
+test('angel city registers under Arknights with independent keys and readable light/dark defaults', () => {
+  const entry = DESIGN_TEMPLATES.find((item) => item.id === 'angel-city');
+  assert.equal(entry.category, 'arknights');
+  assert.equal(entry.name, '天使之城');
+  assert.equal(themeStorageKey(entry.id), 'acm.theme.angel-city.v1');
+  assert.equal(libraryStorageKey(entry.id), 'acm.theme.angel-city.library.v1');
+  const theme = validateTheme(templateTheme(entry.id));
+  for (const mode of ['light', 'dark'])
+    assert.ok(contrastChecks(theme[mode], mode === 'dark').every((check) => check.pass));
+  assert.equal(theme.light.colors.accent, '#155bd8');
+  assert.equal(templateTheme('phase').light.colors.accent, '#d5f500');
 });
 
 test('real editor isolates saved colors, dark modes and libraries across template switches', async () => {
@@ -180,7 +199,7 @@ test('unavailable storage still allows template selection and fallback palettes'
   assert.equal(accent(), '#f1f547');
 });
 
-test('external template changes update Header and library, persist, and mount only phase decorations', async () => {
+test('external template changes update Header and library, persist, and mount only selected decorations', async () => {
   await mountShell();
   const card = (name) =>
     find(mounted.root, (item) => item.props['aria-label'] === `使用${name}`)[0];
@@ -202,10 +221,19 @@ test('external template changes update Header and library, persist, and mount on
   assert.equal(localStorage.getItem('acm.design-template.v1'), 'phase');
   assert.equal(graphNodes()[1], selectedNode);
   assert.equal(selectedNode.props['aria-pressed'], true);
+  editor.value.setTemplate('angel-city');
+  await settle();
+  assert.equal(button('主题库').props.title, '当前：天使之城');
+  assert.equal(card('天使之城').props['aria-pressed'], true);
+  assert.equal(triangles().length, 0);
+  assert.equal(find(mounted.root, (item) => item.props.class === 'angel-city-art').length, 1);
+  assert.equal(graphNodes()[1], selectedNode);
+  assert.equal(selectedNode.props['aria-pressed'], true);
   editor.value.setTemplate('original');
   await settle();
   assert.equal(button('主题库').props.title, '当前：原有设计模板');
   assert.equal(triangles().length, 0);
+  assert.equal(find(mounted.root, (item) => item.props.class === 'angel-city-art').length, 0);
   assert.equal(selectedNode.props['aria-pressed'], true);
   card('相变信号').props.onClick();
   await settle();
@@ -288,6 +316,7 @@ test('category browsing has no selection side effect and empty categories expose
   assert.deepEqual(selections, []);
   category('arknights').props.onClick();
   await settle();
+  assert.equal(find(mounted.root, (item) => item.props['aria-label'] === '使用天使之城').length, 1);
   const cards = find(
     mounted.root,
     (item) => item.type === 'button' && item.props['aria-label'] === '使用相变信号',
