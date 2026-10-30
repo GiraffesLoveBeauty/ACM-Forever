@@ -12,16 +12,9 @@ from .database import validate_submission_data
 from .difficulty import challenge_filter, challenge_time_limit, neighboring_difficulties, normalize_platform
 from .training_logic import score_candidate
 
-bot_api = Blueprint("bot_api", __name__)
+from .binding_service import BINDING_FIELDS as _BINDING_FIELDS, apply_binding, snapshot
 
-_BINDING_FIELDS = {
-    "cf": ("cf_handle", "codeforces"),
-    "codeforces": ("cf_handle", "codeforces"),
-    "luogu": ("luogu_id", "luogu"),
-    "nowcoder": ("nowcoder_id", "nowcoder"),
-    "atcoder": ("atcoder_handle", "atcoder"),
-    "cjlu": ("cjlu_username", "cjlu"),
-}
+bot_api = Blueprint("bot_api", __name__)
 
 
 def service_required(func):
@@ -270,7 +263,7 @@ async def put_bind_verification(qq_id, platform):
         await db.execute(
             "INSERT INTO account_bind_verifications(qq_id,platform,account,verification_code,created_at,expires_at) "
             "VALUES(?,?,?,?,?,?) ON CONFLICT(qq_id,platform) DO UPDATE SET account=excluded.account, "
-            "verification_code=excluded.verification_code,created_at=excluded.created_at,expires_at=excluded.expires_at",
+            "verification_code=excluded.verification_code,created_at=excluded.created_at,expires_at=excluded.expires_at,verification_id=NULL,expected_binding=NULL,binding_version=NULL,validated_at=0",
             (qq_id, platform, account, code, created_at, expires_at),
         )
         await db.commit()
@@ -331,7 +324,7 @@ async def create_bind_verifications(qq_id):
         await db.executemany(
             "INSERT INTO account_bind_verifications(qq_id,platform,account,verification_code,created_at,expires_at) "
             "VALUES(?,?,?,?,?,?) ON CONFLICT(qq_id,platform) DO UPDATE SET account=excluded.account, "
-            "verification_code=excluded.verification_code,created_at=excluded.created_at,expires_at=excluded.expires_at",
+            "verification_code=excluded.verification_code,created_at=excluded.created_at,expires_at=excluded.expires_at,verification_id=NULL,expected_binding=NULL,binding_version=NULL,validated_at=0",
             [(qq_id, platform, account, code, created, expires) for platform, account, code, created, expires, _field in normalized],
         )
         await db.commit()
@@ -439,23 +432,13 @@ async def confirm_account_binding(qq_id, platform):
         if current and (current[field] or "").strip():
             await db.rollback()
             return jsonify({"success": False, "message": "A platform account is already bound."}), 409
+        if not current:
+            await db.execute("INSERT INTO users(qq_id,name) VALUES(?,?)", (qq_id, qq_id))
         try:
-            if current:
-                await db.execute(f"UPDATE users SET {field}=? WHERE qq_id=?", (pending["account"], qq_id))
-            else:
-                await db.execute(
-                    f"INSERT INTO users(qq_id,name,{field}) VALUES(?,?,?)",
-                    (qq_id, qq_id, pending["account"]),
-                )
-        except aiosqlite.IntegrityError as exc:
+            await apply_binding(db, qq_id, normalized_platform, pending["account"], expected=await snapshot(db, qq_id, normalized_platform), actor="bot")
+        except aiosqlite.IntegrityError:
             await db.rollback()
-            if "duplicate account binding" in str(exc):
-                return jsonify({"success": False, "message": "That OJ account is already bound."}), 409
-            raise
-        await db.execute(
-            "DELETE FROM account_bind_verifications WHERE qq_id=? AND platform=?",
-            (qq_id, platform),
-        )
+            return jsonify({"success": False, "message": "That OJ account is already bound."}), 409
         await db.commit()
         return jsonify({"success": True, "account": pending["account"], "platform": normalized_platform})
     finally:
@@ -482,8 +465,7 @@ async def remove_account_binding(qq_id, platform):
         if not user or not (user[field] or "").strip():
             await db.commit()
             return jsonify({"success": False, "message": "No account is bound for this platform."}), 404
-        await db.execute(f"UPDATE users SET {field}=NULL WHERE qq_id=?", (qq_id,))
-        await _clear_platform_records(db, qq_id, normalized_platform)
+        await apply_binding(db, qq_id, normalized_platform, None, expected=await snapshot(db, qq_id, normalized_platform), actor="bot")
         await db.commit()
         return jsonify({"success": True})
     except Exception:

@@ -311,6 +311,25 @@ test('unmatched sample layout falls back to local text and copy buttons', async 
   assert.deepEqual(copied, [sample.output]);
 });
 
+test('officially omitted output shows an explanation without an answer copy button', async () => {
+  const note = 'Output omitted because it is too long. The minimum cost is <3739.378294998>.';
+  responseData = saved({
+    platform: 'atcoder',
+    statement_html:
+      '<h3>Sample Input 1</h3><pre>1\n</pre><h3>Sample Output 1</h3><p>Output omitted because it is too long.</p>',
+    samples: [{ index: 1, input: '1\n', output: null, output_note: note }],
+  });
+  await page(Problem, '/problem.html?platform=atcoder&problem_id=arc021_4');
+  const panel = element('problem-samples');
+  assert.ok(textOf(panel).includes('样例 1 · 输出说明'));
+  assert.ok(textOf(panel).includes(note));
+  assert.deepEqual(find(panel, (node) => node.type === 'pre').map(textOf), ['1\n']);
+  const buttons = find(panel, (node) => node.type === 'button');
+  assert.deepEqual(buttons.map((button) => textOf(button).trim()), ['复制样例 1 输入']);
+  await buttons[0].props.onClick();
+  assert.deepEqual(copied, ['1\n']);
+});
+
 test('missing parameters and 404 show local errors rather than redirecting', async () => {
   await page(Problem, '/problem.html');
   assert.equal(calls.length, 0);

@@ -102,6 +102,7 @@ onMounted(async () => {
           <button
             v-for="c in directory"
             :key="c.slug"
+            :data-category="c.slug || 'all'"
             class="forum-directory-card"
             :class="{ active: filters.category === c.slug }"
             :aria-pressed="filters.category === c.slug"

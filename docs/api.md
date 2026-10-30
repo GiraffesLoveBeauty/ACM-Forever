@@ -133,17 +133,57 @@ response.raise_for_status()
 
 赛事状态统一为 `todo/unsolved/queued/solved/reviewed/ignored`，其中 `reviewed` 可正常保存，`queued` 仅表示待补题状态，不创建复习或计划队列。`rating` 接受整数或 null。任何赛事 `note_md` 写请求均返回 410。所有写请求继续执行 CSRF 校验，模块路由不是权限边界。
 
+## 普通成员训练闭环
+
+个人入口为 `/home.html`、`/my-problems.html` 和 `/problem.html`。个人中心的“查看全部已 AC”对 member / admin / root 均指向 `/my-problems.html?scope=solved`，仅展示会话本人的 AC；此地址需要登录，刷新、直链、登录及首次改密保留范围、筛选和页码。旧 `/problem-bank.html` 仍供普通成员使用，admin / root 访问时进入统一后台题库；两种个人题库地址默认展示全站目录，可切换“我已 AC”。
+
+认证初始化失败进入 `/auth-unavailable.html?next=...`。恢复页跳过自动认证初始化，首次请求超时（15 秒）后即可展示反馈，不会自行发起第二次认证；直接打开恢复页也不查询认证。用户点击“重试原页面”才重新请求并恢复原目标。普通成员访问后台，服务端直链返回 403，客户端导航提供无权限页面。
+
+### 本人 AC 与站内题面
+
+`GET /api/me/problems?scope=solved` 从会话读取 QQ，客户端的 `qq_id/owner_qq_id` 不改变归属。以平台和题号去重，返回 `ac_at`（Unix 秒），按最近 AC 时间倒序，再按平台、题号稳定排序。`platform/tag/state=favorite/page/page_size` 与总数使用相同条件；`tag` 同时匹配题名、题号和标签。本人范围默认每页 20、上限 100，默认全站目录仍为 500、上限 500。返回 `items/total/returned/page/page_size`；无效 `scope` 或非整数分页参数返回 400。
+
+个人中心的最近 AC 和个人题库均打开站内题面。`from` 仅接受 `/home.html`、携带允许筛选参数的 `/problem-bank.html` 或 `/my-problems.html`；外部网址、管理地址和身份参数会被排除，返回时保留实际个人入口。个人列表与收藏对所有角色均使用 `/api/me/problems`，归属只取会话本人；成员详情及 PDF 读取复用 `/api/me/problems/<platform>/<problem_id>` 和后缀 `/statement.pdf`，admin / root 的详情沿用原管理读取接口，两者均不会触发采集。
+
+### 绑定与同步接口
+
+所有接口均要求完成首次改密的 Web 会话，写入必须带 `X-CSRF-Token`，操作对象仅为会话本人。`cf` 与 `codeforces` 在服务端统一为 `codeforces`。
+
+| 接口 | 请求 / 返回 |
+| --- | --- |
+| `GET /api/me/profile` | 新增 `bindings` 数组，每个平台包含 `platform/label/account/binding_status/self_service/sync_status/last_success_at/message/verification`；`verification` 是本人仍有效的验证信息或 null |
+| `POST /api/me/bindings/<platform>/verification` | JSON `account`；返回 `verification_id/account/code/expires_at/instructions`。验证码 10 分钟有效，重新申请替换旧验证 |
+| `POST /api/me/bindings/<platform>/confirm` | JSON `verification_id`；改绑还须提交 `password`、`confirmed:true`、`current_account`；服务端重新读取公开资料核验，成功消费验证并提交绑定 |
+| `DELETE /api/me/bindings/<platform>` | JSON `password`、`confirmed:true`、`current_account`；确认当前 Web 密码及目标账号后解绑 |
+| `POST /api/me/bindings/<platform>/sync` | 无需指定成员；仅调度本人已绑定的平台；同步创建成功返回 202 和 `task_id` |
+
+Web 归属验证当前实现 Codeforces：账号存在性使用已有验证器，归属只检查目标 `user.info` 的 `firstName/lastName/organization`。用户将验证码写入公开资料，不提供 OJ 密码。其他平台 `self_service=false`，保留查看、同步、密码确认后的解绑和管理员代操作；真实平台归属验证联测前不开放自助绑定 / 改绑。此次自动测试与浏览器测试使用模拟 CF 资料，真实账号的正向归属验证仍待联测。
+
+`binding_status` 为 `unbound/pending/bound`，同步为 `never/queued/running/success/failed`。`last_success_at` 为 Unix 秒，0 代表没有成功记录。`verification` 含 `account/verification_id/code/expires_at`，不能将该资料发给其他成员。服务重启后丢失的运行中任务显示失败并可重试；旧账号的任务不会使新绑定显示同步中。绑定提交与同步调度分别反馈：排队失败时响应仍表明绑定成功，`sync_status=failed`，刷新后仍能看到失败状态。
+
+限频按成员、平台、动作持久保存：申请验证码间隔 30 秒，确认与解绑间隔 3 秒，同步间隔 60 秒，每个动作最多 15 次 / 15 分钟；上游核验并发最多 4。常见错误为 `confirmation_required`（400）、`invalid_password`（403）、`ownership_unverified`（400）、`verification_expired/verification_changed/binding_changed/account_occupied`（409）、`rate_limited`（429）、`upstream_unavailable/verification_unavailable`（503）。仅浏览器提交“已验证”不会完成绑定。
+
+成功解绑 / 改绑在同一事务清理该成员该平台的 AC、提交证据、同步状态并结束活动挑战；收藏、历史笔记、复习与计划存档保留。每个平台使用持久绑定版本拦截旧同步批次，包括解绑后重绑同名账号的情况。
+
+管理员 `PUT /api/user`、`POST /api/register` 改动 OJ 绑定时，须附 `confirm_bindings:true`、`expected_bindings`（按字段名，如 `cf_handle`）和 `binding_versions`（按平台名，如 `codeforces`）。版本来自成员详情中的 `cf_binding_version/luogu_binding_version/nowcoder_binding_version/atcoder_binding_version/cjlu_binding_version`；新成员的预期账号为空、版本为 0。资料编辑省略的绑定字段不会被清空。成功与确认失败均记录操作者、目标、平台、动作、结果和时间，不保存提交的密码。
+
+迁移、备份与验收边界见 [issue-52-member-training.md（普通成员训练闭环）](issue-52-member-training.md)。
+
 ## 管理员采集新题目
 
 ### 网页操作
 
 题库管理顶部的 **服务端数据库 → 初始化数据库** 会补齐 SQLite 表结构，保留已有账号、设置、题目及样例；页面显示各平台目录数量、已采集数量、失败数量和样例组数。服务启动仍自动初始化，也可使用已有 `python -m api.init_db` 命令。
 
+题库管理页的 **题库记录** 可视化浏览 `crawler_problems` 中的目录数据、采集状态、样例数和更新时间，并按平台、题面状态及题号 / 题名 / 比赛 ID 搜索。对应的 `GET /api/admin/database/problems` 仅限 Web 管理员 / Root，支持 `q`、`platform`、`status`、`page` 和 `page_size`；题面正文通过下方题目详情接口读取。
+
 题库列表右侧的 **打开题目** 进入 `/problem.html?platform=codeforces&problem_id=cf_1843A` 等站内详情页，读取服务端已保存的题面与样例。管理员使用 `GET /api/problems/<platform>/<problem_id>`，普通成员使用 `GET /api/me/problems/<platform>/<problem_id>`；都要求登录且完成首次改密。返回题名、难度、标签、原题链接 `problem_url`、`statement_html/statement_text`、题面语言、`samples`、采集时间、最近采集状态和 `content_available`。读取不触发爬虫；题目不存在返回 404，只收录目录时返回 200 且 `content_available=false`，提示等待采集或管理员重试。更新失败但仍有旧题面时继续展示已保存内容。详情页的“查看原题”按钮在新标签页打开数据库中记录的原题链接，正文尚未采集时也可使用。
 
 详情页清理外部 HTML，保留样例空格和换行并提供复制按钮；公式使用本地 KaTeX 0.19.0 输出 MathML（[配置说明](https://katex.org/docs/autorender)）。题面图片目前仍从 AtCoder / Codeforces 的 HTTPS 域名加载，尚未存入本地数据库；其它来源的图片显示占位文字。仅详情页允许这些图片域名，其它页面继续使用原有内容安全策略。
 
 CF 原题未提供样例时（如 171E 的空样例区），采集成功并返回 `samples=[]`；存在一侧输入或输出、缺少 `pre` 等损坏样例仍报错。已有样例的 HTML 刷新结果意外变空时，继续保留旧题面和样例。
+
+AtCoder 仅输出题在输入章节明确无输入时返回 `samples[].input=""`。原站明确省略巨大输出时返回 `output=null` 及 `output_note`（官方说明），网页显示“输出说明”且不提供复制输出；调用方不能将该说明或 null 当作期望答案。APG 课程及错误程序演示保留在正文，不作为同一道题的正式样例。叙述重复、历史错编号的处理边界见[采集说明](crawler-samples.md#样例直接保存在题目中)。原站 404 和空题面仍记录失败，便于后续重试。
 
 PDF 题面（如 497D）将原始字节保存到 SQLite 的 `crawler_problems.statement_pdf`，详情返回 `statement_format="pdf"`、`content_available=true`；JSON 不包含二进制。HTML / 纯文本题面分别返回 `statement_format="html"` / `"text"`，未采集时为 null。详情页的 **打开已采集 PDF** 使用本站 `GET /api/problems/<platform>/<problem_id>/statement.pdf`，成员使用 `/api/me/problems/<platform>/<problem_id>/statement.pdf`；权限与详情接口相同，支持字节范围读取，未保存 PDF 返回 404。PDF 中的图示、公式和样例按原文件保留，暂不拆分为结构化 `samples`，不计入样例组数。PDF 校验文件头、结束标记和 20 MiB 上限；不完整文件采集失败且保留旧内容。
 

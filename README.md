@@ -21,4 +21,6 @@
 - [TCrB-AI项目工程规范.md（AI 项目工程协作规范 · 讨论稿）](docs/TCrB-AI项目工程规范.md)
 - [api.md（API 调用指南）](docs/api.md)
 - [README.md（Vue 前端开发与构建）](feat/web/README.md)
+- [theme-development.md（个人主题开发与投稿规范）](docs/theme-development.md)
 - [crawler-samples.md（采集命令、JSON 字段与 SQLite 入库）](docs/crawler-samples.md)
+- [issue-52-member-training.md（普通成员训练闭环实施与验收）](docs/issue-52-member-training.md)
