@@ -13,6 +13,8 @@ import { cleanupCompiled, find, loadSfc, mount, settle, textOf } from './helpers
 
 const Editor = (await import(await loadSfc('src/components/ThemeEditor.vue'))).default;
 const Library = (await import(await loadSfc('src/components/TemplateLibrary.vue'))).default;
+const Header = (await import(await loadSfc('src/components/Header.vue'))).default;
+const Graph = (await import(await loadSfc('src/components/GraphArt.vue'))).default;
 const keys = ['document', 'Document', 'Node', 'ShadowRoot', 'localStorage', 'matchMedia', 'prompt'];
 const savedGlobals = new Map(
   keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]),
@@ -20,23 +22,42 @@ const savedGlobals = new Map(
 let dom, mounted, editor;
 const accent = () => document.body.style.getPropertyValue('--accent');
 const button = (label) =>
-  find(mounted.root, (item) => item.type === 'button' && textOf(item) === label)[0];
+  find(mounted.root, (item) => item.type === 'button' && textOf(item).trim() === label)[0];
 async function click(label) {
   assert.ok(button(label), label);
   button(label).props.onClick();
   await settle();
 }
 function dialogStub() {
-  const dialog = find(mounted.root, (item) => item.type === 'dialog')[0];
-  dialog.close = () => {};
-  dialog.showModal = () => {};
-  dialog.querySelector = () => null;
+  for (const dialog of find(mounted.root, (item) => item.type === 'dialog')) {
+    dialog.close = () => {};
+    dialog.showModal = () => {};
+    dialog.querySelector = () => null;
+  }
 }
 async function mountEditor() {
   editor = ref();
   mounted = await mount({ render: () => h(Editor, { ref: editor }) }, [
     { path: '/index.html', component: { render: () => null } },
   ]);
+  dialogStub();
+}
+async function mountShell() {
+  editor = ref();
+  mounted = await mount(
+    { render: () => [h(Header), h(Graph), h(Editor, { ref: editor })] },
+    ['/index.html', '/leaderboard.html', '/login.html'].map((path) => ({
+      path,
+      component: { render: () => null },
+    })),
+    '/index.html',
+    {
+      getDesignTemplate: () => editor.value?.getTemplate(),
+      setDesignTemplate: (id) => editor.value?.setTemplate(id),
+      openTheme: () => editor.value?.open(),
+      toggleTheme: () => editor.value?.toggle(),
+    },
+  );
   dialogStub();
 }
 beforeEach(() => {
@@ -157,6 +178,99 @@ test('unavailable storage still allows template selection and fallback palettes'
   editor.value.setTemplate('original');
   await settle();
   assert.equal(accent(), '#f1f547');
+});
+
+test('external template changes update Header and library, persist, and mount only phase decorations', async () => {
+  await mountShell();
+  const card = (name) =>
+    find(mounted.root, (item) => item.props['aria-label'] === `使用${name}`)[0];
+  const triangles = () => find(mounted.root, (item) => item.type === 'i');
+  const graphNodes = () =>
+    find(mounted.root, (item) => item.type === 'g' && item.props.role === 'button');
+  assert.equal(button('主题库').props.title, '当前：原有设计模板');
+  assert.equal(triangles().length, 0);
+  assert.equal(graphNodes().length, 12);
+  const selectedNode = graphNodes()[1];
+  selectedNode.props.onClick();
+  await settle();
+  editor.value.setTemplate('phase');
+  await settle();
+  assert.equal(button('主题库').props.title, '当前：相变信号');
+  assert.equal(card('相变信号').props['aria-pressed'], true);
+  assert.equal(card('原有设计模板').props['aria-pressed'], false);
+  assert.equal(triangles().length, 18);
+  assert.equal(localStorage.getItem('acm.design-template.v1'), 'phase');
+  assert.equal(graphNodes()[1], selectedNode);
+  assert.equal(selectedNode.props['aria-pressed'], true);
+  editor.value.setTemplate('original');
+  await settle();
+  assert.equal(button('主题库').props.title, '当前：原有设计模板');
+  assert.equal(triangles().length, 0);
+  assert.equal(selectedNode.props['aria-pressed'], true);
+  card('相变信号').props.onClick();
+  await settle();
+  assert.equal(button('主题库').props.title, '当前：相变信号');
+  mounted.unmount();
+  mounted = null;
+  await mountShell();
+  assert.equal(button('主题库').props.title, '当前：相变信号');
+  assert.equal(triangles().length, 18);
+});
+
+test('switching with an open draft closes under the new template without reapplying the old one', async () => {
+  await mountEditor();
+  editor.value.open();
+  await click('柔粉');
+  const records = [];
+  const root = document.documentElement;
+  const observer = new dom.window.MutationObserver((items) => records.push(...items));
+  observer.observe(root, {
+    attributes: true,
+    attributeOldValue: true,
+    attributeFilter: ['data-design-template'],
+  });
+  let templateAtClose;
+  find(mounted.root, (item) => item.type === 'dialog')[0].close = () => {
+    templateAtClose = editor.value.getTemplate();
+  };
+  editor.value.setTemplate('phase');
+  await settle();
+  observer.disconnect();
+  assert.equal(templateAtClose, 'phase');
+  assert.ok(records.length);
+  const applied = records.map((_, index) =>
+    index + 1 < records.length ? records[index + 1].oldValue : root.dataset.designTemplate,
+  );
+  assert.ok(
+    applied.every((id) => id === 'phase'),
+    JSON.stringify(applied),
+  );
+  assert.equal(accent(), '#d5f500');
+  editor.value.setTemplate('original');
+  await settle();
+  assert.equal(accent(), '#f1f547');
+});
+
+test('invalid draft colors keep the template gates and last valid palette with a visible error', async () => {
+  await mountEditor();
+  editor.value.setTemplate('phase');
+  await settle();
+  editor.value.open();
+  const previousAccent = accent();
+  delete document.documentElement.dataset.designTemplate;
+  delete document.documentElement.dataset.customTheme;
+  const override = find(
+    mounted.root,
+    (item) => item.type === 'input' && item.props.placeholder === '自动 / #RRGGBB',
+  )[0];
+  override.props.onChange({ target: { value: 'invalid-color' } });
+  await settle();
+  assert.equal(document.documentElement.dataset.designTemplate, 'phase');
+  assert.equal(document.documentElement.dataset.customTheme, 'true');
+  assert.equal(accent(), previousAccent);
+  assert.match(textOf(find(mounted.root, (item) => item.props.role === 'status')[0]), /RGB/);
+  await click('取消');
+  assert.equal(accent(), previousAccent);
 });
 
 test('category browsing has no selection side effect and empty categories expose no fake templates', async () => {

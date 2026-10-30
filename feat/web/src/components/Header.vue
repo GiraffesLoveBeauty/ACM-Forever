@@ -1,36 +1,13 @@
 <script setup>
-import { computed, inject, ref, onMounted } from 'vue';
+import { computed, inject, ref } from 'vue';
 import { useRouter, isNavigationFailure, NavigationFailureType } from 'vue-router';
-import { auth, logoutSession, avatar, showError, notify } from '../lib/api.js';
+import { auth, logoutSession, avatar, showError } from '../lib/api.js';
 import TemplateLibrary from './TemplateLibrary.vue';
 import { normalizeTemplate, templateLabel } from '../lib/design-template.js';
 const templateLibrary = ref();
-const templateKey = 'acm.design-template.v1';
-const designTemplate = ref('original');
 const setDesignTemplate = inject('setDesignTemplate');
-const getDesignTemplate = inject('getDesignTemplate');
-function applyTemplate() {
-  document.documentElement.dataset.designTemplate = designTemplate.value;
-}
-onMounted(() => {
-  try {
-    designTemplate.value = normalizeTemplate(localStorage.getItem(templateKey));
-  } catch {
-    designTemplate.value = 'original';
-  }
-  designTemplate.value = getDesignTemplate?.() || designTemplate.value;
-  // Test renderers and non-browser hosts may not expose an HTML dataset.
-  if (document.documentElement.dataset) applyTemplate();
-});
-function changeTemplate() {
-  applyTemplate();
-  setDesignTemplate?.(designTemplate.value);
-  try {
-    localStorage.setItem(templateKey, designTemplate.value);
-  } catch {
-    notify('存储不可用，设计模板仅在本页应用');
-  }
-}
+const getDesignTemplate = inject('getDesignTemplate', () => 'original');
+const designTemplate = computed(() => normalizeTemplate(getDesignTemplate()));
 const openTheme = inject('openTheme');
 const toggleTheme = inject('toggleTheme');
 const router = useRouter();
@@ -92,11 +69,6 @@ async function logout() {
   <TemplateLibrary
     ref="templateLibrary"
     :current="designTemplate"
-    @select="
-      (id) => {
-        designTemplate = id;
-        changeTemplate();
-      }
-    "
+    @select="(id) => setDesignTemplate?.(id)"
   />
 </template>

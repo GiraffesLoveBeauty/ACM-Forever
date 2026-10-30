@@ -82,7 +82,6 @@ const templateSessions = new Map();
 function setTemplate(value) {
   const next = normalizeTemplate(value);
   if (next === activeTemplate.value) return;
-  if (opened.value) close();
   templateSessions.set(activeTemplate.value, {
     theme: clone(current.value),
     library: clone(library.value),
@@ -96,7 +95,13 @@ function setTemplate(value) {
   }
   library.value = cached ? clone(cached.library) : loadLibrary();
   draft.value = clone(current.value);
-  apply(current.value);
+  if (opened.value) close();
+  else apply(current.value);
+  try {
+    localStorage.setItem('acm.design-template.v1', next);
+  } catch {
+    notify('存储不可用，设计模板仅在本页应用');
+  }
 }
 const dialog = ref(),
   editMode = ref('light'),
@@ -118,6 +123,11 @@ const checks = computed(() => {
   }
 });
 function apply(theme, forced) {
+  // Template identity must not depend on successful palette derivation.
+  if (document.documentElement.dataset) {
+    document.documentElement.dataset.designTemplate = activeTemplate.value;
+    document.documentElement.dataset.customTheme = 'true';
+  }
   try {
     const mode =
       forced || (theme.mode === 'system' ? (systemDark.value ? 'dark' : 'light') : theme.mode);
@@ -128,11 +138,11 @@ function apply(theme, forced) {
       node.dataset.customTheme = 'true';
       node.style.colorScheme = mode;
     }
-    document.documentElement.dataset.designTemplate = activeTemplate.value;
     document.documentElement.dataset.palette = 'custom';
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', tokens['--bg']);
   } catch (e) {
     message.value = e.message;
+    if (!opened.value) notify('配色应用失败，请打开自助调色检查或恢复原配色');
   }
 }
 watch(
