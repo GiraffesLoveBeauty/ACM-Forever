@@ -371,7 +371,7 @@ class WikiTests(contract.unittest.IsolatedAsyncioTestCase):
         _, c = await self.tree()
         p = await self.page(
             c["id"],
-            title="中文 [链接] *标题*",
+            title="中文 [链接] *标题* &amp;",
             body="公式 $x^2$\n```cpp\n# fake\n```\n末行保留空格  \n\n",
         )
         url = f"/api/admin/wiki/revisions/{p['draft_revision_id']}/markdown"
@@ -379,6 +379,7 @@ class WikiTests(contract.unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status_code, 200)
         source = await r.get_data(as_text=True)
         self.assertIn("\\[链接\\]", source)
+        self.assertIn("\\&amp;", source)
         self.assertIn("公式 $x^2$", source)
         self.assertTrue(source.endswith("末行保留空格  \n\n"))
         self.assertIn('filename="dsu.md"', r.headers["Content-Disposition"])

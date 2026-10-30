@@ -251,6 +251,10 @@ test('shared Markdown import handles BOM, LF, fenced H1 and fallback filename wi
     title: '无标题',
     body: '普通正文',
   });
+  assert.equal(
+    (await importMarkdownFile(new File(['# \\&amp;\n\n正文'], 'entity.md'))).title,
+    '&amp;',
+  );
   await assert.rejects(importMarkdownFile(new File([new Uint8Array([255, 254])], 'bad.md')));
   await assert.rejects(importMarkdownFile(new File(['a'.repeat(102401)], 'large.md')), /100 KB/);
   await assert.rejects(importMarkdownFile(new File(['😀'.repeat(20001)], 'body.md')), /20000/);

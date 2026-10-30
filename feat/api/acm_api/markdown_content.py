@@ -35,7 +35,7 @@ def source_fields(data):
 
 def export_markdown(title, body, origin):
     # Treat the title as text, keeping a single generated H1 and the source body intact.
-    title = re.sub(r"([\\`*_{}\[\]()<>#+.!|~-])", r"\\\1", title.replace("\n", " "))
+    title = re.sub(r"([\\`*_{}\[\]()<>#+.!&|~-])", r"\\\1", title.replace("\n", " "))
     if not re.fullmatch(r"https?://[^/\s]+", origin):
         raise ContentError("请配置有效的公开站点地址。")
     body = re.sub(
