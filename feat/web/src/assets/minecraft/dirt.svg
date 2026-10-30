@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" shape-rendering="crispEdges">
+  <!-- Original repeat tile: an irregular pixel mosaic, not a game texture. -->
+  <path fill="#38291f" d="M0 0h32v32H0z"/>
+  <path fill="#493323" d="M0 2h9v5H0zM13 0h8v4h-8zM26 3h6v7h-6zM7 13h12v6H7zM0 24h8v8H0zM20 25h12v5H20z"/>
+  <path fill="#5b412b" d="M3 3h4v3H3zM15 1h4v2h-4zM25 13h7v4h-7zM9 25h6v5H9zM19 18h5v4h-5z"/>
+  <path fill="#281d16" d="M8 7h5v5H8zM18 7h8v4h-8zM0 16h4v5H0zM12 20h6v4h-6zM27 30h5v2h-5z"/>
+  <path fill="#6a4c33" d="M4 11h2v2H4zM22 4h2v3h-2zM13 15h3v2h-3zM26 21h3v3h-3zM3 27h2v2H3z"/>
+</svg>
