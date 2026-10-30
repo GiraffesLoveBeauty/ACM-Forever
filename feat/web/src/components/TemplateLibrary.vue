@@ -366,6 +366,30 @@ defineExpose({ open });
   transform: rotate(-50deg);
   background: linear-gradient(#00d7d2 0 25%, #f00091 25% 50%, #d5f500 50% 75%, #385bff 75%);
 }
+.preview-angel-city {
+  background: radial-gradient(ellipse at 60% 35%, #cedcd8, transparent 68%), #f4f6f4;
+}
+.preview-angel-city .preview-header {
+  background: #fbfcfb;
+  border-bottom-color: #155bd8;
+}
+.preview-angel-city :is(.preview-rail, .preview-side, .preview-posts) {
+  background-color: #fff;
+  border-top: 2px solid #292f32;
+}
+.preview-angel-city .preview-hero {
+  background: repeating-linear-gradient(90deg, transparent 0 19px, #155bd813 19px 20px);
+  border-bottom: 1px solid #155bd8;
+}
+.preview-angel-city .preview-hero i {
+  inset: 5% 15% 0 auto;
+  height: 90%;
+  width: 48%;
+  border-radius: 50% 50% 0 0;
+  border: 1px solid #155bd8;
+  background: repeating-radial-gradient(ellipse at 50% 0, transparent 0 4px, #6d8a9a66 4px 5px);
+  clip-path: polygon(50% 0, 65% 30%, 80% 80%, 100% 100%, 0 100%, 20% 80%, 35% 30%);
+}
 .template-library-empty {
   display: grid;
   place-content: center;
