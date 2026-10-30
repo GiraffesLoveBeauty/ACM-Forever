@@ -163,10 +163,10 @@ async def read_forum_image(image_id):
             (identity["qq_id"] if identity else None, identity["qq_id"] if identity else None, image_id),
         ) as cursor:
             image = await cursor.fetchone()
-        private_access = identity and not identity["must_change_password"] and (
-            identity["qq_id"] == (image["owner_qq_id"] if image else None)
-            or image and image["referenced_by_viewer"]
-            or identity["role"] in {"admin", "root"} and image and image["submitted"]
+        private_access = image and identity and not identity["must_change_password"] and (
+            image["owner_qq_id"] is not None and identity["qq_id"] == image["owner_qq_id"]
+            or image["referenced_by_viewer"]
+            or identity["role"] in {"admin", "root"} and image["submitted"]
         )
         if not image or not (image["published"] or private_access):
             abort(404)

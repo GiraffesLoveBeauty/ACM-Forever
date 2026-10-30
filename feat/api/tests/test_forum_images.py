@@ -29,6 +29,7 @@ class ForumImageTests(unittest.IsolatedAsyncioTestCase):
         self.path = Path(self.directory.name) / "forum.db"
         self.env = patch.dict(os.environ, {
             "ACM_DATABASE_PATH": str(self.path), "ACM_WEBUI_SECRET_KEY": "forum-image-test-only",
+            "ACM_BOT_API_TOKEN": "forum-image-bot-test-only",
             "ACM_BOOTSTRAP_ROOT_QQ_ID": "", "ACM_BOOTSTRAP_ROOT_PASSWORD": "",
         })
         self.env.start()
@@ -201,3 +202,133 @@ class ForumImageTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await cursor.fetchone())[0], 0)
         finally:
             await db.close()
+
+    async def test_delete_uploader_with_unused_images_and_drafts(self):
+        unused = await (await self.upload()).get_json()
+        image = await (await self.upload()).get_json()
+        fields = {"title": "仅保存在草稿中的图片", "body": f"![草稿图片]({image['url']})", "category_id": 1, "cover_image_id": image["id"]}
+        response = await self.owner.post("/api/forum/drafts", json=fields, headers=self.headers[0])
+        self.assertEqual(response.status_code, 201)
+        response = await self.public.delete(
+            "/internal/v1/users/10000001", headers={"Authorization": "Bearer forum-image-bot-test-only"},
+        )
+        self.assertEqual(response.status_code, 200)
+        db = await connect_db(self.path)
+        try:
+            for table in ["users", "web_accounts", "forum_drafts", "forum_image_links"]:
+                async with db.execute(f"SELECT COUNT(*) FROM {table}" + (" WHERE qq_id='10000001'" if table in {"users", "web_accounts"} else "")) as cursor:
+                    self.assertEqual((await cursor.fetchone())[0], 0)
+            rows = await db.execute_fetchall("SELECT owner_qq_id FROM forum_images")
+            self.assertEqual([row[0] for row in rows], [None, None])
+            self.assertEqual(await db.execute_fetchall("PRAGMA foreign_key_check"), [])
+            # Reusing the deleted QQ number must not restore private upload access.
+            await db.execute("INSERT INTO users(qq_id,name) VALUES('10000001','新账号')")
+            await db.execute(
+                "INSERT INTO web_accounts(qq_id,password_hash,role,must_change_password,created_at,updated_at) "
+                "VALUES('10000001',?,'member',0,?,?)", (hash_password(self.password), int(time.time()), int(time.time())),
+            )
+            await db.commit()
+        finally:
+            await db.close()
+        response = await self.owner.post("/api/auth/login", json={"qq_id": "10000001", "password": self.password})
+        self.assertEqual(response.status_code, 200)
+        self.app.config["PLUGIN_CONFIG"].update({
+            "webui_admin_username": "legacy-image-admin", "webui_admin_password": "legacy-image-password",
+            "webui_legacy_admin_login": True,
+        })
+        legacy_admin = self.app.test_client()
+        response = await legacy_admin.post("/api/auth/login", json={"username": "legacy-image-admin", "password": "legacy-image-password"})
+        self.assertEqual(response.status_code, 200)
+        for uploaded in [unused, image]:
+            self.assertTrue((Path(self.app.config["FORUM_UPLOAD_DIR"]) / f"{uploaded['id']}.webp").is_file())
+            for client in [self.owner, self.other, self.admin, legacy_admin, self.public]:
+                self.assertEqual((await client.get(uploaded["url"])).status_code, 404)
+
+    async def test_delete_uploader_preserves_shared_post_and_draft_images(self):
+        image = await (await self.upload()).get_json()
+        fields = {"title": "其他成员继续使用图片", "body": f"![共享图片]({image['url']})", "category_id": 1, "cover_image_id": image["id"]}
+        response = await self.owner.post("/api/forum/posts", json=fields, headers=self.headers[0])
+        original_id = (await response.get_json())["id"]
+        await self.admin.post(f"/api/forum/moderation/posts/{original_id}", json={"decision": "publish"}, headers=self.headers[2])
+        response = await self.other.post("/api/forum/posts", json=fields, headers=self.headers[1])
+        self.assertEqual(response.status_code, 201)
+        shared_id = (await response.get_json())["id"]
+        await self.admin.post(f"/api/forum/moderation/posts/{shared_id}", json={"decision": "publish"}, headers=self.headers[2])
+        response = await self.other.post("/api/forum/drafts", json=fields, headers=self.headers[1])
+        self.assertEqual(response.status_code, 201)
+        draft_id = (await response.get_json())["id"]
+        db = await connect_db(self.path)
+        try:
+            # Existing post-author foreign keys require the original content to be
+            # purged before its author can be deleted; shared references remain.
+            await db.execute("DELETE FROM forum_posts WHERE id=?", (original_id,))
+            await db.commit()
+        finally:
+            await db.close()
+        response = await self.public.delete(
+            "/internal/v1/users/10000001", headers={"Authorization": "Bearer forum-image-bot-test-only"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual((await self.public.get(image["url"])).status_code, 200)
+        post = await (await self.public.get(f"/api/forum/posts/{shared_id}")).get_json()
+        self.assertEqual(post["cover_url"], image["url"])
+        response = await self.other.delete(f"/api/forum/posts/{shared_id}", headers=self.headers[1])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual((await self.public.get(image["url"])).status_code, 404)
+        self.assertEqual((await self.other.get(image["url"])).status_code, 200)
+        response = await self.other.put(f"/api/forum/drafts/{draft_id}", json=fields, headers=self.headers[1])
+        self.assertEqual(response.status_code, 200)
+        response = await self.other.post(f"/api/forum/drafts/{draft_id}/submit", headers=self.headers[1])
+        self.assertEqual(response.status_code, 201)
+        db = await connect_db(self.path)
+        try:
+            self.assertIsNone((await db.execute_fetchall("SELECT owner_qq_id FROM forum_images WHERE id=?", (image["id"],)))[0][0])
+            self.assertEqual(await db.execute_fetchall("PRAGMA foreign_key_check"), [])
+        finally:
+            await db.close()
+
+    async def test_legacy_image_schema_migration_preserves_references_and_is_repeatable(self):
+        db = await connect_db(self.path)
+        try:
+            await db.execute("DROP TABLE forum_image_links")
+            await db.execute("DROP TABLE forum_images")
+            await db.execute(
+                "CREATE TABLE forum_images (id TEXT PRIMARY KEY, owner_qq_id TEXT NOT NULL REFERENCES users(qq_id), "
+                "width INTEGER NOT NULL, height INTEGER NOT NULL, size_bytes INTEGER NOT NULL, created_at INTEGER NOT NULL)"
+            )
+            await db.execute(
+                "CREATE TABLE forum_image_links (image_id TEXT NOT NULL REFERENCES forum_images(id), "
+                "draft_id INTEGER REFERENCES forum_drafts(id) ON DELETE CASCADE, "
+                "post_id INTEGER REFERENCES forum_posts(id) ON DELETE CASCADE, "
+                "CHECK((draft_id IS NULL) <> (post_id IS NULL)), UNIQUE(image_id,draft_id), UNIQUE(image_id,post_id))"
+            )
+            await db.commit()
+        finally:
+            await db.close()
+        image = await (await self.upload()).get_json()
+        fields = {"title": "升级前的图片与引用", "body": f"![图片]({image['url']})", "category_id": 1, "cover_image_id": image["id"]}
+        response = await self.owner.post("/api/forum/drafts", json=fields, headers=self.headers[0])
+        self.assertEqual(response.status_code, 201)
+        draft_id = (await response.get_json())["id"]
+        response = await self.owner.post("/api/forum/posts", json=fields, headers=self.headers[0])
+        self.assertEqual(response.status_code, 201)
+        post_id = (await response.get_json())["id"]
+        for _ in range(2):
+            db = await connect_db(self.path)
+            try:
+                columns = {row["name"]: row for row in await db.execute_fetchall("PRAGMA table_info(forum_images)")}
+                self.assertEqual(columns["owner_qq_id"]["notnull"], 0)
+                foreign_keys = await db.execute_fetchall("PRAGMA foreign_key_list(forum_images)")
+                self.assertEqual(foreign_keys[0]["on_delete"], "SET NULL")
+                rows = await db.execute_fetchall("SELECT * FROM forum_images WHERE id=?", (image["id"],))
+                self.assertEqual((rows[0]["owner_qq_id"], rows[0]["width"], rows[0]["height"], rows[0]["size_bytes"]), ("10000001", 48, 32, image["size_bytes"]))
+                links = await db.execute_fetchall("SELECT image_id,draft_id,post_id FROM forum_image_links")
+                self.assertCountEqual([tuple(row) for row in links], [(image["id"], draft_id, None), (image["id"], None, post_id)])
+                self.assertEqual(await db.execute_fetchall("PRAGMA foreign_key_check"), [])
+            finally:
+                await db.close()
+        self.assertEqual((await self.owner.get(image["url"])).status_code, 200)
+        self.assertEqual((await self.public.get(image["url"])).status_code, 404)
+        response = await self.admin.post(f"/api/forum/moderation/posts/{post_id}", json={"decision": "publish"}, headers=self.headers[2])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual((await self.public.get(image["url"])).status_code, 200)
