@@ -1,10 +1,11 @@
 <script setup>
-import { inject } from 'vue';
+import { computed, inject } from 'vue';
 import { useRouter, isNavigationFailure, NavigationFailureType } from 'vue-router';
 import { auth, logoutSession, avatar, showError } from '../lib/api.js';
 const openTheme = inject('openTheme');
 const toggleTheme = inject('toggleTheme');
 const router = useRouter();
+const canManage = computed(() => auth.authenticated && ['admin', 'root'].includes(auth.role));
 async function logout() {
   try {
     const failure = await router.push('/index.html');
@@ -32,7 +33,10 @@ async function logout() {
       ><RouterLink to="/leaderboard.html" active-class="active">♛ 排行榜</RouterLink
       ><RouterLink v-if="auth.authenticated" to="/home.html" active-class="active"
         >◉ 个人中心</RouterLink
-      ><RouterLink v-if="['admin', 'root'].includes(auth.role)" to="/admin.html"
+      ><RouterLink
+        v-if="canManage"
+        to="/admin.html"
+        active-class="active"
         >⚙ 管理后台</RouterLink
       >
     </nav>
@@ -44,7 +48,7 @@ async function logout() {
       ><RouterLink
         v-else
         class="btn account-avatar-button"
-        :to="auth.role === 'member' ? '/home.html' : '/admin.html'"
+        :to="canManage ? '/admin.html' : '/home.html'"
         aria-label="账户中心"
         ><img
           class="header-account-avatar"
