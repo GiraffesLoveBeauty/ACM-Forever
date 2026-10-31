@@ -10,7 +10,7 @@ Vue 3 + Vue Router + Vite。社区、个人中心、训练工具及 9 个管理�
 
 首次访问仍使用原有设计与原有默认配色。在页头“主题库”打开分类面板，从“明日方舟”分类选择“相变信号”，才启用新增的特殊设计。从“默认”分类选择“原有设计模板”立即恢复原外观。所有相变样式限定在 `data-design-template="phase"` 下，原模板中隐藏新增装饰。
 
-主题库使用 `src/lib/design-template.js` 中的 `TEMPLATE_CATEGORIES` 和 `DESIGN_TEMPLATES` 登记分类及模板。预留“默认”“明日方舟”“原神”“绝区零”，没有模板的分类显示空状态。后续开发者先登记唯一分类 ID 与模板 ID、名称、介绍和预览类型，再提供以 `data-design-template` 隔离的样式以及 `templateTheme` 中的默认配色。模板 ID 必须稳定，独立存储键由该 ID 生成；原模板和相变信号已有存储键兼容保留。分类只管理展示归属，不会改变当前模板或配色；点击具体模板才应用。
+主题库使用 `src/lib/design-template.js` 中的 `TEMPLATE_CATEGORIES` 和 `DESIGN_TEMPLATES` 登记分类及模板。分类包括“默认”“明日方舟”“原神”“绝区零”“我的世界”，没有模板的分类显示空状态。后续开发者先登记唯一分类 ID 与模板 ID、名称、介绍和预览类型，再提供以 `data-design-template` 隔离的样式以及 `templateTheme` 中的默认配色。模板 ID 必须稳定，独立存储键由该 ID 生成；原模板和相变信号已有存储键兼容保留。分类只管理展示归属，不会改变当前模板或配色；点击具体模板才应用。
 
 主题库内置“制作与投稿说明”。个人配色 JSON 的编辑与导入、完整模板的登记示例、资源来源、可用性检查与源码 PR 投稿流程见 [theme-development.md（个人主题开发与投稿规范）](../../docs/theme-development.md)。
 
@@ -23,6 +23,16 @@ Vue 3 + Vue Router + Vite。社区、个人中心、训练工具及 9 个管理�
 “主题库 → 明日方舟”还可选择独立的“天使之城”。`src/angel-city-theme.css` 与 `src/components/AngelCityArt.vue` 提供雾白底色、钴蓝坐标、原创尖拱建筑及镜像等高线、黑白分类标签和六边形热榜序号。参考用户提供的五张界面与宣传截图，实际渲染使用 CSS/SVG，无外部图片或字体依赖；全部样式限定在 `data-design-template="angel-city"` 下，装饰仅在选用时挂载，保留原来的图谱交互。
 
 天使之城的默认浅色强调色为 `#155bd8`，深色为 `#74adff`；当前配色与收藏分别使用 `acm.theme.angel-city.v1` 与 `acm.theme.angel-city.library.v1`。可编辑、导入导出、收藏或恢复该模板默认色，原模板与相变信号的已保存方案不受影响。
+
+“主题库 → 我的世界 → 方块工坊”启用完整的 `minecraft` 模板。`src/minecraft-theme.css` 提供石质物品槽、草地绿强调色、像素立体边框和按钮按压反馈，`src/components/MinecraftArt.vue` 绘制原创方块地形、树与工作台，图谱继续支持原有点选与键盘操作。浅深模式、共享面板、表单和窄屏布局均有对应样式，主题库与调色弹窗保持通用界面。
+
+方块工坊使用灰色背包容器、凹陷物品槽、黑色输入框与原创泥土平铺背景。浅色强调色为 `#3c8527`，深色为 `#a2c881`；配色与收藏独立使用 `acm.theme.minecraft.v1` 和 `acm.theme.minecraft.library.v1`。已保存的旧版配色不会被覆盖，可在自助调色中“恢复此模板原配色”后保存。
+
+`CommunityArt.vue` 在方块工坊中使用 `MinecraftPodium.vue` 的草地方块领奖台和 `MinecraftJourney.vue` 的工作台、像素镐探索小径；其他模板保持原插画。个人中心横幅使用可收缩网格，排行榜入口在窄屏换行，保持在面板内。社区介绍星标独立居中；首页、排行榜和后台搜索框采用外层中性焦点框，输入框不重复绘制绿色轮廓。
+
+常用正文与控件采用 14px 像素字，首页“拆解问题。连接思路。”标题在桌面为 48px、窄屏为 36px。后台章节带有灰色面板，避免文字直接落在泥土背景上；点赞、收藏使用立体按钮，悬停或键盘聚焦时反色，减少动态效果偏好下取消位移。
+
+参考 `nagatoquin33/astrbot_plugin_stealer`、中国版官网与 Minecraft-CSS 的视觉组织后独立实现，没有复制参考项目源码或游戏素材。中文像素字体采用本地提供的“缝合像素字体”`2026.10.25` 版，保留 OFL 和组合字形许可，无字体 CDN、音效或新增 npm 依赖。来源、哈希与许可见 [README.md（字体来源与许可）](src/assets/fonts/fusion-pixel/README.md)；完整配色与研究说明见 [theme-development.md（个人主题开发与投稿规范）](../../docs/theme-development.md#9-方块工坊模板)。
 
 需要 Node.js 22.13 或更新版本、pnpm 11.25.0。先按 [API README](../api/README.md) 启动后端，默认端口 `8088`，再在本目录执行：
 

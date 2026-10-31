@@ -14,6 +14,7 @@ import '../../api/acm_api/public/assets/endfield-theme.css';
 import './style.css';
 import './phase-theme.css';
 import './angel-city-theme.css';
+import './minecraft-theme.css';
 const app = createApp(App);
 const renderMath = (element) => window.renderForumMath?.(element);
 app.directive('forum-math', { mounted: renderMath, updated: renderMath });
