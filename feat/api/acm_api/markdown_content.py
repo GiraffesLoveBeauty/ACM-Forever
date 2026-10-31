@@ -63,6 +63,7 @@ async def record_assets(db, body, kind, document_id, revision_id, actor):
         ).fetchone()
         if not row or not (
             row["owner"] == actor
+            and row["document_type"] == "forum_draft"
             or kind == "wiki"
             and row["document_type"] == "wiki"
             or await asset_public(db, asset_id)

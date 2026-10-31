@@ -145,6 +145,7 @@ async def asset(asset_id):
             or identity["must_change_password"]
             or not (
                 identity["qq_id"] == row["owner"]
+                and row["document_type"] == "forum_draft"
                 or row["document_type"] == "wiki"
                 and identity["role"] in {"admin", "root"}
             )

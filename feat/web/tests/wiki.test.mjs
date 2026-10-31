@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, afterEach, beforeEach, test } from 'node:test';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { File } from 'node:buffer';
 import { JSDOM } from 'jsdom';
 
@@ -15,6 +15,7 @@ for (const name of [
   'Document',
   'Node',
   'Element',
+  'Event',
   'HTMLElement',
   'SVGElement',
   'navigator',
@@ -35,7 +36,17 @@ const Header = (await import(await loadSfc('src/components/Header.vue'))).defaul
 const Editor = (await import(await loadSfc('src/components/MarkdownEditor.vue'))).default;
 const Wiki = (await import(await loadSfc('src/views/Wiki.vue'))).default;
 const Pages = (await import(await loadSfc('src/components/WikiPages.vue'))).default;
+const Categories = (await import(await loadSfc('src/components/WikiCategories.vue'))).default;
 const Compose = (await import(await loadSfc('src/views/Compose.vue'))).default;
+// Exercise both navigation guards through the real, lazily loaded Admin -> Wiki tree.
+const adminUrl = await loadSfc('src/views/Admin.vue');
+let adminSource = await readFile(new URL(adminUrl), 'utf8');
+for (const name of ['Wiki', 'Tasks']) {
+  const url = await loadSfc(`src/admin/${name}.vue`);
+  adminSource = adminSource.replace(`import('../admin/${name}.vue')`, `import('${url}')`);
+}
+await writeFile(new URL(adminUrl), adminSource);
+const Admin = (await import(adminUrl)).default;
 const asset = '/api/markdown/assets/' + 'a'.repeat(32);
 const nav = {
   categories: [
@@ -76,14 +87,14 @@ async function click(word) {
   button(word).click();
   await settle();
 }
-async function mount(component, path, props = {}) {
+async function mount(component, path, props = {}, admin = Pages) {
   host = document.createElement('div');
   document.body.append(host);
   router = createRouter({
     history: createMemoryHistory(),
     routes: [
       { path: '/wiki.html', component: Wiki },
-      { path: '/admin.html', component: Pages },
+      { path: '/admin.html', component: admin },
       { path: '/compose.html', component: Compose },
       { path: '/elsewhere', component: { render: () => h('p', '其他页面') } },
     ],
@@ -119,6 +130,8 @@ beforeEach(() => {
           ? JSON.parse(options.body)
           : null;
     calls.push({ url, body, signal: options.signal });
+    if (url === '/api/ui/preferences') return response({ font_scale: 1 });
+    if (url === '/api/tasks') return response([]);
     if (url === '/api/markdown/assets') {
       if (heldUpload)
         return new Promise((resolve, reject) => {
@@ -491,4 +504,339 @@ test('Wiki login entry retains article query and heading hash', async () => {
     decodeURIComponent(new URL(link.href).searchParams.get('next')),
     '/wiki.html?slug=dsu#路径压缩',
   );
+});
+
+test('blank Wiki upload first creates a protected draft before attaching the image', async () => {
+  await mount(null, '/admin.html?section=wiki&tab=pages');
+  const image = q('[aria-label="选择图片"]');
+  Object.defineProperty(image, 'files', {
+    configurable: true,
+    value: [new File(['synthetic'], 'first.png', { type: 'image/png' })],
+  });
+  image.dispatchEvent(new dom.window.Event('change'));
+  await settle();
+  assert.equal(savedPage.draft.title, '');
+  assert.equal(savedPage.draft.body, '');
+  assert.equal(router.currentRoute.value.query.page_id, '1');
+  const upload = calls.find((c) => c.url === '/api/markdown/assets');
+  assert.ok(upload, host.textContent);
+  assert.equal(upload.body.get('document_id'), '1');
+  assert.ok(q('textarea[aria-label="Markdown 正文"]').value.includes('![first]('));
+});
+
+test('blank forum upload creates its own draft without requiring text first', async () => {
+  await mount(null, '/compose.html');
+  const image = q('[aria-label="选择图片"]');
+  Object.defineProperty(image, 'files', {
+    configurable: true,
+    value: [new File(['synthetic'], 'first.png', { type: 'image/png' })],
+  });
+  image.dispatchEvent(new dom.window.Event('change'));
+  await settle();
+  const draft = calls.find((c) => c.url === '/api/forum/drafts' && c.body);
+  assert.equal(draft.body.title, '');
+  assert.equal(draft.body.body, '');
+  assert.equal(calls.find((c) => c.url === '/api/markdown/assets').body.get('document_id'), '12');
+  assert.ok(q('textarea[aria-label="Markdown 正文"]').value.includes('![first]('));
+});
+
+test('handbook overview shows numbered subcategories, public counts and a real start-reading link', async () => {
+  await mount(null, '/wiki.html');
+  const sidebar = q('.wiki-layout > .wiki-categories');
+  assert.equal(sidebar.querySelectorAll('.wiki-category').length, 1);
+  assert.ok(sidebar.textContent.includes('1 个小类 · 1 篇文章'));
+  assert.ok(q('.wiki-subcategory').textContent.includes('01'));
+  assert.equal(new URL(q('.wiki-hero a').href).searchParams.get('slug'), 'dsu');
+  assert.equal(q('.wiki-start-reading .wiki-reading-row').textContent.includes('并查集'), true);
+  assert.ok(calls.some((c) => c.url.includes('category_id=1') && c.url.includes('page_size=3')));
+});
+
+test('reader practice navigation is shareable and browser history restores the explanation without refetching', async () => {
+  await mount(null, '/wiki.html?slug=dsu');
+  const count = calls.length;
+  q('.wiki-reading-tabs a:nth-child(2)').click();
+  await settle();
+  assert.equal(router.currentRoute.value.query.tab, 'practice');
+  assert.ok(q('.wiki-practice').textContent.includes('暂无关联练习'));
+  assert.equal(q('.wiki-body').parentElement.style.display, 'none');
+  assert.equal(calls.length, count);
+  router.back();
+  await settle();
+  assert.equal(q('.wiki-body').parentElement.style.display, '');
+  assert.equal(q('.wiki-practice'), null);
+  assert.equal(calls.length, count);
+});
+
+test('suggestions keep the article in place, support keyboard entry and ignore responses after Escape', async () => {
+  await mount(null, '/wiki.html?slug=dsu');
+  await input(q('#wiki-search'), 'DSU');
+  await new Promise((r) => setTimeout(r, 280));
+  await settle();
+  assert.ok(host.textContent.includes('公开正文'));
+  assert.equal(router.currentRoute.value.query.slug, 'dsu');
+  releases.shift()();
+  await settle();
+  const suggestion = q('.wiki-search-results a');
+  assert.ok(suggestion.textContent.includes('DSU'));
+  q('#wiki-search').dispatchEvent(
+    new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+  );
+  assert.equal(document.activeElement, suggestion);
+  q('#wiki-search').dispatchEvent(
+    new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+  );
+  await settle();
+  assert.equal(
+    q('.wiki-search-results'),
+    null,
+    JSON.stringify({
+      html: q('.wiki-search-results')?.textContent,
+      calls: calls.map((c) => c.url),
+    }),
+  );
+  await input(q('#wiki-search'), '迟到的结果');
+  await new Promise((r) => setTimeout(r, 280));
+  await settle();
+  q('#wiki-search').dispatchEvent(
+    new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+  );
+  releases.shift()();
+  await settle();
+  assert.equal(q('.wiki-search-results'), null);
+});
+
+for (const [name, composition] of [
+  ['isComposing', { isComposing: true, keyCode: 13 }],
+  ['legacy keyCode 229', { isComposing: false, keyCode: 229 }],
+]) {
+  test(`search shortcuts ignore IME composition with ${name} and work after confirmation`, async () => {
+    await mount(null, '/wiki.html');
+    const field = q('#wiki-search');
+    field.focus();
+    await input(field, '\u6570\u636e');
+    await new Promise((r) => setTimeout(r, 280));
+    await settle();
+    releases.shift()();
+    await settle();
+    assert.ok(q('.wiki-search-results a'));
+    field.dispatchEvent(new dom.window.CompositionEvent('compositionstart', { bubbles: true }));
+    field.value = '\u6570\u636ejie';
+    field.dispatchEvent(
+      new dom.window.CompositionEvent('compositionupdate', { bubbles: true, data: 'jie' }),
+    );
+    field.dispatchEvent(
+      new dom.window.InputEvent('input', {
+        bubbles: true,
+        inputType: 'insertCompositionText',
+        data: 'jie',
+        isComposing: true,
+      }),
+    );
+    // v-model retains the confirmed keyword while the IME is composing.
+    await new Promise((r) => setTimeout(r, 280));
+    await settle();
+    releases.shift()();
+    await settle();
+    assert.equal(q('.wiki-search-results a strong').textContent, '\u6570\u636e');
+    for (const key of ['Enter', 'ArrowDown', 'ArrowUp', 'Escape']) {
+      const event = new dom.window.KeyboardEvent('keydown', {
+        ...composition,
+        key,
+        bubbles: true,
+        cancelable: true,
+      });
+      field.dispatchEvent(event);
+      await settle();
+      assert.equal(router.currentRoute.value.fullPath, '/wiki.html', key);
+      assert.equal(event.defaultPrevented, false, key);
+      assert.equal(document.activeElement, field, key);
+      assert.ok(q('.wiki-search-results a'), key);
+    }
+    field.value = '\u6570\u636e\u7ed3\u6784';
+    field.dispatchEvent(
+      new dom.window.CompositionEvent('compositionend', { bubbles: true, data: '\u7ed3\u6784' }),
+    );
+    await new Promise((r) => setTimeout(r, 280));
+    await settle();
+    releases.shift()();
+    await settle();
+    assert.equal(q('.wiki-search-results a strong').textContent, '\u6570\u636e\u7ed3\u6784');
+    const enter = new dom.window.KeyboardEvent('keydown', {
+      key: 'Enter',
+      keyCode: 13,
+      bubbles: true,
+      cancelable: true,
+    });
+    field.dispatchEvent(enter);
+    await settle();
+    assert.equal(enter.defaultPrevented, true);
+    assert.equal(router.currentRoute.value.fullPath, '/wiki.html?slug=dsu');
+  });
+}
+
+function categoryFixture() {
+  const previous = globalThis.fetch;
+  const state = {
+    ...nav,
+    operations: [],
+    categories: [
+      ...nav.categories.map((c) => ({ ...c, description: '', draft_count: 0 })),
+      {
+        id: 3,
+        name: '工程与工具',
+        parent_id: null,
+        description: '',
+        published_count: 0,
+        draft_count: 0,
+      },
+      {
+        id: 4,
+        name: 'Git 与协作',
+        parent_id: 3,
+        description: '',
+        published_count: 0,
+        draft_count: 0,
+      },
+    ],
+  };
+  globalThis.fetch = async (url, options = {}) =>
+    url === '/api/admin/wiki/categories' && !options.method
+      ? response(state)
+      : previous(url, options);
+  return state;
+}
+
+test('taxonomy selects a single root, preserves it in the URL and disables boundary moves', async () => {
+  categoryFixture();
+  await mount(Categories, '/admin.html?section=wiki&tab=categories&category=3');
+  assert.ok(q('.wiki-category-management h2').textContent.includes('工程与工具'));
+  assert.equal(host.querySelectorAll('.wiki-child-row').length, 1);
+  assert.ok(q('.wiki-child-row').textContent.includes('Git 与协作'));
+  assert.equal(q('.wiki-category-actions [aria-label="下移工程与工具"]').disabled, true);
+  q('.wiki-categories .wiki-category').click();
+  await settle();
+  assert.equal(router.currentRoute.value.query.category, '1');
+  assert.ok(q('.wiki-category-management h2').textContent.includes('知识总览'));
+  assert.equal(q('.wiki-category-actions [aria-label="上移知识总览"]').disabled, true);
+  router.back();
+  await settle();
+  assert.ok(q('.wiki-child-row').textContent.includes('Git 与协作'));
+});
+
+test('taxonomy does not discard an edited form when leaving is declined', async () => {
+  categoryFixture();
+  await mount(null, '/admin.html?section=wiki&tab=categories', {}, Admin);
+  await click('编辑大类');
+  await input(q('.wiki-edit-form input'), '未保存的大类名称');
+  globalThis.confirm = () => false;
+  q('.wiki-categories .wiki-category:nth-child(2)').click();
+  await settle();
+  assert.equal(router.currentRoute.value.query.category, undefined);
+  assert.equal(q('.wiki-edit-form input').value, '未保存的大类名称');
+  await router.push('/elsewhere');
+  await settle();
+  assert.equal(router.currentRoute.value.path, '/admin.html');
+});
+
+for (const [name, destination] of [
+  ['leaving Admin', '/wiki.html'],
+  ['switching Admin modules', '/admin.html?section=tasks'],
+  ['switching Wiki tabs', '/admin.html?section=wiki&tab=pages'],
+  ['switching categories', '/admin.html?section=wiki&tab=categories&category=3'],
+]) {
+  test(`real Admin prompts once when ${name} and preserves category input on refusal`, async () => {
+    categoryFixture();
+    const start = '/admin.html?section=wiki';
+    await mount(null, start, {}, Admin);
+    await click('\uff0b \u65b0\u5efa\u5927\u7c7b');
+    await input(q('.wiki-edit-form input'), 'Unsaved category');
+    const prompts = [];
+    let accept = false;
+    globalThis.confirm = (message) => {
+      prompts.push(message);
+      return accept;
+    };
+    await router.push(destination);
+    await settle();
+    assert.equal(prompts.length, 1);
+    assert.equal(router.currentRoute.value.fullPath, start);
+    assert.equal(q('.wiki-edit-form input').value, 'Unsaved category');
+    accept = true;
+    await router.push(destination);
+    await settle();
+    assert.equal(prompts.length, 2, 'one prompt per attempted navigation');
+    assert.equal(prompts[0], prompts[1]);
+    assert.equal(router.currentRoute.value.fullPath, destination);
+    assert.equal(q('.wiki-edit-form'), null);
+    if (name === 'switching categories')
+      assert.ok(
+        q('.wiki-category-management h2').textContent.includes('\u5de5\u7a0b\u4e0e\u5de5\u5177'),
+      );
+    await router.push('/elsewhere');
+    await settle();
+    assert.equal(prompts.length, 2, 'discarded inputs must not leave a stale guard');
+  });
+}
+
+test('taxonomy deletion renders the impact before content and requires migration plus a replacement default', async () => {
+  categoryFixture();
+  const previous = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) =>
+    url.endsWith('/categories/1/delete-preview')
+      ? response({
+          category: nav.categories[0],
+          children_count: 1,
+          published_count: 1,
+          draft_count: 0,
+          is_default: true,
+          targets: [{ id: 3, name: '工程与工具' }],
+          token: 'opaque-test-token',
+        })
+      : previous(url, options);
+  await mount(Categories, '/admin.html?section=wiki&tab=categories');
+  await click('删除大类');
+  const preview = q('.wiki-delete-preview');
+  assert.ok(preview.textContent.includes('1 篇已发布文章'));
+  assert.ok(
+    preview.compareDocumentPosition(q('.wiki-category-management')) &
+      dom.window.Node.DOCUMENT_POSITION_FOLLOWING,
+  );
+  assert.equal(button('确认迁移并删除').disabled, true);
+  const selects = preview.querySelectorAll('select');
+  selects[0].value = '3';
+  selects[0].dispatchEvent(new dom.window.Event('change'));
+  q('.wiki-check input').click();
+  await settle();
+  assert.equal(button('确认迁移并删除').disabled, true);
+  selects[1].value = '3';
+  selects[1].dispatchEvent(new dom.window.Event('change'));
+  await settle();
+  assert.equal(button('确认迁移并删除').disabled, false);
+  await click('取消删除');
+  assert.equal(q('.wiki-delete-preview'), null);
+});
+
+test('overview excerpts show plain text instead of raw Markdown or executable markup', async () => {
+  const previous = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) =>
+    url.startsWith('/api/wiki/pages?')
+      ? response({
+          items: [
+            {
+              ...source,
+              slug: 'dsu',
+              summary: '',
+              excerpt: '## 算法标题\n\n**集合查询** <script>alert(1)</script>',
+              parent_name: '知识总览',
+              category_name: '数据结构',
+            },
+          ],
+          total: 1,
+        })
+      : previous(url, options);
+  await mount(null, '/wiki.html');
+  const row = q('.wiki-start-reading .wiki-reading-row');
+  assert.ok(row.textContent.includes('算法标题 集合查询'));
+  assert.equal(row.textContent.includes('##'), false);
+  assert.equal(row.querySelector('script'), null);
 });

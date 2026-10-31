@@ -126,7 +126,9 @@ function fill(data) {
     /* Invalid recovery data is ignored. */
   }
 }
+// A new draft already has its server state; its URL update must not cancel the save refresh.
 async function load() {
+  if (updatingRoute) return;
   const revision = ++loadRevision;
   try {
     error.value = '';
@@ -172,13 +174,13 @@ function persist() {
     /* Server save remains the authoritative path. */
   }
 }
-async function save() {
+async function save({ create = false } = {}) {
   clearTimeout(timer);
   if (saving) return saving;
-  if (!dirty.value || !initialized) return;
+  if ((!dirty.value && (!create || page.value)) || !initialized) return;
   if (recovery.value) throw Error('请先恢复或丢弃本地内容，再保存。');
   saving = (async () => {
-    while (dirty.value && !disposed) {
+    while ((dirty.value || (create && !page.value)) && !disposed) {
       const snapshot = JSON.stringify(form),
         payload = content(),
         previousKey = key();
@@ -280,7 +282,7 @@ async function publish() {
   });
 }
 async function prepareUpload() {
-  await save();
+  await save({ create: true });
   return page.value?.id;
 }
 function query(extra = {}) {

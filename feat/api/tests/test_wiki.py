@@ -540,3 +540,26 @@ class WikiTests(contract.unittest.IsolatedAsyncioTestCase):
         data = await self.call("/wiki/pages/dsu", client=self.anon)
         self.assertNotIn("parent_revision_id", data)
         self.assertNotIn("hidden", data)
+
+    async def test_blank_upload_and_role_revocation_of_private_wiki_assets(self):
+        _, child = await self.tree()
+        page = await self.page(child["id"], title="", body="")
+        image = await self.upload(page["id"])
+        self.assertEqual((await self.anon.get(image["url"])).status_code, 404)
+        db = await connect_db(self.db_path)
+        await db.execute("UPDATE web_accounts SET role='member' WHERE qq_id='12345678'")
+        await db.commit()
+        await db.close()
+        self.assertEqual((await self.client.get(image["url"])).status_code, 404)
+        await self.upload(page["id"], status=403)
+        await self.call(
+            "/forum/drafts",
+            {"title": "禁止引用内部 Wiki 资源", "body": "![图](" + image["url"] + ")"},
+            status=400,
+        )
+        draft = await self.call(
+            "/forum/drafts", {"title": "", "body": "", "category_id": None}, status=201
+        )
+        owned = await self.upload(draft["id"], "forum_draft")
+        self.assertEqual((await self.client.get(owned["url"])).status_code, 200)
+        self.assertEqual((await self.anon.get(owned["url"])).status_code, 404)

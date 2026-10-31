@@ -190,6 +190,7 @@ function discardRecovery() {
   if (revision !== savedRevision) persistRecovery();
 }
 async function prepareImageUpload() {
+  if (!id.value && revision === savedRevision) revision++;
   await save();
   return id.value;
 }

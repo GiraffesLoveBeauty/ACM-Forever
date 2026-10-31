@@ -40,7 +40,7 @@ onMounted(async () => {
 });
 </script>
 <template>
-  <main class="admin-home-layout">
+  <main class="admin-home-layout" :class="{ 'wiki-workspace': section === 'wiki' }">
     <header class="forum-welcome admin-welcome">
       <div class="industrial-hero-dots" aria-hidden="true"></div>
       <div class="industrial-hero-copy">
