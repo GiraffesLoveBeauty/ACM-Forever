@@ -185,6 +185,8 @@ CF 原题未提供样例时（如 171E 的空样例区），采集成功并返�
 
 AtCoder 仅输出题在输入章节明确无输入时返回 `samples[].input=""`。原站明确省略巨大输出时返回 `output=null` 及 `output_note`（官方说明），网页显示“输出说明”且不提供复制输出；调用方不能将该说明或 null 当作期望答案。APG 课程及错误程序演示保留在正文，不作为同一道题的正式样例。叙述重复、历史错编号的处理边界见[采集说明](crawler-samples.md#样例直接保存在题目中)。原站 404 和空题面仍记录失败，便于后续重试。
 
+旧 ICPC 输出标题和严格配对的多组无编号样例也可采集。源编号从 0 开始时，`samples[].index` 规范为正数，并由 `source_index` 保存原编号。附件型样例可返回 `input=null` / `output=null`、对应的 `input_note/output_note` 及 `attachments: [{url, name}]`；附件仅保留官方 `https://img.atcoder.jp/` ZIP 链接，未展开为文本。未提供输出的官方补充输入同样通过 `output_note` 说明。null 不表示空字符串答案。首选语言排版损坏但页面内另一语言可严格解析时，整体回退并如实记录实际 `statement_language`；`requested_language` 仍保存原请求。
+
 PDF 题面（如 497D）将原始字节保存到 SQLite 的 `crawler_problems.statement_pdf`，详情返回 `statement_format="pdf"`、`content_available=true`；JSON 不包含二进制。HTML / 纯文本题面分别返回 `statement_format="html"` / `"text"`，未采集时为 null。详情页的 **打开已采集 PDF** 使用本站 `GET /api/problems/<platform>/<problem_id>/statement.pdf`，成员使用 `/api/me/problems/<platform>/<problem_id>/statement.pdf`；权限与详情接口相同，支持字节范围读取，未保存 PDF 返回 404。PDF 中的图示、公式和样例按原文件保留，暂不拆分为结构化 `samples`，不计入样例组数。PDF 校验文件头、结束标记和 20 MiB 上限；不完整文件采集失败且保留旧内容。
 
 旧数据库在启动或初始化时自动补充可空的 `statement_pdf` 列，保留已有题目。已成功保存的 PDF 与 HTML 一样计入已采集统计，并在默认重复采集时跳过。
