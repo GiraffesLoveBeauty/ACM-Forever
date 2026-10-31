@@ -21,6 +21,7 @@ const Editor = (await import(await loadSfc('src/components/ThemeEditor.vue'))).d
 const Library = (await import(await loadSfc('src/components/TemplateLibrary.vue'))).default;
 const Header = (await import(await loadSfc('src/components/Header.vue'))).default;
 const Graph = (await import(await loadSfc('src/components/GraphArt.vue'))).default;
+const CommunityArt = (await import(await loadSfc('src/components/CommunityArt.vue'))).default;
 const keys = ['document', 'Document', 'Node', 'ShadowRoot', 'localStorage', 'matchMedia', 'prompt'];
 const savedGlobals = new Map(
   keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]),
@@ -51,7 +52,15 @@ async function mountEditor() {
 async function mountShell() {
   editor = ref();
   mounted = await mount(
-    { render: () => [h(Header), h(Graph), h(Editor, { ref: editor })] },
+    {
+      render: () => [
+        h(Header),
+        h(Graph),
+        h(CommunityArt),
+        h(CommunityArt, { scene: 'journey' }),
+        h(Editor, { ref: editor }),
+      ],
+    },
     ['/index.html', '/leaderboard.html', '/login.html'].map((path) => ({
       path,
       component: { render: () => null },
@@ -147,6 +156,49 @@ test('real editor isolates saved colors, dark modes and libraries across templat
   await click('取消');
 });
 
+test('Minecraft defaults are readable and its saved palette survives reload without changing other templates', async () => {
+  const entry = DESIGN_TEMPLATES.find((item) => item.id === 'minecraft');
+  assert.equal(entry.category, 'minecraft');
+  const theme = validateTheme(templateTheme(entry.id));
+  for (const mode of ['light', 'dark'])
+    assert.ok(contrastChecks(theme[mode], mode === 'dark').every((check) => check.pass));
+  await mountEditor();
+  editor.value.setTemplate('minecraft');
+  await settle();
+  assert.equal(accent(), theme.light.colors.accent);
+  editor.value.open();
+  await click('暖黄');
+  await click('收藏方案');
+  await click('保存主题');
+  editor.value.toggle();
+  await settle();
+  const savedPalette = localStorage.getItem(themeStorageKey('minecraft'));
+  const savedLibrary = localStorage.getItem(libraryStorageKey('minecraft'));
+  assert.ok(savedPalette);
+  assert.ok(savedLibrary);
+  editor.value.setTemplate('original');
+  await settle();
+  assert.equal(accent(), createDefaultTheme().light.colors.accent);
+  assert.equal(localStorage.getItem(themeStorageKey('original')), null);
+  assert.equal(localStorage.getItem(libraryStorageKey('original')), null);
+  editor.value.setTemplate('minecraft');
+  mounted.unmount();
+  mounted = null;
+  await mountEditor();
+  assert.equal(document.documentElement.dataset.designTemplate, 'minecraft');
+  assert.equal(document.body.dataset.theme, 'dark');
+  assert.equal(accent(), theme.dark.colors.accent);
+  assert.equal(localStorage.getItem(themeStorageKey('minecraft')), savedPalette);
+  assert.equal(localStorage.getItem(libraryStorageKey('minecraft')), savedLibrary);
+  editor.value.toggle();
+  await settle();
+  assert.equal(accent(), presetProfile('sunshine', 'light').colors.accent);
+  editor.value.open();
+  await click('恢复此模板原配色');
+  await click('保存主题');
+  assert.equal(accent(), theme.light.colors.accent);
+});
+
 test('cancel rolls back reset and page-only palette survives template switches without persistence', async () => {
   await mountEditor();
   editor.value.setTemplate('phase');
@@ -229,11 +281,33 @@ test('external template changes update Header and library, persist, and mount on
   assert.equal(find(mounted.root, (item) => item.props.class === 'angel-city-art').length, 1);
   assert.equal(graphNodes()[1], selectedNode);
   assert.equal(selectedNode.props['aria-pressed'], true);
+  editor.value.setTemplate('minecraft');
+  await settle();
+  assert.equal(button('主题库').props.title, '当前：方块工坊');
+  assert.equal(card('方块工坊').props['aria-pressed'], true);
+  assert.equal(find(mounted.root, (item) => item.props.class === 'angel-city-art').length, 0);
+  assert.equal(find(mounted.root, (item) => item.props.class === 'minecraft-art').length, 1);
+  assert.equal(find(mounted.root, (item) => item.props.class === 'minecraft-podium').length, 1);
+  assert.equal(find(mounted.root, (item) => item.props.class === 'minecraft-journey').length, 1);
+  assert.equal(find(mounted.root, (item) => item.props.class === 'header-art-scene').length, 0);
+  assert.equal(graphNodes()[1], selectedNode);
+  assert.equal(selectedNode.props['aria-pressed'], true);
+  graphNodes()[4].props.onKeydown[1]({ key: ' ', preventDefault() {} });
+  await settle();
+  assert.equal(graphNodes()[4].props['aria-pressed'], true);
+  assert.equal(selectedNode.props['aria-pressed'], false);
+  selectedNode.props.onKeydown[0]({ key: 'Enter', preventDefault() {} });
+  await settle();
+  assert.equal(selectedNode.props['aria-pressed'], true);
   editor.value.setTemplate('original');
   await settle();
   assert.equal(button('主题库').props.title, '当前：原有设计模板');
   assert.equal(triangles().length, 0);
   assert.equal(find(mounted.root, (item) => item.props.class === 'angel-city-art').length, 0);
+  assert.equal(find(mounted.root, (item) => item.props.class === 'minecraft-art').length, 0);
+  assert.equal(find(mounted.root, (item) => item.props.class === 'minecraft-podium').length, 0);
+  assert.equal(find(mounted.root, (item) => item.props.class === 'minecraft-journey').length, 0);
+  assert.equal(find(mounted.root, (item) => item.props.class === 'header-art-scene').length, 2);
   assert.equal(selectedNode.props['aria-pressed'], true);
   card('相变信号').props.onClick();
   await settle();
@@ -313,6 +387,11 @@ test('category browsing has no selection side effect and empty categories expose
   category('genshin').props.onClick();
   await settle();
   assert.match(textOf(mounted.root), /此分类暂无模板/);
+  assert.deepEqual(selections, []);
+  category('minecraft').props.onClick();
+  await settle();
+  assert.equal(find(mounted.root, (item) => item.props['aria-label'] === '使用方块工坊').length, 1);
+  assert.equal(find(mounted.root, (item) => item.props['aria-label'] === '使用相变信号').length, 0);
   assert.deepEqual(selections, []);
   category('arknights').props.onClick();
   await settle();

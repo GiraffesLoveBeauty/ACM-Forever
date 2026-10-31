@@ -1,0 +1,1295 @@
+/* 方块工坊: original pixel materials and inventory-inspired UI.
+   Font: Fusion Pixel Font 2026.10.25, SIL OFL 1.1 (see assets/fonts/fusion-pixel). */
+@font-face {
+  font-family: 'Fusion Pixel SC';
+  src: url('./assets/fonts/fusion-pixel/fusion-pixel-12px-proportional-zh_hans.otf.woff2')
+    format('woff2');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design {
+  --font-body: 'Fusion Pixel SC', 'Microsoft YaHei UI', sans-serif;
+  --font-display: var(--font-body);
+  --font-data: 'Fusion Pixel SC', 'Consolas', monospace;
+  --admin-font: var(--font-body);
+  --mc-outline: #1b1b1b;
+  --mc-light: color-mix(in srgb, var(--panel) 15%, white);
+  --mc-shadow: color-mix(in srgb, var(--panel) 20%, #222);
+  --mc-slot: color-mix(in srgb, var(--panel) 65%, var(--text));
+  --mc-raised: inset 4px 4px var(--mc-light), inset -4px -4px var(--mc-shadow);
+  --mc-inset: inset 3px 3px var(--mc-shadow), inset -3px -3px var(--mc-light);
+  --mc-press: 2px;
+  --motion-lift: 0px;
+  --motion-icon-shift: 0px;
+  --motion-directory-shift: 0px;
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 2;
+  font-synthesis: none;
+  -webkit-font-smoothing: auto;
+  background-color: #38291f;
+  background-image: linear-gradient(#0003, #0003), url('./assets/minecraft/dirt.svg');
+  background-size:
+    auto,
+    96px 96px;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(h1, h2, h3, h4, b, strong, button, .primary-nav a) {
+  font-weight: 400;
+  letter-spacing: 0;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .admin-console {
+  --admin-font: var(--font-body);
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .admin-section {
+  padding: 20px;
+  background: var(--panel);
+  color: var(--text);
+  border: 2px solid var(--mc-outline);
+  box-shadow: var(--mc-raised);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.admin-section-heading h2, .admin-section > h2) {
+  color: var(--text);
+  font-size: 24px;
+  line-height: 1.5;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.admin-section-heading p, .admin-section > p) {
+  color: var(--muted);
+  font-size: 14px;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(
+    .admin-module-title,
+    .admin-module-nav a,
+    .admin-table th,
+    .admin-table td,
+    .admin-toggle,
+    .admin-create-grid label,
+    .admin-account-list small,
+    .profile-stat-card .label,
+    .profile-stat-card > small,
+    .panel-caption,
+    .binding-row span,
+    .binding-row b,
+    .profile-avatar-copy small,
+    .personal-content-tab,
+    .personal-community-copy b,
+    .personal-community-copy small,
+    .recent-ac-copy b,
+    .recent-ac-copy small,
+    .panel-text-link
+  ) {
+  font-size: 14px;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.admin-module-group, .admin-module-note, .admin-table-meta, .admin-limit) {
+  font-size: 12px;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(button, input, select, textarea) {
+  font-family: var(--font-body);
+  font-size: 14px;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.forum-brand small, .primary-nav a, .forum-header-actions, .industrial-hero-bottom) {
+  font-size: 14px;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design[data-theme='dark'] {
+  --mc-light: color-mix(in srgb, var(--panel) 65%, white);
+  --mc-shadow: #181818;
+  --mc-slot: var(--bg);
+  background-image: linear-gradient(#0008, #0008), url('./assets/minecraft/dirt.svg');
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-header {
+  border: 2px solid var(--mc-outline);
+  border-bottom: 3px solid var(--mc-outline);
+  background: var(--panel);
+  box-shadow:
+    var(--mc-raised),
+    0 4px 0 #0008;
+  gap: 18px;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-brand {
+  font-size: 24px;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .primary-nav {
+  gap: 6px;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .primary-nav a {
+  background: var(--mc-slot);
+  color: var(--text);
+  border: 2px solid var(--mc-outline);
+  padding: 8px 14px;
+  box-shadow: var(--mc-raised);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .primary-nav
+  a.active {
+  background: var(--subtle-bg);
+  color: var(--selected-fg);
+  box-shadow: var(--mc-inset);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .primary-nav
+  a::after {
+  left: 8px;
+  right: 8px;
+  bottom: 3px;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .primary-nav
+  a:hover {
+  outline: 2px solid var(--link);
+  outline-offset: -5px;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.btn, .forum-hero-cta, .forum-search button, .rank-search button):not(
+    :where(.theme-editor *, .vue-theme-dialog *, .template-library *)
+  ) {
+  border: 2px solid var(--mc-outline);
+  border-radius: 0;
+  box-shadow: var(--mc-raised);
+  transform: none;
+  background-image: none;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 400;
+  transition:
+    background-color 100ms steps(2, end),
+    box-shadow 100ms steps(2, end);
+  background: var(--mc-slot);
+  color: var(--text);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.btn.primary, .forum-hero-cta, .forum-search button, .rank-search button):not(
+    :where(.theme-editor *, .vue-theme-dialog *, .template-library *)
+  ) {
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow:
+    inset 3px 3px #fff5,
+    inset -3px -6px #0005;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.btn, .forum-hero-cta, .forum-search button, .rank-search button):not(
+    :where(.theme-editor *, .vue-theme-dialog *, .template-library *)
+  ):is(:hover, :focus-visible):not(:disabled) {
+  border-color: var(--link);
+  transform: none;
+  filter: none;
+  outline: 2px solid var(--link);
+  outline-offset: -5px;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.btn, .forum-hero-cta, .forum-search button, .rank-search button):not(
+    :where(.theme-editor *, .vue-theme-dialog *, .template-library *)
+  ):active:not(:disabled) {
+  box-shadow: var(--mc-inset);
+  transform: translateY(var(--mc-press));
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(button, .btn):disabled {
+  filter: none;
+  transform: none;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(
+    .forum-community-card,
+    .forum-rail-card,
+    .forum-directory,
+    .forum-article,
+    .forum-comments,
+    .forum-author-card,
+    .forum-comment-form,
+    .community-panel,
+    .compose-editor-panel,
+    .compose-side-card,
+    .profile-stat-card,
+    .card
+  ) {
+  background: var(--panel);
+  border: 2px solid var(--mc-outline);
+  border-radius: 0;
+  box-shadow: var(--mc-raised);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(input:not([type='checkbox']):not([type='radio']):not([type='color']), select, textarea):not(
+    :where(.theme-editor *, .vue-theme-dialog *, .template-library *)
+  ) {
+  border: 2px solid var(--mc-outline);
+  border-radius: 0;
+  background-color: #101010;
+  color: #f4f4f4;
+  box-shadow: var(--mc-inset);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 2;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(input[type='checkbox'], input[type='radio']) {
+  accent-color: var(--accent);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.forum-search, .rank-search, .admin-search) {
+  border: 2px solid var(--mc-outline);
+  background: #101010;
+  box-shadow: var(--mc-inset);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.forum-search, .rank-search, .admin-search)
+  input:not([type='checkbox']):not([type='radio']):not([type='color']) {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(input, textarea):not(
+    :where(.theme-editor *, .vue-theme-dialog *, .template-library *)
+  )::placeholder {
+  color: #bdbdbd;
+  opacity: 1;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.forum-search, .rank-search, .admin-search)
+  > span {
+  color: #bdbdbd;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(a, button, input, select, textarea):focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 4px;
+}
+/* The search container owns one neutral focus indicator; never draw a second input ring. */
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.forum-search, .rank-search, .admin-search):focus-within {
+  border-color: var(--mc-outline);
+  box-shadow: var(--mc-inset);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.forum-search, .rank-search, .admin-search)
+  input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.forum-search, .rank-search, .admin-search):has(input:focus-visible) {
+  outline: 2px solid var(--text);
+  outline-offset: 3px;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-home-layout {
+  gap: 22px;
+  margin-top: 32px;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-feed-column {
+  background: var(--panel);
+  border: 3px solid var(--mc-outline);
+  padding: 18px;
+  box-shadow: var(--mc-raised);
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-welcome {
+  min-height: 392px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  padding: 32px 24px 52px;
+  border: 0;
+  border-radius: 0;
+  background: var(--hero-bg);
+  box-shadow: var(--mc-inset);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .industrial-hero-dots,
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-welcome::after {
+  display: none;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-welcome
+  .forum-kicker {
+  letter-spacing: 0;
+  font-size: 14px;
+  color: var(--hero-muted);
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-welcome h1 {
+  font-size: 48px;
+  line-height: 1.4;
+  font-weight: 400;
+  letter-spacing: 0;
+  margin: 20px 0 14px;
+  text-shadow: 3px 3px var(--mc-light);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design[data-theme='dark']
+  .forum-welcome
+  h1 {
+  text-shadow: 3px 3px var(--mc-shadow);
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-welcome p {
+  max-width: 26em;
+  font-size: 14px;
+  line-height: 1.9;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-welcome
+  .forum-hero-cta {
+  min-height: 46px;
+  padding: 10px 16px;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .industrial-hero-bottom {
+  border-top: 2px solid color-mix(in srgb, var(--hero-text) 25%, transparent);
+  background: color-mix(in srgb, var(--hero-bg) 90%, var(--accent));
+  letter-spacing: 0;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-algorithm-art {
+  height: 306px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+  --art-label: var(--hero-text);
+  --art-route: var(--link);
+  --art-node: var(--accent);
+  --art-node-text: var(--on-accent);
+  --art-shade: var(--hero-bg);
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .minecraft-art {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  inset: 0;
+  pointer-events: none;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-clouds {
+  fill: var(--hero-text);
+  opacity: 0.08;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-landscape {
+  stroke: #39492b;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-soil-front {
+  fill: #916846;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-soil-side {
+  fill: #765238;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-grass-top {
+  fill: color-mix(in srgb, var(--accent) 65%, #79a84f);
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-grass-edge {
+  fill: #63853d;
+  stroke: none;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-soil-flecks {
+  fill: #c69b6d;
+  stroke: none;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-trunk-front {
+  fill: #977242;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-trunk-side {
+  fill: #654b2e;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-leaves-top {
+  fill: #88a957;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-leaves-side {
+  fill: #5c833f;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-leaves-shade {
+  fill: #42652f;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-leaves-detail {
+  fill: #a1ba72;
+  stroke: none;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-bench-top {
+  fill: #c19b66;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-bench-grid {
+  fill: none;
+  stroke: #654b2e;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-sparks {
+  fill: #b49238;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .algorithm-grid {
+  display: none;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .algorithm-layer {
+  z-index: 2;
+  opacity: 1;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .algorithm-graph {
+  inset: 0 0 auto;
+  height: 230px;
+  width: 100%;
+  transform: none;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .algorithm-code {
+  display: none;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .graph-floor {
+  opacity: 0.08;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .graph-edge {
+  stroke: var(--hero-text);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+  stroke-opacity: 0.26;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .graph-path-core {
+  stroke-width: 3;
+  stroke-linejoin: miter;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.graph-node-front, .graph-node-back) {
+  clip-path: polygon(15% 15%, 85% 15%, 85% 85%, 15% 85%);
+  transform-box: fill-box;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .graph-node-back {
+  fill: var(--hero-bg);
+  stroke: var(--link);
+  stroke-opacity: 1;
+  stroke-width: 3;
+  clip-path: none;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.graph-node-label-secondary, .graph-trace-caption) {
+  fill: var(--hero-text);
+  paint-order: stroke;
+  stroke: var(--hero-bg);
+  stroke-width: 3px;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .graph-node-label {
+  font-weight: 700;
+  font-size: 11px;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .graph-node-ring {
+  stroke: var(--link);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .graph-callout-surface {
+  rx: 0;
+  stroke-width: 2;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-algorithm-art
+  figcaption {
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 6px;
+  text-align: center;
+  font-size: 14px;
+  background: var(--hero-bg);
+  color: var(--hero-text);
+  border: 1px solid color-mix(in srgb, var(--hero-text) 30%, transparent);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-community-card {
+  padding: 20px 16px;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-community-card
+  h2 {
+  font-size: 24px;
+  line-height: 1.5;
+  font-weight: 400;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .community-spark {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 2px solid var(--mc-outline);
+  box-shadow: var(--mc-inset);
+  color: var(--link);
+  font-size: 0;
+  line-height: 0;
+  vertical-align: top;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .community-spark::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 16px;
+  height: 16px;
+  background: currentColor;
+  clip-path: polygon(
+    43.75% 0,
+    56.25% 0,
+    56.25% 25%,
+    62.5% 25%,
+    62.5% 37.5%,
+    75% 37.5%,
+    75% 43.75%,
+    100% 43.75%,
+    100% 56.25%,
+    75% 56.25%,
+    75% 62.5%,
+    62.5% 62.5%,
+    62.5% 75%,
+    56.25% 75%,
+    56.25% 100%,
+    43.75% 100%,
+    43.75% 75%,
+    37.5% 75%,
+    37.5% 62.5%,
+    25% 62.5%,
+    25% 56.25%,
+    0 56.25%,
+    0 43.75%,
+    25% 43.75%,
+    25% 37.5%,
+    37.5% 37.5%,
+    37.5% 25%,
+    43.75% 25%
+  );
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-side-links a {
+  padding: 10px;
+  background: var(--panel);
+  border: 1px solid var(--mc-outline);
+  box-shadow: var(--mc-raised);
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-side-title {
+  border-bottom: 2px solid var(--line);
+  font-size: 14px;
+  font-weight: 400;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .hot-topic-list
+  > a
+  > span {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  background: var(--mc-slot);
+  border: 1px solid var(--line);
+  color: var(--text);
+  box-shadow: var(--mc-inset);
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-directory {
+  padding: 18px 16px;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-directory-heading {
+  flex-wrap: wrap;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-directory-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-flow: row;
+  gap: 8px;
+  overflow: visible;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-directory-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  min-height: 92px;
+  padding: 12px;
+  border: 2px solid var(--mc-outline);
+  background: var(--mc-slot);
+  color: var(--text);
+  box-shadow: var(--mc-inset);
+  text-align: left;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-directory-card.active {
+  background: var(--subtle-bg);
+  color: var(--selected-fg);
+  border-color: var(--link);
+  box-shadow:
+    var(--mc-inset),
+    inset 0 -4px var(--accent);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-directory-card.active::after {
+  content: '✓';
+  position: absolute;
+  top: 1px;
+  right: 5px;
+  color: var(--selected-fg);
+  font-size: 14px;
+  font-weight: 400;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-directory-icon {
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  color: var(--link);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-directory-copy {
+  min-width: 0;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-directory-copy
+  small {
+  display: block;
+  white-space: normal;
+  line-height: 1.7;
+  font-size: 14px;
+  margin-top: 5px;
+  color: inherit;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-directory-count {
+  grid-column: 2;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  color: var(--text);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-directory-count
+  :is(strong, small) {
+  color: inherit;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-directory-card:not(:disabled):hover {
+  transform: none;
+  box-shadow:
+    var(--mc-inset),
+    inset 0 -4px var(--accent);
+  border-color: var(--link);
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-feed-toolbar {
+  border-bottom: 3px solid var(--mc-outline);
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-tabs {
+  gap: 4px;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-tab {
+  padding-inline: 10px;
+  min-height: 40px;
+  border: 2px solid var(--mc-outline);
+  background: var(--mc-slot);
+  color: var(--text);
+  box-shadow: var(--mc-raised);
+  font-size: 14px;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-tab.active {
+  background: var(--panel);
+  color: var(--text);
+  border-color: var(--mc-outline);
+  box-shadow: var(--mc-inset);
+  text-decoration: underline;
+  text-underline-offset: 5px;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-post-card {
+  padding: 22px;
+  border: 2px solid var(--mc-outline);
+  background: var(--mc-slot);
+  box-shadow: var(--mc-inset);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-post-card
+  :is(
+    .forum-post-meta,
+    .forum-post-time,
+    .forum-post-excerpt,
+    .forum-post-author,
+    .forum-post-actions,
+    .forum-post-actions > *
+  ) {
+  color: var(--text);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-post-actions
+  button.is-active {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-post-actions {
+  gap: 10px 16px;
+  flex-wrap: wrap;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-post-actions
+  button {
+  min-height: 36px;
+  padding: 4px 10px;
+  border: 2px solid var(--mc-outline);
+  border-radius: 0;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--mc-raised);
+  transition:
+    background-color 120ms steps(2, end),
+    color 120ms steps(2, end),
+    transform 120ms steps(2, end),
+    box-shadow 120ms steps(2, end);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-post-actions
+  button:is(:hover, :focus-visible):not(:disabled) {
+  background: var(--text);
+  color: var(--panel);
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+  box-shadow:
+    inset 2px 2px #fff3,
+    inset -2px -2px #0006;
+  transform: translateY(calc(-1 * var(--mc-press)));
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-post-actions
+  button.is-active:not(:hover):not(:focus-visible) {
+  color: var(--selected-fg);
+  background: var(--subtle-bg);
+  box-shadow: var(--mc-inset);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-post-actions
+  button:active:not(:disabled) {
+  transform: translateY(var(--mc-press));
+  box-shadow: var(--mc-inset);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-post-card:hover {
+  border-color: var(--link);
+  box-shadow: var(--mc-inset);
+  transform: none;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .forum-category-pill {
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+  box-shadow: var(--mc-inset);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.personal-welcome, .community-page-heading) {
+  border: 2px solid var(--mc-outline);
+  border-radius: 0;
+  background: var(--panel);
+  box-shadow: var(--mc-raised);
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .personal-welcome {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 280px) minmax(170px, 220px);
+  align-items: center;
+  gap: 20px;
+  padding: 24px;
+  isolation: isolate;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .personal-welcome::after {
+  display: none;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .personal-welcome
+  > div {
+  width: auto;
+  max-width: none;
+  min-width: 0;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .personal-welcome
+  h1 {
+  font-size: 36px;
+  line-height: 1.5;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .personal-welcome p {
+  color: var(--muted);
+  font-size: 14px;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .personal-rank-link {
+  display: grid;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  padding: 16px;
+  gap: 8px;
+  border: 2px solid var(--mc-outline);
+  border-radius: 0;
+  box-shadow: var(--mc-raised);
+  background: var(--mc-slot);
+  color: var(--text);
+  backdrop-filter: none;
+  overflow-wrap: anywhere;
+  animation: none;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .personal-rank-link
+  > span:first-child {
+  font-size: 24px;
+  color: var(--text);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .personal-rank-link
+  b {
+  font-size: 14px;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .personal-rank-link:is(:hover, :focus-visible) {
+  background: var(--subtle-bg);
+  color: var(--selected-fg);
+  outline: 2px solid var(--text);
+  outline-offset: -6px;
+  box-shadow: var(--mc-raised);
+  transform: none;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.forum-directory-heading h2, .industrial-feed-title, .forum-post-card h2) {
+  font-size: 24px;
+  line-height: 1.5;
+  font-weight: 400;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(
+    .forum-directory-heading > span,
+    .forum-directory-copy b,
+    .forum-directory-count strong,
+    .forum-directory-count small,
+    .forum-feed-toolbar > span,
+    .forum-post-excerpt,
+    .forum-post-meta,
+    .forum-post-actions,
+    .forum-post-author,
+    .forum-category-pill,
+    .hot-topic-list > a > span,
+    .hot-topic-list > a > b,
+    .hot-topic-list > a > small,
+    .forum-loading,
+    .forum-feed-refresh,
+    .forum-empty p,
+    .forum-footer
+  ) {
+  font-size: 14px;
+  line-height: 2;
+  font-weight: 400;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(
+    .graph-node-label,
+    .graph-node-label-secondary,
+    .graph-weight,
+    .graph-callout-text,
+    .graph-trace-caption
+  ) {
+  font-family: var(--font-data);
+  font-size: 12px;
+  font-weight: 400;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-footer {
+  color: #f1eee9;
+  text-shadow: 2px 2px #15110e;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.forum-tab, .forum-side-links a):hover {
+  border-color: var(--link);
+  transform: none;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.forum-directory-card, .forum-tab, .forum-side-links a):active:not(:disabled) {
+  box-shadow: var(--mc-inset);
+  transform: translateY(var(--mc-press));
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.template-library, .theme-editor, .vue-theme-dialog) {
+  font-family: var(--font-body);
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.template-library, .theme-editor, .vue-theme-dialog)
+  :is(button, input, select, textarea) {
+  font-family: var(--font-body);
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .admin-welcome {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 240px;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .leaderboard-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 320px);
+  min-height: 228px;
+  gap: 24px;
+  padding: 24px 28px;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .leaderboard-heading::after {
+  display: none;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .leaderboard-heading
+  > div {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .leaderboard-heading
+  h1 {
+  font-size: 36px;
+  line-height: 1.5;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .leaderboard-heading
+  p {
+  font-size: 14px;
+  line-height: 2;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.leaderboard-heading, .personal-welcome)
+  .community-header-art {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  height: 190px;
+  background: transparent;
+  filter: none;
+  opacity: 1;
+  pointer-events: none;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.leaderboard-heading, .personal-welcome)
+  .community-header-art::after {
+  display: none;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  :is(.leaderboard-heading, .personal-welcome)
+  .header-art-layer {
+  filter: none;
+  opacity: 1;
+  transform: none;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .minecraft-podium {
+  width: 100%;
+  height: 100%;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .minecraft-journey {
+  width: 100%;
+  height: 100%;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-journey-terrain {
+  stroke: #493323;
+  stroke-width: 1;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-journey-trail {
+  fill: #e1c683;
+  stroke: none;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-journey-pickaxe {
+  shape-rendering: crispEdges;
+  stroke: #243932;
+  stroke-width: 2;
+  stroke-linejoin: miter;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-journey-handle {
+  fill: #947143;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .mc-journey-tool-edge {
+  fill: #21625b;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-journey-tool {
+  fill: #50c9ba;
+  stroke: none;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .mc-journey-tool-glint {
+  fill: #b4f0d3;
+  stroke: none;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-podium-block {
+  stroke: #493323;
+  stroke-width: 1;
+  stroke-linejoin: miter;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-podium-soil-top {
+  fill: #765238;
+}
+html[data-custom-theme][data-design-template='minecraft']
+  body.endfield-design
+  .mc-podium-grass-flecks {
+  fill: #93ac61;
+  stroke: none;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-podium-floor {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 1;
+  opacity: 0.16;
+}
+html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .mc-podium-rank {
+  fill: #f1f1e7;
+  stroke: #1b1b1b;
+  stroke-width: 4;
+  paint-order: stroke;
+  text-anchor: middle;
+  font: 24px var(--font-data);
+}
+@media (min-width: 481px) and (max-width: 1100px) {
+  html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-brand {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
+  }
+  html[data-custom-theme][data-design-template='minecraft']
+    body.endfield-design
+    .forum-header-actions {
+    grid-column: 2;
+    grid-row: 1;
+    flex-wrap: wrap;
+  }
+  html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .primary-nav {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    margin: 0;
+    flex-wrap: wrap;
+    border-top: 1px solid var(--line);
+    padding-top: 8px;
+  }
+}
+@media (max-width: 1100px) {
+  html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .personal-welcome {
+    grid-template-columns: minmax(0, 1fr) minmax(180px, 280px);
+  }
+  html[data-custom-theme][data-design-template='minecraft']
+    body.endfield-design
+    .personal-rank-link {
+    grid-column: 1 / -1;
+    width: auto;
+    justify-self: start;
+  }
+  html[data-custom-theme][data-design-template='minecraft']
+    body.endfield-design
+    .forum-home-layout {
+    gap: 18px;
+  }
+  html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-welcome {
+    padding-inline: 20px;
+  }
+}
+@media (max-width: 700px) {
+  html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .personal-welcome {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+    padding: 20px;
+  }
+  html[data-custom-theme][data-design-template='minecraft']
+    body.endfield-design
+    .personal-welcome
+    h1 {
+    font-size: 24px;
+  }
+  html[data-custom-theme][data-design-template='minecraft']
+    body.endfield-design
+    .personal-welcome
+    .community-header-art {
+    width: min(100%, 320px);
+    justify-self: center;
+  }
+  html[data-custom-theme][data-design-template='minecraft']
+    body.endfield-design
+    .leaderboard-heading {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 20px;
+  }
+  html[data-custom-theme][data-design-template='minecraft']
+    body.endfield-design
+    .leaderboard-heading
+    h1 {
+    font-size: 24px;
+  }
+  html[data-custom-theme][data-design-template='minecraft']
+    body.endfield-design
+    .leaderboard-heading
+    .community-header-art {
+    width: min(100%, 320px);
+    justify-self: center;
+  }
+  html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-welcome {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 26px 20px 52px;
+    gap: 16px;
+  }
+  html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-welcome h1 {
+    font-size: 36px;
+  }
+  html[data-custom-theme][data-design-template='minecraft']
+    body.endfield-design
+    .forum-algorithm-art {
+    max-width: 400px;
+    justify-self: center;
+    height: 306px;
+  }
+  html[data-custom-theme][data-design-template='minecraft']
+    body.endfield-design
+    .forum-directory-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 480px) {
+  html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .admin-section {
+    padding: 14px 10px;
+  }
+  html[data-custom-theme][data-design-template='minecraft']
+    body.endfield-design
+    .forum-feed-column {
+    padding: 10px;
+  }
+  html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-header {
+    padding: 12px;
+    gap: 12px;
+  }
+  html[data-custom-theme][data-design-template='minecraft']
+    body.endfield-design
+    .forum-home-layout {
+    margin-top: 24px;
+  }
+  html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .primary-nav a {
+    padding-inline: 12px;
+  }
+  html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-directory {
+    padding: 16px 10px;
+  }
+  html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-welcome {
+    padding-inline: 12px;
+  }
+  html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-welcome h1 {
+    font-size: 36px;
+  }
+  html[data-custom-theme][data-design-template='minecraft']
+    body.endfield-design
+    .forum-feed-toolbar {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-tabs {
+    flex-wrap: wrap;
+  }
+  html[data-custom-theme][data-design-template='minecraft']
+    body.endfield-design
+    .forum-directory-card {
+    padding: 10px 8px;
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 6px;
+  }
+  html[data-custom-theme][data-design-template='minecraft'] body.endfield-design .forum-post-card {
+    padding: 18px 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-custom-theme][data-design-template='minecraft'] body.endfield-design {
+    --mc-press: 0px;
+  }
+  html[data-custom-theme][data-design-template='minecraft']
+    body.endfield-design
+    :is(
+      .btn,
+      .forum-hero-cta,
+      .forum-directory-card,
+      .forum-post-actions button,
+      .algorithm-graph,
+      .graph-node-ring
+    ) {
+    transition: none;
+    transform: none;
+  }
+}
