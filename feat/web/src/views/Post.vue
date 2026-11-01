@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useRequests, auth, avatar, date, showError, notify } from '../lib/api.js';
 import { markdown } from '../lib/markdown.js';
+import PostCover from '../components/PostCover.vue';
 const route = useRoute(),
   router = useRouter(),
   request = useRequests();
@@ -127,48 +128,31 @@ onBeforeUnmount(() => observer?.disconnect());
     </div>
     <div v-else-if="!post" class="forum-loading">正在加载话题…</div>
     <div v-else class="forum-post-columns">
-      <aside class="forum-author-rail" aria-label="作者与话题信息">
-        <section class="forum-author-card">
-          <div class="forum-author-card-label">本帖作者</div>
-          <img
-            class="forum-avatar forum-author-avatar"
-            :src="avatar(post.author_avatar_url)"
-            alt="作者头像"
-          /><b class="forum-author-name">{{ post.author_name }}</b
-          ><span class="forum-author-caption">计量 ACMer · 社区成员</span>
-          <div class="forum-author-divider"></div>
-          <div class="forum-author-stats">
-            <div>
-              <b>{{ post.likes_count }}</b
-              ><span>获赞</span>
-            </div>
-            <div>
-              <b>{{ post.views_count }}</b
-              ><span>人气</span>
-            </div>
-            <div>
-              <b>{{ post.comments?.length || 0 }}</b
-              ><span>评论</span>
-            </div>
-          </div>
-          <div class="forum-author-date">发布于 {{ date(post.created_at) }}</div>
-        </section>
-      </aside>
       <article class="forum-post-detail">
         <article class="forum-article">
-          <div class="forum-post-meta">
-            <span class="forum-category-pill">{{ post.category_name }}</span
-            ><span v-if="post.is_pinned" class="forum-pinned">置顶</span
-            ><time>{{ date(post.created_at) }}</time>
-          </div>
-          <h1>{{ post.title }}</h1>
-          <div class="forum-article-byline">
-            <img
-              class="forum-avatar small"
-              :src="avatar(post.author_avatar_url)"
-              alt="作者头像"
-            /><b>{{ post.author_name }}</b>
-          </div>
+          <header class="forum-article-header">
+            <div class="forum-post-meta">
+              <span class="forum-category-pill">{{ post.category_name }}</span
+              ><span v-if="post.is_pinned" class="forum-pinned">置顶</span
+              ><time>{{ date(post.created_at) }}</time>
+            </div>
+            <h1>{{ post.title }}</h1>
+            <div class="forum-article-byline">
+              <img
+                class="forum-avatar small"
+                :src="avatar(post.author_avatar_url)"
+                alt="作者头像"
+              /><b>{{ post.author_name }}</b>
+              <span>· {{ date(post.created_at) }}</span>
+              <span>· {{ post.views_count }} 阅读</span>
+            </div>
+          </header>
+          <PostCover
+            :src="post.cover_url"
+            :alt="`${post.title}的封面`"
+            eager
+            class="forum-article-cover"
+          />
           <div
             ref="article"
             class="forum-article-body forum-markdown"
@@ -191,7 +175,8 @@ onBeforeUnmount(() => observer?.disconnect());
               class="btn forum-delete-post"
               :disabled="busy"
               @click="deletePost"
-            >删除帖子</button
+            >
+              删除帖子</button
             ><span>◉ {{ post.views_count }} 阅读</span>
           </div>
         </article>

@@ -12,6 +12,7 @@ import '../../api/acm_api/public/assets/problem.css';
 import '../../api/acm_api/public/assets/theme-editor.css';
 import '../../api/acm_api/public/assets/endfield-theme.css';
 import './style.css';
+import './post-layout.css';
 import './phase-theme.css';
 import './angel-city-theme.css';
 import './minecraft-theme.css';
