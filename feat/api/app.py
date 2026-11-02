@@ -14,6 +14,7 @@ from .acm_api.bot_api import bot_api
 from .acm_api.auth_service import hash_password, validate_password
 from .acm_api.database import connect_db
 from .acm_api.forum_api import forum_api
+from .acm_api.forum_notifications import forum_notification_api
 from .acm_api.wiki_api import wiki_api
 from .acm_api.markdown_api import markdown_api
 from .acm_api.forum_images import forum_image_api
@@ -312,6 +313,7 @@ def create_app():
     app.register_blueprint(api, url_prefix="/api")
     app.register_blueprint(bot_api, url_prefix="/internal/v1")
     app.register_blueprint(forum_api, url_prefix="/api")
+    app.register_blueprint(forum_notification_api, url_prefix="/api")
     app.register_blueprint(wiki_api, url_prefix="/api")
     app.register_blueprint(markdown_api, url_prefix="/api")
     app.register_blueprint(forum_image_api, url_prefix="/api")
@@ -323,7 +325,7 @@ def create_app():
 
 _PUBLIC_PAGES = {
     "index.html", "login.html", "post.html", "wiki.html", "forum-moderation.html",
-    "change-password.html", "home.html", "admin.html",
+    "change-password.html", "home.html", "admin.html", "notifications.html", "my-post.html",
     "leaderboard.html", "challenge.html", "reviews.html", "problem-bank.html", "my-problems.html", "problem.html",
     "submissions.html", "workspace.html", "contest-review.html", "member.html", "compose.html",
     "tasks.html", "settings.html", "cf-practice.html", "auth-unavailable.html", "forbidden.html",

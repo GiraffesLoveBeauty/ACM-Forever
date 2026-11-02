@@ -42,6 +42,16 @@ const router = createRouter({
       meta: { title: '发布话题' },
     },
     {
+      path: '/notifications.html',
+      component: () => import('./views/Notifications.vue'),
+      meta: { title: '我的通知' },
+    },
+    {
+      path: '/my-post.html',
+      component: () => import('./views/MyPost.vue'),
+      meta: { title: '投稿进度' },
+    },
+    {
       path: '/auth-unavailable.html',
       component: () => import('./views/Notice.vue'),
       meta: { public: true, title: '暂时无法确认登录状态', authError: true },

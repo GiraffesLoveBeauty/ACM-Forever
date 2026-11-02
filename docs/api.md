@@ -351,6 +351,25 @@ page = response.json()  # rows、total、page、page_size
 
 帖子正文按 Markdown 源文保存在数据库中，Web 端渲染前会清理 HTML。草稿属于登录成员本人，不能通过公开论坛 API 查看；保存草稿不会进入待审核队列，调用提交接口后才会转换成待审核帖子。
 
+### 回复通知与投稿进度
+
+登录成员可通过页头“通知”进入 `/notifications.html`。未读数在页面可见时每 30 秒更新，切回页面或修改已读状态时也会刷新。通知保存在数据库中，退出或刷新不会丢失。评论通知发送给话题作者；回复还会通知被回复评论的作者，同一条评论对同一收件人仅通知一次，不发送评论者给自己的通知。审核通过或退回会通知投稿人，管理员退回时须填写原因。
+
+| 接口 | 权限 | 行为 |
+| --- | --- | --- |
+| `GET /api/me/notifications/count` | 成员登录 | 返回本人 `unread_count` |
+| `GET /api/me/notifications` | 成员登录 | 返回 `rows/total/page/page_size/unread_count/latest_id`；支持 `unread=1`、`page`、`page_size`（默认 20、上限 50） |
+| `POST /api/me/notifications/<id>/read` | 成员登录 + CSRF | 将本人的通知标为已读，可重复调用；他人通知返回 404 |
+| `POST /api/me/notifications/read-all` | 成员登录 + CSRF | JSON 传列表返回的整数 `through_id: latest_id`，只标记该快照及之前的本人通知，保留此后到达的新通知 |
+| `GET /api/forum/mine/posts/<id>` | 成员登录 | 仅作者可读的投稿原文、封面、状态、提交时间、`reviewed_at` 与 `review_reason`；他人（含管理员）访问此个人接口返回 404 |
+| `POST /api/forum/moderation/posts/<id>` | 管理员 + CSRF | `decision` 为 `publish/reject`；退回时 `reason` 必须为非空字符串，最多 1000 字符；仅处理待审核帖子 |
+
+通知不返回评论正文或账号 QQ，`target_url` 由服务器按当前可见性生成；原话题不可访问时不提供跳转，已隐藏或移除的回复不再提供对应回复链接。回复链接带 `comment_id` 与 `#comment-<id>`；公开详情支持该参数，在默认前 500 条评论之外最多补充目标评论及其父评论，仍校验同一话题和公开状态。已读不会授予原内容访问权限。
+
+发帖成功后进入 `/my-post.html?id=<id>` 查看实际状态（等待审核 / 审核通过 / 审核未通过 / 已删除），个人中心“我的话题”也提供入口和退回原因；未公开原文仅作者可在个人接口查看，公开帖子接口不放宽。审核通知和状态修改、回复通知和评论写入分别处于同一事务，失败整体回滚。
+
+数据库初始化增量添加 `forum_posts.review_reason` 和 `forum_notifications`，可重复执行；保留原帖子和已有图片，不补发历史通知。旧的退回记录未保存原因时，界面明确提示此前未记录原因。回退代码不会删除新增表和字段；恢复生产数据仍应使用发布前的数据库及上传目录备份。
+
 ### 帖子封面与正文图片
 
 上传接口返回 `201` 和 `{id, url, width, height, size_bytes}`。在草稿创建、保存或直接发帖的 JSON 中传入 `cover_image_id` 设置封面，传 `null` 移除封面；正文使用 `![说明](/api/forum/images/<id>)` 插入图片。列表、详情及审核记录返回可空的 `cover_url`，草稿详情同时返回 `cover_image_id`。旧客户端不传封面字段时按无封面保存。

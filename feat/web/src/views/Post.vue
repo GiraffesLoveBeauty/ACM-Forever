@@ -32,7 +32,14 @@ const roots = computed(() => (post.value?.comments || []).filter((c) => !c.paren
 async function load() {
   try {
     if (!route.query.id) throw Error('没有指定话题。');
-    post.value = await request(`/forum/posts/${encodeURIComponent(route.query.id)}`, {}, 'post');
+    const commentQuery = /^\d+$/.test(String(route.query.comment_id || ''))
+      ? `?comment_id=${route.query.comment_id}`
+      : '';
+    post.value = await request(
+      `/forum/posts/${encodeURIComponent(route.query.id)}${commentQuery}`,
+      {},
+      'post',
+    );
     document.title = `${post.value.title} · ACM Forever`;
     await buildToc();
   } catch (e) {
@@ -118,7 +125,7 @@ async function comment() {
   }
 }
 watch(
-  () => route.query.id,
+  () => [route.query.id, route.query.comment_id],
   () => {
     post.value = null;
     error.value = '';
@@ -127,6 +134,13 @@ watch(
     load();
   },
   { immediate: true },
+);
+watch(
+  () => route.hash,
+  async () => {
+    await nextTick();
+    if (route.hash) document.getElementById(route.hash.slice(1))?.scrollIntoView();
+  },
 );
 onBeforeUnmount(() => {
   observer?.disconnect();
@@ -216,7 +230,13 @@ onBeforeUnmount(() => {
             </div>
           </form>
           <div v-if="!roots.length" class="forum-empty">还没有评论，来开启第一轮讨论吧。</div>
-          <article v-for="item in roots" :key="item.id" class="forum-comment">
+          <article
+            v-for="item in roots"
+            :key="item.id"
+            :id="`comment-${item.id}`"
+            class="forum-comment"
+            :class="{ 'is-highlighted-comment': route.hash === `#comment-${item.id}` }"
+          >
             <div class="forum-post-author">
               <img
                 class="forum-avatar small"
@@ -230,7 +250,9 @@ onBeforeUnmount(() => {
             <div
               v-for="reply in post.comments.filter((r) => Number(r.parent_id) === Number(item.id))"
               :key="reply.id"
+              :id="`comment-${reply.id}`"
               class="forum-comment-reply"
+              :class="{ 'is-highlighted-comment': route.hash === `#comment-${reply.id}` }"
             >
               <div class="forum-post-author">
                 <img

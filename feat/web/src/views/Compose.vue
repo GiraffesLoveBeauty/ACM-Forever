@@ -333,7 +333,7 @@ async function submit() {
     recoveryResolved = true;
     finished = true;
     notify(data.message || '话题已提交审核');
-    await router.push('/index.html');
+    await router.push(`/my-post.html?id=${data.id}`);
   } catch (e) {
     showError(e);
   } finally {
