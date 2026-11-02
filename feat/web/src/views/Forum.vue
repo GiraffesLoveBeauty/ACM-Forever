@@ -1,8 +1,11 @@
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, watch, nextTick } from 'vue';
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
+import { forumState, forumQuery } from '../lib/forum-state.js';
 import { useRequests, showError } from '../lib/api.js';
 import GraphArt from '../components/GraphArt.vue';
 import PostCard from '../components/PostCard.vue';
+import Pager from '../components/Pager.vue';
 const viewModeKey = 'acm.forum.view.v1';
 function savedViewMode() {
   try {
@@ -19,16 +22,29 @@ const request = useRequests(),
   loading = ref(false),
   error = ref(''),
   query = ref(''),
-  viewMode = ref(savedViewMode());
-const filters = reactive({ sort: 'latest', category: '', q: '' });
-const page = ref(1);
+  savedView = ref(savedViewMode());
+const route = useRoute(),
+  router = useRouter();
+const filters = computed(() => forumState(route.query, savedView.value));
+const page = computed(() => filters.value.page);
+const viewMode = computed(() => filters.value.view);
+const listAddress = computed(
+  () => route.path + '?' + new URLSearchParams(forumQuery(filters.value)),
+);
+function navigate(changes, replace = false) {
+  return router[replace ? 'replace' : 'push']({
+    path: route.path,
+    query: forumQuery({ ...filters.value, ...changes }),
+  });
+}
 function changeViewMode(mode) {
-  viewMode.value = mode;
+  savedView.value = mode;
   try {
     localStorage.setItem(viewModeKey, mode);
   } catch {
     // The current page can still switch views when browser storage is unavailable.
   }
+  navigate({ view: mode });
 }
 const directory = computed(() => [
   {
@@ -39,19 +55,36 @@ const directory = computed(() => [
   },
   ...categories.value,
 ]);
-async function load(append = false) {
+async function load() {
   loading.value = true;
   error.value = '';
-  const requestedPage = append ? page.value + 1 : 1;
+  const requestedAddress = listAddress.value;
   try {
     const data = await request(
-      '/forum/posts?' + new URLSearchParams({ ...filters, page: requestedPage, page_size: 12 }),
+      '/forum/posts?' +
+        new URLSearchParams({
+          sort: filters.value.sort,
+          category: filters.value.category,
+          q: filters.value.q,
+          page: page.value,
+          page_size: 12,
+        }),
       {},
       'feed',
     );
-    posts.value = append ? [...posts.value, ...data.rows] : data.rows;
+    if (page.value > Math.max(1, Math.ceil(data.total / 12))) {
+      await navigate({ page: Math.max(1, Math.ceil(data.total / 12)) }, true);
+      return;
+    }
+    posts.value = data.rows;
     total.value = data.total;
-    page.value = requestedPage;
+    await nextTick();
+    try {
+      const position = Number(sessionStorage.getItem('acm.forum.scroll:' + requestedAddress));
+      if (position > 0 && listAddress.value === requestedAddress) window.scrollTo?.(0, position);
+    } catch {
+      /* Browsing still works when storage is disabled. */
+    }
   } catch (e) {
     if (e.name !== 'AbortError') {
       error.value = e.message;
@@ -61,10 +94,22 @@ async function load(append = false) {
   }
   loading.value = false;
 }
-watch(filters, () => load());
+watch(
+  () => route.fullPath,
+  () => {
+    query.value = filters.value.q;
+    posts.value = [];
+    load();
+  },
+  { immediate: true },
+);
+onBeforeRouteLeave(() => {
+  try {
+    sessionStorage.setItem('acm.forum.scroll:' + listAddress.value, String(window.scrollY || 0));
+  } catch {}
+});
 onMounted(async () => {
   await Promise.allSettled([
-    load(),
     request('/forum/categories')
       .then((data) => {
         categories.value = data;
@@ -123,7 +168,7 @@ onMounted(async () => {
             class="forum-directory-card"
             :class="{ active: filters.category === c.slug }"
             :aria-pressed="filters.category === c.slug"
-            @click="filters.category = c.slug"
+            @click="navigate({ category: c.slug, page: 1 })"
           >
             <span class="forum-directory-icon" :class="`directory-${c.slug || 'all'}`"
               ><svg
@@ -155,7 +200,10 @@ onMounted(async () => {
           </button>
         </div>
       </section>
-      <form class="forum-search" @submit.prevent="filters.q = query.trim()">
+      <form
+        class="forum-search"
+        @submit.prevent="navigate({ q: query.trim().slice(0, 100), page: 1 })"
+      >
         <label class="visually-hidden" for="search-query">搜索话题</label><span>⌕</span
         ><input
           id="search-query"
@@ -173,7 +221,7 @@ onMounted(async () => {
             class="forum-tab"
             :class="{ active: filters.sort === sort }"
             :aria-pressed="filters.sort === sort"
-            @click="filters.sort = sort"
+            @click="navigate({ sort, page: 1 })"
           >
             {{ label }}
           </button>
@@ -226,30 +274,33 @@ onMounted(async () => {
           <span class="spinner"></span>正在加载社区话题…
         </div>
         <div v-if="posts.length" class="forum-feed-posts" :class="`forum-feed-posts-${viewMode}`">
-          <PostCard v-for="post in posts" :key="post.id" :post="post" />
+          <PostCard v-for="post in posts" :key="post.id" :post="post" :return-to="listAddress" />
         </div>
         <div v-if="!loading && !posts.length" class="forum-empty">
           <h3>{{ error ? '话题加载失败' : '这里还没有话题' }}</h3>
           <p>{{ error || '来发布第一个讨论，开启社区交流吧。' }}</p>
+          <button v-if="error" class="btn" @click="load">重试</button>
         </div>
       </div>
       <p v-if="error && posts.length" role="alert">
         {{ error }} <button class="btn" @click="load()">重试</button>
       </p>
-      <button
-        v-if="page * 12 < total"
-        class="btn forum-load-more"
-        :disabled="loading"
-        @click="load(true)"
-      >
-        加载更多
-      </button>
+      <Pager
+        :page="page"
+        :total="total"
+        :size="12"
+        :busy="loading"
+        @change="navigate({ page: $event })"
+      />
     </section>
     <aside class="forum-rail forum-right-rail" aria-label="热门话题与社区公约">
       <section class="forum-rail-card">
         <div class="forum-side-title">热门话题 <span>↗</span></div>
         <div class="hot-topic-list">
-          <RouterLink v-for="(post, i) in hot" :key="post.id" :to="`/post.html?id=${post.id}`"
+          <RouterLink
+            v-for="(post, i) in hot"
+            :key="post.id"
+            :to="{ path: '/post.html', query: { id: post.id, from: listAddress } }"
             ><span>{{ String(i + 1).padStart(2, '0') }}</span
             ><b>{{ post.title }}</b
             ><small>{{ post.comments_count || 0 }} 条讨论</small></RouterLink
