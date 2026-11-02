@@ -135,13 +135,19 @@ response.raise_for_status()
 
 ## 普通成员训练闭环
 
-个人入口为 `/home.html`、`/my-problems.html` 和 `/problem.html`。个人中心的“查看全部已 AC”对 member / admin / root 均指向 `/my-problems.html?scope=solved`，仅展示会话本人的 AC；此地址需要登录，刷新、直链、登录及首次改密保留范围、筛选和页码。旧 `/problem-bank.html` 仍供普通成员使用，admin / root 访问时进入统一后台题库；两种个人题库地址默认展示全站目录，可切换“我已 AC”。
+个人入口为 `/home.html`、`/my-problems.html` 和 `/problem.html`。主导航和个人中心的“题库”对 member / admin / root 均进入独立 `/my-problems.html`，可浏览全站目录、查看本人已 AC 及收藏；不提供成员 QQ 选择，收藏归属取当前会话。“查看全部已 AC”指向 `/my-problems.html?scope=solved`，仅展示会话本人的 AC；此地址需要登录，刷新、直链、登录及首次改密保留范围、筛选和页码。旧 `/problem-bank.html` 仍供普通成员使用，admin / root 访问时进入统一后台题库。
 
 认证初始化失败进入 `/auth-unavailable.html?next=...`。恢复页跳过自动认证初始化，首次请求超时（15 秒）后即可展示反馈，不会自行发起第二次认证；直接打开恢复页也不查询认证。用户点击“重试原页面”才重新请求并恢复原目标。普通成员访问后台，服务端直链返回 403，客户端导航提供无权限页面。
 
 ### 本人 AC 与站内题面
 
 `GET /api/me/problems?scope=solved` 从会话读取 QQ，客户端的 `qq_id/owner_qq_id` 不改变归属。以平台和题号去重，返回 `ac_at`（Unix 秒），按最近 AC 时间倒序，再按平台、题号稳定排序。`platform/tag/state=favorite/page/page_size` 与总数使用相同条件；`tag` 同时匹配题名、题号和标签。本人范围默认每页 20、上限 100，默认全站目录仍为 500、上限 500。返回 `items/total/returned/page/page_size`；无效 `scope` 或非整数分页参数返回 400。
+
+`GET /api/me/problems/tracker` 为个人题库的比赛进度矩阵提供数据，member / admin / root 均只读取会话本人，客户端身份参数不改变归属。支持 `platform`（空、`codeforces`、`atcoder`）、`tag`（比赛 ID / 题号 / 题名 / 标签）、`scope=all|solved`、`state=favorite`、`page` 和 `page_size`（默认 20、上限 50）。无效参数返回 400；未登录或未完成首次改密沿用本人接口权限。
+
+返回 `items/total/page/page_size`，`total` 为比赛数量。每个比赛含 `platform/contest_id/contest_name/total_count/solved_count/attempted_count/problems`；题目含 `platform/problem_id/problem_index/problem_name/problem_rating/status/ac_at/last_submit_at/is_favorite`。`status` 为 `solved`（已 AC）、`attempted`（有提交记录且未 AC）、`unseen`（未记录），时间为 Unix 秒。AC 证据优先于之后的失败提交；收藏和提交状态只关联本人。按自然题序排列 D1 / D2 等题目，筛选先选择比赛，再返回该场全部已入库题目，分页不会切开比赛。仅使用本地目录和提交数据，不调用 OJ 或触发采集；未记录不代表原站没有提交，目录和尝试记录均可能尚未同步完整。
+
+前端 `/my-problems.html?view=tracker` 切换比赛进度；默认列表省略 `view`。前端题库的平台筛选默认 Codeforces，不提供“全部平台”；未指定或无效平台回落为 `codeforces`，清除筛选同样恢复该默认值。接口自身仍支持空平台供兼容调用。站内题面返回白名单保留 `view=tracker` 和已有范围、筛选、页码，排除身份参数。
 
 个人中心的最近 AC 和个人题库均打开站内题面。`from` 仅接受 `/home.html`、携带允许筛选参数的 `/problem-bank.html` 或 `/my-problems.html`；外部网址、管理地址和身份参数会被排除，返回时保留实际个人入口。个人列表与收藏对所有角色均使用 `/api/me/problems`，归属只取会话本人；成员详情及 PDF 读取复用 `/api/me/problems/<platform>/<problem_id>` 和后缀 `/statement.pdf`，admin / root 的详情沿用原管理读取接口，两者均不会触发采集。
 
@@ -176,6 +182,8 @@ Web 归属验证当前实现 Codeforces：账号存在性使用已有验证器�
 题库管理顶部的 **服务端数据库 → 初始化数据库** 会补齐 SQLite 表结构，保留已有账号、设置、题目及样例；页面显示各平台目录数量、已采集数量、失败数量和样例组数。服务启动仍自动初始化，也可使用已有 `python -m api.init_db` 命令。
 
 题库管理页的 **题库记录** 可视化浏览 `crawler_problems` 中的目录数据、采集状态、样例数和更新时间，并按平台、题面状态及题号 / 题名 / 比赛 ID 搜索。对应的 `GET /api/admin/database/problems` 仅限 Web 管理员 / Root，支持 `q`、`platform`、`status`、`page` 和 `page_size`；题面正文通过下方题目详情接口读取。
+
+管理页按 **服务端数据库 → 拉取题目 → 题库记录** 排列；浏览和收藏题目的独立题库通过主导航进入，不再混排在管理页。初始化、目录导入和采集批次完成后刷新题库记录，并保留记录表当前筛选和页码。
 
 题库列表右侧的 **打开题目** 进入 `/problem.html?platform=codeforces&problem_id=cf_1843A` 等站内详情页，读取服务端已保存的题面与样例。管理员使用 `GET /api/problems/<platform>/<problem_id>`，普通成员使用 `GET /api/me/problems/<platform>/<problem_id>`；都要求登录且完成首次改密。返回题名、难度、标签、原题链接 `problem_url`、`statement_html/statement_text`、题面语言、`samples`、采集时间、最近采集状态和 `content_available`。读取不触发爬虫；题目不存在返回 404，只收录目录时返回 200 且 `content_available=false`，提示等待采集或管理员重试。更新失败但仍有旧题面时继续展示已保存内容。详情页的“查看原题”按钮在新标签页打开数据库中记录的原题链接，正文尚未采集时也可使用。
 

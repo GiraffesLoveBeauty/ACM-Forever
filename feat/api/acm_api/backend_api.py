@@ -32,6 +32,7 @@ from .reporting import valid_contest_report_time
 from .cf_client import cf_request
 from .problem_sync import sync_options
 from .problem_bank import problem_bank_status
+from .problem_tracker import contest_tracker, tracker_options
 from .database import connect_db
 from . import binding_service
 from .binding_service import clear_platform_records as _clear_platform_records
@@ -2044,6 +2045,20 @@ async def api_me_problems():
         async with db.execute(query, tuple(params + [size, (page - 1) * size])) as cursor:
             items = [dict(row) for row in await cursor.fetchall()]
         return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": size})
+    finally:
+        await db.close()
+
+
+@api.route("/me/problems/tracker", methods=["GET"])
+@member_required
+async def api_me_problem_tracker():
+    try:
+        options = tracker_options(request.args)
+    except ValueError as error:
+        return jsonify({"success": False, "message": str(error)}), 400
+    db = await get_db()
+    try:
+        return jsonify(await contest_tracker(db, _me_qq_id(), options))
     finally:
         await db.close()
 
