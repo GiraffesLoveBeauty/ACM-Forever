@@ -7,7 +7,6 @@ import time
 import warnings
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 import mistune
@@ -24,32 +23,21 @@ _render_markdown = mistune.create_markdown(escape=False)
 
 
 class _ImageReferences(HTMLParser):
-    def __init__(self, origins=()):
+    def __init__(self):
         super().__init__(convert_charrefs=True)
         self.ids = set()
-        self.origins = {origin.rstrip("/").lower() for origin in origins if origin}
 
     def handle_starttag(self, tag, attrs):
         attribute = {"img": "src", "a": "href"}.get(tag)
         if attribute:
-            source = dict(attrs).get(attribute) or ""
-            if not source.startswith("/") or source.startswith("//"):
-                try:
-                    url = urlsplit(source)
-                    origin = f"{url.scheme}://{url.netloc}".lower()
-                    if url.scheme not in {"http", "https"} or origin not in self.origins or url.query or url.fragment or url.username or url.password:
-                        return
-                    source = url.path
-                except ValueError:
-                    return
-            match = IMAGE_REFERENCE.fullmatch(source)
+            match = IMAGE_REFERENCE.fullmatch(dict(attrs).get(attribute) or "")
             if match:
                 self.ids.add(match[1])
 
 
-def referenced_images(body, origins=()):
+def referenced_images(body):
     # Parse Markdown so code samples and prose do not accidentally publish images.
-    parser = _ImageReferences(origins)
+    parser = _ImageReferences()
     parser.feed(_render_markdown(body))
     return parser.ids
 
@@ -86,7 +74,7 @@ def normalize_image(contents):
 
 async def sync_image_links(db, owner, body, cover_id, *, draft_id=None, post_id=None):
     """Validate references and update them in the caller's content transaction."""
-    ids = referenced_images(body, (request.host_url, current_app.config.get("PUBLIC_BASE_URL", "")))
+    ids = referenced_images(body)
     if cover_id:
         ids.add(cover_id)
     if len(ids) > 30:
