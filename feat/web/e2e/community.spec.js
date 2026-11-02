@@ -69,7 +69,12 @@ test('submit, moderate, comment, reply and author deletion use the real API', as
   const result = await submitted;
   expect(result.status()).toBe(201);
   const { id } = await result.json();
-  await expect(page).toHaveURL(/index\.html$/);
+  // A successful submission can finish at the forum or its own review-progress page.
+  await expect(page).toHaveURL(
+    (url) =>
+      url.pathname === '/index.html' ||
+      (url.pathname === '/my-post.html' && url.searchParams.get('id') === String(id)),
+  );
   const admin = await browser.newContext({
     baseURL: info.project.use.baseURL || new URL(page.url()).origin,
   });
