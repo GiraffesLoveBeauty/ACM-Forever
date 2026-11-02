@@ -59,7 +59,12 @@ async function toggle(kind) {
         :to="`/post.html?id=${post.id}`"
         :aria-label="`阅读：${post.title}`"
       >
-        <PostCover :src="post.cover_url" :alt="`${post.title}的封面`" class="forum-card-cover" />
+        <PostCover
+          :src="post.cover_url"
+          :alt="`${post.title}的封面`"
+          thumbnail
+          class="forum-card-cover"
+        />
       </RouterLink>
       <RouterLink
         v-else
