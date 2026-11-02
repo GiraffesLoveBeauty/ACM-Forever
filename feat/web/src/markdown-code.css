@@ -1,0 +1,124 @@
+:root {
+  --markdown-code-font:
+    'Cascadia Code', 'Cascadia Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo,
+    monospace;
+}
+
+.forum-markdown code,
+.markdown-editor .compose-textarea,
+html[data-design-template] body.endfield-design .markdown-editor .compose-textarea {
+  font-family: var(--markdown-code-font);
+  font-variant-ligatures: none;
+}
+
+.forum-markdown pre.markdown-code-block {
+  /* Keep the syntax palette readable when the theme editor overrides code colors. */
+  --code-bg: #000;
+  --code-text: #e6edf3;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #000;
+  color: #e6edf3;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  white-space: normal;
+  text-shadow: none;
+}
+
+.forum-markdown pre.markdown-code-block[hidden] {
+  display: none;
+}
+
+.forum-markdown pre.markdown-code-block > code {
+  display: block;
+  max-width: 100%;
+  padding: 16px;
+  overflow: auto;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  border-radius: 0;
+  font: 13px/1.7 var(--markdown-code-font);
+  font-variant-ligatures: none;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+  tab-size: 4;
+}
+
+.forum-markdown .markdown-code-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #30363d;
+  background: #000;
+  color: #b1bac4;
+  font: 12px/1.5 var(--markdown-code-font);
+}
+
+.forum-markdown .markdown-code-language {
+  margin-right: auto;
+}
+
+.forum-markdown .markdown-code-toolbar .code-copy {
+  position: static;
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid #484f58;
+  border-radius: 5px;
+  background: #000;
+  color: #e6edf3;
+  font: 12px/1.5 var(--markdown-code-font);
+  cursor: pointer;
+}
+
+.forum-markdown .markdown-code-toolbar .code-copy:hover {
+  border-color: #b1bac4;
+}
+
+.forum-markdown .markdown-code-toolbar .code-copy:focus-visible,
+.forum-markdown pre.markdown-code-block > code:focus-visible {
+  outline: 2px solid #79c0ff;
+  outline-offset: -2px;
+}
+
+.forum-markdown .code-copy-status {
+  font-size: 12px;
+}
+
+.forum-markdown .hljs-comment,
+.forum-markdown .hljs-quote {
+  color: #8b949e;
+}
+.forum-markdown .hljs-keyword,
+.forum-markdown .hljs-selector-tag,
+.forum-markdown .hljs-literal {
+  color: #ff7b72;
+}
+.forum-markdown .hljs-string,
+.forum-markdown .hljs-regexp {
+  color: #a5d6ff;
+}
+.forum-markdown .hljs-number,
+.forum-markdown .hljs-attr,
+.forum-markdown .hljs-variable {
+  color: #79c0ff;
+}
+.forum-markdown .hljs-title,
+.forum-markdown .hljs-section {
+  color: #d2a8ff;
+}
+.forum-markdown .hljs-built_in,
+.forum-markdown .hljs-type,
+.forum-markdown .hljs-meta {
+  color: #ffa657;
+}
+.forum-markdown .hljs-subst {
+  color: #e6edf3;
+}

@@ -20,6 +20,9 @@
 
 - [TCrB-AI项目工程规范.md（AI 项目工程协作规范 · 讨论稿）](docs/TCrB-AI项目工程规范.md)
 - [api.md（API 调用指南）](docs/api.md)
+- [command-line-operations.md（网站服务管理、日志和数据库查询）](docs/command-line-operations.md)
+- [backup-and-diagnostics.md（数据库与图片备份、诊断和恢复）](docs/backup-and-diagnostics.md)
+- [markdown-code-blocks.md（代码高亮、字体和复制）](docs/markdown-code-blocks.md)
 - [README.md（Vue 前端开发与构建）](feat/web/README.md)
 - [theme-development.md（个人主题开发与投稿规范）](docs/theme-development.md)
 - [crawler-samples.md（采集命令、JSON 字段与 SQLite 入库）](docs/crawler-samples.md)

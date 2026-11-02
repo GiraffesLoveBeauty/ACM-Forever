@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useRequests, auth, avatar, date, showError, notify } from '../lib/api.js';
 import { downloadMarkdown } from '../lib/wiki.js';
 import { markdown, controlledImage } from '../lib/markdown.js';
+import { codeBlocks as vCodeBlocks } from '../lib/code-blocks.js';
 import PostCover from '../components/PostCover.vue';
 import ImageLightbox from '../components/ImageLightbox.vue';
 const imageViewer = ref();
@@ -206,6 +207,7 @@ onBeforeUnmount(() => {
             ref="article"
             class="forum-article-body forum-markdown"
             v-forum-math
+            v-code-blocks
             @click="viewImage"
             @keydown="viewImage"
             v-html="markdown(post.body)"

@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router';
 import { useRequests, showError, date } from '../lib/api.js';
 import { useParams } from '../lib/admin.js';
 import { markdown } from '../lib/markdown.js';
+import { codeBlocks as vCodeBlocks } from '../lib/code-blocks.js';
 import PostCover from '../components/PostCover.vue';
 const route = useRoute(),
   update = useParams(),
@@ -91,6 +92,7 @@ watch(tab, load, { immediate: true });
         v-if="item.body"
         class="forum-moderation-body forum-markdown"
         v-forum-math
+        v-code-blocks
         v-html="markdown(item.body)"
       ></div>
       <label
