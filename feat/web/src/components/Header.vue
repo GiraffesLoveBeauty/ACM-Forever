@@ -3,6 +3,7 @@ import { computed, inject, ref } from 'vue';
 import { useRouter, isNavigationFailure, NavigationFailureType } from 'vue-router';
 import { auth, logoutSession, avatar, showError } from '../lib/api.js';
 import TemplateLibrary from './TemplateLibrary.vue';
+import NotificationBell from './NotificationBell.vue';
 import { normalizeTemplate, templateLabel } from '../lib/design-template.js';
 const templateLibrary = ref();
 const setDesignTemplate = inject('setDesignTemplate');
@@ -51,6 +52,7 @@ async function logout() {
       ><RouterLink v-if="canManage" to="/admin.html" active-class="active">⚙ 管理后台</RouterLink>
     </nav>
     <div class="forum-header-actions">
+      <NotificationBell />
       <button
         class="btn"
         :title="`当前：${templateLabel(designTemplate)}`"

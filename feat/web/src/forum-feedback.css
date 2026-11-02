@@ -1,0 +1,132 @@
+.forum-notification-bell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.forum-notification-count {
+  min-width: 19px;
+  padding: 1px 5px;
+  border-radius: 12px;
+  background: var(--text);
+  color: var(--panel);
+  font-size: 11px;
+  text-align: center;
+}
+.forum-feedback-page {
+  max-width: 1000px;
+}
+.forum-feedback-page > .community-panel {
+  margin-block: 20px;
+  padding: clamp(18px, 3vw, 30px);
+}
+.forum-feedback-page h1 {
+  margin: 5px 0 12px;
+}
+.forum-feedback-page h2 {
+  overflow-wrap: anywhere;
+}
+.forum-feedback-toolbar,
+.forum-feedback-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.forum-feedback-toolbar {
+  justify-content: space-between;
+  padding-block: 15px;
+  border-block: 1px solid var(--line);
+}
+.forum-notification-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.forum-notification-item {
+  padding: 24px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.forum-notification-item.unread {
+  border-left: 3px solid var(--accent);
+  padding-left: 16px;
+}
+.forum-notification-item h2 {
+  font-size: 18px;
+  margin-block: 12px;
+}
+.forum-feedback-meta {
+  font-size: 13px;
+}
+.forum-feedback-meta time {
+  color: var(--muted);
+}
+.forum-feedback-tag {
+  display: inline-block;
+  padding: 4px 8px;
+  background: var(--subtle-bg);
+  color: var(--text);
+  font-size: 12px;
+}
+.forum-feedback-reason {
+  padding: 14px;
+  border-left: 3px solid var(--accent);
+  background: var(--subtle-bg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.forum-feedback-error {
+  padding-block: 20px;
+}
+.forum-submission-timeline {
+  padding-left: 24px;
+}
+.forum-submission-timeline li {
+  padding: 10px 0 10px 8px;
+}
+.forum-submission-timeline time,
+.forum-submission-timeline span {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.forum-review-reason-label {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+.forum-review-reason-label textarea {
+  width: 100%;
+  min-height: 80px;
+}
+.forum-review-reason-summary {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.forum-comment[id],
+.forum-comment-reply[id],
+#my-posts {
+  scroll-margin-top: 110px;
+}
+.forum-comment:target,
+.forum-comment-reply:target,
+.is-highlighted-comment {
+  outline: 2px solid var(--accent);
+  outline-offset: 5px;
+}
+@media (max-width: 600px) {
+  .forum-feedback-page .panel-heading {
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+  .forum-feedback-toolbar {
+    align-items: flex-start;
+  }
+  .forum-feedback-toolbar .chips {
+    flex-wrap: wrap;
+  }
+}
