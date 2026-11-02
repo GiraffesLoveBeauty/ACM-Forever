@@ -45,10 +45,18 @@ async def run(port):
                     "VALUES(?,?,?,0,1,?,?)", (qq, encoded, role, now, now),
                 )
             for number in range(1, 31):
+                body = "## 思路\n\n仅用于自动化测试的内容。"
+                if number == 30:
+                    body = (
+                        '## 多语言代码\n\n'
+                        '```cpp\n#include <iostream>\nint main() { std::cout << "你好 <AC>"; return 0; }\n```\n\n'
+                        '```python\ndef solve(n):\n    # 保留缩进\n    return "AC" * n\n```\n\n'
+                        '```java\npublic class Main {\n    public static void main(String[] args) { System.out.println(42); }\n}\n```'
+                    )
                 await db.execute(
                     "INSERT INTO forum_posts(id,category_id,author_qq_id,title,body,status,created_at,updated_at,reviewed_at) "
                     "VALUES(?,2,'10000001',?,?,'published',?,?,?)",
-                    (number, f"合成算法讨论 {number:02}", "## 思路\n\n仅用于自动化测试的内容。", now - number, now, now),
+                    (number, f"合成算法讨论 {number:02}", body, now - number, now, now),
                 )
             await db.commit()
         finally:

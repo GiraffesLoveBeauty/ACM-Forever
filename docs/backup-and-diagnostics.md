@@ -4,12 +4,14 @@
 
 以下命令从仓库根目录执行。数据库路径是示例，必须替换成正在使用的 `ACM_DATABASE_PATH`。工具要求显式传入数据库；不会猜测生产配置。若部署设置了 `ACM_MARKDOWN_UPLOAD_DIR`，`diagnose` 和 `backup` 都必须加 `--markdown-dir /实际目录`。头像、帖子目录与服务一致，取数据库旁的 `uploads/avatars`、`uploads/forum`。
 
+仓库部署工作流安装的是 WYJ 的用户级服务，以下服务命令需以 WYJ 账号执行。若服务器只部署了 `feat/` 内容，在 `/home/WYJ/acm-forever-feat` 执行，将 `python -m feat.api.acm_api.maintenance` 替换为 `/home/WYJ/acm-forever-data/venv/bin/python -m api.acm_api.maintenance`。更多服务及数据库查询命令见 [命令行操作说明](command-line-operations.md)。
+
 ## 1. 只读检查和日志
 
 ```sh
 python -m feat.api.acm_api.maintenance diagnose --database /home/WYJ/acm-forever-data/acm_forever.db
-sudo systemctl status acm-forever-webui --no-pager
-sudo journalctl -u acm-forever-webui --since '30 minutes ago' --no-pager
+systemctl --user status acm-forever-webui --no-pager
+journalctl --user -u acm-forever-webui --since '30 minutes ago' --no-pager
 curl -f http://127.0.0.1:8088/health
 df -h
 ```
@@ -21,14 +23,14 @@ df -h
 SQLite 在线备份本身是一致的，但数据库和图片要同一时点，必须暂停所有写入者：Web 服务、Bot 和直接写库的脚本。仅暂停 Web 但 Bot 仍写同一个数据库是不够的。`--writers-stopped` 是操作员对停写状态的声明，工具无法替代服务管理器判断。
 
 ```sh
-sudo systemctl stop acm-forever-webui
+systemctl --user stop acm-forever-webui
 # 如有共享此数据库的 Bot/脚本，同时停止它们。
 python -m feat.api.acm_api.maintenance backup \
   --database /home/WYJ/acm-forever-data/acm_forever.db \
   --destination /home/WYJ/acm-backups/2026-11-02-001 \
   --writers-stopped
 python -m feat.api.acm_api.maintenance verify /home/WYJ/acm-backups/2026-11-02-001
-sudo systemctl start acm-forever-webui
+systemctl --user start acm-forever-webui
 ```
 
 目标必须是全新的目录，且不能与数据目录或图片目录互相包含。源诊断不通过会拒绝备份。SQLite 通过 backup API 读取已提交 WAL，不直接复制正在使用的 `.db` 文件。快照转换成单文件数据库，图片逐文件复制，manifest 记录相对路径、大小和 SHA-256，完成后再次校验数据库和引用。

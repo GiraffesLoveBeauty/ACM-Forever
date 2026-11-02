@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
 import { useRequests } from '../lib/api.js';
 import { markdown, controlledImage } from '../lib/markdown.js';
+import { codeBlocks as vCodeBlocks } from '../lib/code-blocks.js';
 import {
   importMarkdownFile,
   insertMarkdown,
@@ -240,6 +241,7 @@ async function download() {
       <div
         v-if="mode !== 'write'"
         v-forum-math
+        v-code-blocks
         class="compose-preview forum-markdown"
         v-html="markdown(modelValue)"
       ></div>

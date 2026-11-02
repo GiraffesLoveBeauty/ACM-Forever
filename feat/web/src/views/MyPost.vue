@@ -3,6 +3,7 @@ import { ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useRequests, date } from '../lib/api.js';
 import { markdown } from '../lib/markdown.js';
+import { codeBlocks as vCodeBlocks } from '../lib/code-blocks.js';
 import PostCover from '../components/PostCover.vue';
 
 const route = useRoute(),
@@ -85,7 +86,7 @@ watch(() => route.query.id, load, { immediate: true });
         <p class="label">投稿原文 · {{ post.category_name }}</p>
         <h2>{{ post.title }}</h2>
         <PostCover :src="post.cover_url" :alt="`${post.title}的封面`" class="forum-article-cover" />
-        <div class="forum-markdown" v-forum-math v-html="markdown(post.body)"></div>
+        <div class="forum-markdown" v-forum-math v-code-blocks v-html="markdown(post.body)"></div>
       </article>
     </template>
   </main>

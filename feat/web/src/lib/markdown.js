@@ -1,5 +1,6 @@
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { highlightCode } from './markdown-code.js';
 export function markdown(source) {
   const rendered =
     typeof window !== 'undefined' && window.renderForumMarkdown
@@ -48,6 +49,7 @@ export function markdown(source) {
     }
   }
   for (const link of root.querySelectorAll('a')) link.setAttribute('rel', 'noopener noreferrer');
+  highlightCode(root);
   return root.innerHTML;
 }
 export function controlledImage(value) {

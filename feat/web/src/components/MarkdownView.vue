@@ -2,10 +2,10 @@
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { markdown, controlledImage } from '../lib/markdown.js';
 import { headingSlug } from '../lib/wiki.js';
+import { codeBlocks as vCodeBlocks } from '../lib/code-blocks.js';
 const props = defineProps({ source: { type: String, default: '' } });
 const emit = defineEmits(['toc', 'active']);
 const root = ref(),
-  message = ref(''),
   viewer = ref(),
   viewed = ref('');
 let observer,
@@ -36,14 +36,6 @@ async function enhance() {
       { rootMargin: '-100px 0px -60% 0px' },
     );
     root.value.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach((node) => observer.observe(node));
-  }
-  for (const pre of root.value.querySelectorAll('pre')) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'btn code-copy';
-    button.dataset.copy = '';
-    button.textContent = '复制代码';
-    pre.append(button);
   }
   const pres = [...root.value.querySelectorAll('pre')];
   for (let index = 0; index < pres.length; index++) {
@@ -92,18 +84,8 @@ async function enhance() {
     }
   }
 }
-async function action(event) {
+function action(event) {
   const target = event.target;
-  const copy = target.closest?.('[data-copy]');
-  if (copy) {
-    try {
-      await navigator.clipboard.writeText(copy.closest('pre').querySelector('code').textContent);
-      message.value = '代码已复制。';
-    } catch {
-      message.value = '复制失败，请选择代码后手动复制。';
-    }
-    return;
-  }
   if (target.dataset?.group != null) {
     const set = groups[Number(target.dataset.group)];
     set?.forEach((node, index) => (node.hidden = index !== Number(target.dataset.index)));
@@ -137,13 +119,13 @@ onBeforeUnmount(() => observer?.disconnect());
   <article
     ref="root"
     v-forum-math
+    v-code-blocks
     class="forum-markdown wiki-body"
     @click="action"
     @keydown="keydown"
     @error.capture="imageError"
     v-html="markdown(source)"
   ></article>
-  <p v-if="message" role="status">{{ message }}</p>
   <dialog ref="viewer" class="wiki-image-viewer" @click.self="viewer.close()">
     <button class="btn" @click="viewer.close()">关闭图片</button
     ><img :src="viewed" alt="正文图片放大查看" />
