@@ -12,6 +12,12 @@ const designTemplate = computed(() => normalizeTemplate(getDesignTemplate()));
 const openTheme = inject('openTheme');
 const toggleTheme = inject('toggleTheme');
 const router = useRouter();
+const onWiki = computed(() => router.currentRoute.value.path === '/wiki.html');
+const loginTarget = computed(() =>
+  onWiki.value
+    ? { path: '/login.html', query: { next: router.currentRoute.value.fullPath } }
+    : '/login.html',
+);
 const canManage = computed(() => auth.authenticated && ['admin', 'root'].includes(auth.role));
 async function logout() {
   try {
@@ -38,6 +44,7 @@ async function logout() {
     <nav class="nav primary-nav" aria-label="主导航">
       <RouterLink to="/index.html" active-class="active">⌂ 论坛</RouterLink
       ><RouterLink to="/leaderboard.html" active-class="active">♛ 排行榜</RouterLink
+      ><RouterLink to="/wiki.html" active-class="active">▧ Wiki</RouterLink
       ><RouterLink v-if="auth.authenticated" to="/my-problems.html" active-class="active"
         >▦ 题库</RouterLink
       ><RouterLink v-if="auth.authenticated" to="/home.html" active-class="active"
@@ -56,8 +63,9 @@ async function logout() {
       </button>
       <button class="btn" aria-label="切换主题" @click="toggleTheme">◐</button>
       <button class="btn" @click="openTheme">自助调色</button
-      ><RouterLink v-if="!auth.authenticated" class="btn primary" to="/login.html"
-        >登录后发帖</RouterLink
+      ><RouterLink v-if="!auth.authenticated" class="btn primary" :to="loginTarget">{{
+        onWiki ? '登录社区' : '登录后发帖'
+      }}</RouterLink
       ><RouterLink
         v-else
         class="btn account-avatar-button"
