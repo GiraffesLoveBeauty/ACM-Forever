@@ -1,9 +1,12 @@
 const platforms = ['codeforces', 'luogu', 'atcoder', 'nowcoder', 'cjlu'];
 export function memberFilters(query = {}) {
   const number = Number(query.page);
+  const view = query.view === 'tracker' ? 'tracker' : 'list';
+  const allowedPlatforms = view === 'tracker' ? ['codeforces', 'atcoder'] : platforms;
   return {
+    view,
     scope: query.scope === 'solved' ? 'solved' : 'all',
-    platform: platforms.includes(query.platform) ? query.platform : '',
+    platform: allowedPlatforms.includes(query.platform) ? query.platform : 'codeforces',
     tag: typeof query.tag === 'string' ? query.tag.slice(0, 100) : '',
     state: query.state === 'favorite' ? 'favorite' : '',
     page: Number.isSafeInteger(number) && number > 0 && number <= 1000000 ? number : 1,
@@ -13,7 +16,10 @@ export function memberQuery(filters) {
   return Object.fromEntries(
     Object.entries(memberFilters(filters)).filter(
       ([key, value]) =>
-        value && !(key === 'scope' && value === 'all') && !(key === 'page' && value === 1),
+        value &&
+        !(key === 'view' && value === 'list') &&
+        !(key === 'scope' && value === 'all') &&
+        !(key === 'page' && value === 1),
     ),
   );
 }

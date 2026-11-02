@@ -56,6 +56,7 @@ function reset() {
   load(1);
 }
 
+defineExpose({ refresh: () => load(page.value) });
 onMounted(() => load());
 </script>
 
@@ -71,37 +72,37 @@ onMounted(() => load());
       </button>
     </div>
     <div class="admin-panel">
-      <form class="admin-filter-row" @submit.prevent="load(1)">
-        <label class="admin-search"
-          >搜索题目<input
-            v-model="filters.q"
-            type="search"
-            placeholder="题号、题名或比赛 ID"
-          /> </label
+      <form class="admin-filter-row problem-database-filters" @submit.prevent="load(1)">
+        <label class="problem-database-search"
+          ><span>搜索题目</span
+          ><input v-model="filters.q" type="search" placeholder="题号、题名或比赛 ID" /> </label
         ><label
-          >平台<select v-model="filters.platform">
+          ><span>平台</span
+          ><select v-model="filters.platform">
             <option value="">全部平台</option>
             <option value="codeforces">Codeforces</option>
             <option value="atcoder">AtCoder</option>
           </select></label
         ><label
-          >题面状态<select v-model="filters.status">
+          ><span>题面状态</span
+          ><select v-model="filters.status">
             <option value="all">全部</option>
             <option value="collected">已采集题面</option>
             <option value="pending">尚未采集</option>
             <option value="failed">最近采集失败</option>
           </select></label
-        ><button class="btn primary" type="submit" :disabled="busy">筛选</button>
-        <button class="btn" type="button" :disabled="busy" @click="reset">重置</button>
+        >
+        <div class="problem-database-filter-actions">
+          <button class="btn primary" type="submit" :disabled="busy">筛选</button>
+          <button class="btn" type="button" :disabled="busy" @click="reset">重置</button>
+        </div>
       </form>
       <div class="admin-table-meta">
         <span>共 {{ total }} 条数据库记录</span>
         <span>每页 {{ pageSize }} 条</span>
       </div>
       <p v-if="error" class="admin-message" role="alert">读取失败：{{ error }}</p>
-      <p v-else-if="busy && !rows.length" class="admin-message" role="status">
-        正在读取题库记录…
-      </p>
+      <p v-else-if="busy && !rows.length" class="admin-message" role="status">正在读取题库记录…</p>
       <p v-else-if="!rows.length" class="admin-message">没有匹配的题库记录。</p>
       <div v-if="rows.length" class="admin-table-wrap">
         <table class="admin-table problem-database-table">
@@ -120,10 +121,14 @@ onMounted(() => load());
           <tbody>
             <tr v-for="row in rows" :key="`${row.platform}-${row.problem_id}`">
               <td>{{ platformName(row.platform) }}</td>
-              <td><code>{{ row.problem_id }}</code></td>
+              <td>
+                <code>{{ row.problem_id }}</code>
+              </td>
               <td class="problem-database-title">
                 <b>{{ row.problem_name || '未命名题目' }}</b>
-                <small>比赛 {{ row.contest_id || '—' }} · 题序 {{ row.problem_index || '—' }}</small>
+                <small
+                  >比赛 {{ row.contest_id || '—' }} · 题序 {{ row.problem_index || '—' }}</small
+                >
               </td>
               <td>{{ row.problem_rating ?? '—' }}</td>
               <td class="problem-database-tags">{{ tagsText(row.tags) }}</td>
@@ -154,3 +159,47 @@ onMounted(() => load());
     </div>
   </section>
 </template>
+
+<style scoped>
+.problem-database-filters {
+  align-items: flex-end;
+  gap: 20px 24px;
+  margin-bottom: 24px;
+}
+.problem-database-filters > label {
+  display: flex;
+  flex: 1 1 180px;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.problem-database-filters > .problem-database-search {
+  flex: 2 1 280px;
+}
+.problem-database-filters label > span {
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.problem-database-filters :is(input, select) {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+}
+.problem-database-filter-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+@media (max-width: 640px) {
+  .problem-database-filters > label,
+  .problem-database-filters > .problem-database-search {
+    flex-basis: 100%;
+  }
+  .problem-database-filter-actions {
+    width: 100%;
+  }
+  .problem-database-filter-actions > .btn {
+    flex: 1;
+  }
+}
+</style>

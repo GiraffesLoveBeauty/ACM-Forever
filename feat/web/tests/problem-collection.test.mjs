@@ -64,8 +64,8 @@ beforeEach(() => {
     if (url === '/api/admin/database') return response(dbStatus);
     if (url === '/api/admin/database/init')
       return response({ ...dbStatus, message: '数据库初始化完成，已有数据已保留。' });
-    if (url.startsWith('/api/problems?') || url.startsWith('/api/me/problems?'))
-      return response({ items: [], total: 0 });
+    if (url.startsWith('/api/admin/database/problems?'))
+      return response({ items: [], total: 0, page: 1 });
     if (url === '/api/tasks') {
       if (holdTasks)
         return new Promise((resolve) => delayedTasks.push(() => resolve(response(jobs))));
@@ -153,10 +153,33 @@ test('Web admin and root see the collection form; members make no admin requests
       role !== 'member',
     );
     assert.equal(syncPosts().length, 0);
+    assert.equal(
+      calls.some((call) => /^\/api\/(?:me\/)?problems\?/.test(call.url)),
+      false,
+      'collection management does not request the personal browsing list',
+    );
     mounted.unmount();
     mounted = null;
   }
 });
+test('management shows initialization, collection and saved records in that order without personal filters', async () => {
+  await page();
+  const headings = find(mounted.root, (node) => node.type === 'h2').map((node) =>
+    textOf(node).trim(),
+  );
+  const database = headings.indexOf('服务端数据库');
+  const collection = headings.indexOf('拉取题目');
+  const records = headings.indexOf('题库记录');
+  assert.ok(database >= 0 && database < collection && collection < records);
+  assert.equal(find(mounted.root, (node) => node.props.id === 'problem-list').length, 0);
+  assert.doesNotMatch(textOf(mounted.root), /成员 QQ|筛选题目|收藏/);
+  assert.ok(calls.some((call) => call.url.startsWith('/api/admin/database/problems?')));
+  assert.equal(
+    calls.some((call) => /^\/api\/(?:me\/)?problems\?/.test(call.url)),
+    false,
+  );
+});
+
 test('AtCoder submission uses the real request layer, locks duplicates and cancels the task', async () => {
   await page();
   await model('sync-contest', 'abc370');
@@ -203,7 +226,7 @@ test('full CF collection sends batch size without a contest or total limit and r
     refresh: false,
     batch_size: 50,
   });
-  const lists = calls.filter((c) => c.url.startsWith('/api/problems?')).length;
+  const lists = calls.filter((c) => c.url.startsWith('/api/admin/database/problems?')).length;
   jobs = [
     running({
       platform: 'codeforces',
@@ -225,16 +248,24 @@ test('full CF collection sends batch size without a contest or total limit and r
   assert.match(textOf(mounted.root), /部分题目拉取失败/);
   assert.match(textOf(mounted.root), /<img src=x onerror=alert\(1\)>/);
   assert.equal(find(mounted.root, (n) => n.props.innerHTML).length, 0);
-  assert.ok(calls.filter((c) => c.url.startsWith('/api/problems?')).length > lists);
+  assert.ok(calls.filter((c) => c.url.startsWith('/api/admin/database/problems?')).length > lists);
+  assert.equal(
+    calls.some((c) => /^\/api\/(?:me\/)?problems\?/.test(c.url)),
+    false,
+  );
 });
 test('initialization posts no reset or database path and updates the visible status', async () => {
   await page();
+  const lists = calls.filter((call) => call.url.startsWith('/api/admin/database/problems?')).length;
   await element('problem-db-init').props.onClick();
   await settle();
   const initialization = calls.find((call) => call.url === '/api/admin/database/init');
   assert.deepEqual(JSON.parse(initialization.options.body), {});
   assert.equal(initialization.options.method, 'POST');
   assert.match(textOf(mounted.root), /初始化完成，已有数据已保留/);
+  assert.ok(
+    calls.filter((call) => call.url.startsWith('/api/admin/database/problems?')).length > lists,
+  );
 });
 test('returning to the page restores an active task without another POST', async () => {
   jobs = [running()];
