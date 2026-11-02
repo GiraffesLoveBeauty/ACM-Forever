@@ -1,21 +1,27 @@
 <script setup>
-import { ref, reactive, watch, onMounted, onBeforeUnmount } from 'vue';
+import { computed, ref, reactive, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { api, useRequests, notify, showError, auth } from '../lib/api.js';
 import { sourceFields } from '../lib/markdown-source.js';
 import MarkdownEditor from '../components/MarkdownEditor.vue';
+import { postImage, uploadPostImage } from '../lib/post-images.js';
 const route = useRoute(),
   router = useRouter(),
   request = useRequests();
-const form = reactive({ title: '', body: '', category_id: null }),
+const form = reactive({ title: '', body: '', category_id: null, cover_image_id: null }),
   categories = ref([]),
   drafts = ref([]),
   id = ref(null),
-  mode = ref('write'),
+  mode = ref('split'),
+  coverInput = ref(),
+  imageUploadMessage = ref(''),
   recoveryCandidate = ref(null),
   recoveryKeyForCandidate = ref(''),
   message = ref('新话题尚未保存'),
   busy = ref(false);
+const coverSource = computed(() =>
+  postImage(form.cover_image_id ? `/api/forum/images/${form.cover_image_id}` : ''),
+);
 let revision = 0,
   savedRevision = 0,
   timer,
@@ -25,9 +31,15 @@ let revision = 0,
   finished = false,
   leaving = false,
   recoveryTabId = '',
-  recoveryResolved = false;
+  recoveryResolved = false,
+  coverController;
 function payload() {
-  return { title: form.title, body: form.body, category_id: form.category_id || null };
+  return {
+    title: form.title,
+    body: form.body,
+    category_id: form.category_id || null,
+    cover_image_id: form.cover_image_id || null,
+  };
 }
 function recoveryKey(draftId = id.value) {
   const scope = draftId == null ? 'new' : String(draftId);
@@ -139,7 +151,8 @@ function discoverRecovery(serverPayload) {
       serverPayload &&
       local.title === serverPayload.title &&
       local.body === serverPayload.body &&
-      String(local.category_id || '') === String(serverPayload.category_id || '')
+      String(local.category_id || '') === String(serverPayload.category_id || '') &&
+      (local.cover_image_id || null) === (serverPayload.cover_image_id || null)
     ) {
       if (candidate.key === key || candidate.key === workingKey) removeRecoveryKey(candidate.key);
       else markRecoveryHandled(candidate.key);
@@ -167,6 +180,7 @@ function restoreRecovery() {
     title: recoveryCandidate.value.title || '',
     body: recoveryCandidate.value.body || '',
     category_id: recoveryCandidate.value.category_id || null,
+    cover_image_id: recoveryCandidate.value.cover_image_id || null,
   });
   loading = false;
   recoveryResolved = true;
@@ -193,6 +207,33 @@ async function prepareImageUpload() {
   if (!id.value && revision === savedRevision) revision++;
   await save();
   return id.value;
+}
+async function uploadBodyImage(file, options) {
+  const result = await uploadPostImage(file, options);
+  if (!postImage(result.url)) throw Error('服务器未返回有效的图片地址。');
+  return result;
+}
+async function selectCover(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file || busy.value) return;
+  busy.value = true;
+  coverController = new AbortController();
+  imageUploadMessage.value = '正在处理并上传封面…';
+  try {
+    const result = await uploadBodyImage(file, { signal: coverController.signal });
+    if (disposed) return;
+    form.cover_image_id = result.id;
+    await save();
+    if (!disposed) imageUploadMessage.value = '封面已上传并保存到草稿。';
+  } catch (error) {
+    if (!disposed && error.name !== 'AbortError') {
+      imageUploadMessage.value = error.message;
+      showError(error);
+    }
+  } finally {
+    if (!disposed) busy.value = false;
+  }
 }
 async function list() {
   drafts.value = await request('/forum/drafts');
@@ -254,11 +295,12 @@ async function choose(draftId) {
     loading = true;
     const data = draftId
       ? await request(`/forum/drafts/${draftId}`, {}, 'draft')
-      : { title: '', body: '', category_id: null };
+      : { title: '', body: '', category_id: null, cover_image_id: null };
     Object.assign(form, {
       title: data.title || '',
       body: data.body || '',
       category_id: data.category_id || null,
+      cover_image_id: data.cover_image_id || null,
     });
     id.value = draftId;
     revision = 0;
@@ -267,6 +309,7 @@ async function choose(draftId) {
     recoveryKeyForCandidate.value = '';
     recoveryResolved = true;
     discoverRecovery(payload());
+    imageUploadMessage.value = '';
     message.value = draftId ? '已读取草稿' : '新话题尚未保存';
     await router.replace({ path: '/compose.html', query: draftId ? { draft_id: draftId } : {} });
   } catch (e) {
@@ -307,12 +350,13 @@ async function remove() {
     removeRecoveryKey(recoveryKey());
     removeRecoveryKey(workingRecoveryKey());
     loading = true;
-    Object.assign(form, { title: '', body: '', category_id: null });
+    Object.assign(form, { title: '', body: '', category_id: null, cover_image_id: null });
     id.value = null;
     revision = savedRevision = 0;
     await router.replace('/compose.html');
     await list();
     message.value = '草稿已删除';
+    imageUploadMessage.value = '';
   } catch (e) {
     showError(e);
   } finally {
@@ -321,7 +365,7 @@ async function remove() {
   }
 }
 function unload(event) {
-  if (revision !== savedRevision || saving) {
+  if (revision !== savedRevision || saving || busy.value) {
     event.preventDefault();
     event.returnValue = '';
   }
@@ -377,6 +421,7 @@ onMounted(async () => {
           title: results[2].value.title || '',
           body: results[2].value.body || '',
           category_id: results[2].value.category_id || null,
+          cover_image_id: results[2].value.cover_image_id || null,
         });
         discoverRecovery(payload());
         message.value = '已读取草稿';
@@ -398,6 +443,7 @@ onMounted(async () => {
 });
 onBeforeUnmount(() => {
   disposed = true;
+  coverController?.abort();
   clearTimeout(timer);
   window.removeEventListener('beforeunload', unload);
   window.removeEventListener('pagehide', pagehide);
@@ -423,24 +469,76 @@ onBeforeUnmount(() => {
           <h1>发布新话题</h1>
           <p>写下问题、题解或训练心得。草稿会自动保存到你的账号。</p>
         </div>
-        <label class="compose-field"
-          >选择版块<select v-model="form.category_id" :disabled="busy">
-            <option :value="null">选择一个版块</option>
-            <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option>
-          </select></label
-        ><label class="compose-field"
-          >话题标题<input
-            v-model="form.title"
-            :disabled="busy"
-            maxlength="240"
-            placeholder="用一句话概括你想讨论的内容"
-        /></label>
+        <div class="compose-basics">
+          <div class="compose-basics-fields">
+            <label class="compose-field"
+              >选择版块<select v-model="form.category_id" :disabled="busy">
+                <option :value="null">选择一个版块</option>
+                <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option>
+              </select></label
+            ><label class="compose-field"
+              >话题标题<input
+                v-model="form.title"
+                :disabled="busy"
+                maxlength="240"
+                placeholder="用一句话概括你想讨论的内容"
+            /></label>
+          </div>
+          <section class="compose-cover-field" aria-label="帖子封面">
+            <span>帖子封面 <small>选填</small></span>
+            <img
+              v-if="coverSource"
+              :src="coverSource"
+              alt="当前帖子封面"
+              class="compose-cover-preview"
+            />
+            <button
+              v-else
+              class="compose-cover-empty"
+              type="button"
+              :disabled="busy"
+              @click="coverInput?.click()"
+            >
+              <b aria-hidden="true">＋</b><span>上传一张封面</span
+              ><small>让你的分享更容易被发现</small>
+            </button>
+            <input
+              ref="coverInput"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              aria-label="选择帖子封面"
+              hidden
+              :disabled="busy"
+              @change="selectCover"
+            />
+            <div class="compose-cover-actions">
+              <button
+                v-if="coverSource"
+                class="btn"
+                type="button"
+                :disabled="busy"
+                @click="coverInput?.click()"
+              >
+                更换封面
+              </button>
+              <button
+                v-if="coverSource"
+                class="btn"
+                type="button"
+                :disabled="busy"
+                @click="form.cover_image_id = null"
+              >
+                移除封面
+              </button>
+            </div>
+          </section>
+        </div>
         <section class="compose-body-field">
           <div class="compose-body-label">
-            <span>正文 <small>支持 Markdown</small></span>
+            <span>正文 <small>Markdown · LaTeX · 图片</small></span>
             <div class="compose-view-tabs">
               <button
-                v-for="(label, key) in { write: '编辑', preview: '预览' }"
+                v-for="(label, key) in { write: '编辑', split: '双栏', preview: '预览' }"
                 :key="key"
                 :class="{ active: mode === key }"
                 @click="mode = key"
@@ -449,6 +547,12 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
+          <p class="compose-image-hint">
+            支持选择、粘贴或拖入 PNG / JPEG / WebP，原图最大 20 MB，上传前会自动压缩。
+          </p>
+          <p v-if="imageUploadMessage" class="compose-image-status" role="status">
+            {{ imageUploadMessage }}
+          </p>
           <MarkdownEditor
             v-model="form.body"
             v-model:title="form.title"
@@ -457,7 +561,10 @@ onBeforeUnmount(() => {
             document-type="forum_draft"
             :document-id="id"
             :prepare-upload="prepareImageUpload"
+            :upload-image="uploadBodyImage"
             :download-url="id ? `/api/forum/drafts/${id}/markdown` : ''"
+            @uploading="busy = $event"
+            @uploaded="save().catch(showError)"
           />
         </section>
         <div class="compose-actions">

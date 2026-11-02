@@ -48,6 +48,16 @@ for (const name of ['Wiki', 'Tasks']) {
 await writeFile(new URL(adminUrl), adminSource);
 const Admin = (await import(adminUrl)).default;
 const asset = '/api/markdown/assets/' + 'a'.repeat(32);
+const forumAsset = '/api/forum/images/' + 'b'.repeat(32);
+// jsdom has no image decoder/canvas; actual encoding is exercised in browser checks.
+globalThis.Image = class {
+  naturalWidth = 64;
+  naturalHeight = 48;
+  async decode() {}
+};
+dom.window.HTMLCanvasElement.prototype.getContext = () => ({ drawImage() {} });
+dom.window.HTMLCanvasElement.prototype.toBlob = (callback) =>
+  callback(new Blob(['encoded image'], { type: 'image/webp' }));
 const nav = {
   categories: [
     { id: 1, name: '知识总览', parent_id: null, published_count: 1 },
@@ -132,7 +142,7 @@ beforeEach(() => {
     calls.push({ url, body, signal: options.signal });
     if (url === '/api/ui/preferences') return response({ font_scale: 1 });
     if (url === '/api/tasks') return response([]);
-    if (url === '/api/markdown/assets') {
+    if (url === '/api/markdown/assets' || url === '/api/forum/images') {
       if (heldUpload)
         return new Promise((resolve, reject) => {
           options.signal.addEventListener('abort', () =>
@@ -140,7 +150,12 @@ beforeEach(() => {
           );
         });
       if (failUpload) return response({ message: '合成上传错误' }, 503);
-      return response({ url: asset, id: 'a'.repeat(32) }, 201);
+      return response(
+        url === '/api/forum/images'
+          ? { url: forumAsset, id: 'b'.repeat(32) }
+          : { url: asset, id: 'a'.repeat(32) },
+        201,
+      );
     }
     if (url === '/api/wiki/navigation' || url === '/api/admin/wiki/categories')
       return response(nav);
@@ -278,7 +293,7 @@ test('shared Markdown import handles BOM, LF, fenced H1 and fallback filename wi
 });
 
 test('both renderer paths reject foreign and local disk images and unsafe HTML while allowing controlled assets', async () => {
-  const body = `![安全](${asset}) ![远程](https://example.test/a.png) ![本机](file:///secret.png)<img src="${asset}" onerror="alert(1)"><script>alert(1)</script>`;
+  const body = `![安全](${asset}) ![论坛](${forumAsset}) ![导出绝对路径](${location.origin}${forumAsset}) ![远程](https://example.test/a.png) ![本机](file:///secret.png)<img src="${asset}" onerror="alert(1)"><script>alert(1)</script>`;
   for (const shared of [false, true]) {
     if (shared) {
       window.marked = (await import('marked')).marked;
@@ -293,7 +308,7 @@ test('both renderer paths reject foreign and local disk images and unsafe HTML w
     const result = markdown(body);
     const target = document.createElement('div');
     target.innerHTML = result;
-    assert.equal(target.querySelectorAll('img').length, 2);
+    assert.equal(target.querySelectorAll('img').length, 4);
     assert.ok(!target.querySelector('[onerror],script'));
     assert.ok(result.includes('图片待上传'));
     assert.ok(missingImages(body).includes('https://example.test/a.png'));
@@ -536,7 +551,11 @@ test('blank forum upload creates its own draft without requiring text first', as
   const draft = calls.find((c) => c.url === '/api/forum/drafts' && c.body);
   assert.equal(draft.body.title, '');
   assert.equal(draft.body.body, '');
-  assert.equal(calls.find((c) => c.url === '/api/markdown/assets').body.get('document_id'), '12');
+  const upload = calls.find((c) => c.url === '/api/forum/images');
+  assert.equal(upload.body.get('image').type, 'image/webp');
+  assert.ok(calls.indexOf(draft) < calls.indexOf(upload));
+  assert.equal(q('.compose-editing-panes').classList.contains('split'), true);
+  assert.equal(q('.compose-preview img').getAttribute('src'), forumAsset);
   assert.ok(q('textarea[aria-label="Markdown 正文"]').value.includes('![first]('));
 });
 
@@ -839,4 +858,55 @@ test('overview excerpts show plain text instead of raw Markdown or executable ma
   assert.ok(row.textContent.includes('算法标题 集合查询'));
   assert.equal(row.textContent.includes('##'), false);
   assert.equal(row.querySelector('script'), null);
+});
+
+test('forum cover and shared-editor images are saved together and removing a cover is persisted', async () => {
+  await mount(null, '/compose.html');
+  const cover = q('[aria-label="选择帖子封面"]');
+  Object.defineProperty(cover, 'files', {
+    configurable: true,
+    value: [new File(['synthetic'], 'cover.png', { type: 'image/png' })],
+  });
+  cover.dispatchEvent(new dom.window.Event('change'));
+  await settle();
+  assert.equal(q('.compose-cover-preview').getAttribute('src'), forumAsset);
+  await input(q('textarea[aria-label="Markdown 正文"]'), `![旧图](${asset})`);
+  await click('保存草稿');
+  const saved = calls.filter((c) => c.url.startsWith('/api/forum/drafts') && c.body).at(-1);
+  assert.equal(saved.body.cover_image_id, 'b'.repeat(32));
+  assert.ok(saved.body.body.includes(asset));
+  await click('移除封面');
+  await click('保存草稿');
+  assert.equal(
+    calls.filter((c) => c.url.startsWith('/api/forum/drafts') && c.body).at(-1).body.cover_image_id,
+    null,
+  );
+});
+
+test('custom forum image uploads abort on editor disposal without inserting a late response', async () => {
+  let signal,
+    updates = 0;
+  await mount(Editor, '/elsewhere', {
+    modelValue: '保留正文',
+    documentId: 12,
+    uploadImage: (_file, options) => {
+      signal = options.signal;
+      return new Promise((resolve, reject) =>
+        signal.addEventListener('abort', () => reject(new DOMException('取消', 'AbortError'))),
+      );
+    },
+    'onUpdate:modelValue': () => updates++,
+  });
+  const image = q('[aria-label="选择图片"]');
+  Object.defineProperty(image, 'files', {
+    value: [new File(['synthetic'], 'image.png', { type: 'image/png' })],
+  });
+  image.dispatchEvent(new dom.window.Event('change'));
+  await settle();
+  assert.equal(signal.aborted, false);
+  app.unmount();
+  app = null;
+  await settle();
+  assert.equal(signal.aborted, true);
+  assert.equal(updates, 0);
 });

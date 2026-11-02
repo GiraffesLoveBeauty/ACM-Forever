@@ -57,7 +57,7 @@ export function controlledImage(value) {
       url.origin === location.origin &&
       !url.search &&
       !url.hash &&
-      /^\/api\/markdown\/assets\/[a-f0-9]{32}$/.test(url.pathname)
+      /^\/api\/(?:markdown\/assets|forum\/images)\/[a-f0-9]{32}$/.test(url.pathname)
     );
   } catch {
     return false;

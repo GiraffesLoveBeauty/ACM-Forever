@@ -16,6 +16,7 @@ from .acm_api.database import connect_db
 from .acm_api.forum_api import forum_api
 from .acm_api.wiki_api import wiki_api
 from .acm_api.markdown_api import markdown_api
+from .acm_api.forum_images import forum_image_api
 from .acm_api.cf_practice import PracticeQuery
 from .acm_api.cf_practice_api import cf_practice_api
 from .acm_api.cf_practice_jobs import PracticeJobs
@@ -72,7 +73,8 @@ def create_app():
     app.config["AVATAR_UPLOAD_DIR"] = db_path.parent / "uploads" / "avatars"
     app.config["MARKDOWN_UPLOAD_DIR"] = Path(os.getenv("ACM_MARKDOWN_UPLOAD_DIR", str(db_path.parent / "uploads" / "markdown"))).expanduser()
     app.config["PUBLIC_BASE_URL"] = os.getenv("ACM_PUBLIC_BASE_URL", "").strip()
-    app.config["MAX_CONTENT_LENGTH"] = 3 * 1024 * 1024
+    app.config["FORUM_UPLOAD_DIR"] = db_path.parent / "uploads" / "forum"
+    app.config["MAX_CONTENT_LENGTH"] = 6 * 1024 * 1024
     app.config["BOT_API_TOKEN"] = os.getenv("ACM_BOT_API_TOKEN", "").strip()
     app.config["WEBUI_PUBLIC_DIR"] = Path(__file__).parent / "acm_api" / "public"
     app.config["WEBUI_DIST_DIR"] = Path(__file__).parent.parent / "web" / "dist"
@@ -225,6 +227,8 @@ def create_app():
                 response = await send_from_directory(dist_dir, filename)
                 if extension == ".mjs":
                     response.headers["Content-Type"] = "text/javascript; charset=utf-8"
+                elif extension == ".css":
+                    response.headers["Content-Type"] = "text/css; charset=utf-8"
                 return response
             response = await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], filename)
             if extension == ".css":
@@ -283,7 +287,7 @@ def create_app():
         response.headers.setdefault(
             "Content-Security-Policy",
             "default-src 'self'; base-uri 'self'; object-src 'none'; "
-            f"frame-ancestors 'none'; connect-src 'self'; img-src 'self' data:{problem_images}; "
+            f"frame-ancestors 'none'; connect-src 'self'; img-src 'self' data: blob:{problem_images}; "
             "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'",
         )
         if response.content_type == "application/json":
@@ -310,6 +314,7 @@ def create_app():
     app.register_blueprint(forum_api, url_prefix="/api")
     app.register_blueprint(wiki_api, url_prefix="/api")
     app.register_blueprint(markdown_api, url_prefix="/api")
+    app.register_blueprint(forum_image_api, url_prefix="/api")
     app.register_blueprint(cf_practice_api, url_prefix="/api")
     app.sync_engine = sync_engine
     app.task_manager = task_manager

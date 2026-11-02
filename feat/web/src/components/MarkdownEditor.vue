@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
 import { useRequests } from '../lib/api.js';
-import { markdown } from '../lib/markdown.js';
+import { markdown, controlledImage } from '../lib/markdown.js';
 import {
   importMarkdownFile,
   insertMarkdown,
@@ -17,25 +17,28 @@ const props = defineProps({
   documentType: String,
   documentId: [Number, String],
   prepareUpload: Function,
+  uploadImage: Function,
   downloadUrl: String,
 });
 const request = useRequests();
-const emit = defineEmits(['update:modelValue', 'update:title']);
+const emit = defineEmits(['update:modelValue', 'update:title', 'uploading', 'uploaded']);
 const input = ref(),
   importInput = ref(),
   imageInput = ref(),
   localMode = ref('write'),
   message = ref(''),
   uploading = ref(false),
-  pendingFile = ref();
+  pendingFiles = ref([]);
 const mode = computed(() => props.mode || localMode.value),
   missing = computed(() => missingImages(props.modelValue));
 let disposed = false,
-  downloadController;
+  downloadController,
+  uploadController;
 onBeforeUnmount(() => {
   disposed = true;
   downloadController?.abort();
-  pendingFile.value = null;
+  uploadController?.abort();
+  pendingFiles.value = [];
 });
 async function insert(before, after = '', placeholder = '文字') {
   const result = insertMarkdown(input.value, props.modelValue, before, after, placeholder);
@@ -63,59 +66,85 @@ async function importFile(event) {
     if (!disposed) message.value = '导入失败：' + e.message;
   }
 }
-async function upload(file) {
-  if (!file || uploading.value || props.disabled) return;
-  const start = input.value?.selectionStart ?? props.modelValue.length;
+async function upload(files) {
+  const queue = Array.from(files || []);
+  if (!queue.length || uploading.value || props.disabled) return;
+  if (queue.length > 10) {
+    message.value = '每次最多上传 10 张图片。';
+    return;
+  }
+  let position = input.value?.selectionStart ?? props.modelValue.length;
+  let end = input.value?.selectionEnd ?? position;
   uploading.value = true;
-  pendingFile.value = file;
+  pendingFiles.value = queue;
+  emit('uploading', true);
   message.value = '正在上传图片…';
+  uploadController = new AbortController();
   try {
-    if (file.size > 2 * 1024 * 1024) throw Error('单张图片不能超过 2 MB。');
     const documentId = props.prepareUpload ? await props.prepareUpload() : props.documentId;
     if (disposed) return;
     if (!documentId) throw Error('请先选择小类并创建草稿，再上传图片。');
-    const data = new FormData();
-    data.append('file', file);
-    data.append('document_type', props.documentType);
-    data.append('document_id', documentId);
-    const asset = await request('/markdown/assets', { method: 'POST', body: data });
-    if (disposed) return;
-    const alt = (file.name || '图片').replace(/[\[\]\r\n\\]/g, '').replace(/\.[^.]+$/, '');
-    const snippet = `![${alt}](${asset.url})`;
-    emit(
-      'update:modelValue',
-      props.modelValue.slice(0, start) + snippet + props.modelValue.slice(start),
-    );
-    await nextTick();
-    input.value?.focus();
-    input.value?.setSelectionRange(start + snippet.length, start + snippet.length);
-    pendingFile.value = null;
+    for (const file of queue) {
+      let asset;
+      if (props.uploadImage) {
+        asset = await props.uploadImage(file, { signal: uploadController.signal });
+      } else {
+        if (file.size > 2 * 1024 * 1024) throw Error('单张图片不能超过 2 MB。');
+        const data = new FormData();
+        data.append('file', file);
+        data.append('document_type', props.documentType);
+        data.append('document_id', documentId);
+        asset = await request('/markdown/assets', { method: 'POST', body: data });
+      }
+      if (disposed) return;
+      if (!controlledImage(asset.url)) throw Error('服务器未返回有效的图片地址。');
+      const alt = (file.name || '图片')
+        .replace(/[\[\]\r\n\\]/g, '')
+        .replace(/\.[^.]+$/, '')
+        .slice(0, 80);
+      const snippet = `![${alt}](${asset.url})`;
+      const body = props.modelValue.slice(0, position) + snippet + props.modelValue.slice(end);
+      if (Array.from(body).length > 20000)
+        throw Error('正文不能超过 20000 个字符，请精简后再插入图片。');
+      emit('update:modelValue', body);
+      position += snippet.length;
+      end = position;
+      pendingFiles.value = pendingFiles.value.slice(1);
+      await nextTick();
+      input.value?.focus();
+      input.value?.setSelectionRange(position, position);
+      emit('uploaded');
+    }
     message.value = '图片已插入，请保存正文；发布前仅授权账号可见。';
   } catch (e) {
-    if (!disposed) message.value = '图片上传失败：' + e.message;
+    if (!disposed && e.name !== 'AbortError') message.value = '图片上传失败：' + e.message;
   } finally {
-    if (!disposed) uploading.value = false;
+    if (!disposed) {
+      uploading.value = false;
+      emit('uploading', false);
+    }
   }
 }
 function imageFile(event) {
-  const file = event.target.files?.[0];
+  const files = [...(event.target.files || [])];
   event.target.value = '';
-  upload(file);
+  upload(files);
 }
 function drop(event) {
-  const file = [...(event.dataTransfer?.files || [])][0];
-  if (file) {
+  const files = [...(event.dataTransfer?.files || [])];
+  if (files.length) {
     event.preventDefault();
-    upload(file);
+    upload(files);
   }
 }
 function paste(event) {
-  const item = [...(event.clipboardData?.items || [])].find((item) =>
-    item.type.startsWith('image/'),
-  );
-  if (item) {
+  const files = [...(event.clipboardData?.items || [])]
+    .filter((item) => item.type.startsWith('image/'))
+    .map((item) => item.getAsFile())
+    .filter(Boolean);
+  if (files.length) {
     event.preventDefault();
-    upload(item.getAsFile());
+    upload(files);
   }
 }
 async function download() {
@@ -188,6 +217,7 @@ async function download() {
         type="file"
         accept="image/png,image/jpeg,image/webp"
         aria-label="选择图片"
+        :multiple="!!uploadImage"
         hidden
         @change="imageFile"
       />
@@ -195,28 +225,35 @@ async function download() {
         下载 MD
       </button>
     </div>
-    <textarea
-      v-if="mode === 'write'"
-      ref="input"
-      class="compose-textarea"
-      :value="modelValue"
-      :disabled="disabled || uploading"
-      rows="18"
-      aria-label="Markdown 正文"
-      placeholder="记录你的思路…"
-      @input="emit('update:modelValue', $event.target.value)"
-    ></textarea>
-    <div
-      v-else
-      v-forum-math
-      class="compose-preview forum-markdown"
-      v-html="markdown(modelValue)"
-    ></div>
+    <div class="compose-editing-panes" :class="{ split: mode === 'split' }">
+      <textarea
+        v-if="mode !== 'preview'"
+        ref="input"
+        class="compose-textarea"
+        :value="modelValue"
+        :disabled="disabled || uploading"
+        rows="18"
+        aria-label="Markdown 正文"
+        placeholder="记录你的思路…"
+        @input="emit('update:modelValue', $event.target.value)"
+      ></textarea>
+      <div
+        v-if="mode !== 'write'"
+        v-forum-math
+        class="compose-preview forum-markdown"
+        v-html="markdown(modelValue)"
+      ></div>
+    </div>
     <p v-if="missing.length" class="muted">
       待上传或关联的图片：{{ missing.join('、') }}。请选择图片上传后替换原引用。
     </p>
     <p v-if="message" role="status">{{ message }}</p>
-    <button v-if="pendingFile && !uploading" type="button" class="btn" @click="upload(pendingFile)">
+    <button
+      v-if="pendingFiles.length && !uploading"
+      type="button"
+      class="btn"
+      @click="upload(pendingFiles)"
+    >
       重试上传
     </button>
   </div>

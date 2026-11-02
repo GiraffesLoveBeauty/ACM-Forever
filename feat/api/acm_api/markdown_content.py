@@ -39,7 +39,7 @@ def export_markdown(title, body, origin):
     if not re.fullmatch(r"https?://[^/\s]+", origin):
         raise ContentError("请配置有效的公开站点地址。")
     body = re.sub(
-        r"(?<![\w/])(/api/markdown/assets/[a-f0-9]{32})", lambda m: origin + m[1], body
+        r"(?<![\w/])(/api/(?:markdown/assets|forum/images)/[a-f0-9]{32})", lambda m: origin + m[1], body
     )
     return "# " + title + "\n\n" + body + ("" if body.endswith("\n") else "\n")
 

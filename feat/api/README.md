@@ -39,6 +39,8 @@ python -m api
 
 `.db`、WAL 文件、`.env` 和密钥均被忽略，不会随代码同步。备份数据库时应一并考虑 SQLite WAL 状态，建议停服后备份或使用 SQLite 在线备份方式。
 
+帖子封面与正文图片保存在数据库同级的 `uploads/forum/`，备份、迁移时须与数据库一起保留。首次启动会自动为旧数据库添加封面字段及图片元数据、引用表。安装更新后的 `requirements.txt`，其中 Pillow 处理图片，Mistune 解析正文图片引用（不把代码示例当作公开图片）。反向代理请求体上限应至少为 6 MB；图片 API 接受最大 5 MB 的静态 PNG/JPEG/WebP，服务端校验并重编码为 WebP。草稿图片仅本人及合法引用者可读，提交后供管理员审核，发布后才向访客开放；账号限额、引用和存储细节见 [帖子图片 API](../../docs/api.md#帖子封面与正文图片)。
+
 GitHub Actions 会在 `/home/WYJ/acm-forever-data/.env` 已存在时安装依赖并启动用户级 systemd 服务 `acm-forever-webui`。首次部署前，在服务器创建该环境文件，至少设置 `ACM_API_HOST`、`ACM_DATABASE_PATH`、`ACM_WEBUI_SECRET_KEY` 和 `ACM_BOT_API_TOKEN`。数据库路径应设为 `/home/WYJ/acm-forever-data/acm_forever.db`。需要通过服务器网卡访问时，将 `ACM_API_HOST` 设为 `0.0.0.0` 并在防火墙限制可访问来源；经 HTTPS 反向代理时设置 `ACM_WEBUI_COOKIE_SECURE=true`。系统服务定义位于 `deploy/acm-forever-webui.service`。首次配置还需由服务器管理员运行 `sudo loginctl enable-linger WYJ`，让用户级服务在 SSH 断开后和服务器重启后继续运行。
 
 服务器当前实际使用的数据库路径、服务运行状态和梓喵接入情况，应以服务器环境文件与运行检查为准，不能仅凭仓库代码推断。若要把旧数据库切换到本服务，先停止会写入旧库的服务并制作可恢复备份（包含 WAL 状态），再设置 `ACM_DATABASE_PATH`、启动 API 并核对关键数据；确认 Web 与梓喵都经 API 正常读写后，再按运维流程停用旧写入路径。不要在没有备份和核验的情况下覆盖生产数据库。
@@ -277,6 +279,6 @@ API 回归新增 `tests/test_member_training.py`，共 20 项，覆盖三种 Web
 
 新增公开 `/wiki.html`、`/api/wiki/*` 和统一后台 `section=wiki`。admin/root 维护两级分类与文章，普通成员和匿名访客只读已发布内容。共享图片接口、MD 导入/渲染/下载同样用于论坛，论坛发帖继续审核。
 
-数据库初始化增量创建 `acm_api/wiki.sql` 中的表、索引与约束，可重复执行，不生成业务示例。图片经 Pillow 实际解码；总请求上限仍 3MB，单张 2MB，需核对反向代理配置。`ACM_MARKDOWN_UPLOAD_DIR` 与数据库一起备份，不能使用部署制品目录存放资源；外部站点下载需要配置 `ACM_PUBLIC_BASE_URL`。
+数据库初始化增量创建 `acm_api/wiki.sql` 中的表、索引与约束，可重复执行，不生成业务示例。图片经 Pillow 实际解码；服务总请求上限为 6 MB，Wiki/共享图片接口仍单独限制单张 2 MB；论坛图片接口限制单张 5 MB，需核对反向代理配置。`ACM_MARKDOWN_UPLOAD_DIR` 与数据库一起备份，不能使用部署制品目录存放资源；外部站点下载需要配置 `ACM_PUBLIC_BASE_URL`。
 
 接口合约、并发控制、资源清理、升级及代码/数据库/资源恢复步骤见 [Wiki 文档](../../docs/wiki.md)。`tests/test_wiki.py` 会随现有 unittest discover 自动运行。

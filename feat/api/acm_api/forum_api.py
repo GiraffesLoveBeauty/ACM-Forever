@@ -12,6 +12,7 @@ from .backend_api import (
     get_db,
     member_required,
 )
+from .forum_images import IMAGE_ID, image_url, sync_image_links
 
 forum_api = Blueprint("forum_api", __name__)
 
@@ -105,6 +106,7 @@ async def posts():
             total = int((await cursor.fetchone())[0])
         sql = (
             "SELECT p.id,p.title,substr(p.body,1,420) AS excerpt,p.created_at,p.updated_at,p.is_pinned,p.views_count,"
+            "'/api/forum/images/' || p.cover_image_id AS cover_url,"
             "c.slug AS category_slug,c.name AS category_name,CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,u.avatar_url AS author_avatar_url,"
             "(SELECT COUNT(*) FROM forum_post_likes l WHERE l.post_id=p.id) AS likes_count,"
             "(SELECT COUNT(*) FROM forum_comments cm WHERE cm.post_id=p.id AND cm.status='published') AS comments_count,"
@@ -128,6 +130,7 @@ async def post_detail(post_id):
     try:
         async with db.execute(
             "SELECT p.id,p.title,p.body,p.created_at,p.updated_at,p.views_count,p.is_pinned,"
+            "'/api/forum/images/' || p.cover_image_id AS cover_url,"
             "c.slug AS category_slug,c.name AS category_name,CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,u.avatar_url AS author_avatar_url,"
             "(SELECT COUNT(*) FROM forum_post_likes l WHERE l.post_id=p.id) AS likes_count,"
             "EXISTS(SELECT 1 FROM forum_post_likes vl WHERE vl.post_id=p.id AND vl.qq_id=?) AS viewer_liked,"
@@ -192,7 +195,10 @@ def _draft_fields(data):
             return None, "请选择有效的帖子分类。"
         if category_id <= 0:
             return None, "请选择有效的帖子分类。"
-    return {"title": title, "body": body, "category_id": category_id}, None
+    cover_id = data.get("cover_image_id") or None
+    if cover_id is not None and (not isinstance(cover_id, str) or not IMAGE_ID.fullmatch(cover_id)):
+        return None, "封面图片无效，请重新上传。"
+    return {"title": title, "body": body, "category_id": category_id, "cover_image_id": cover_id}, None
 
 
 @forum_api.get("/forum/drafts")
@@ -225,13 +231,18 @@ async def create_forum_draft():
                     return jsonify({"message": "请选择有效的帖子分类。"}), 400
         now = int(time.time())
         cursor = await db.execute(
-            "INSERT INTO forum_drafts(author_qq_id,category_id,title,body,created_at,updated_at) "
-            "VALUES(?,?,?,?,?,?)",
-            (request.web_identity["qq_id"], data["category_id"], data["title"], data["body"], now, now),
+            "INSERT INTO forum_drafts(author_qq_id,category_id,title,body,cover_image_id,created_at,updated_at) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (request.web_identity["qq_id"], data["category_id"], data["title"], data["body"], data["cover_image_id"], now, now),
         )
-        await record_assets(db, data["body"], "forum_draft", cursor.lastrowid, 0, request.web_identity["qq_id"])
+        draft_id = cursor.lastrowid
+        try:
+            await sync_image_links(db, request.web_identity["qq_id"], data["body"], data["cover_image_id"], draft_id=draft_id)
+        except ValueError as error:
+            return jsonify({"message": str(error)}), 400
+        await record_assets(db, data["body"], "forum_draft", draft_id, 0, request.web_identity["qq_id"])
         await db.commit()
-        return jsonify({"id": cursor.lastrowid, "updated_at": now, "message": "草稿已保存。"}), 201
+        return jsonify({"id": draft_id, "updated_at": now, "message": "草稿已保存。"}), 201
     finally:
         await db.close()
 
@@ -242,14 +253,14 @@ async def get_forum_draft(draft_id):
     db = await get_db()
     try:
         async with db.execute(
-            "SELECT d.id,d.category_id,d.title,d.body,d.created_at,d.updated_at "
+            "SELECT d.id,d.category_id,d.title,d.body,d.cover_image_id,d.created_at,d.updated_at "
             "FROM forum_drafts d WHERE d.id=? AND d.author_qq_id=?",
             (draft_id, request.web_identity["qq_id"]),
         ) as cursor:
             draft = await cursor.fetchone()
         if not draft:
             return jsonify({"message": "草稿不存在。"}), 404
-        return jsonify(dict(draft))
+        return jsonify({**dict(draft), "cover_url": image_url(draft["cover_image_id"])})
     finally:
         await db.close()
 
@@ -268,12 +279,16 @@ async def update_forum_draft(draft_id):
                     return jsonify({"message": "请选择有效的帖子分类。"}), 400
         now = int(time.time())
         cursor = await db.execute(
-            "UPDATE forum_drafts SET category_id=?,title=?,body=?,updated_at=? "
+            "UPDATE forum_drafts SET category_id=?,title=?,body=?,cover_image_id=?,updated_at=? "
             "WHERE id=? AND author_qq_id=?",
-            (data["category_id"], data["title"], data["body"], now, draft_id, request.web_identity["qq_id"]),
+            (data["category_id"], data["title"], data["body"], data["cover_image_id"], now, draft_id, request.web_identity["qq_id"]),
         )
         if cursor.rowcount == 0:
             return jsonify({"message": "草稿不存在。"}), 404
+        try:
+            await sync_image_links(db, request.web_identity["qq_id"], data["body"], data["cover_image_id"], draft_id=draft_id)
+        except ValueError as error:
+            return jsonify({"message": str(error)}), 400
         await record_assets(db, data["body"], "forum_draft", draft_id, 0, request.web_identity["qq_id"])
         await db.commit()
         return jsonify({"id": draft_id, "updated_at": now, "message": "草稿已保存。"})
@@ -305,7 +320,7 @@ async def submit_forum_draft(draft_id):
     db = await get_db()
     try:
         async with db.execute(
-            "SELECT id,category_id,title,body FROM forum_drafts WHERE id=? AND author_qq_id=?",
+            "SELECT id,category_id,title,body,cover_image_id FROM forum_drafts WHERE id=? AND author_qq_id=?",
             (draft_id, qq_id),
         ) as cursor:
             draft = await cursor.fetchone()
@@ -323,11 +338,15 @@ async def submit_forum_draft(draft_id):
                 return jsonify({"message": "请选择有效的帖子分类。"}), 400
         now = int(time.time())
         cursor = await db.execute(
-            "INSERT INTO forum_posts(author_qq_id,category_id,title,body,status,created_at,updated_at) "
-            "VALUES(?,?,?,?,'pending',?,?)",
-            (qq_id, category_id, title, body, now, now),
+            "INSERT INTO forum_posts(author_qq_id,category_id,title,body,cover_image_id,status,created_at,updated_at) "
+            "VALUES(?,?,?,?,?,'pending',?,?)",
+            (qq_id, category_id, title, body, draft["cover_image_id"], now, now),
         )
         post_id = cursor.lastrowid
+        try:
+            await sync_image_links(db, qq_id, body, draft["cover_image_id"], post_id=post_id)
+        except ValueError as error:
+            return jsonify({"message": str(error)}), 400
         await record_assets(db, body, "forum_post", post_id, 0, qq_id)
         await db.execute("DELETE FROM markdown_asset_references WHERE document_type='forum_draft' AND document_id=?", (draft_id,))
         await db.execute("DELETE FROM forum_drafts WHERE id=? AND author_qq_id=?", (draft_id, qq_id))
@@ -340,15 +359,10 @@ async def submit_forum_draft(draft_id):
 @forum_api.post("/forum/posts")
 @member_required
 async def create_post():
-    data = await request.get_json(silent=True) or {}
-    if not isinstance(data, dict):
-        return jsonify({"message": "请求格式无效。"}), 400
-    title = str(data.get("title", "")).strip()
-    body = str(data.get("body", "")).strip()
-    try:
-        category_id = int(data.get("category_id", 0))
-    except (TypeError, ValueError):
-        category_id = 0
+    data, error = _draft_fields(await request.get_json(silent=True) or {})
+    if error:
+        return jsonify({"message": error}), 400
+    title, body, category_id = data["title"], data["body"].strip(), data["category_id"]
     if not 4 <= len(title) <= 120:
         return jsonify({"message": "标题长度需要在 4 到 120 个字符之间。"}), 400
     if not 5 <= len(body) <= 20000:
@@ -360,13 +374,18 @@ async def create_post():
                 return jsonify({"message": "请选择有效的帖子分类。"}), 400
         now = int(time.time())
         cursor = await db.execute(
-            "INSERT INTO forum_posts(author_qq_id,category_id,title,body,status,created_at,updated_at) "
-            "VALUES(?,?,?,?,'pending',?,?)",
-            (request.web_identity["qq_id"], category_id, title, body, now, now),
+            "INSERT INTO forum_posts(author_qq_id,category_id,title,body,cover_image_id,status,created_at,updated_at) "
+            "VALUES(?,?,?,?,?,'pending',?,?)",
+            (request.web_identity["qq_id"], category_id, title, body, data["cover_image_id"], now, now),
         )
-        await record_assets(db, body, "forum_post", cursor.lastrowid, 0, request.web_identity["qq_id"])
+        post_id = cursor.lastrowid
+        try:
+            await sync_image_links(db, request.web_identity["qq_id"], body, data["cover_image_id"], post_id=post_id)
+        except ValueError as error:
+            return jsonify({"message": str(error)}), 400
+        await record_assets(db, body, "forum_post", post_id, 0, request.web_identity["qq_id"])
         await db.commit()
-        return jsonify({"id": cursor.lastrowid, "status": "pending", "message": "帖子已提交，审核通过后会出现在论坛。"}), 201
+        return jsonify({"id": post_id, "status": "pending", "message": "帖子已提交，审核通过后会出现在论坛。"}), 201
     finally:
         await db.close()
 
@@ -510,6 +529,7 @@ async def moderation_posts():
     try:
         async with db.execute(
             "SELECT p.id,p.title,p.body,p.created_at,c.name AS category_name,"
+            "'/api/forum/images/' || p.cover_image_id AS cover_url,"
             "CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name "
             "FROM forum_posts p JOIN forum_categories c ON c.id=p.category_id "
             "JOIN users u ON u.qq_id=p.author_qq_id WHERE p.status='pending' ORDER BY p.created_at LIMIT 200"
@@ -551,6 +571,7 @@ async def moderation_reports():
     try:
         async with db.execute(
             "SELECT r.id,r.post_id,r.reason,r.created_at,p.title,p.body,p.status AS post_status,"
+            "'/api/forum/images/' || p.cover_image_id AS cover_url,"
             "CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS reporter_name "
             "FROM forum_reports r JOIN forum_posts p ON p.id=r.post_id "
             "JOIN users u ON u.qq_id=r.reporter_qq_id WHERE r.status='pending' ORDER BY r.created_at LIMIT 200"

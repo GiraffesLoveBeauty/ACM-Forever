@@ -184,6 +184,46 @@ async def connect_db(db_path):
         "created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)"
     )
     await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_drafts_author_updated ON forum_drafts(author_qq_id, updated_at DESC)")
+    for table in ("forum_posts", "forum_drafts"):
+        async with db.execute(f"PRAGMA table_info({table})") as cursor:
+            columns = {row["name"] for row in await cursor.fetchall()}
+        if "cover_image_id" not in columns:
+            await db.execute(f"ALTER TABLE {table} ADD COLUMN cover_image_id TEXT")
+    image_columns = (
+        "id TEXT PRIMARY KEY, owner_qq_id TEXT REFERENCES users(qq_id) ON DELETE SET NULL, "
+        "width INTEGER NOT NULL, height INTEGER NOT NULL, size_bytes INTEGER NOT NULL, created_at INTEGER NOT NULL"
+    )
+    await db.execute(f"CREATE TABLE IF NOT EXISTS forum_images ({image_columns})")
+    await db.execute(
+        "CREATE TABLE IF NOT EXISTS forum_image_links (image_id TEXT NOT NULL REFERENCES forum_images(id), "
+        "draft_id INTEGER REFERENCES forum_drafts(id) ON DELETE CASCADE, "
+        "post_id INTEGER REFERENCES forum_posts(id) ON DELETE CASCADE, "
+        "CHECK((draft_id IS NULL) <> (post_id IS NULL)), UNIQUE(image_id,draft_id), UNIQUE(image_id,post_id))"
+    )
+    async with db.execute("PRAGMA table_info(forum_images)") as cursor:
+        image_owner = next(row for row in await cursor.fetchall() if row["name"] == "owner_qq_id")
+    async with db.execute("PRAGMA foreign_key_list(forum_images)") as cursor:
+        image_owner_fk = next((row for row in await cursor.fetchall() if row["from"] == "owner_qq_id"), None)
+    if image_owner["notnull"] or not image_owner_fk or image_owner_fk["on_delete"] != "SET NULL":
+        # Rebuild the old ownership constraint in the initialization transaction.
+        # Temporarily save references so foreign keys stay enabled during the swap.
+        await db.execute(f"CREATE TABLE forum_images_migrated ({image_columns})")
+        await db.execute(
+            "INSERT INTO forum_images_migrated(id,owner_qq_id,width,height,size_bytes,created_at) "
+            "SELECT id,owner_qq_id,width,height,size_bytes,created_at FROM forum_images"
+        )
+        await db.execute("CREATE TEMP TABLE forum_image_links_saved AS SELECT image_id,draft_id,post_id FROM forum_image_links")
+        await db.execute("DELETE FROM forum_image_links")
+        await db.execute("DROP TABLE forum_images")
+        await db.execute("ALTER TABLE forum_images_migrated RENAME TO forum_images")
+        await db.execute(
+            "INSERT INTO forum_image_links(image_id,draft_id,post_id) "
+            "SELECT image_id,draft_id,post_id FROM forum_image_links_saved"
+        )
+        await db.execute("DROP TABLE temp.forum_image_links_saved")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_images_owner ON forum_images(owner_qq_id)")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_image_links_draft ON forum_image_links(draft_id)")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_image_links_post ON forum_image_links(post_id)")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_posts_status_created ON forum_posts(status, created_at DESC)")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_posts_category_created ON forum_posts(category_id, status, created_at DESC)")
     await db.execute(

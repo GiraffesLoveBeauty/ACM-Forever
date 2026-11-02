@@ -563,3 +563,58 @@ class WikiTests(contract.unittest.IsolatedAsyncioTestCase):
         owned = await self.upload(draft["id"], "forum_draft")
         self.assertEqual((await self.client.get(owned["url"])).status_code, 200)
         self.assertEqual((await self.anon.get(owned["url"])).status_code, 404)
+
+
+    async def test_forum_mixed_asset_transaction_export_and_publication(self):
+        draft = await self.call("/forum/drafts", {"title": "混合图片兼容测试", "body": ""}, status=201)
+        shared = await self.upload(draft["id"], "forum_draft")
+        image = io.BytesIO()
+        Image.new("RGB", (16, 12), "blue").save(image, format="PNG")
+        response = await self.client.post(
+            "/api/forum/images", headers=self.headers,
+            files={"image": FileStorage(io.BytesIO(image.getvalue()), filename="forum.png", content_type="image/png")},
+        )
+        self.assertEqual(response.status_code, 201)
+        forum = await response.get_json()
+        categories = await self.call("/forum/categories")
+        content = {
+            "title": "混合图片兼容测试", "category_id": categories[0]["id"],
+            "cover_image_id": forum["id"],
+            "body": f"![共享图]({shared['url']})\n\n![论坛图]({forum['url']})",
+        }
+        await self.call(f"/forum/drafts/{draft['id']}", content, method="PUT")
+        # A failure in the second asset system must roll back body, cover and both reference sets.
+        await self.call(f"/forum/drafts/{draft['id']}", {
+            **content, "cover_image_id": None,
+            "body": "![失效共享图](/api/markdown/assets/" + "f" * 32 + ")",
+        }, method="PUT", status=400)
+        saved = await self.call(f"/forum/drafts/{draft['id']}")
+        self.assertEqual(saved["body"], content["body"])
+        self.assertEqual(saved["cover_image_id"], forum["id"])
+        # Downloaded/re-imported absolute URLs keep a body reference even without a cover.
+        content["body"] = content["body"].replace(forum["url"], "https://wiki.example.test" + forum["url"])
+        content["cover_image_id"] = None
+        await self.call(f"/forum/drafts/{draft['id']}", content, method="PUT")
+        db = await connect_db(self.db_path)
+        try:
+            row = await (await db.execute("SELECT COUNT(*) FROM forum_image_links WHERE draft_id=? AND image_id=?", (draft["id"], forum["id"]))).fetchone()
+            self.assertEqual(row[0], 1)
+        finally:
+            await db.close()
+        source = await self.client.get(f"/api/forum/drafts/{draft['id']}/markdown")
+        self.assertEqual(source.status_code, 200)
+        exported = (await source.get_data()).decode("utf-8")
+        for asset in [shared, forum]:
+            self.assertIn("https://wiki.example.test" + asset["url"], exported)
+            self.assertEqual((await self.anon.get(asset["url"])).status_code, 404)
+        post = await self.call(f"/forum/drafts/{draft['id']}/submit", {}, status=201)
+        for asset in [shared, forum]:
+            self.assertEqual((await self.anon.get(asset["url"])).status_code, 404)
+        db = await connect_db(self.db_path)
+        try:
+            await db.execute("UPDATE forum_posts SET status='published' WHERE id=?", (post["id"],))
+            await db.commit()
+        finally:
+            await db.close()
+        for asset in [shared, forum]:
+            self.assertEqual((await self.anon.get(asset["url"])).status_code, 200)
