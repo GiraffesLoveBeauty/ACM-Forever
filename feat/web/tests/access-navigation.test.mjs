@@ -98,7 +98,7 @@ test('return targets preserve query and anchors but reject authentication loops 
   );
 });
 
-for (const target of ['/index.html', '/login.html?next=/compose.html', '/wiki.html?page=guide']) {
+for (const target of ['/index.html', '/login.html?next=/compose.html', '/post.html?id=9#comments']) {
   test(`${target} opens before a slow authentication request finishes`, async () => {
     heldAuth({ authenticated: false });
     await actualGuard();

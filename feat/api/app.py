@@ -15,8 +15,6 @@ from .acm_api.bot_api import bot_api
 from .acm_api.auth_service import hash_password, validate_password
 from .acm_api.database import connect_db
 from .acm_api.forum_api import forum_api
-from .acm_api.wiki_api import wiki_api
-from .acm_api.markdown_api import markdown_api
 from .acm_api.forum_images import forum_image_api
 from .acm_api.cf_practice import PracticeQuery
 from .acm_api.cf_practice_api import cf_practice_api
@@ -91,8 +89,6 @@ def create_app():
     )
     app.config["DB_PATH"] = str(db_path)
     app.config["AVATAR_UPLOAD_DIR"] = db_path.parent / "uploads" / "avatars"
-    app.config["MARKDOWN_UPLOAD_DIR"] = Path(os.getenv("ACM_MARKDOWN_UPLOAD_DIR", str(db_path.parent / "uploads" / "markdown"))).expanduser()
-    app.config["PUBLIC_BASE_URL"] = os.getenv("ACM_PUBLIC_BASE_URL", "").strip()
     app.config["FORUM_UPLOAD_DIR"] = db_path.parent / "uploads" / "forum"
     app.config["MAX_CONTENT_LENGTH"] = 6 * 1024 * 1024
     app.config["BOT_API_TOKEN"] = os.getenv("ACM_BOT_API_TOKEN", "").strip()
@@ -335,8 +331,6 @@ def create_app():
     app.register_blueprint(api, url_prefix="/api")
     app.register_blueprint(bot_api, url_prefix="/internal/v1")
     app.register_blueprint(forum_api, url_prefix="/api")
-    app.register_blueprint(wiki_api, url_prefix="/api")
-    app.register_blueprint(markdown_api, url_prefix="/api")
     app.register_blueprint(forum_image_api, url_prefix="/api")
     app.register_blueprint(cf_practice_api, url_prefix="/api")
     app.sync_engine = sync_engine
@@ -345,13 +339,13 @@ def create_app():
 
 
 _PUBLIC_PAGES = {
-    "index.html", "login.html", "post.html", "wiki.html", "forum-moderation.html",
+    "index.html", "login.html", "post.html", "forum-moderation.html",
     "change-password.html", "home.html", "admin.html",
     "leaderboard.html", "challenge.html", "reviews.html", "problem-bank.html", "my-problems.html", "problem.html",
     "submissions.html", "workspace.html", "contest-review.html", "member.html", "compose.html",
     "tasks.html", "settings.html", "cf-practice.html", "auth-unavailable.html", "forbidden.html",
 }
-_ANONYMOUS_PAGES = {"wiki.html", "index.html", "login.html", "post.html", "leaderboard.html", "auth-unavailable.html", "forbidden.html"}
+_ANONYMOUS_PAGES = {"index.html", "login.html", "post.html", "leaderboard.html", "auth-unavailable.html", "forbidden.html"}
 _ADMIN_PAGES = {"admin.html", "member.html", "tasks.html", "settings.html", "forum-moderation.html", "cf-practice.html"}
 _RETIRED_PAGES = {"reviews.html", "submissions.html", "workspace.html"}
 _LEGACY_ADMIN_PAGES = {"member.html": "members", "challenge.html": "training", "problem-bank.html": "problems", "contest-review.html": "contests", "tasks.html": "tasks", "settings.html": "settings", "forum-moderation.html": "moderation", "cf-practice.html": "cf-practice"}

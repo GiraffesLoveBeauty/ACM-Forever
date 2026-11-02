@@ -16,7 +16,6 @@ import './post-layout.css';
 import './phase-theme.css';
 import './angel-city-theme.css';
 import './minecraft-theme.css';
-import './wiki.css';
 const app = createApp(App);
 const renderMath = (element) => window.renderForumMath?.(element);
 app.directive('forum-math', { mounted: renderMath, updated: renderMath });
