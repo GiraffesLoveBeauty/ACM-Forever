@@ -1,4 +1,5 @@
 import io
+import asyncio
 import mimetypes
 import os
 import tempfile
@@ -13,6 +14,7 @@ from werkzeug.datastructures import FileStorage
 from feat.api.acm_api.auth_service import hash_password
 from feat.api.acm_api.database import connect_db
 from feat.api.app import create_app
+from feat.api.acm_api.forum_images import thumbnail_path
 
 
 def png(size=(48, 32)):
@@ -63,6 +65,64 @@ class ForumImageTests(unittest.IsolatedAsyncioTestCase):
             "/api/forum/images", headers=self.headers[0] if headers is None else headers,
             files={"image": FileStorage(io.BytesIO(png() if data is None else data), filename="untrusted.png", content_type="image/png")},
         )
+
+    async def test_thumbnail_dimensions_cache_and_original_are_independent(self):
+        uploaded = await (await self.upload(data=png((2048, 1024)))).get_json()
+        original = await (await self.owner.get(uploaded["url"])).get_data()
+        response = await self.owner.get(uploaded["url"] + "?variant=thumb")
+        self.assertEqual(response.status_code, 200)
+        derivative = await response.get_data()
+        with Image.open(io.BytesIO(derivative)) as image:
+            self.assertEqual(image.size, (640, 320))
+        with Image.open(io.BytesIO(original)) as image:
+            self.assertEqual(image.size, (2048, 1024))
+        self.assertLess(len(derivative), len(original))
+        folder = self.app.config["FORUM_UPLOAD_DIR"]
+        target = Path(folder) / "thumbnails" / f"{uploaded['id']}.webp"
+        modified = target.stat().st_mtime_ns
+        self.assertEqual(await (await self.owner.get(uploaded["url"] + "?variant=thumb")).get_data(), derivative)
+        self.assertEqual(target.stat().st_mtime_ns, modified)
+        self.assertEqual(await (await self.owner.get(uploaded["url"])).get_data(), original)
+        self.assertIn("no-store", response.headers["Cache-Control"])
+        (Path(folder) / f"{uploaded['id']}.webp").unlink()
+        self.assertEqual((await self.owner.get(uploaded["url"] + "?variant=thumb")).status_code, 404)
+
+    async def test_cached_thumbnails_follow_publication_and_removal_permissions(self):
+        image = await (await self.upload()).get_json()
+        url = image["url"] + "?variant=thumb"
+        self.assertEqual((await self.owner.get(url)).status_code, 200)
+        for viewer in [self.public, self.other, self.admin]:
+            self.assertEqual((await viewer.get(url)).status_code, 404)
+        response = await self.owner.post("/api/forum/posts", json={
+            "title": "缩略图权限测试", "body": f"![测试]({image['url']})", "category_id": 2,
+        }, headers=self.headers[0])
+        post_id = (await response.get_json())["id"]
+        self.assertEqual((await self.admin.get(url)).status_code, 200)
+        self.assertEqual((await self.public.get(url)).status_code, 404)
+        await self.admin.post(f"/api/forum/moderation/posts/{post_id}", json={"decision": "publish"}, headers=self.headers[2])
+        self.assertEqual((await self.public.get(url)).status_code, 200)
+        await self.owner.delete(f"/api/forum/posts/{post_id}", headers=self.headers[0])
+        self.assertEqual((await self.public.get(url)).status_code, 404)
+        self.assertEqual((await self.other.get(url)).status_code, 404)
+        self.assertEqual((await self.admin.get(url)).status_code, 404)
+        self.assertEqual((await self.owner.get(image["url"] + "?variant=huge")).status_code, 400)
+
+    async def test_concurrent_thumbnail_generation_is_atomic(self):
+        image = await (await self.upload(data=png((1600, 1200)))).get_json()
+        folder = self.app.config["FORUM_UPLOAD_DIR"]
+        paths = await asyncio.gather(*(asyncio.to_thread(thumbnail_path, folder, image["id"]) for _ in range(4)))
+        self.assertEqual(len(set(paths)), 1)
+        with Image.open(paths[0]) as result:
+            self.assertEqual(result.size, (640, 480))
+            result.load()
+        self.assertEqual(list(paths[0].parent.glob("*.tmp")), [])
+
+    async def test_thumbnail_storage_failure_returns_retryable_response(self):
+        image = await (await self.upload()).get_json()
+        with patch("feat.api.acm_api.forum_images.thumbnail_path", side_effect=PermissionError("private filesystem path")):
+            response = await self.owner.get(image["url"] + "?variant=thumb")
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn("filesystem", (await response.get_data()).decode())
 
     async def test_upload_authentication_validation_and_metadata(self):
         self.assertEqual((await self.upload(self.public, {})).status_code, 401)

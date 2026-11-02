@@ -3,8 +3,21 @@ import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useRequests, auth, avatar, date, showError, notify } from '../lib/api.js';
 import { downloadMarkdown } from '../lib/wiki.js';
-import { markdown } from '../lib/markdown.js';
+import { markdown, controlledImage } from '../lib/markdown.js';
 import PostCover from '../components/PostCover.vue';
+import ImageLightbox from '../components/ImageLightbox.vue';
+const imageViewer = ref();
+function viewImage(event) {
+  if (event.type === 'keydown' && !['Enter', ' '].includes(event.key)) return;
+  if (
+    event.target.tagName === 'IMG' &&
+    !event.target.closest('a') &&
+    controlledImage(event.target.getAttribute('src'))
+  ) {
+    event.preventDefault();
+    imageViewer.value.open(event.target.getAttribute('src'), event.target.alt);
+  }
+}
 const route = useRoute(),
   router = useRouter(),
   request = useRequests();
@@ -43,6 +56,12 @@ async function buildToc() {
   await nextTick();
   observer?.disconnect();
   const headings = [...(article.value?.querySelectorAll('h1,h2,h3') || [])];
+  for (const image of article.value?.querySelectorAll('img') || []) {
+    if (!controlledImage(image.getAttribute('src')) || image.closest('a')) continue;
+    image.tabIndex = 0;
+    image.setAttribute('role', 'button');
+    image.setAttribute('aria-label', `放大查看：${image.alt || '正文图片'}`);
+  }
   toc.value = headings.map((node, i) => {
     node.id = `post-section-${i + 1}`;
     return { id: node.id, text: node.textContent, level: node.tagName.slice(1) };
@@ -165,12 +184,15 @@ onBeforeUnmount(() => {
             :src="post.cover_url"
             :alt="`${post.title}的封面`"
             eager
+            zoom
             class="forum-article-cover"
           />
           <div
             ref="article"
             class="forum-article-body forum-markdown"
             v-forum-math
+            @click="viewImage"
+            @keydown="viewImage"
             v-html="markdown(post.body)"
           ></div>
           <div class="forum-detail-actions">
@@ -271,5 +293,6 @@ onBeforeUnmount(() => {
         <RouterLink class="forum-rank-link" to="/leaderboard.html">♛　查看社区刷题榜</RouterLink>
       </aside>
     </div>
+    <ImageLightbox ref="imageViewer" />
   </main>
 </template>
