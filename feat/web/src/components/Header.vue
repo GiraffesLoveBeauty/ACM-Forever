@@ -1,7 +1,7 @@
 <script setup>
 import { computed, inject, ref } from 'vue';
 import { useRouter, isNavigationFailure, NavigationFailureType } from 'vue-router';
-import { auth, logoutSession, avatar, showError } from '../lib/api.js';
+import { auth, logoutSession, avatar, showError, safeNext } from '../lib/api.js';
 import TemplateLibrary from './TemplateLibrary.vue';
 import NotificationBell from './NotificationBell.vue';
 import { normalizeTemplate, templateLabel } from '../lib/design-template.js';
@@ -12,12 +12,10 @@ const designTemplate = computed(() => normalizeTemplate(getDesignTemplate()));
 const openTheme = inject('openTheme');
 const toggleTheme = inject('toggleTheme');
 const router = useRouter();
-const onWiki = computed(() => router.currentRoute.value.path === '/wiki.html');
-const loginTarget = computed(() =>
-  onWiki.value
-    ? { path: '/login.html', query: { next: router.currentRoute.value.fullPath } }
-    : '/login.html',
-);
+const loginTarget = computed(() => ({
+  path: '/login.html',
+  query: { next: safeNext(router.currentRoute.value.fullPath) },
+}));
 const canManage = computed(() => auth.authenticated && ['admin', 'root'].includes(auth.role));
 async function logout() {
   try {
@@ -63,9 +61,8 @@ async function logout() {
       </button>
       <button class="btn" aria-label="切换主题" @click="toggleTheme">◐</button>
       <button class="btn" @click="openTheme">自助调色</button
-      ><RouterLink v-if="!auth.authenticated" class="btn primary" :to="loginTarget">{{
-        onWiki ? '登录社区' : '登录后发帖'
-      }}</RouterLink
+      ><RouterLink v-if="!auth.authenticated" class="btn primary" :to="loginTarget"
+        >登录社区</RouterLink
       ><RouterLink
         v-else
         class="btn account-avatar-button"

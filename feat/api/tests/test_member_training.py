@@ -218,7 +218,7 @@ class MemberTrainingTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(all(not row['self_service'] for row in profile['bindings'] if row['platform']!='codeforces'))
             for url in ['/auth-unavailable.html?next=%2Fhome.html','/forbidden.html']:
                 self.assertEqual((await client.get(url)).status_code,200)
-            denied=await client.get('/admin.html');self.assertEqual(denied.status_code,403);self.assertIn('返回个人中心',await denied.get_data(as_text=True))
+            denied=await client.get('/admin.html');self.assertEqual(denied.status_code,403);self.assertIn('id="app"',await denied.get_data(as_text=True))
 
     async def test_admin_binding_changes_require_confirmation_snapshot_and_audit(self):
         async with self.app.test_app():

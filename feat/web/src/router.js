@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import { initializeAuth, auth, safeNext, notify } from './lib/api.js';
+import { initializeAuth, auth, safeNext, notify, pageLoadError } from './lib/api.js';
 const legacy = {
   '/member.html': 'members',
   '/challenge.html': 'training',
@@ -137,12 +137,26 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   // Recovery must mount immediately; only an explicit retry starts authentication again.
   if (to.meta.authError) return;
+  // Public reading and the login form remain available while authentication is slow.
+  if (to.meta.public && !auth.authenticated) {
+    initializeAuth()
+      .then(async () => {
+        await router.isReady();
+        if (router.currentRoute.value.fullPath !== to.fullPath || !auth.authenticated) return;
+        const next = to.path === '/login.html' ? safeNext(to.query.next) : to.fullPath;
+        if (auth.must_change_password && !to.meta.retired)
+          return router.replace({ path: '/change-password.html', query: { next } });
+        if (to.path === '/login.html') return router.replace(next);
+      })
+      .catch(() => {});
+    return;
+  }
   try {
     await initializeAuth();
   } catch {
     if (!to.meta.public) return { path: '/auth-unavailable.html', query: { next: to.fullPath } };
   }
-  const target = to.fullPath;
+  const target = to.path === '/login.html' ? safeNext(to.query.next) : to.fullPath;
   if (
     !to.meta.retired &&
     auth.authenticated &&
@@ -154,11 +168,11 @@ router.beforeEach(async (to) => {
     return { path: '/login.html', query: { next: target } };
   if (to.path === '/login.html' && auth.authenticated) {
     const next = safeNext(to.query.next);
-    return next.split(/[?#]/)[0] === '/login.html' ? '/index.html' : next;
+    return next;
   }
   if (to.meta.admin && !['admin', 'root'].includes(auth.role)) return { path: '/forbidden.html' };
   if (to.meta.section && ['admin', 'root'].includes(auth.role))
-    return { path: '/admin.html', query: { ...to.query, section: to.meta.section } };
+    return { path: '/admin.html', query: { ...to.query, section: to.meta.section }, hash: to.hash };
   if (to.path === '/admin.html') {
     const query = { ...to.query };
     let changed = false;
@@ -187,15 +201,19 @@ router.beforeEach(async (to) => {
       delete query.tab;
       changed = true;
     }
-    if (changed) return { path: to.path, query, replace: true };
+    if (changed) return { path: to.path, query, hash: to.hash, replace: true };
   }
 });
 router.afterEach((to, from, failure) => {
   if (failure) return;
+  pageLoadError.value = null;
   document.title = `${to.meta.title} · ACM Forever`;
   document.body.className =
     to.meta.admin && to.path === '/admin.html'
       ? 'forum-page endfield-design admin-console'
       : `forum-page endfield-design ${to.meta.body || ''}`;
+});
+router.onError((_error, to) => {
+  pageLoadError.value = { target: to.fullPath };
 });
 export default router;

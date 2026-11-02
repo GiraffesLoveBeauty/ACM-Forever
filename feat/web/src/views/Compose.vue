@@ -393,6 +393,12 @@ onBeforeRouteLeave(async () => {
     return allowed;
   }
 });
+const stopNavigationError = router.onError(() => {
+  leaving = false;
+});
+const stopNavigationResult = router.afterEach((_to, _from, failure) => {
+  if (failure) leaving = false;
+});
 onMounted(async () => {
   window.addEventListener('beforeunload', unload);
   window.addEventListener('pagehide', pagehide);
@@ -443,6 +449,8 @@ onMounted(async () => {
 });
 onBeforeUnmount(() => {
   disposed = true;
+  stopNavigationError();
+  stopNavigationResult();
   coverController?.abort();
   clearTimeout(timer);
   window.removeEventListener('beforeunload', unload);
