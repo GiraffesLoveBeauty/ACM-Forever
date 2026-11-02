@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """数据库初始化、设置读写与排行榜查询。"""
 import time
-from pathlib import Path
 from contextlib import asynccontextmanager
 
 import aiosqlite
@@ -351,7 +350,6 @@ async def connect_db(db_path):
             (platform, int(time.time())),
         )
     await db.execute("UPDATE users SET name = cf_handle WHERE cf_handle IS NOT NULL AND TRIM(cf_handle) <> '' AND (name IS NULL OR TRIM(name) = '' OR name = qq_id)")
-    await db.executescript(Path(__file__).with_name("wiki.sql").read_text(encoding="utf-8"))
     await db.commit()
     return db
 

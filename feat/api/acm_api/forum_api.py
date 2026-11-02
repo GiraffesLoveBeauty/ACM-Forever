@@ -1,6 +1,5 @@
 """Public discussion forum API and authenticated member actions."""
 import time
-from .markdown_content import ContentError, record_assets, source_fields
 
 from quart import Blueprint, jsonify, request
 
@@ -16,11 +15,6 @@ from .forum_images import IMAGE_ID, image_url, sync_image_links
 from .forum_notifications import add_notification
 
 forum_api = Blueprint("forum_api", __name__)
-
-
-@forum_api.errorhandler(ContentError)
-async def content_error(error):
-    return jsonify({"message": str(error), "code": "invalid_content"}), 400
 
 
 async def _viewer_id():
@@ -222,10 +216,16 @@ async def my_post(post_id):
 def _draft_fields(data):
     if not isinstance(data, dict):
         return None, "请求格式无效。"
-    try:
-        title, body = source_fields(data)
-    except ContentError as error:
-        return None, str(error)
+    title_value = data.get("title", "")
+    body_value = data.get("body", "")
+    if not isinstance(title_value, str) or not isinstance(body_value, str):
+        return None, "标题和正文必须是文本。"
+    title = title_value.strip()
+    body = body_value
+    if len(title) > 120:
+        return None, "标题不能超过 120 个字符。"
+    if len(body) > 20000:
+        return None, "正文不能超过 20000 个字符。"
     category_value = data.get("category_id")
     if category_value in (None, "", 0, "0"):
         category_id = None
@@ -281,7 +281,6 @@ async def create_forum_draft():
             await sync_image_links(db, request.web_identity["qq_id"], data["body"], data["cover_image_id"], draft_id=draft_id)
         except ValueError as error:
             return jsonify({"message": str(error)}), 400
-        await record_assets(db, data["body"], "forum_draft", draft_id, 0, request.web_identity["qq_id"])
         await db.commit()
         return jsonify({"id": draft_id, "updated_at": now, "message": "草稿已保存。"}), 201
     finally:
@@ -330,7 +329,6 @@ async def update_forum_draft(draft_id):
             await sync_image_links(db, request.web_identity["qq_id"], data["body"], data["cover_image_id"], draft_id=draft_id)
         except ValueError as error:
             return jsonify({"message": str(error)}), 400
-        await record_assets(db, data["body"], "forum_draft", draft_id, 0, request.web_identity["qq_id"])
         await db.commit()
         return jsonify({"id": draft_id, "updated_at": now, "message": "草稿已保存。"})
     finally:
@@ -388,8 +386,6 @@ async def submit_forum_draft(draft_id):
             await sync_image_links(db, qq_id, body, draft["cover_image_id"], post_id=post_id)
         except ValueError as error:
             return jsonify({"message": str(error)}), 400
-        await record_assets(db, body, "forum_post", post_id, 0, qq_id)
-        await db.execute("DELETE FROM markdown_asset_references WHERE document_type='forum_draft' AND document_id=?", (draft_id,))
         await db.execute("DELETE FROM forum_drafts WHERE id=? AND author_qq_id=?", (draft_id, qq_id))
         await db.commit()
         return jsonify({"id": post_id, "status": "pending", "message": "帖子已提交，审核通过后会出现在论坛。"}), 201
@@ -424,7 +420,6 @@ async def create_post():
             await sync_image_links(db, request.web_identity["qq_id"], body, data["cover_image_id"], post_id=post_id)
         except ValueError as error:
             return jsonify({"message": str(error)}), 400
-        await record_assets(db, body, "forum_post", post_id, 0, request.web_identity["qq_id"])
         await db.commit()
         return jsonify({"id": post_id, "status": "pending", "message": "帖子已提交，审核通过后会出现在论坛。"}), 201
     finally:

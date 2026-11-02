@@ -2,7 +2,6 @@
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useRequests, auth, avatar, date, showError, notify } from '../lib/api.js';
-import { downloadMarkdown } from '../lib/wiki.js';
 import { markdown } from '../lib/markdown.js';
 import PostCover from '../components/PostCover.vue';
 const route = useRoute(),
@@ -17,17 +16,7 @@ const post = ref(),
   input = ref(),
   toc = ref([]),
   activeHeading = ref('');
-let observer, downloadController;
-async function download() {
-  try {
-    downloadController?.abort();
-    downloadController = new AbortController();
-    await downloadMarkdown(`/api/forum/posts/${post.value.id}/markdown`, downloadController.signal);
-    notify('Markdown 已下载。');
-  } catch (e) {
-    if (e.name !== 'AbortError') showError(e);
-  }
-}
+let observer;
 const roots = computed(() => (post.value?.comments || []).filter((c) => !c.parent_id));
 async function load() {
   try {
@@ -142,10 +131,7 @@ watch(
     if (route.hash) document.getElementById(route.hash.slice(1))?.scrollIntoView();
   },
 );
-onBeforeUnmount(() => {
-  observer?.disconnect();
-  downloadController?.abort();
-});
+onBeforeUnmount(() => observer?.disconnect());
 </script>
 <template>
   <main class="forum-post-layout">
@@ -188,7 +174,6 @@ onBeforeUnmount(() => {
             v-html="markdown(post.body)"
           ></div>
           <div class="forum-detail-actions">
-            <button class="btn" @click="download">下载 MD</button>
             <button
               class="btn"
               :class="{ 'is-active': post.viewer_liked }"

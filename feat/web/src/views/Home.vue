@@ -176,7 +176,7 @@ onBeforeUnmount(() => {
       <div class="panel-heading"><h2>训练与题目</h2></div>
       <div class="chips">
         <RouterLink class="btn" to="/challenge.html">今日训练</RouterLink
-        ><RouterLink class="btn" to="/problem-bank.html">题库</RouterLink
+        ><RouterLink class="btn" to="/my-problems.html">题库</RouterLink
         ><RouterLink class="btn" to="/contest-review.html">赛事复盘</RouterLink
         ><RouterLink class="btn" to="/change-password.html?next=/home.html">修改密码</RouterLink>
       </div>
