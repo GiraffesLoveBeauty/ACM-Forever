@@ -14,7 +14,6 @@ const modules = {
   tasks: defineAsyncComponent(() => import('../admin/Tasks.vue')),
   moderation: defineAsyncComponent(() => import('../admin/Moderation.vue')),
   settings: defineAsyncComponent(() => import('../admin/Settings.vue')),
-  wiki: defineAsyncComponent(() => import('../admin/Wiki.vue')),
 };
 const section = computed(() =>
   Object.hasOwn(sections, route.query.section) ? route.query.section : 'accounts',
@@ -40,7 +39,7 @@ onMounted(async () => {
 });
 </script>
 <template>
-  <main class="admin-home-layout" :class="{ 'wiki-workspace': section === 'wiki' }">
+  <main class="admin-home-layout">
     <header class="forum-welcome admin-welcome">
       <div class="industrial-hero-dots" aria-hidden="true"></div>
       <div class="industrial-hero-copy">
@@ -61,9 +60,7 @@ onMounted(async () => {
               v-if="['accounts', 'training', 'moderation'].includes(key)"
               class="admin-module-group"
             >
-              {{
-                { accounts: '账户与成员', training: '训练与题目', moderation: '社区与系统' }[key]
-              }}
+              {{ { accounts: '账户与成员', training: '训练与题目', moderation: '社区与系统' }[key] }}
             </div>
             <RouterLink
               :to="key === 'accounts' ? '/admin.html' : `/admin.html?section=${key}`"
@@ -79,10 +76,8 @@ onMounted(async () => {
                   tasks: '↻',
                   moderation: '☷',
                   settings: '⚙',
-                  wiki: '▧',
                 }[key]
-              }}</span
-              >{{ label }}</RouterLink
+              }}</span>{{ label }}</RouterLink
             >
           </template>
         </nav>
