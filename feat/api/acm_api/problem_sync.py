@@ -13,6 +13,7 @@ from .problem_bank import record_problem_failure, save_problem, save_metadata_ba
 from .problem_content import parse_atcoder, parse_atcoder_tasks, parse_codeforces
 from .cf_client import CFUnavailable, cf_page, cf_request, problem_url
 from .cf_practice import normalize_problem
+from .contest_metadata import contest_metadata, refresh_contests, save_contests
 
 ATCODER_CATALOG_URL = "https://kenkoooo.com/atcoder/resources/problems.json"
 
@@ -201,6 +202,17 @@ class ProblemSync:
                 else:
                     data = await cf_request(http, "contest.standings", {"contestId": int(options["contest_id"])})
                     items = cf_metadata(data.get("problems") if isinstance(data, dict) else None, options["contest_id"])
+                try:
+                    if options["platform"] == "codeforces" and not full:
+                        contest = data.get("contest")
+                        if isinstance(contest, dict) and str(contest.get("id")) == options["contest_id"]:
+                            await save_contests(db, contest_metadata("codeforces", [contest]))
+                    else:
+                        await refresh_contests(db, http, options["platform"],
+                                               {item["contest_id"] for item in items},
+                                               lambda url: self.download(http, url))
+                except (aiohttp.ClientError, OSError, ValueError, aiosqlite.Error, CFUnavailable) as error:
+                    result["contest_metadata_error"] = str(error)[:1000]
                 result["discovered_count"] = len(items)
                 if full:
                     task["progress"].update(phase="metadata", metadata_done=0, metadata_total=len(items))
