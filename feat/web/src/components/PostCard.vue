@@ -1,10 +1,14 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { auth, api, avatar, date, showError } from '../lib/api.js';
 import { postImage, postExcerpt } from '../lib/post-images.js';
 import PostCover from './PostCover.vue';
-const props = defineProps({ post: { type: Object, required: true } });
+const props = defineProps({ post: { type: Object, required: true }, returnTo: String });
+const target = computed(() => ({
+  path: '/post.html',
+  query: { id: props.post.id, ...(props.returnTo ? { from: props.returnTo } : {}) },
+}));
 const router = useRouter(),
   busy = ref(false);
 async function toggle(kind) {
@@ -41,9 +45,9 @@ async function toggle(kind) {
           ><time class="forum-post-time">{{ date(post.created_at) }}</time>
         </div>
         <h2>
-          <RouterLink :to="`/post.html?id=${post.id}`">{{ post.title }}</RouterLink>
+          <RouterLink :to="target">{{ post.title }}</RouterLink>
         </h2>
-        <RouterLink class="forum-post-excerpt" :to="`/post.html?id=${post.id}`">{{
+        <RouterLink class="forum-post-excerpt" :to="target">{{
           postExcerpt(post.excerpt)
         }}</RouterLink>
         <div class="forum-post-author">
@@ -56,7 +60,7 @@ async function toggle(kind) {
       <RouterLink
         v-if="postImage(post.cover_url)"
         class="forum-post-cover-link"
-        :to="`/post.html?id=${post.id}`"
+        :to="target"
         :aria-label="`阅读：${post.title}`"
       >
         <PostCover
@@ -69,7 +73,7 @@ async function toggle(kind) {
       <RouterLink
         v-else
         class="forum-post-cover-link forum-post-cover-placeholder"
-        :to="`/post.html?id=${post.id}`"
+        :to="target"
         :aria-label="`阅读：${post.title}`"
       >
         <svg
@@ -87,7 +91,7 @@ async function toggle(kind) {
       </RouterLink>
     </div>
     <div class="forum-post-actions">
-      <RouterLink :to="`/post.html?id=${post.id}#comments`"
+      <RouterLink :to="{ ...target, hash: '#comments' }"
         >▤ {{ post.comments_count || 0 }} 条评论</RouterLink
       ><button :class="{ 'is-active': post.viewer_liked }" :disabled="busy" @click="toggle('like')">
         {{ post.viewer_liked ? '♥' : '♡' }} {{ post.likes_count || 0 }} 赞</button

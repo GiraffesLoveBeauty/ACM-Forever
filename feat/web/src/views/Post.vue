@@ -1,4 +1,5 @@
 <script setup>
+import { forumReturn } from '../lib/forum-state.js';
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useRequests, auth, avatar, date, showError, notify } from '../lib/api.js';
@@ -168,7 +169,7 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <main class="forum-post-layout">
-    <RouterLink class="forum-back-link" to="/index.html">← 返回论坛</RouterLink>
+    <RouterLink class="forum-back-link" :to="forumReturn(route.query.from)">← 返回论坛</RouterLink>
     <div v-if="error" class="forum-empty">
       <h2>话题暂时无法打开</h2>
       <p>{{ error }}</p>
