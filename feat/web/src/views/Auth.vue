@@ -37,6 +37,7 @@ async function submit() {
     const next = safeNext(
       route.query.next,
       changing.value ? (auth.role === 'member' ? '/home.html' : '/admin.html') : '/index.html',
+      changing.value ? ['/change-password.html'] : [],
     );
     password.value = '';
     nextPassword.value = '';

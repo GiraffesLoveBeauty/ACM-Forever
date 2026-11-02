@@ -2,10 +2,11 @@ import asyncio
 import json
 import logging
 import os
+import posixpath
 import re
 import sqlite3
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode, urlsplit
 
 from quart import Quart, abort, jsonify, redirect, request, send_from_directory
 
@@ -21,6 +22,25 @@ from .acm_api.cf_practice import PracticeQuery
 from .acm_api.cf_practice_api import cf_practice_api
 from .acm_api.cf_practice_jobs import PracticeJobs
 from .service_runtime import SyncEngine, WebTaskManager, create_web_challenge
+
+
+def _safe_web_next(value, fallback="/index.html"):
+    if not isinstance(value, str) or not value.startswith("/") or value.startswith("//") or re.search(r"[\\\x00-\x1f\x7f]", value):
+        return fallback
+    try:
+        raw_path = urlsplit(value).path
+        path = unquote(raw_path, errors="strict")
+        if re.search(r"%(?![0-9a-fA-F]{2})", raw_path):
+            return fallback
+        if path.startswith("//") or re.search(r"[\\\x00-\x1f\x7f]", path):
+            return fallback
+        if posixpath.normpath(path).lower() in {
+            "/login.html", "/auth-unavailable.html", "/forbidden.html",
+        }:
+            return fallback
+    except (ValueError, UnicodeError):
+        return fallback
+    return value
 
 
 def _bool_env(name, default=False):
@@ -196,17 +216,19 @@ def create_app():
 
         identity = await _session_identity()
         if identity and identity["must_change_password"]:
-            return redirect("/change-password.html?" + urlencode({"next": "/"}))
+            return redirect("/change-password.html?" + urlencode({"next": request.full_path.rstrip("?")}))
         return await vue_entry()
 
-    async def vue_entry(filename="index.html"):
+    async def vue_entry(filename="index.html", status=200):
         dist = app.config["WEBUI_DIST_DIR"]
         if not (dist / "index.html").is_file():
             return (
                 "Vue frontend has not been built. Run pnpm install and pnpm build in feat/web.",
                 503,
             )
-        return await send_from_directory(dist, filename)
+        response = await send_from_directory(dist, filename)
+        response.status_code = status
+        return response
 
     @app.get("/<path:filename>")
     async def webui_static(filename):
@@ -235,6 +257,8 @@ def create_app():
                 response.headers["Content-Type"] = "text/css; charset=utf-8"
             return response
         if filename not in _PUBLIC_PAGES:
+            if filename.split("/", 1)[0] not in {"api", "internal", "assets", "uploads", "health"} and extension in {"", ".html"}:
+                return await vue_entry(status=404)
             abort(404)
 
         from .acm_api.backend_api import _session_identity
@@ -249,21 +273,20 @@ def create_app():
         if filename in _RETIRED_PAGES:
             return await vue_entry("retired.html")
         if identity and identity["must_change_password"] and filename != "change-password.html":
+            if filename == "login.html":
+                target = _safe_web_next(request.args.get("next"))
             return redirect("/change-password.html?" + urlencode({"next": target}))
         if filename in _ADMIN_PAGES:
             if not identity:
                 return redirect("/login.html?" + urlencode({"next": target}))
             if identity["role"] not in {"admin", "root"}:
-                return ('<html lang="zh-CN"><meta charset="utf-8"><title>无权访问</title><h1>无权访问</h1><p>此页面仅限管理员。</p><a href="/home.html">返回个人中心</a></html>', 403)
+                return await vue_entry(status=403)
         elif filename == "change-password.html":
             if not identity:
                 return redirect("/login.html?" + urlencode({"next": target}))
         elif filename == "login.html":
             if identity:
-                next_url = request.args.get("next", "/index.html")
-                if not next_url.startswith("/") or next_url.startswith("//") or "\\" in next_url or any(ord(char) < 32 for char in next_url):
-                    next_url = "/index.html"
-                return redirect(next_url)
+                return redirect(_safe_web_next(request.args.get("next")))
         elif filename not in _ANONYMOUS_PAGES and not identity:
             return redirect("/login.html?" + urlencode({"next": target}))
         if target != request.full_path.rstrip("?"):

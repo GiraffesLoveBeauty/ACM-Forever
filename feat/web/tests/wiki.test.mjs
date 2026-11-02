@@ -485,6 +485,26 @@ test('forum still saves a shared-editor draft and protects local recovery before
   assert.equal(draft.body.body, '共享编辑器正文');
 });
 
+for (const failed of [false, true]) {
+  test(`forum editor can continue saving after navigation is ${failed ? 'failed' : 'cancelled'}`, async () => {
+    await mount(null, '/compose.html');
+    await input(q('input[maxlength="240"]'), '导航失败后的草稿');
+    await input(q('textarea[aria-label="Markdown 正文"]'), '先保存的内容');
+    const unregister = router.beforeEach(() => {
+      if (failed) throw Error('合成导航失败');
+      return false;
+    });
+    if (failed) await assert.rejects(router.push('/elsewhere'), /合成导航失败/);
+    else await router.push('/elsewhere');
+    unregister();
+    await input(q('textarea[aria-label="Markdown 正文"]'), '继续编辑的内容');
+    await click('保存草稿');
+    assert.equal(router.currentRoute.value.path, '/compose.html');
+    assert.equal(router.currentRoute.value.query.draft_id, '12');
+    assert.equal(q('textarea[aria-label="Markdown 正文"]').value, '继续编辑的内容');
+  });
+}
+
 test('leaving a new Wiki draft saves it without replacing the requested destination', async () => {
   await mount(null, '/admin.html?section=wiki&tab=pages');
   await input(q('input[maxlength="240"]'), '离开前保存');
