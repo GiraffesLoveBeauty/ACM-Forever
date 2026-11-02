@@ -42,9 +42,11 @@ async function prepareImage(file) {
   }
 }
 
-export async function uploadPostImage(file) {
+export async function uploadPostImage(file, { signal } = {}) {
+  signal?.throwIfAborted();
   const blob = await prepareImage(file);
+  signal?.throwIfAborted();
   const body = new FormData();
   body.append('image', blob, 'image.webp');
-  return api('/forum/images', { method: 'POST', body, timeoutMs: 60000 });
+  return api('/forum/images', { method: 'POST', body, timeoutMs: 60000, signal });
 }
