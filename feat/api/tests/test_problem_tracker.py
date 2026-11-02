@@ -155,6 +155,97 @@ class ProblemTrackerTests(unittest.IsolatedAsyncioTestCase):
                 with self.subTest(query=query):
                     self.assertEqual((await client.get("/api/me/problems/tracker?" + query)).status_code, 400)
 
+    async def test_attempt_only_tracker_cells_open_pending_details_for_each_role(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            self.assertEqual((await client.get("/api/me/problems/codeforces/cf_999B")).status_code, 401)
+            await self.account_login(client, role="member")
+            await self.execute(
+                "INSERT INTO submission_attempts(owner_qq_id,platform,problem_id,contest_id,verdict,submitted_at,created_at,source_code) "
+                "VALUES(?,'codeforces',?,'999','WRONG_ANSWER',10,1,'private attempted source')",
+                [("12345678", "cf_999B"), ("87654321", "cf_999C")],
+            )
+            with patch("feat.api.acm_api.backend_api.cf_request", new_callable=AsyncMock) as network, \
+                    patch.object(self.app.task_manager.problem_sync, "download", new_callable=AsyncMock) as download:
+                for role in ("member", "admin", "root"):
+                    await self.execute(
+                        "UPDATE web_accounts SET role=?,credential_version=credential_version+1 WHERE qq_id='12345678'",
+                        [(role,)],
+                    )
+                    login = await client.post("/api/auth/login", json={"qq_id": "12345678", "password": "Test-Password-123!"})
+                    self.assertEqual(login.status_code, 200)
+                    data = await (await client.get("/api/me/problems/tracker?platform=codeforces&tag=999B")).get_json()
+                    cell = data["items"][0]["problems"][0]
+                    self.assertEqual((cell["problem_id"], cell["status"]), ("cf_999B", "attempted"))
+                    prefixes = ["/api/me/problems"] + (["/api/problems"] if role != "member" else [])
+                    for prefix in prefixes:
+                        with self.subTest(role=role, prefix=prefix):
+                            response = await client.get(f"{prefix}/{cell['platform']}/{cell['problem_id']}")
+                            self.assertEqual(response.status_code, 200)
+                            detail = await response.get_json()
+                            self.assertFalse(detail["content_available"])
+                            self.assertEqual(detail["samples"], [])
+                            self.assertIsNone(detail["statement_format"])
+                            self.assertEqual(detail["last_fetch_status"], "never")
+                            self.assertEqual(detail["problem_url"], "https://codeforces.com/contest/999/problem/B")
+                            self.assertEqual(detail["contest_id"], "999")
+                            self.assertNotIn("private attempted source", str(detail))
+                            for key in ("source_code", "owner_qq_id", "verdict", "submitted_at", "external_submission_id"):
+                                self.assertNotIn(key, detail)
+                            other = await client.get(f"{prefix}/codeforces/cf_999C?qq_id=87654321&owner_qq_id=87654321")
+                            self.assertEqual(other.status_code, 404)
+                network.assert_not_awaited()
+                download.assert_not_awaited()
+                self.assertEqual(self.app.task_manager.tasks, {})
+            db = await connect_db(self.db_path)
+            try:
+                for table in ("crawler_problems", "recommendations", "submissions"):
+                    self.assertEqual((await (await db.execute(f"SELECT COUNT(*) FROM {table}")).fetchone())[0], 0)
+            finally:
+                await db.close()
+
+    async def test_attempt_detail_resolves_aliases_and_preserves_catalog_priority(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            await self.account_login(client, role="member")
+            await self.execute(
+                "INSERT INTO submission_attempts(owner_qq_id,platform,problem_id,contest_id,verdict,submitted_at,created_at) "
+                "VALUES('12345678',?,?,?,'WRONG_ANSWER',10,1)",
+                [("codeforces", "1000d1", "1000"),
+                 ("codeforces", "92101", "921"),
+                 ("atcoder", "asprocon10_b", "ahc023"),
+                 ("codeforces", "malformed", None)],
+            )
+            cases = [
+                ("codeforces", "cf_1000D1", "1000", "https://codeforces.com/contest/1000/problem/D1"),
+                ("codeforces", "1000D1", "1000", "https://codeforces.com/contest/1000/problem/D1"),
+                ("codeforces", "cf_92101", "921", "https://codeforces.com/contest/921/problem/01"),
+                ("atcoder", "asprocon10_b", "ahc023", "https://atcoder.jp/contests/ahc023/tasks/asprocon10_b"),
+            ]
+            for platform, pid, contest, url in cases:
+                with self.subTest(platform=platform, problem_id=pid):
+                    response = await client.get(f"/api/me/problems/{platform}/{pid}")
+                    self.assertEqual(response.status_code, 200)
+                    detail = await response.get_json()
+                    self.assertEqual(detail["contest_id"], contest)
+                    self.assertEqual(detail["problem_url"], url)
+                    self.assertFalse(detail["content_available"])
+            for pid in ("malformed", "cf_2000A"):
+                self.assertEqual((await client.get(f"/api/me/problems/codeforces/{pid}")).status_code, 404)
+
+            metadata = self.problem("1000", "D1", problem_name="Catalog title", problem_rating=1800,
+                                    problem_url="https://codeforces.com/problemset/problem/1000/D1")
+            await self.catalog([metadata])
+            for keep_crawler in (True, False):
+                with self.subTest(keep_crawler=keep_crawler):
+                    if not keep_crawler:
+                        await self.execute("DELETE FROM crawler_problems WHERE platform='codeforces' AND problem_id='cf_1000D1'", [()])
+                    detail = await (await client.get("/api/me/problems/codeforces/cf_1000D1")).get_json()
+                    self.assertEqual(detail["problem_name"], metadata["problem_name"])
+                    self.assertEqual(int(detail["problem_rating"]), metadata["problem_rating"])
+                    self.assertEqual(detail["problem_url"], metadata["problem_url"])
+                    self.assertEqual(detail["tags"], ["math"])
+
 
 if __name__ == "__main__":
     unittest.main()

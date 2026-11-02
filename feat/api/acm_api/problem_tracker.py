@@ -4,6 +4,8 @@ import json
 import re
 from urllib.parse import urlsplit
 
+from .cf_client import problem_url as cf_problem_url
+
 
 PLATFORMS = {"codeforces", "atcoder"}
 SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,160}")
@@ -84,6 +86,34 @@ def rating(value):
         return int(value) if value is not None and str(value).strip() else None
     except (ValueError, TypeError):
         return None
+
+
+async def attempt_problem_metadata(db, owner, platform, problem_id):
+    """Resolve an attempt-only link from this account, without publishing a catalog row."""
+    if not owner or platform not in PLATFORMS or not SAFE_ID.fullmatch(problem_id):
+        return None
+    aliases = {problem_id}
+    wanted = problem_id
+    if platform == "codeforces":
+        bare = re.sub(r"^cf_", "", problem_id, flags=re.IGNORECASE)
+        aliases.update((bare, "cf_" + bare))
+        wanted = "cf_" + bare.upper()
+    comparison = "problem_id COLLATE NOCASE" if platform == "codeforces" else "problem_id"
+    async with db.execute(
+        "SELECT problem_id,contest_id FROM submission_attempts WHERE owner_qq_id=? AND platform=? AND "
+        + comparison + " IN (" + ",".join("?" for _ in aliases) + ") ORDER BY submitted_at DESC,id DESC",
+        (owner, platform, *sorted(aliases)),
+    ) as cursor:
+        async for row in cursor:
+            parsed = identity(platform, row["problem_id"], row["contest_id"])
+            if parsed is None or parsed[0] != wanted:
+                continue
+            pid, contest, index = parsed
+            url = (cf_problem_url(contest, index) if platform == "codeforces" else
+                   f"https://atcoder.jp/contests/{contest}/tasks/{pid}")
+            return {"problem_id": pid, "contest_id": contest, "problem_name": pid,
+                    "problem_rating": None, "problem_url": url, "tags": ""}
+    return None
 
 
 async def contest_tracker(db, owner, options):

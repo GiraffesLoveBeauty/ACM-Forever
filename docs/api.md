@@ -151,6 +151,8 @@ response.raise_for_status()
 
 个人中心的最近 AC 和个人题库均打开站内题面。`from` 仅接受 `/home.html`、携带允许筛选参数的 `/problem-bank.html` 或 `/my-problems.html`；外部网址、管理地址和身份参数会被排除，返回时保留实际个人入口。个人列表与收藏对所有角色均使用 `/api/me/problems`，归属只取会话本人；成员详情及 PDF 读取复用 `/api/me/problems/<platform>/<problem_id>` 和后缀 `/statement.pdf`，admin / root 的详情沿用原管理读取接口，两者均不会触发采集。
 
+比赛进度中的题目若仅有会话本人的提交尝试、尚无题库目录，两个题目详情入口均回退读取本人的 `submission_attempts`，返回题号、所属比赛和规范的原题链接，`content_available=false`、`samples=[]`，沿用“题面尚未采集”提示。此回退不读取其他账号的尝试，不返回源码或提交详情，也不联网或新增目录；无本人的有效记录时仍返回 404。已有采集题面和目录元数据优先。
+
 ### 绑定与同步接口
 
 所有接口均要求完成首次改密的 Web 会话，写入必须带 `X-CSRF-Token`，操作对象仅为会话本人。`cf` 与 `codeforces` 在服务端统一为 `codeforces`。

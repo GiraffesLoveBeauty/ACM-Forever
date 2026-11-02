@@ -32,7 +32,7 @@ from .reporting import valid_contest_report_time
 from .cf_client import cf_request
 from .problem_sync import sync_options
 from .problem_bank import problem_bank_status
-from .problem_tracker import contest_tracker, tracker_options
+from .problem_tracker import attempt_problem_metadata, contest_tracker, tracker_options
 from .database import connect_db
 from . import binding_service
 from .binding_service import clear_platform_records as _clear_platform_records
@@ -1442,10 +1442,18 @@ async def _problem_detail(platform, problem_id):
             ) as cursor:
                 row = await cursor.fetchone()
             if not row:
+                # The tracker also includes this account's attempts before the
+                # problem is collected or solved. Admin detail uses the same owner.
+                row = await attempt_problem_metadata(
+                    db, str(session.get("webui_qq_id") or ""), platform, problem_id,
+                )
+            if not row:
                 return jsonify({"success": False, "message": "题库中没有这道题目。"}), 404
+            metadata = dict(row)
             detail = {
-                **dict(row), "platform": platform, "problem_id": problem_id, "contest_id": None,
-                "tags": [tag.strip() for tag in (row["tags"] or "").split(",") if tag.strip()],
+                **metadata, "platform": platform, "problem_id": metadata.get("problem_id", problem_id),
+                "contest_id": metadata.get("contest_id"),
+                "tags": [tag.strip() for tag in (metadata["tags"] or "").split(",") if tag.strip()],
                 "statement_html": None, "statement_text": None, "statement_language": None,
                 "samples": [], "statement_fetched_at": None, "last_fetch_status": "never",
             }
