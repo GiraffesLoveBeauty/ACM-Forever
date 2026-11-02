@@ -81,6 +81,16 @@ def identity(platform, problem_id, contest_id=None, problem_index=None, problem_
     return problem_id, contest, index.upper()
 
 
+def problem_id_aliases(platform, problem_id):
+    """CF's offline and server collectors use the same ID with different prefixes."""
+    aliases = [problem_id]
+    if platform == "codeforces":
+        bare = re.sub(r"^cf_", "", problem_id, flags=re.IGNORECASE)
+        if re.fullmatch(r"[1-9]\d*(?:[A-Za-z]+\d*)?", bare):
+            aliases.extend((bare, "cf_" + bare))
+    return tuple(dict.fromkeys(aliases))
+
+
 def rating(value):
     try:
         return int(value) if value is not None and str(value).strip() else None
@@ -92,17 +102,16 @@ async def attempt_problem_metadata(db, owner, platform, problem_id):
     """Resolve an attempt-only link from this account, without publishing a catalog row."""
     if not owner or platform not in PLATFORMS or not SAFE_ID.fullmatch(problem_id):
         return None
-    aliases = {problem_id}
+    aliases = problem_id_aliases(platform, problem_id)
     wanted = problem_id
     if platform == "codeforces":
         bare = re.sub(r"^cf_", "", problem_id, flags=re.IGNORECASE)
-        aliases.update((bare, "cf_" + bare))
         wanted = "cf_" + bare.upper()
     comparison = "problem_id COLLATE NOCASE" if platform == "codeforces" else "problem_id"
     async with db.execute(
         "SELECT problem_id,contest_id FROM submission_attempts WHERE owner_qq_id=? AND platform=? AND "
         + comparison + " IN (" + ",".join("?" for _ in aliases) + ") ORDER BY submitted_at DESC,id DESC",
-        (owner, platform, *sorted(aliases)),
+        (owner, platform, *aliases),
     ) as cursor:
         async for row in cursor:
             parsed = identity(platform, row["problem_id"], row["contest_id"])

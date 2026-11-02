@@ -32,7 +32,7 @@ from .reporting import valid_contest_report_time
 from .cf_client import cf_request
 from .problem_sync import sync_options
 from .problem_bank import problem_bank_status
-from .problem_tracker import attempt_problem_metadata, contest_tracker, tracker_options
+from .problem_tracker import attempt_problem_metadata, contest_tracker, problem_id_aliases, tracker_options
 from .database import connect_db
 from . import binding_service
 from .binding_service import clear_platform_records as _clear_platform_records
@@ -1416,14 +1416,25 @@ async def api_problems():
         await db.close()
 
 
+def _problem_id_filter(platform, problem_id):
+    aliases = problem_id_aliases(platform, problem_id)
+    column = "problem_id COLLATE NOCASE" if platform == "codeforces" else "problem_id"
+    return column + " IN (" + ",".join("?" for _ in aliases) + ")", aliases
+
+
 async def _problem_detail(platform, problem_id):
     """Read the saved statement without triggering a remote fetch."""
     db = await get_db()
     try:
+        id_filter, aliases = _problem_id_filter(platform, problem_id)
         async with db.execute(
             "SELECT platform,problem_id,contest_id,problem_name,problem_rating,problem_url,tags,"
             "statement_html,statement_text,length(statement_pdf)>0 AS has_pdf,statement_language,samples,statement_fetched_at,last_fetch_status "
-            "FROM crawler_problems WHERE platform=? AND problem_id=?", (platform, problem_id),
+            "FROM crawler_problems WHERE platform=? AND " + id_filter +
+            " ORDER BY (COALESCE(length(statement_html),0)>0 OR COALESCE(length(statement_text),0)>0 "
+            "OR COALESCE(length(statement_pdf),0)>0) DESC,(problem_id=?) DESC,"
+            "(problem_id=? COLLATE NOCASE) DESC,statement_fetched_at DESC,problem_id LIMIT 1",
+            (platform, *aliases, problem_id, problem_id),
         ) as cursor:
             row = await cursor.fetchone()
         if row:
@@ -1433,12 +1444,13 @@ async def _problem_detail(platform, problem_id):
         else:
             # Older catalog/submission entries may not have a crawler row yet.
             async with db.execute(
-                "SELECT problem_name,problem_rating,problem_url,tags FROM ("
-                "SELECT problem_name,problem_rating,problem_url,tags,0 AS source,0 AS submit_time FROM recommendations "
-                "WHERE platform=? AND problem_id=? UNION ALL "
-                "SELECT problem_name,problem_rating,problem_url,tags,1 AS source,submit_time FROM submissions "
-                "WHERE platform=? AND problem_id=?) ORDER BY source,submit_time DESC LIMIT 1",
-                (platform, problem_id, platform, problem_id),
+                "SELECT problem_id,problem_name,problem_rating,problem_url,tags FROM ("
+                "SELECT problem_id,problem_name,problem_rating,problem_url,tags,0 AS source,0 AS submit_time FROM recommendations "
+                "WHERE platform=? AND " + id_filter + " UNION ALL "
+                "SELECT problem_id,problem_name,problem_rating,problem_url,tags,1 AS source,submit_time FROM submissions "
+                "WHERE platform=? AND " + id_filter + ") ORDER BY source,(problem_id=?) DESC,"
+                "(problem_id=? COLLATE NOCASE) DESC,submit_time DESC,problem_id LIMIT 1",
+                (platform, *aliases, platform, *aliases, problem_id, problem_id),
             ) as cursor:
                 row = await cursor.fetchone()
             if not row:
@@ -1480,9 +1492,12 @@ async def api_me_problem_detail(platform, problem_id):
 async def _problem_pdf(platform, problem_id):
     db = await get_db()
     try:
+        id_filter, aliases = _problem_id_filter(platform, problem_id)
         async with db.execute(
-            "SELECT statement_pdf FROM crawler_problems WHERE platform=? AND problem_id=?",
-            (platform, problem_id),
+            "SELECT statement_pdf FROM crawler_problems WHERE platform=? AND " + id_filter +
+            " AND length(statement_pdf)>0 ORDER BY (problem_id=?) DESC,"
+            "(problem_id=? COLLATE NOCASE) DESC,statement_fetched_at DESC,problem_id LIMIT 1",
+            (platform, *aliases, problem_id, problem_id),
         ) as cursor:
             row = await cursor.fetchone()
         if not row or not row["statement_pdf"]:

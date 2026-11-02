@@ -1,11 +1,18 @@
 """Contest tracker uses the current account's local submission evidence only."""
 
+import sys
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import test_api_contract as contract
 from feat.api.acm_api.database import connect_db
 from feat.api.acm_api.problem_bank import save_metadata_batch
+from test_problem_sync import CF_PDF
+
+with patch.object(sys, "path", [str(Path(__file__).resolve().parents[3] / "tools/crawlers"), *sys.path]):
+    from codeforces_sample import make_sample
+    from problem_store import ProblemStore
 
 
 class ProblemTrackerTests(unittest.IsolatedAsyncioTestCase):
@@ -27,6 +34,23 @@ class ProblemTrackerTests(unittest.IsolatedAsyncioTestCase):
             await save_metadata_batch(db, items)
         finally:
             await db.close()
+
+    def offline_problem(self, contest=100, index="A", pdf=False):
+        items = make_sample([{"contestId": contest, "index": index, "type": "PROGRAMMING",
+                              "name": "Offline saved problem", "rating": 1600, "tags": ["math"]}], 1)
+        store = ProblemStore(self.db_path)
+        content = {"statement_html": None if pdf else "<p>Offline saved statement</p>",
+                   "statement_text": None if pdf else "Offline saved statement",
+                   "statement_pdf": CF_PDF if pdf else None,
+                   "statement_language": "en", "requested_language": "en",
+                   "samples": [] if pdf else [{"index": 1, "input": "1\n", "output": "2\n"}],
+                   "source_url": items[0]["problem_url"], "sha256": "offline-fixture"}
+        try:
+            store.import_metadata(items)
+            store.save_content("codeforces", items[0]["problem_id"], content)
+        finally:
+            store.close()
+        return items[0], content
 
     @staticmethod
     def problem(contest, index, platform="codeforces", **kwargs):
@@ -245,6 +269,119 @@ class ProblemTrackerTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(int(detail["problem_rating"]), metadata["problem_rating"])
                     self.assertEqual(detail["problem_url"], metadata["problem_url"])
                     self.assertEqual(detail["tags"], ["math"])
+
+    async def test_offline_bare_catalog_tracker_links_open_saved_html_and_pdf_for_all_roles(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            await self.account_login(client, role="member")
+            fixtures = [self.offline_problem(), self.offline_problem(497, "D", pdf=True)]
+            db = await connect_db(self.db_path)
+            try:
+                for table in ("submission_attempts", "submissions", "recommendations"):
+                    self.assertEqual((await (await db.execute(f"SELECT COUNT(*) FROM {table}")).fetchone())[0], 0)
+            finally:
+                await db.close()
+            with patch("feat.api.acm_api.backend_api.cf_request", new_callable=AsyncMock) as network, \
+                    patch.object(self.app.task_manager.problem_sync, "download", new_callable=AsyncMock) as download:
+                for role in ("member", "admin", "root"):
+                    await self.execute("UPDATE web_accounts SET role=?,credential_version=credential_version+1 WHERE qq_id='12345678'", [(role,)])
+                    login = await client.post("/api/auth/login", json={"qq_id": "12345678", "password": "Test-Password-123!"})
+                    self.assertEqual(login.status_code, 200)
+                    for metadata, content in fixtures:
+                        pid = metadata["problem_id"]
+                        self.assertFalse(pid.startswith("cf_"), "real offline collector emits bare identifiers")
+                        tracker = await (await client.get("/api/me/problems/tracker?platform=codeforces&tag=" + pid)).get_json()
+                        cell = tracker["items"][0]["problems"][0]
+                        self.assertEqual((cell["problem_id"], cell["status"]), ("cf_" + pid, "unseen"))
+                        for prefix in ["/api/me/problems"] + (["/api/problems"] if role != "member" else []):
+                            with self.subTest(role=role, prefix=prefix, problem=pid):
+                                path = f"{prefix}/codeforces/{cell['problem_id']}"
+                                response = await client.get(path)
+                                self.assertEqual(response.status_code, 200)
+                                detail = await response.get_json()
+                                self.assertEqual(detail["problem_id"], pid)
+                                self.assertTrue(detail["content_available"])
+                                self.assertEqual(detail["problem_name"], metadata["problem_name"])
+                                self.assertEqual(detail["problem_url"], metadata["problem_url"])
+                                self.assertEqual(detail["statement_html"], content["statement_html"])
+                                self.assertEqual(detail["samples"], content["samples"])
+                                self.assertEqual(detail["statement_format"], "pdf" if content["statement_pdf"] else "html")
+                                if content["statement_pdf"]:
+                                    for detail_id in (cell["problem_id"], detail["problem_id"]):
+                                        pdf_path = f"{prefix}/codeforces/{detail_id}/statement.pdf"
+                                        full = await client.get(pdf_path)
+                                        self.assertEqual(full.status_code, 200)
+                                        self.assertEqual(await full.get_data(), CF_PDF)
+                                        part = await client.get(pdf_path, headers={"Range": "bytes=0-7"})
+                                        self.assertEqual(part.status_code, 206)
+                                        self.assertEqual(await part.get_data(), CF_PDF[:8])
+                network.assert_not_awaited()
+                download.assert_not_awaited()
+                self.assertEqual(self.app.task_manager.tasks, {})
+
+    async def test_saved_alias_beats_pending_exact_catalog_and_equal_content_prefers_exact_id(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            await self.account_login(client, role="member")
+            metadata, content = self.offline_problem()
+            await self.catalog([self.problem("100", "A", problem_name="New pending catalog")])
+            response = await client.get("/api/me/problems/codeforces/cf_100A")
+            self.assertEqual(response.status_code, 200)
+            detail = await response.get_json()
+            self.assertTrue(detail["content_available"])
+            self.assertEqual(detail["problem_id"], "100A")
+            self.assertEqual(detail["statement_html"], content["statement_html"])
+            tracker = await (await client.get("/api/me/problems/tracker?platform=codeforces")).get_json()
+            self.assertEqual(tracker["items"][0]["total_count"], 1)
+            self.assertEqual(len(tracker["items"][0]["problems"]), 1)
+            await self.execute("UPDATE crawler_problems SET statement_html='<p>Exact saved statement</p>',statement_text='Exact saved statement',last_fetch_status='ok' WHERE problem_id='cf_100A'", [()])
+            exact = await (await client.get("/api/me/problems/codeforces/cf_100A")).get_json()
+            self.assertEqual(exact["problem_id"], "cf_100A")
+            self.assertEqual(exact["statement_html"], "<p>Exact saved statement</p>")
+            bare = await (await client.get("/api/me/problems/codeforces/100A")).get_json()
+            self.assertEqual(bare["problem_id"], "100A")
+            self.assertEqual(bare["statement_html"], content["statement_html"])
+
+            self.offline_problem(497, "D", pdf=True)
+            await self.catalog([self.problem("497", "D")])
+            pdf_detail = await (await client.get("/api/me/problems/codeforces/cf_497D")).get_json()
+            self.assertEqual((pdf_detail["problem_id"], pdf_detail["statement_format"]), ("497D", "pdf"))
+            self.assertEqual(await (await client.get("/api/me/problems/codeforces/cf_497D/statement.pdf")).get_data(), CF_PDF)
+
+    async def test_bare_recommendation_and_ac_metadata_resolve_without_attempts(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            await self.account_login(client, role="member")
+            await self.execute("INSERT INTO recommendations(platform,problem_id,problem_name,problem_url,tags) VALUES('codeforces',?,?,?,'math')",
+                               [("200A", "Bare recommendation", "https://codeforces.com/contest/200/problem/A")])
+            await self.execute("INSERT INTO submissions(user_qq_id,platform,problem_id,problem_name,problem_url,submit_time) VALUES('12345678','codeforces',?,?,?,10)",
+                               [("201B", "Bare AC", "https://codeforces.com/contest/201/problem/B"),
+                                ("cf_200A", "Exact AC duplicate", "https://codeforces.com/problemset/problem/200/A")])
+            for pid, title, url in [("200A", "Bare recommendation", "https://codeforces.com/contest/200/problem/A"),
+                                    ("201B", "Bare AC", "https://codeforces.com/contest/201/problem/B")]:
+                response = await client.get("/api/me/problems/codeforces/cf_" + pid)
+                self.assertEqual(response.status_code, 200)
+                detail = await response.get_json()
+                self.assertEqual((detail["problem_id"], detail["problem_name"], detail["problem_url"]), (pid, title, url))
+                self.assertFalse(detail["content_available"])
+
+    async def test_catalog_aliases_support_cf_case_and_numeric_indices_but_keep_atcoder_exact(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            await self.account_login(client, role="member")
+            self.offline_problem(921, "01")
+            self.offline_problem(1000, "D1")
+            for requested, stored in [("cf_92101", "92101"), ("92101", "92101"),
+                                      ("CF_1000d1", "1000D1"), ("1000d1", "1000D1")]:
+                response = await client.get("/api/me/problems/codeforces/" + requested)
+                self.assertEqual(response.status_code, 200)
+                detail = await response.get_json()
+                self.assertEqual(detail["problem_id"], stored)
+                self.assertTrue(detail["content_available"])
+            await self.catalog([self.problem("Case", "a", "atcoder", problem_id="Case_a", problem_name="Case sensitive")])
+            self.assertEqual((await client.get("/api/me/problems/atcoder/Case_a")).status_code, 200)
+            for requested in ("case_a", "cf_Case_a"):
+                self.assertEqual((await client.get("/api/me/problems/atcoder/" + requested)).status_code, 404)
 
 
 if __name__ == "__main__":
