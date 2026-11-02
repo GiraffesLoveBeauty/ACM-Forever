@@ -20,7 +20,6 @@ export const sections = {
   tasks: '同步任务',
   moderation: '内容审核',
   settings: '全局设置',
-  wiki: 'Wiki 知识手册',
 };
 const router = createRouter({
   history: createWebHistory(),
@@ -50,11 +49,6 @@ const router = createRouter({
       path: '/forbidden.html',
       component: () => import('./views/Notice.vue'),
       meta: { public: true, title: '无权访问', forbidden: true },
-    },
-    {
-      path: '/wiki.html',
-      component: () => import('./views/Wiki.vue'),
-      meta: { public: true, title: 'Wiki 知识手册', body: 'wiki-page' },
     },
     {
       path: '/home.html',
@@ -115,12 +109,6 @@ const router = createRouter({
     },
   ],
   scrollBehavior(to, from, saved) {
-    if (to.hash) {
-      try {
-        const el = document.getElementById(decodeURIComponent(to.hash.slice(1)));
-        if (el) return { el, top: 110 };
-      } catch {}
-    }
     return saved || (to.path === from.path ? false : { top: 0 });
   },
 });
@@ -167,11 +155,8 @@ router.beforeEach(async (to) => {
     if (
       query.tab &&
       !(
-        {
-          'cf-practice': ['recent', 'check'],
-          moderation: ['posts', 'reports'],
-          wiki: ['categories', 'pages'],
-        }[query.section] || []
+        { 'cf-practice': ['recent', 'check'], moderation: ['posts', 'reports'] }[query.section] ||
+        []
       ).includes(query.tab)
     ) {
       delete query.tab;

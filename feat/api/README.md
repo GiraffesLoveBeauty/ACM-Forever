@@ -2,7 +2,7 @@
 
 本服务承接梓喵 ACM Helper WebUI 的数据库访问与业务 API。SQLite 数据库由本服务独占；WebUI 和梓喵后续都通过 HTTP API 访问数据，不直接读写数据库文件。
 
-当前包含以下接口：
+当前包含两组接口：
 
 - `/api/*`：移植的 WebUI API，包含登录与账号管理、成员信息、提交记录、训练与挑战、学习计划、统计分析、审核与复盘、排行榜等功能。Web 端使用 Cookie 会话和 CSRF 校验。
 - `/api/forum/*`：公开话题列表与详情、分类、搜索、热门与待回答筛选；登录成员可以发帖、评论、回复、点赞、收藏和举报。新话题进入管理员审核队列，审核与举报处理都需要 Web 管理员权限。
@@ -72,8 +72,6 @@ CF 支持没有样例的题目及直接返回 PDF 的题面。PDF 原文件存�
 | --- | --- |
 | `ACM_API_HOST` / `ACM_API_PORT` | 监听地址和端口，默认 `127.0.0.1:8088`，沿用原 WebUI 端口 |
 | `ACM_DATABASE_PATH` | SQLite 数据库文件路径，默认 `./data/acm_forever.db` |
-| `ACM_MARKDOWN_UPLOAD_DIR` | Wiki/论坛持久化图片目录，默认数据库同级 `uploads/markdown`；必须在代码同步目录外 |
-| `ACM_PUBLIC_BASE_URL` | Markdown 导出图片的公开站点根地址，例如 `https://实际域名`，不带路径 |
 | `ACM_WEBUI_SECRET_KEY` | Web 会话签名密钥，必须设置为随机长值 |
 | `ACM_WEBUI_COOKIE_SECURE` | HTTPS 反向代理时设为 `true`；直接通过受限内网 HTTP 访问时设为 `false` |
 | `ACM_BOT_API_TOKEN` | `/internal/v1/*` 的服务间 Bearer Token；未设置时内部接口返回 503 |
@@ -274,11 +272,3 @@ CF 选题验收应覆盖成员指纹、未绑定 / 过期等就绪状态、近�
 发布前先停止旧版本写入，使用 SQLite 在线备份接口或停服后的完整备份保存数据库（不能只复制正在写入的主文件而遗漏 WAL）；对备份副本运行初始化两次并检查成员 / 记录 / 收藏数量和关键流程。新版本开始执行解绑、改绑后会清理该平台的证据数据，撤销代码无法恢复这些数据。恢复时由运维停止写入、保留故障现场，再按已验收备份恢复数据库与对应源码，核对账号绑定和同步状态；不能让旧写入服务绕过新版本校验继续运行。详细变更和本地验收见 [实施记录](../../docs/issue-52-member-training.md)。
 
 API 回归新增 `tests/test_member_training.py`，共 20 项，覆盖三种 Web 角色的个人页面与本人 AC 数据范围、旧题库入口、完整登录 / 改密目标、CSRF、验证消费 / 过期 / 替换、改绑失败及成功、限频、占用、上游错误、平台清理范围、审计与旧同步批次 / 状态保护。该测试使用临时文件数据库及模拟平台响应，不修改真实账号。
-
-## Wiki 与共享 Markdown
-
-新增公开 `/wiki.html`、`/api/wiki/*` 和统一后台 `section=wiki`。admin/root 维护两级分类与文章，普通成员和匿名访客只读已发布内容。共享图片接口、MD 导入/渲染/下载同样用于论坛，论坛发帖继续审核。
-
-数据库初始化增量创建 `acm_api/wiki.sql` 中的表、索引与约束，可重复执行，不生成业务示例。图片经 Pillow 实际解码；服务总请求上限为 6 MB，Wiki/共享图片接口仍单独限制单张 2 MB；论坛图片接口限制单张 5 MB，需核对反向代理配置。`ACM_MARKDOWN_UPLOAD_DIR` 与数据库一起备份，不能使用部署制品目录存放资源；外部站点下载需要配置 `ACM_PUBLIC_BASE_URL`。
-
-接口合约、并发控制、资源清理、升级及代码/数据库/资源恢复步骤见 [Wiki 文档](../../docs/wiki.md)。`tests/test_wiki.py` 会随现有 unittest discover 自动运行。
