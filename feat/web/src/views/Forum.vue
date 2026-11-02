@@ -95,7 +95,8 @@ async function load() {
   loading.value = false;
 }
 watch(
-  () => route.fullPath,
+  // Hash-only navigation scrolls within the page without replacing the loaded feed.
+  listAddress,
   () => {
     query.value = filters.value.q;
     posts.value = [];

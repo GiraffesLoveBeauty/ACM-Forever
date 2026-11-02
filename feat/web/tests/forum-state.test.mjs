@@ -91,6 +91,34 @@ test('pagination and browser back restore the actual page from the URL', async (
   assert.equal(mounted.router.currentRoute.value.query.page, '2');
   assert.match(calls.at(-1), /page=2/);
 });
+
+test('hash navigation and back keep loaded posts without another request while offline', async () => {
+  await open('/index.html?page=2&view=grid');
+  const requested = [...calls];
+  assert.match(textOf(mounted.root), /分页话题/);
+  fail = true;
+  await mounted.router.push('/index.html?page=2&view=grid#forum-feed');
+  await settle();
+  assert.deepEqual(calls, requested);
+  assert.match(textOf(mounted.root), /分页话题/);
+  assert.doesNotMatch(textOf(mounted.root), /话题加载失败|临时故障/);
+  mounted.router.back();
+  await settle();
+  assert.equal(mounted.router.currentRoute.value.hash, '');
+  assert.deepEqual(calls, requested);
+  assert.match(textOf(mounted.root), /分页话题/);
+});
+
+test('equivalent listing queries do not reload or discard posts', async () => {
+  await open('/index.html?q=图论&page=2&view=list');
+  const requested = [...calls];
+  fail = true;
+  await mounted.router.replace('/index.html?view=list&page=02&q=图论&tracking=test');
+  await settle();
+  assert.deepEqual(calls, requested);
+  assert.match(textOf(mounted.root), /分页话题/);
+});
+
 test('sorting resets the page and retains the current search', async () => {
   await open('/index.html?q=图论&page=2&view=list');
   await click('热门');
