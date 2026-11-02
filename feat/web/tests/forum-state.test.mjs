@@ -165,6 +165,81 @@ test('returning to a page saved at its top restores zero after a delayed respons
   assert.deepEqual(scrolls, [0]);
 });
 
+test('rapid back and forward while loading preserves both saved reading positions', async () => {
+  await open('/index.html?view=list');
+  scrollY = 1800;
+  await click('下一页');
+  scrollY = 720;
+  holdFeed = true;
+  mounted.router.back();
+  await settle();
+  scrollY = 100; // The loading page is shorter than the saved page-one position.
+  mounted.router.forward();
+  await settle();
+  assert.equal(positions.get('acm.forum.scroll:/index.html?view=list'), '1800');
+  scrollY = 80;
+  mounted.router.back();
+  await settle();
+  assert.equal(positions.get('acm.forum.scroll:/index.html?page=2&view=list'), '720');
+  pendingFeeds.shift()(); // A cancelled response must not make the loading page saveable.
+  pendingFeeds.shift()();
+  await settle();
+  assert.equal(
+    find(mounted.root, (node) => node.props.id === 'forum-feed')[0].props['aria-busy'],
+    true,
+  );
+  pendingFeeds.shift()();
+  await settle();
+  assert.equal(scrollY, 1800);
+  mounted.router.forward();
+  await settle();
+  pendingFeeds.shift()();
+  await settle();
+  assert.equal(scrollY, 720);
+});
+
+test('leaving a loading listing does not overwrite its saved reading position', async () => {
+  await open('/index.html?view=list');
+  scrollY = 1800;
+  await click('下一页');
+  scrollY = 720;
+  holdFeed = true;
+  mounted.router.back();
+  await settle();
+  scrollY = 100;
+  await mounted.router.push('/post.html?id=1');
+  await settle();
+  assert.equal(positions.get('acm.forum.scroll:/index.html?view=list'), '1800');
+  mounted.router.back();
+  await settle();
+  pendingFeeds.shift()(); // Resolve the request aborted when leaving the previous instance.
+  pendingFeeds.shift()();
+  await settle();
+  assert.equal(scrollY, 1800);
+});
+
+test('leaving a failed listing keeps its saved position for a successful retry', async () => {
+  await open('/index.html?view=list');
+  scrollY = 1800;
+  await click('下一页');
+  fail = true;
+  mounted.router.back();
+  await settle();
+  assert.match(textOf(mounted.root), /话题加载失败/);
+  scrollY = 100;
+  await mounted.router.push('/post.html?id=1');
+  await settle();
+  assert.equal(positions.get('acm.forum.scroll:/index.html?view=list'), '1800');
+  fail = false;
+  mounted.router.back();
+  await settle();
+  assert.equal(scrollY, 1800);
+  scrollY = 2100;
+  await mounted.router.push('/post.html?id=1');
+  await settle();
+  assert.equal(positions.get('acm.forum.scroll:/index.html?view=list'), '2100');
+});
+
 test('hash navigation and back keep loaded posts without another request while offline', async () => {
   await open('/index.html?page=2&view=grid');
   const requested = [...calls];

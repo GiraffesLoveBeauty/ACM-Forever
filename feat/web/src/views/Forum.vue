@@ -31,8 +31,11 @@ const viewMode = computed(() => filters.value.view);
 const listAddress = computed(
   () => route.path + '?' + new URLSearchParams(forumQuery(filters.value)),
 );
+let renderedAddress = null,
+  loadVersion = 0;
 function rememberScroll(address) {
-  if (!address) return;
+  // Loading and failed pages have a temporary height; keep their saved position intact.
+  if (!address || address !== renderedAddress) return;
   try {
     sessionStorage.setItem('acm.forum.scroll:' + address, String(window.scrollY || 0));
   } catch {
@@ -64,6 +67,8 @@ const directory = computed(() => [
   ...categories.value,
 ]);
 async function load() {
+  const version = ++loadVersion;
+  renderedAddress = null;
   loading.value = true;
   error.value = '';
   const requestedAddress = listAddress.value;
@@ -80,6 +85,7 @@ async function load() {
       {},
       'feed',
     );
+    if (version !== loadVersion || listAddress.value !== requestedAddress) return;
     if (page.value > Math.max(1, Math.ceil(data.total / 12))) {
       await navigate({ page: Math.max(1, Math.ceil(data.total / 12)) }, true);
       return;
@@ -88,6 +94,7 @@ async function load() {
     total.value = data.total;
     loading.value = false;
     await nextTick();
+    if (version !== loadVersion || listAddress.value !== requestedAddress) return;
     try {
       const stored = sessionStorage.getItem('acm.forum.scroll:' + requestedAddress);
       const position = Number(stored);
@@ -101,14 +108,18 @@ async function load() {
     } catch {
       /* Browsing still works when storage is disabled. */
     }
+    renderedAddress = requestedAddress;
   } catch (e) {
-    if (e.name !== 'AbortError') {
+    if (
+      e.name !== 'AbortError' &&
+      version === loadVersion &&
+      listAddress.value === requestedAddress
+    ) {
       error.value = e.message;
       loading.value = false;
     }
     return;
   }
-  loading.value = false;
 }
 watch(
   // Hash-only navigation scrolls within the page without replacing the loaded feed.
