@@ -1,12 +1,12 @@
 <script setup>
 import { ref } from 'vue';
-import { postImage } from '../lib/post-images.js';
+import { controlledImage } from '../lib/markdown.js';
 const dialog = ref(),
   source = ref(''),
   description = ref(''),
   failed = ref(false);
 function open(url, alt = '') {
-  if (!postImage(url)) return;
+  if (!controlledImage(url)) return;
   source.value = url;
   description.value = alt || '帖子图片';
   failed.value = false;

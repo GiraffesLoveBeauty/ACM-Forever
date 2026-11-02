@@ -2,8 +2,8 @@
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useRequests, auth, avatar, date, showError, notify } from '../lib/api.js';
-import { markdown } from '../lib/markdown.js';
-import { postImage } from '../lib/post-images.js';
+import { downloadMarkdown } from '../lib/wiki.js';
+import { markdown, controlledImage } from '../lib/markdown.js';
 import PostCover from '../components/PostCover.vue';
 import ImageLightbox from '../components/ImageLightbox.vue';
 const imageViewer = ref();
@@ -12,7 +12,7 @@ function viewImage(event) {
   if (
     event.target.tagName === 'IMG' &&
     !event.target.closest('a') &&
-    postImage(event.target.getAttribute('src'))
+    controlledImage(event.target.getAttribute('src'))
   ) {
     event.preventDefault();
     imageViewer.value.open(event.target.getAttribute('src'), event.target.alt);
@@ -30,7 +30,17 @@ const post = ref(),
   input = ref(),
   toc = ref([]),
   activeHeading = ref('');
-let observer;
+let observer, downloadController;
+async function download() {
+  try {
+    downloadController?.abort();
+    downloadController = new AbortController();
+    await downloadMarkdown(`/api/forum/posts/${post.value.id}/markdown`, downloadController.signal);
+    notify('Markdown 已下载。');
+  } catch (e) {
+    if (e.name !== 'AbortError') showError(e);
+  }
+}
 const roots = computed(() => (post.value?.comments || []).filter((c) => !c.parent_id));
 async function load() {
   try {
@@ -47,7 +57,7 @@ async function buildToc() {
   observer?.disconnect();
   const headings = [...(article.value?.querySelectorAll('h1,h2,h3') || [])];
   for (const image of article.value?.querySelectorAll('img') || []) {
-    if (!postImage(image.getAttribute('src')) || image.closest('a')) continue;
+    if (!controlledImage(image.getAttribute('src')) || image.closest('a')) continue;
     image.tabIndex = 0;
     image.setAttribute('role', 'button');
     image.setAttribute('aria-label', `放大查看：${image.alt || '正文图片'}`);
@@ -137,7 +147,10 @@ watch(
   },
   { immediate: true },
 );
-onBeforeUnmount(() => observer?.disconnect());
+onBeforeUnmount(() => {
+  observer?.disconnect();
+  downloadController?.abort();
+});
 </script>
 <template>
   <main class="forum-post-layout">
@@ -183,6 +196,7 @@ onBeforeUnmount(() => observer?.disconnect());
             v-html="markdown(post.body)"
           ></div>
           <div class="forum-detail-actions">
+            <button class="btn" @click="download">下载 MD</button>
             <button
               class="btn"
               :class="{ 'is-active': post.viewer_liked }"
