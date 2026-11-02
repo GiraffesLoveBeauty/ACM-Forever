@@ -118,6 +118,8 @@ CF 离线导入的 `100A` 与服务端的 `cf_100A` 可通过同一比赛进度�
 
 `tests/access-navigation.test.mjs` 验证慢认证、登录返回、首次改密、会话过期、旧入口锚点及模块加载恢复；`tests/compose-navigation.test.mjs` 补充编辑器在导航失败与取消后的保存回归。后端对应入口契约见 `feat/api/tests/test_web_access.py`。
 
+首次确认已有登录会话时，App 按认证状态和账号重建当前页面，取消初始实例的请求并由新实例重新加载。`e2e/public-auth.spec.js` 使用真实 Cookie，分别延迟认证或公开数据响应，验证论坛、帖子和排行榜在两种完成顺序下都能显示内容并结束加载；退出和切换账号时的旧会话响应仍被丢弃。
+
 ## 回归测试
 
 ```powershell
