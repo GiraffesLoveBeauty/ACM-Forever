@@ -9,6 +9,7 @@ import { cleanupCompiled, find, loadSfc, mount, settle, textOf } from './helpers
 const Problem = (await import(await loadSfc('src/views/Problem.vue'))).default;
 const PdfPreview = (await import(await loadSfc('src/components/PdfPreview.vue'))).default;
 const Problems = (await import(await loadSfc('src/admin/Problems.vue'))).default;
+const MemberProblems = (await import(await loadSfc('src/views/MemberProblems.vue'))).default;
 const keys = ['document', 'Document', 'Node', 'ShadowRoot', 'navigator', 'fetch', 'location'];
 const originals = new Map(
   keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]),
@@ -112,9 +113,12 @@ beforeEach(() => {
         held.push(() => resolve(response(saved({ problem_id: holdId, problem_name: 'Stale' })))),
       );
     if (url === '/api/admin/database') return response({ initialized: true, platforms: [] });
+    if (url.startsWith('/api/admin/database/problems?'))
+      return response({ items: [saved()], total: 1, page: 1 });
     if (url === '/api/tasks') return response([]);
-    if (url.startsWith('/api/problems?') || url.startsWith('/api/me/problems?'))
-      return response({ items: [saved()], total: 1 });
+    if (url.startsWith('/api/me/problems?')) return response({ items: [saved()], total: 1 });
+    if (/^\/api\/me\/problems\/[^/]+\/[^/]+\/state$/.test(url) && options.method === 'PUT')
+      return response({ success: true });
     if (/^\/api\/(me\/)?problems\/[^/]+\/[^/]+$/.test(url))
       return response(responseData, responseStatus);
     throw Error('Unexpected request: ' + url);
@@ -142,7 +146,9 @@ async function page(
     [
       { path: '/problem.html', component: Problem },
       { path: '/admin.html', component: Problems },
-      { path: '/problem-bank.html', component: Problems },
+      { path: '/problem-bank.html', component: MemberProblems },
+      { path: '/my-problems.html', component: MemberProblems },
+      { path: '/home.html', component: { render: () => null } },
     ],
     path,
     { loadPdfRenderer: async () => renderer },
@@ -233,16 +239,59 @@ test('plain statements remain text and KaTeX cannot enable trusted HTML or URLs'
   assert.equal(originalProblemUrl('https://user:pass@codeforces.com/'), '');
 });
 
-test('both member and admin lists open the local viewer rather than problem_url', async () => {
-  for (const role of ['member', 'admin']) {
-    setAuth({ authenticated: true, qq_id: '12345678', role }, true);
-    await page(Problems, role === 'member' ? '/problem-bank.html' : '/admin.html?section=problems');
-    const link = find(mounted.root, (node) => node.type === 'a' && textOf(node) === '打开题目')[0];
-    assert.equal(link.props.href, '/problem.html?platform=codeforces&problem_id=cf_1843A');
-    assert.equal(link.props.target, '_blank');
-    mounted.unmount();
-    mounted = null;
-  }
+for (const role of ['member', 'admin', 'root']) {
+  test(`${role} browses and favorites in the independent personal problem bank without choosing a QQ`, async () => {
+    setAuth({ authenticated: true, qq_id: '12345678', role, csrf_token: 'fixture-csrf' }, true);
+    const path = '/my-problems.html?platform=codeforces&page=2';
+    await page(MemberProblems, path);
+    assert.doesNotMatch(textOf(mounted.root), /成员 QQ|题库管理|拉取题目/);
+    assert.equal(find(mounted.root, (node) => node.props.inputmode === 'numeric').length, 0);
+    const list = calls.find((call) => call.url.startsWith('/api/me/problems?'));
+    assert.ok(list);
+    const query = new URL(list.url, 'http://localhost').searchParams;
+    assert.equal(query.get('page'), '2');
+    assert.equal(query.get('platform'), 'codeforces');
+    assert.equal(query.has('qq_id'), false);
+    assert.equal(query.has('owner_qq_id'), false);
+    const link = find(mounted.root, (node) => node.type === 'a' && textOf(node) === '查看题面')[0];
+    assert.ok(link);
+    const target = new URL(link.props.href, 'http://localhost');
+    assert.equal(target.pathname, '/problem.html');
+    assert.equal(target.searchParams.get('platform'), 'codeforces');
+    assert.equal(target.searchParams.get('problem_id'), 'cf_1843A');
+    assert.equal(target.searchParams.get('from'), path);
+    const favorite = find(
+      mounted.root,
+      (node) => node.type === 'button' && textOf(node).trim() === '收藏',
+    )[0];
+    await favorite.props.onClick();
+    await settle();
+    const update = calls.find((call) => call.options.method === 'PUT');
+    assert.equal(update.url, '/api/me/problems/codeforces/cf_1843A/state');
+    assert.deepEqual(JSON.parse(update.options.body), { is_favorite: true });
+    assert.equal(update.options.headers['X-CSRF-Token'], 'fixture-csrf');
+    assert.ok(calls.filter((call) => call.url.startsWith('/api/me/problems?')).length >= 2);
+    assert.equal(
+      calls.some(
+        (call) => call.url.startsWith('/api/admin/') || call.url.startsWith('/api/problems?'),
+      ),
+      false,
+    );
+  });
+}
+
+test('management opens saved database records in the local viewer and has no personal browsing list', async () => {
+  setAuth({ authenticated: true, qq_id: '12345678', role: 'admin' }, true);
+  await page(Problems, '/admin.html?section=problems');
+  assert.equal(element('problem-list'), undefined);
+  assert.doesNotMatch(textOf(mounted.root), /成员 QQ|收藏/);
+  assert.equal(
+    calls.some((call) => /^\/api\/(?:me\/)?problems\?/.test(call.url)),
+    false,
+  );
+  const link = find(mounted.root, (node) => node.type === 'a' && textOf(node) === '查看题面')[0];
+  assert.equal(link.props.href, '/problem.html?platform=codeforces&problem_id=cf_1843A');
+  assert.equal(link.props.target, '_blank');
 });
 
 test('local viewer reads member detail, shows saved content and exposes a separate original link', async () => {

@@ -1,9 +1,10 @@
 <script setup>
-import { computed, reactive, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { useProblemCollection } from '../lib/problem-collection.js';
 import ProblemDatabaseBrowser from './ProblemDatabaseBrowser.vue';
 import ProblemTaskProgress from './ProblemTaskProgress.vue';
 const emit = defineEmits(['published']);
+const databaseBrowser = ref(null);
 const {
   database,
   databaseMessage,
@@ -17,7 +18,10 @@ const {
   cancel,
   checkTask,
   submit: collectionSubmit,
-} = useProblemCollection(() => emit('published'));
+} = useProblemCollection(() => {
+  emit('published');
+  return databaseBrowser.value?.refresh();
+});
 const form = reactive({
   platform: 'atcoder',
   scope: 'contest',
@@ -96,15 +100,6 @@ async function submit() {
           · 目录 {{ row.total }} 题 · 已采集 {{ row.collected }} 题 · 失败 {{ row.failed }} 题 ·
           样例 {{ row.samples }} 组</span
         >
-      </div>
-    </div>
-  </section>
-  <ProblemDatabaseBrowser v-if="database?.initialized" />
-  <section v-else-if="database" class="admin-section">
-    <div class="admin-section-heading">
-      <div>
-        <h2>题库记录</h2>
-        <p>初始化 SQLite 数据库后即可浏览已保存的题目与题面。</p>
       </div>
     </div>
   </section>
@@ -214,6 +209,15 @@ async function submit() {
         <button v-if="active" class="btn" type="button" :disabled="cancelling" @click="cancel">
           {{ cancelling ? '正在取消…' : '取消采集' }}
         </button>
+      </div>
+    </div>
+  </section>
+  <ProblemDatabaseBrowser v-if="database?.initialized" ref="databaseBrowser" />
+  <section v-else-if="database" class="admin-section">
+    <div class="admin-section-heading">
+      <div>
+        <h2>题库记录</h2>
+        <p>初始化 SQLite 数据库后即可浏览已保存的题目与题面。</p>
       </div>
     </div>
   </section>
