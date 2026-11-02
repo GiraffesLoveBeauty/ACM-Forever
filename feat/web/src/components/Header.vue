@@ -41,6 +41,7 @@ async function logout() {
     <nav class="nav primary-nav" aria-label="主导航">
       <RouterLink to="/index.html" active-class="active">⌂ 论坛</RouterLink
       ><RouterLink to="/leaderboard.html" active-class="active">♛ 排行榜</RouterLink
+      ><RouterLink to="/wiki.html" active-class="active">▧ Wiki</RouterLink
       ><RouterLink v-if="auth.authenticated" to="/my-problems.html" active-class="active"
         >▦ 题库</RouterLink
       ><RouterLink v-if="auth.authenticated" to="/home.html" active-class="active"

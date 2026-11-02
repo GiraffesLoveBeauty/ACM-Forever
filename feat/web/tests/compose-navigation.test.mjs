@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, afterEach, beforeEach, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-// These editor checks survive independently of the removed Wiki editor suite.
+// Keep editor navigation coverage separate from Wiki-specific behavior.
 const dom = new JSDOM('<html><body></body></html>', { url: 'http://localhost/compose.html' });
 for (const name of [
   'window',
@@ -84,8 +84,8 @@ after(async () => {
 
 for (const failed of [false, true]) {
   test(`editor keeps saving after navigation is ${failed ? 'failed' : 'cancelled'}`, async () => {
-    await input('input[maxlength="120"]', '导航失败后的草稿');
-    await input('textarea[aria-label="帖子 Markdown 正文"]', '先保存的内容');
+    await input('input[maxlength="240"]', '导航失败后的草稿');
+    await input('textarea[aria-label="Markdown 正文"]', '先保存的内容');
     const unregister = router.beforeEach(() => {
       if (failed) throw Error('合成导航失败');
       return false;
@@ -95,7 +95,7 @@ for (const failed of [false, true]) {
     unregister();
     assert.equal(router.currentRoute.value.fullPath, '/compose.html');
     assert.equal(writes[0].method, 'POST');
-    await input('textarea[aria-label="帖子 Markdown 正文"]', '继续编辑的内容');
+    await input('textarea[aria-label="Markdown 正文"]', '继续编辑的内容');
     const save = [...host.querySelectorAll('button')].find(
       (node) => node.textContent.trim() === '保存草稿',
     );
@@ -103,7 +103,7 @@ for (const failed of [false, true]) {
     await settle();
     assert.equal(router.currentRoute.value.query.draft_id, '12');
     assert.equal(
-      host.querySelector('textarea[aria-label="帖子 Markdown 正文"]').value,
+      host.querySelector('textarea[aria-label="Markdown 正文"]').value,
       '继续编辑的内容',
     );
     assert.equal(writes.at(-1).method, 'PUT');

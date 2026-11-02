@@ -8,7 +8,7 @@
 | --- | --- | --- | --- |
 | 浏览器 WebUI | `/api/*` | 登录 Cookie；写请求带 `X-CSRF-Token` | 用户资料、做题看板、训练、论坛、管理功能 |
 | 受信任的服务端程序（如梓喵） | `/internal/v1/*` | `Authorization: Bearer <ACM_BOT_API_TOKEN>` | 成员数据、做题记录、排行榜、训练、同步任务等 |
-| 公开只读调用方 | 部分 `/api/forum/*`、`/api/community/leaderboard` | 无 | 公开论坛内容和公开排行榜 |
+| 公开只读调用方 | 部分 `/api/forum/*`、`/api/community/leaderboard`、`/api/wiki/*` | 无 | 公开论坛内容和公开排行榜 |
 
 不要把服务端 Token 写进网页、App、桌面程序或公开仓库。客户端应用应由自己的服务端调用内部接口，再只向客户端提供所需数据。`/internal/v1/*` 不接受 Web 登录 Cookie 代替 Bearer Token。
 
@@ -472,3 +472,16 @@ else:
 | `503` | 服务或必要配置不可用；稍后重试或联系服务维护者 |
 
 建议为所有请求设置超时，对 `429` 和临时 `5xx` 使用有上限的退避重试；不要对非幂等写操作盲目重试，以免重复创建数据。
+
+## Wiki 知识手册与共享 Markdown
+
+Wiki 使用 `/api/wiki/*` 公开读取当前发布内容，admin/root 使用 `/api/admin/wiki/*` 维护分类、文章和修订；维护写请求沿用 Cookie 与 CSRF。读者不需要绑定 OJ。分类、文章源文、发布指针与历史独立持久化，草稿不会改变公开正文和检索结果。
+
+- `GET /api/wiki/navigation`、`/categories/<id>`、`/pages?category_id=...`、`/search?q=...`：目录与分页检索；默认 20、上限 50。
+- `GET /api/wiki/pages/<slug>`、`/revisions`、`/revisions/<id>`：当前正文与可公开历史。
+- `GET /api/wiki/pages/<slug>/markdown`：公开源文下载；`revision_id` 选择公开历史。
+- `POST /api/markdown/assets`：multipart `file/document_type/document_id`；Wiki 类型仅管理员，论坛草稿仅本人；PNG/JPEG/WebP 实际解码，2MB/4096px。
+- `GET /api/markdown/assets/<id>`：按发布引用与文档归属鉴权，私有资源匿名返回 404。
+- 论坛公开话题和本人草稿的 `/markdown` 下载调用同一源文导出逻辑。
+
+文章修订写入携带 `version/base_revision_id`；分类写入携带目录版本；409 必须保留输入并核对最新状态。发布和删除携带 `idempotency_key`。所有维护接口和源文下载不进入公共缓存；公开 JSON 支持 ETag。完整请求表、限制、删除预览、恢复与持久化配置见 [Wiki 实现与运维说明](wiki.md)。
