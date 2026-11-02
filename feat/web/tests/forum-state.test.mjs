@@ -7,10 +7,36 @@ import { setAuth } from '../src/lib/api.js';
 import { cleanupCompiled, find, loadSfc, mount, settle, textOf } from './helpers/vue-harness.mjs';
 const Forum = (await import(await loadSfc('src/views/Forum.vue'))).default;
 const previousFetch = globalThis.fetch;
-let mounted, calls, fail;
+const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
+let mounted, calls, fail, scrollY, scrolls, positions, holdFeed, pendingFeeds;
 beforeEach(() => {
   calls = [];
   fail = false;
+  scrollY = 0;
+  scrolls = [];
+  positions = new Map();
+  holdFeed = false;
+  pendingFeeds = [];
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      get scrollY() {
+        return scrollY;
+      },
+      scrollTo(_x, y) {
+        scrollY = y;
+        scrolls.push(y);
+      },
+    },
+  });
+  Object.defineProperty(globalThis, 'sessionStorage', {
+    configurable: true,
+    value: {
+      getItem: (key) => positions.get(key) ?? null,
+      setItem: (key, value) => positions.set(key, value),
+    },
+  });
   setAuth({ authenticated: false }, true);
   globalThis.fetch = async (url) => {
     calls.push(url);
@@ -24,15 +50,24 @@ beforeEach(() => {
           rows: [{ id: Number(query.get('page')), title: '分页话题', excerpt: '正文' }],
         };
     }
-    return new Response(JSON.stringify(fail ? { message: '临时故障' } : data), {
+    const result = new Response(JSON.stringify(fail ? { message: '临时故障' } : data), {
       status: fail ? 503 : 200,
     });
+    if (holdFeed && url.includes('page_size=12'))
+      return new Promise((resolve) => pendingFeeds.push(() => resolve(result)));
+    return result;
   };
 });
-afterEach(() => {
+afterEach(async () => {
   mounted?.unmount();
+  pendingFeeds.forEach((resolve) => resolve());
+  await settle();
   mounted = null;
   globalThis.fetch = previousFetch;
+  if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+  else delete globalThis.window;
+  if (previousStorage) Object.defineProperty(globalThis, 'sessionStorage', previousStorage);
+  else delete globalThis.sessionStorage;
 });
 after(cleanupCompiled);
 const open = async (path) => {
@@ -90,6 +125,44 @@ test('pagination and browser back restore the actual page from the URL', async (
   await settle();
   assert.equal(mounted.router.currentRoute.value.query.page, '2');
   assert.match(calls.at(-1), /page=2/);
+});
+
+test('slow pagination back and forward restore each page after its cards render', async () => {
+  await open('/index.html?view=list');
+  scrollY = 1800;
+  holdFeed = true;
+  await click('下一页');
+  assert.equal(positions.get('acm.forum.scroll:/index.html?view=list'), '1800');
+  pendingFeeds.shift()();
+  await settle();
+  scrollY = 720;
+  mounted.router.back();
+  await settle();
+  assert.equal(positions.get('acm.forum.scroll:/index.html?page=2&view=list'), '720');
+  scrollY = 0; // Model the short loading page clamping the router's saved scroll position.
+  pendingFeeds.shift()();
+  await settle();
+  assert.equal(scrollY, 1800);
+  assert.match(textOf(mounted.root), /分页话题/);
+  mounted.router.forward();
+  await settle();
+  scrollY = 0;
+  pendingFeeds.shift()();
+  await settle();
+  assert.equal(scrollY, 720);
+});
+
+test('returning to a page saved at its top restores zero after a delayed response', async () => {
+  await open('/index.html?view=list');
+  await click('下一页');
+  holdFeed = true;
+  mounted.router.back();
+  await settle();
+  scrollY = 300;
+  scrolls = [];
+  pendingFeeds.shift()();
+  await settle();
+  assert.deepEqual(scrolls, [0]);
 });
 
 test('hash navigation and back keep loaded posts without another request while offline', async () => {

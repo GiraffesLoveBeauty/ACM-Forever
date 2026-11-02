@@ -31,6 +31,14 @@ const viewMode = computed(() => filters.value.view);
 const listAddress = computed(
   () => route.path + '?' + new URLSearchParams(forumQuery(filters.value)),
 );
+function rememberScroll(address) {
+  if (!address) return;
+  try {
+    sessionStorage.setItem('acm.forum.scroll:' + address, String(window.scrollY || 0));
+  } catch {
+    // Browsing still works when storage is disabled.
+  }
+}
 function navigate(changes, replace = false) {
   return router[replace ? 'replace' : 'push']({
     path: route.path,
@@ -78,10 +86,18 @@ async function load() {
     }
     posts.value = data.rows;
     total.value = data.total;
+    loading.value = false;
     await nextTick();
     try {
-      const position = Number(sessionStorage.getItem('acm.forum.scroll:' + requestedAddress));
-      if (position > 0 && listAddress.value === requestedAddress) window.scrollTo?.(0, position);
+      const stored = sessionStorage.getItem('acm.forum.scroll:' + requestedAddress);
+      const position = Number(stored);
+      if (
+        stored !== null &&
+        Number.isFinite(position) &&
+        position >= 0 &&
+        listAddress.value === requestedAddress
+      )
+        window.scrollTo?.(0, position);
     } catch {
       /* Browsing still works when storage is disabled. */
     }
@@ -97,18 +113,16 @@ async function load() {
 watch(
   // Hash-only navigation scrolls within the page without replacing the loaded feed.
   listAddress,
-  () => {
+  (_address, previousAddress) => {
+    // Query navigation reuses this component; save before the old cards disappear.
+    rememberScroll(previousAddress);
     query.value = filters.value.q;
     posts.value = [];
     load();
   },
   { immediate: true },
 );
-onBeforeRouteLeave(() => {
-  try {
-    sessionStorage.setItem('acm.forum.scroll:' + listAddress.value, String(window.scrollY || 0));
-  } catch {}
-});
+onBeforeRouteLeave(() => rememberScroll(listAddress.value));
 onMounted(async () => {
   await Promise.allSettled([
     request('/forum/categories')
