@@ -297,12 +297,18 @@ API 回归新增 `tests/test_member_training.py`，共 20 项，覆盖三种 Web
 接口合约、并发控制、资源清理、升级及代码/数据库/资源恢复步骤见 [Wiki 文档](../../docs/wiki.md)。`tests/test_wiki.py` 会随现有 unittest discover 自动运行。
 
 
-## 账号生命周期基础（Issue #83，注销尚未开放）
+## 账号注销（Issue #83）
 
-初始化数据库会给 `users` 补充独立于成员身份 `status` 的 `account_state`、`account_epoch`、`closed_at`。旧用户初始为 active、epoch 1，迁移不更改角色或密码、不清理已有数据。closed 墓碑不能通过普通开户、UPSERT、启用、重置或 Bot 删除恢复。
+策略 `closure-v1` 已由需求方确认。普通成员在个人中心的“账号安全”进入 `/account-closure.html`，阅读影响清单，输入当前密码、勾选并填写“注销账号”。管理员和 root 必须先由另一有效 root 完成交接并降为 member，legacy 管理身份不支持注销。
 
-Web 登录和会话共用可用性判断；操作 root 时以真实 QQ Web 账号的生命周期、启停、有效凭据和临时密码期限判断继任者，legacy 登录不计为继任者。更新角色/启停和启动引导在独立写事务中重查，避免并发操作移除最后可用 root。
+`ACM_ACCOUNT_CLOSURE_ENABLED` **默认 false**；部署前完成全端联调、旧写入进程排空、备份与恢复验证后，才由运维设置为 `true`。关闭开关只停止接受新预览/注销；已有回执、清理和所有 closed 防护继续运行。`/api/auth/me` 的 `account_closure_enabled` 控制前端入口。
 
-共同守卫位于 `acm_api/account_lifecycle_service.py`。导入及新增写入口必须在最终写入所用的 `BEGIN IMMEDIATE` 事务内调用 `require_active_user`，带旧任务快照时必须提供预期 epoch；Web 写入还须调用 `require_web_actor` 复核操作者，不能仅信任请求开始时的 Cookie/角色。同步任务缺少 epoch 时应重新排队，不能默认免检查。Bot 删除有 Web 账号的成员返回 `WEB_ACCOUNT_PROTECTED`。
+注销采用独立短写事务，重认证的密码验证在写锁外；成功同时撤销凭据、epoch 和平台绑定，清除私有记录，匿名保留公共历史。资源先撤销访问，再由持久清理任务租约执行；不可用文件系统会退避重试，异常路径标记 attention_required，不恢复账号。清理服务启动后每 30 秒恢复工作，正常关闭等待当前短任务结束。
 
-本阶段未提供本人注销和回执接口，也没有自动清理定时器。P01–P08、后续实现、全部已部署客户端联调与运维确认完成前保持关闭。处理规则、未完成范围和验证见 [issue-83-account-closure.md（执行方案与当前实现）](../../docs/issue-83-account-closure.md)。新增正式回归 `tests/test_account_lifecycle.py` 随现有 unittest discover 运行。
+审计保留 180 天，回执秘密有效 24 小时，仅哈希入库。`GET /api/admin/account-closures/audit` 仅有效 Web root 可读，返回脱敏主体；密码、Cookie、CSRF、明文回执及密码指纹不入审计。备份最长保留 30 天属于部署方运维措施，应用不会自行删除任意外部备份目录。
+
+新增表为 `account_closure_requests`、`account_lifecycle_audit`、`account_sensitive_action_limits`、`account_closure_cleanup_tasks` 和 `account_closure_resource_revocations`；CF job 增加隐私版本，成员分项增加 epoch（旧分项 0，不获写回豁免）。迁移可重复，默认不关闭任何账号。最小墓碑禁止普通开户/UPSERT/启用/重置/Bot 删除重新激活。
+
+所有新增写入口在最终事务调用 `require_active_user`，Web 操作者还须 `require_web_actor`。后台任务捕获 epoch 后在每次最终写回复核，不能仅依赖本进程取消任务。最后 root 保护按真实可用凭据判断；legacy 管理入口不能作为继任 root。
+
+恢复旧备份前必须保留并重放最新墓碑、凭据版本和资源撤销清单，且使旧 Cookie 失效。禁止把旧备份直接覆盖后开放登录。运行细节、测试及尚未完成的实际客户端联调见 [issue-83-account-closure.md（策略、实现与发布验收）](../../docs/issue-83-account-closure.md)。正式回归为 `tests/test_account_lifecycle.py`、`tests/test_account_closure.py`、前端与浏览器 `account-closure` 用例。
