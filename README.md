@@ -31,4 +31,4 @@
 - [issue-52-member-training.md（普通成员训练闭环实施与验收）](docs/issue-52-member-training.md)
 
 - [wiki.md（Wiki 知识手册、共享 Markdown、接口与备份恢复）](docs/wiki.md)
-- [issue-83-account-closure.md（账号注销与关联数据处理执行方案 · 草稿）](docs/issue-83-account-closure.md)
+- [issue-83-account-closure.md（账号注销执行方案与当前基础实现 · 草稿）](docs/issue-83-account-closure.md)

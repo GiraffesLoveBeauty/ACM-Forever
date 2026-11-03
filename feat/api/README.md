@@ -295,3 +295,14 @@ API 回归新增 `tests/test_member_training.py`，共 20 项，覆盖三种 Web
 数据库初始化增量创建 `acm_api/wiki.sql` 中的表、索引与约束，可重复执行，不生成业务示例。图片经 Pillow 实际解码；服务总请求上限为 6 MB，Wiki/共享图片接口仍单独限制单张 2 MB；论坛图片接口限制单张 5 MB，需核对反向代理配置。`ACM_MARKDOWN_UPLOAD_DIR` 与数据库一起备份，不能使用部署制品目录存放资源；外部站点下载需要配置 `ACM_PUBLIC_BASE_URL`。
 
 接口合约、并发控制、资源清理、升级及代码/数据库/资源恢复步骤见 [Wiki 文档](../../docs/wiki.md)。`tests/test_wiki.py` 会随现有 unittest discover 自动运行。
+
+
+## 账号生命周期基础（Issue #83，注销尚未开放）
+
+初始化数据库会给 `users` 补充独立于成员身份 `status` 的 `account_state`、`account_epoch`、`closed_at`。旧用户初始为 active、epoch 1，迁移不更改角色或密码、不清理已有数据。closed 墓碑不能通过普通开户、UPSERT、启用、重置或 Bot 删除恢复。
+
+Web 登录和会话共用可用性判断；操作 root 时以真实 QQ Web 账号的生命周期、启停、有效凭据和临时密码期限判断继任者，legacy 登录不计为继任者。更新角色/启停和启动引导在独立写事务中重查，避免并发操作移除最后可用 root。
+
+共同守卫位于 `acm_api/account_lifecycle_service.py`。导入及新增写入口必须在最终写入所用的 `BEGIN IMMEDIATE` 事务内调用 `require_active_user`，带旧任务快照时必须提供预期 epoch；Web 写入还须调用 `require_web_actor` 复核操作者，不能仅信任请求开始时的 Cookie/角色。同步任务缺少 epoch 时应重新排队，不能默认免检查。Bot 删除有 Web 账号的成员返回 `WEB_ACCOUNT_PROTECTED`。
+
+本阶段未提供本人注销和回执接口，也没有自动清理定时器。P01–P08、后续实现、全部已部署客户端联调与运维确认完成前保持关闭。处理规则、未完成范围和验证见 [issue-83-account-closure.md（执行方案与当前实现）](../../docs/issue-83-account-closure.md)。新增正式回归 `tests/test_account_lifecycle.py` 随现有 unittest discover 运行。

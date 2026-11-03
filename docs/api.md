@@ -504,3 +504,20 @@ Wiki 使用 `/api/wiki/*` 公开读取当前发布内容，admin/root 使用 `/a
 - 论坛公开话题和本人草稿的 `/markdown` 下载调用同一源文导出逻辑。
 
 文章修订写入携带 `version/base_revision_id`；分类写入携带目录版本；409 必须保留输入并核对最新状态。发布和删除携带 `idempotency_key`。所有维护接口和源文下载不进入公共缓存；公开 JSON 支持 ETag（弱标签、多标签与 `*`）。公开目录、分类、文章列表和搜索使用应用级有界字节缓存及数据库版本校验，返回 `Cache-Control: public, max-age=0, must-revalidate` 和 `Server-Timing`；正文及公开历史本轮不缓存响应体。可通过 `ACM_WIKI_CACHE_ENABLED=false` 关闭，数据库恢复后必须重启或清空所有 worker 的缓存。完整请求表、限制、删除预览、恢复与持久化配置见 [Wiki 实现与运维说明](wiki.md)。
+
+
+## Issue #83：账号生命周期基础接口约定
+
+本阶段新增内部生命周期字段并接入现有入口，**本人注销、注销预览与秘密回执接口尚未开放**。P01–P08 的推荐规则仍待确认；接口草案和后续清理范围见 [issue-83-account-closure.md（账号注销执行方案）](issue-83-account-closure.md)。
+
+| 场景 | HTTP / 结果码 | 调用方处理 |
+| --- | --- | --- |
+| Web/受信 Bot 写入的成员已注销 | 409 `ACCOUNT_CLOSED` | 停止本次操作，不能改用建档/重置/启用绕过 |
+| 预期账号 epoch 已变化 | 409 `ACCOUNT_CHANGED` | 丢弃旧响应/任务；重新获取当前状态 |
+| 事务内发现 Web 操作者旧凭据无效 | 401 `AUTH_REQUIRED` | 重新登录，不能继续使用旧角色快照 |
+| 降级/停用后无可用真实 root | 409 `LAST_ROOT_PROTECTED` | 先准备并验证其他有效 root，再处理交接 |
+| Bot DELETE 目标仍有关联 Web 账号 | 409 `WEB_ACCOUNT_PROTECTED` | 不执行物理成员删除；不能将它当作本人注销接口 |
+
+`GET /api/admin/web-accounts` 增加 `account_state` 和 `closed_at`，供账号管理区显示状态与禁用原因。成员身份 `status` 与生命周期含义独立；closed 不等于普通停用。
+
+内部同步快照需要账号 epoch 与平台绑定版本/账号共同匹配；历史缺少 epoch 的快照应重新排队。`/internal/v1/*` 仍须服务令牌，Web 写入仍须当前身份和 CSRF 校验。公共内容去标识化、持久任务数据清理及跨客户端联调尚未完成，不能据本阶段宣称账号注销已上线。
