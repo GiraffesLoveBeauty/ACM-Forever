@@ -15,6 +15,37 @@ const detail = ref(null),
 const back = computed(() => problemReturn(route.query.from, ['admin', 'root'].includes(auth.role)));
 const original = computed(() => originalProblemUrl(detail.value?.problem_url));
 const samples = computed(() => (Array.isArray(detail.value?.samples) ? detail.value.samples : []));
+const sampleFiles = computed(() =>
+  samples.value.map((sample) => {
+    if (!Array.isArray(sample?.attachments)) return [];
+    return sample.attachments.flatMap((attachment) => {
+      if (typeof attachment?.url !== 'string') return [];
+      try {
+        const url = new URL(attachment.url);
+        if (
+          url.protocol !== 'https:' ||
+          url.hostname !== 'img.atcoder.jp' ||
+          url.username ||
+          url.password ||
+          url.port ||
+          !url.pathname.toLowerCase().endsWith('.zip')
+        )
+          return [];
+        return [
+          {
+            url: url.href,
+            name:
+              typeof attachment.name === 'string' && attachment.name.trim()
+                ? attachment.name
+                : '官方样例 ZIP',
+          },
+        ];
+      } catch {
+        return [];
+      }
+    });
+  }),
+);
 const pdf = computed(() => detail.value?.statement_format === 'pdf');
 const pdfUrl = computed(() =>
   detail.value
@@ -157,9 +188,9 @@ watch(() => [route.query.platform, route.query.problem_id], load, { immediate: t
         <h2>样例</h2>
         <div v-for="(sample, index) in samples" :key="index" class="problem-sample-grid">
           <div v-for="kind in ['input', 'output']" :key="kind">
-            <template v-if="kind === 'output' && sample.output === null && sample.output_note">
-              <h3>样例 {{ index + 1 }} · 输出说明</h3>
-              <p>{{ sample.output_note }}</p>
+            <template v-if="sample[kind] === null && sample[kind + '_note']">
+              <h3>样例 {{ index + 1 }} · {{ kind === 'input' ? '输入' : '输出' }}说明</h3>
+              <p>{{ sample[kind + '_note'] }}</p>
             </template>
             <template v-else>
               <h3>样例 {{ index + 1 }} · {{ kind === 'input' ? '输入' : '输出' }}</h3>
@@ -168,6 +199,16 @@ watch(() => [route.query.platform, route.query.problem_id], load, { immediate: t
                 复制样例 {{ index + 1 }} {{ kind === 'input' ? '输入' : '输出' }}
               </button>
             </template>
+          </div>
+          <div v-if="sampleFiles[index].length" class="problem-sample-attachments">
+            <h3>样例附件</h3>
+            <ul>
+              <li v-for="attachment in sampleFiles[index]" :key="attachment.url">
+                <a :href="attachment.url" target="_blank" rel="noopener noreferrer">{{
+                  attachment.name
+                }}</a>
+              </li>
+            </ul>
           </div>
         </div>
       </section>

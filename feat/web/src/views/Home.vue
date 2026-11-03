@@ -176,7 +176,7 @@ onBeforeUnmount(() => {
       <div class="panel-heading"><h2>训练与题目</h2></div>
       <div class="chips">
         <RouterLink class="btn" to="/challenge.html">今日训练</RouterLink
-        ><RouterLink class="btn" to="/problem-bank.html">题库</RouterLink
+        ><RouterLink class="btn" to="/my-problems.html">题库</RouterLink
         ><RouterLink class="btn" to="/contest-review.html">赛事复盘</RouterLink
         ><RouterLink class="btn" to="/change-password.html?next=/home.html">修改密码</RouterLink>
       </div>
@@ -270,7 +270,7 @@ onBeforeUnmount(() => {
       :bindings="profile.bindings || []"
       @refresh="load"
     />
-    <section class="community-panel personal-community-panel">
+    <section id="my-posts" class="community-panel personal-community-panel">
       <div class="panel-heading">
         <h2>我的社区内容</h2>
         <RouterLink class="panel-text-link" to="/compose.html">查看草稿 / 写新话题　↗</RouterLink>
@@ -289,9 +289,8 @@ onBeforeUnmount(() => {
       <div class="personal-content-list">
         <article v-for="item in posts" :key="item.id" class="personal-community-item">
           <RouterLink
-            v-if="tab === 'bookmarks' || item.status === 'published'"
             class="personal-community-link"
-            :to="`/post.html?id=${item.id}`"
+            :to="tab === 'posts' ? `/my-post.html?id=${item.id}` : `/post.html?id=${item.id}`"
           >
             <span class="personal-community-icon">{{ tab === 'posts' ? '↗' : '☆' }}</span>
             <span class="personal-community-copy"
@@ -302,21 +301,13 @@ onBeforeUnmount(() => {
                   { pending: '待审核', published: '已发布', rejected: '未通过' }[item.status] ||
                   item.author_name
                 }}</small
+              ><small
+                v-if="tab === 'posts' && item.status === 'rejected'"
+                class="forum-review-reason-summary"
+                >退回原因：{{ item.review_reason || '此前未记录原因，请查看投稿进度。' }}</small
               ></span
             >
           </RouterLink>
-          <div v-else class="personal-community-link">
-            <span class="personal-community-icon">↗</span>
-            <span class="personal-community-copy"
-              ><b>{{ item.title }}</b
-              ><small
-                >{{ item.category_name }} ·
-                {{
-                  { pending: '待审核', rejected: '未通过' }[item.status] || item.author_name
-                }}</small
-              ></span
-            >
-          </div>
           <button
             v-if="tab === 'posts'"
             class="btn personal-community-delete"

@@ -1,8 +1,19 @@
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, watch, nextTick } from 'vue';
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
+import { forumState, forumQuery } from '../lib/forum-state.js';
 import { useRequests, showError } from '../lib/api.js';
 import GraphArt from '../components/GraphArt.vue';
 import PostCard from '../components/PostCard.vue';
+import Pager from '../components/Pager.vue';
+const viewModeKey = 'acm.forum.view.v1';
+function savedViewMode() {
+  try {
+    return localStorage.getItem(viewModeKey) === 'grid' ? 'grid' : 'list';
+  } catch {
+    return 'list';
+  }
+}
 const request = useRequests(),
   categories = ref([]),
   posts = ref([]),
@@ -10,9 +21,42 @@ const request = useRequests(),
   total = ref(0),
   loading = ref(false),
   error = ref(''),
-  query = ref('');
-const filters = reactive({ sort: 'latest', category: '', q: '' });
-const page = ref(1);
+  query = ref(''),
+  savedView = ref(savedViewMode());
+const route = useRoute(),
+  router = useRouter();
+const filters = computed(() => forumState(route.query, savedView.value));
+const page = computed(() => filters.value.page);
+const viewMode = computed(() => filters.value.view);
+const listAddress = computed(
+  () => route.path + '?' + new URLSearchParams(forumQuery(filters.value)),
+);
+let renderedAddress = null,
+  loadVersion = 0;
+function rememberScroll(address) {
+  // Loading and failed pages have a temporary height; keep their saved position intact.
+  if (!address || address !== renderedAddress) return;
+  try {
+    sessionStorage.setItem('acm.forum.scroll:' + address, String(window.scrollY || 0));
+  } catch {
+    // Browsing still works when storage is disabled.
+  }
+}
+function navigate(changes, replace = false) {
+  return router[replace ? 'replace' : 'push']({
+    path: route.path,
+    query: forumQuery({ ...filters.value, ...changes }),
+  });
+}
+function changeViewMode(mode) {
+  savedView.value = mode;
+  try {
+    localStorage.setItem(viewModeKey, mode);
+  } catch {
+    // The current page can still switch views when browser storage is unavailable.
+  }
+  navigate({ view: mode });
+}
 const directory = computed(() => [
   {
     slug: '',
@@ -22,32 +66,76 @@ const directory = computed(() => [
   },
   ...categories.value,
 ]);
-async function load(append = false) {
+async function load() {
+  const version = ++loadVersion;
+  renderedAddress = null;
   loading.value = true;
   error.value = '';
-  const requestedPage = append ? page.value + 1 : 1;
+  const requestedAddress = listAddress.value;
   try {
     const data = await request(
-      '/forum/posts?' + new URLSearchParams({ ...filters, page: requestedPage, page_size: 12 }),
+      '/forum/posts?' +
+        new URLSearchParams({
+          sort: filters.value.sort,
+          category: filters.value.category,
+          q: filters.value.q,
+          page: page.value,
+          page_size: 12,
+        }),
       {},
       'feed',
     );
-    posts.value = append ? [...posts.value, ...data.rows] : data.rows;
+    if (version !== loadVersion || listAddress.value !== requestedAddress) return;
+    if (page.value > Math.max(1, Math.ceil(data.total / 12))) {
+      await navigate({ page: Math.max(1, Math.ceil(data.total / 12)) }, true);
+      return;
+    }
+    posts.value = data.rows;
     total.value = data.total;
-    page.value = requestedPage;
+    loading.value = false;
+    await nextTick();
+    if (version !== loadVersion || listAddress.value !== requestedAddress) return;
+    try {
+      const stored = sessionStorage.getItem('acm.forum.scroll:' + requestedAddress);
+      const position = Number(stored);
+      if (
+        stored !== null &&
+        Number.isFinite(position) &&
+        position >= 0 &&
+        listAddress.value === requestedAddress
+      )
+        window.scrollTo?.(0, position);
+    } catch {
+      /* Browsing still works when storage is disabled. */
+    }
+    renderedAddress = requestedAddress;
   } catch (e) {
-    if (e.name !== 'AbortError') {
+    if (
+      e.name !== 'AbortError' &&
+      version === loadVersion &&
+      listAddress.value === requestedAddress
+    ) {
       error.value = e.message;
       loading.value = false;
     }
     return;
   }
-  loading.value = false;
 }
-watch(filters, () => load());
+watch(
+  // Hash-only navigation scrolls within the page without replacing the loaded feed.
+  listAddress,
+  (_address, previousAddress) => {
+    // Query navigation reuses this component; save before the old cards disappear.
+    rememberScroll(previousAddress);
+    query.value = filters.value.q;
+    posts.value = [];
+    load();
+  },
+  { immediate: true },
+);
+onBeforeRouteLeave(() => rememberScroll(listAddress.value));
 onMounted(async () => {
   await Promise.allSettled([
-    load(),
     request('/forum/categories')
       .then((data) => {
         categories.value = data;
@@ -106,7 +194,7 @@ onMounted(async () => {
             class="forum-directory-card"
             :class="{ active: filters.category === c.slug }"
             :aria-pressed="filters.category === c.slug"
-            @click="filters.category = c.slug"
+            @click="navigate({ category: c.slug, page: 1 })"
           >
             <span class="forum-directory-icon" :class="`directory-${c.slug || 'all'}`"
               ><svg
@@ -138,7 +226,10 @@ onMounted(async () => {
           </button>
         </div>
       </section>
-      <form class="forum-search" @submit.prevent="filters.q = query.trim()">
+      <form
+        class="forum-search"
+        @submit.prevent="navigate({ q: query.trim().slice(0, 100), page: 1 })"
+      >
         <label class="visually-hidden" for="search-query">搜索话题</label><span>⌕</span
         ><input
           id="search-query"
@@ -156,12 +247,43 @@ onMounted(async () => {
             class="forum-tab"
             :class="{ active: filters.sort === sort }"
             :aria-pressed="filters.sort === sort"
-            @click="filters.sort = sort"
+            @click="navigate({ sort, page: 1 })"
           >
             {{ label }}
           </button>
         </div>
         <span class="muted">{{ total }} 个话题</span>
+        <div class="forum-view-switch" role="group" aria-label="话题显示方式">
+          <button
+            v-for="(label, value) in { list: '列表', grid: '网格' }"
+            :key="value"
+            type="button"
+            :class="{ active: viewMode === value }"
+            :aria-pressed="viewMode === value"
+            :aria-label="`${label}视图`"
+            aria-controls="forum-feed"
+            @click="changeViewMode(value)"
+          >
+            <svg
+              viewBox="0 0 20 20"
+              width="16"
+              height="16"
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+            >
+              <template v-if="value === 'grid'">
+                <rect x="3" y="3" width="5" height="5" />
+                <rect x="12" y="3" width="5" height="5" />
+                <rect x="3" y="12" width="5" height="5" />
+                <rect x="12" y="12" width="5" height="5" />
+              </template>
+              <path v-else d="M3 4h3v3H3zM9 5.5h8M3 13h3v3H3zM9 14.5h8" />
+            </svg>
+            {{ label }}
+          </button>
+        </div>
       </div>
       <div
         id="forum-feed"
@@ -177,29 +299,34 @@ onMounted(async () => {
         >
           <span class="spinner"></span>正在加载社区话题…
         </div>
-        <PostCard v-for="post in posts" :key="post.id" :post="post" />
+        <div v-if="posts.length" class="forum-feed-posts" :class="`forum-feed-posts-${viewMode}`">
+          <PostCard v-for="post in posts" :key="post.id" :post="post" :return-to="listAddress" />
+        </div>
         <div v-if="!loading && !posts.length" class="forum-empty">
           <h3>{{ error ? '话题加载失败' : '这里还没有话题' }}</h3>
           <p>{{ error || '来发布第一个讨论，开启社区交流吧。' }}</p>
+          <button v-if="error" class="btn" @click="load">重试</button>
         </div>
       </div>
       <p v-if="error && posts.length" role="alert">
         {{ error }} <button class="btn" @click="load()">重试</button>
       </p>
-      <button
-        v-if="page * 12 < total"
-        class="btn forum-load-more"
-        :disabled="loading"
-        @click="load(true)"
-      >
-        加载更多
-      </button>
+      <Pager
+        :page="page"
+        :total="total"
+        :size="12"
+        :busy="loading"
+        @change="navigate({ page: $event })"
+      />
     </section>
     <aside class="forum-rail forum-right-rail" aria-label="热门话题与社区公约">
       <section class="forum-rail-card">
         <div class="forum-side-title">热门话题 <span>↗</span></div>
         <div class="hot-topic-list">
-          <RouterLink v-for="(post, i) in hot" :key="post.id" :to="`/post.html?id=${post.id}`"
+          <RouterLink
+            v-for="(post, i) in hot"
+            :key="post.id"
+            :to="{ path: '/post.html', query: { id: post.id, from: listAddress } }"
             ><span>{{ String(i + 1).padStart(2, '0') }}</span
             ><b>{{ post.title }}</b
             ><small>{{ post.comments_count || 0 }} 条讨论</small></RouterLink

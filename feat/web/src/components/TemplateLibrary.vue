@@ -366,6 +366,74 @@ defineExpose({ open });
   transform: rotate(-50deg);
   background: linear-gradient(#00d7d2 0 25%, #f00091 25% 50%, #d5f500 50% 75%, #385bff 75%);
 }
+.preview-angel-city {
+  background: radial-gradient(ellipse at 60% 35%, #cedcd8, transparent 68%), #f4f6f4;
+}
+.preview-angel-city .preview-header {
+  background: #fbfcfb;
+  border-bottom-color: #155bd8;
+}
+.preview-angel-city :is(.preview-rail, .preview-side, .preview-posts) {
+  background-color: #fff;
+  border-top: 2px solid #292f32;
+}
+.preview-angel-city .preview-hero {
+  background: repeating-linear-gradient(90deg, transparent 0 19px, #155bd813 19px 20px);
+  border-bottom: 1px solid #155bd8;
+}
+.preview-angel-city .preview-hero i {
+  inset: 5% 15% 0 auto;
+  height: 90%;
+  width: 48%;
+  border-radius: 50% 50% 0 0;
+  border: 1px solid #155bd8;
+  background: repeating-radial-gradient(ellipse at 50% 0, transparent 0 4px, #6d8a9a66 4px 5px);
+  clip-path: polygon(50% 0, 65% 30%, 80% 80%, 100% 100%, 0 100%, 20% 80%, 35% 30%);
+}
+.preview-minecraft {
+  background: #38291f url('../assets/minecraft/dirt.svg') repeat;
+  background-size: 32px 32px;
+  border-color: #1b1b1b;
+}
+.preview-minecraft :is(.preview-header, .preview-rail, .preview-side, .preview-hero) {
+  border: 1px solid #1b1b1b;
+  background: #c6c6c6;
+  box-shadow:
+    inset 2px 2px #f4f4f4,
+    inset -2px -2px #555;
+}
+.preview-minecraft .preview-header {
+  border-bottom: 2px solid #1b1b1b;
+}
+.preview-minecraft .preview-hero {
+  background: #8b8b8b;
+  box-shadow:
+    inset 2px 2px #555,
+    inset -2px -2px #eee;
+}
+.preview-minecraft .preview-hero i {
+  width: 23px;
+  height: 20px;
+  top: auto;
+  bottom: 10%;
+  right: 15%;
+  border: 0;
+  border-top: 6px solid #3c8527;
+  border-radius: 0;
+  background: #765238;
+  box-shadow:
+    -20px 7px 0 -2px #638e46,
+    16px -8px 0 -3px #638e46;
+}
+.preview-minecraft .preview-posts {
+  border: 2px solid #c6c6c6;
+  background: repeating-linear-gradient(
+    #8b8b8b 0 8px,
+    #555 8px 9px,
+    #eee 9px 10px,
+    #c6c6c6 10px 13px
+  );
+}
 .template-library-empty {
   display: grid;
   place-content: center;

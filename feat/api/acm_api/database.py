@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """数据库初始化、设置读写与排行榜查询。"""
 import time
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 import aiosqlite
@@ -182,7 +183,60 @@ async def connect_db(db_path):
         "title TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '', "
         "created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)"
     )
+    async with db.execute("PRAGMA table_info(forum_posts)") as cursor:
+        post_columns = {row["name"] for row in await cursor.fetchall()}
+    if "review_reason" not in post_columns:
+        await db.execute("ALTER TABLE forum_posts ADD COLUMN review_reason TEXT NOT NULL DEFAULT ''")
+    if "content_version" not in post_columns:
+        await db.execute("ALTER TABLE forum_posts ADD COLUMN content_version INTEGER NOT NULL DEFAULT 1")
+    async with db.execute("PRAGMA table_info(forum_drafts)") as cursor:
+        draft_columns = {row["name"] for row in await cursor.fetchall()}
+    for column, definition in (("source_post_id", "INTEGER REFERENCES forum_posts(id)"), ("source_version", "INTEGER"), ("source_status", "TEXT"), ("edit_version", "INTEGER NOT NULL DEFAULT 1")):
+        if column not in draft_columns:
+            await db.execute(f"ALTER TABLE forum_drafts ADD COLUMN {column} {definition}")
+    await db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_forum_draft_source ON forum_drafts(author_qq_id,source_post_id) WHERE source_post_id IS NOT NULL")
+    await db.execute("CREATE TABLE IF NOT EXISTS forum_post_history (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER NOT NULL REFERENCES forum_posts(id) ON DELETE CASCADE, content_version INTEGER NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL, category_id INTEGER NOT NULL, status TEXT NOT NULL, review_reason TEXT NOT NULL, reviewed_at INTEGER, saved_at INTEGER NOT NULL, UNIQUE(post_id,content_version))")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_drafts_author_updated ON forum_drafts(author_qq_id, updated_at DESC)")
+    for table in ("forum_posts", "forum_drafts"):
+        async with db.execute(f"PRAGMA table_info({table})") as cursor:
+            columns = {row["name"] for row in await cursor.fetchall()}
+        if "cover_image_id" not in columns:
+            await db.execute(f"ALTER TABLE {table} ADD COLUMN cover_image_id TEXT")
+    image_columns = (
+        "id TEXT PRIMARY KEY, owner_qq_id TEXT REFERENCES users(qq_id) ON DELETE SET NULL, "
+        "width INTEGER NOT NULL, height INTEGER NOT NULL, size_bytes INTEGER NOT NULL, created_at INTEGER NOT NULL"
+    )
+    await db.execute(f"CREATE TABLE IF NOT EXISTS forum_images ({image_columns})")
+    await db.execute(
+        "CREATE TABLE IF NOT EXISTS forum_image_links (image_id TEXT NOT NULL REFERENCES forum_images(id), "
+        "draft_id INTEGER REFERENCES forum_drafts(id) ON DELETE CASCADE, "
+        "post_id INTEGER REFERENCES forum_posts(id) ON DELETE CASCADE, "
+        "CHECK((draft_id IS NULL) <> (post_id IS NULL)), UNIQUE(image_id,draft_id), UNIQUE(image_id,post_id))"
+    )
+    async with db.execute("PRAGMA table_info(forum_images)") as cursor:
+        image_owner = next(row for row in await cursor.fetchall() if row["name"] == "owner_qq_id")
+    async with db.execute("PRAGMA foreign_key_list(forum_images)") as cursor:
+        image_owner_fk = next((row for row in await cursor.fetchall() if row["from"] == "owner_qq_id"), None)
+    if image_owner["notnull"] or not image_owner_fk or image_owner_fk["on_delete"] != "SET NULL":
+        # Rebuild the old ownership constraint in the initialization transaction.
+        # Temporarily save references so foreign keys stay enabled during the swap.
+        await db.execute(f"CREATE TABLE forum_images_migrated ({image_columns})")
+        await db.execute(
+            "INSERT INTO forum_images_migrated(id,owner_qq_id,width,height,size_bytes,created_at) "
+            "SELECT id,owner_qq_id,width,height,size_bytes,created_at FROM forum_images"
+        )
+        await db.execute("CREATE TEMP TABLE forum_image_links_saved AS SELECT image_id,draft_id,post_id FROM forum_image_links")
+        await db.execute("DELETE FROM forum_image_links")
+        await db.execute("DROP TABLE forum_images")
+        await db.execute("ALTER TABLE forum_images_migrated RENAME TO forum_images")
+        await db.execute(
+            "INSERT INTO forum_image_links(image_id,draft_id,post_id) "
+            "SELECT image_id,draft_id,post_id FROM forum_image_links_saved"
+        )
+        await db.execute("DROP TABLE temp.forum_image_links_saved")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_images_owner ON forum_images(owner_qq_id)")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_image_links_draft ON forum_image_links(draft_id)")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_image_links_post ON forum_image_links(post_id)")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_posts_status_created ON forum_posts(status, created_at DESC)")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_posts_category_created ON forum_posts(category_id, status, created_at DESC)")
     await db.execute(
@@ -193,6 +247,17 @@ async def connect_db(db_path):
         "status TEXT NOT NULL DEFAULT 'published' CHECK(status IN ('published','hidden','removed')), created_at INTEGER NOT NULL)"
     )
     await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_comments_post_created ON forum_comments(post_id, status, created_at)")
+    await db.execute(
+        "CREATE TABLE IF NOT EXISTS forum_notifications ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, recipient_qq_id TEXT NOT NULL REFERENCES users(qq_id) ON DELETE CASCADE, "
+        "actor_qq_id TEXT REFERENCES users(qq_id) ON DELETE SET NULL, "
+        "kind TEXT NOT NULL CHECK(kind IN ('comment','reply','published','rejected')), "
+        "post_id INTEGER NOT NULL REFERENCES forum_posts(id) ON DELETE CASCADE, "
+        "comment_id INTEGER REFERENCES forum_comments(id) ON DELETE SET NULL, "
+        "created_at INTEGER NOT NULL, read_at INTEGER, UNIQUE(recipient_qq_id,comment_id))"
+    )
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_notifications_recipient ON forum_notifications(recipient_qq_id,id DESC)")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_notifications_unread ON forum_notifications(recipient_qq_id,read_at,id DESC)")
     await db.execute(
         "CREATE TABLE IF NOT EXISTS forum_post_likes ("
         "post_id INTEGER NOT NULL REFERENCES forum_posts(id) ON DELETE CASCADE, "
@@ -295,6 +360,7 @@ async def connect_db(db_path):
             (platform, int(time.time())),
         )
     await db.execute("UPDATE users SET name = cf_handle WHERE cf_handle IS NOT NULL AND TRIM(cf_handle) <> '' AND (name IS NULL OR TRIM(name) = '' OR name = qq_id)")
+    await db.executescript(Path(__file__).with_name("wiki.sql").read_text(encoding="utf-8"))
     await db.commit()
     return db
 

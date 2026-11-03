@@ -32,3 +32,12 @@ ON crawler_problems(platform, contest_id);
 
 CREATE INDEX IF NOT EXISTS idx_crawler_problems_fetch
 ON crawler_problems(platform, last_fetch_status, requested_language);
+
+CREATE TABLE IF NOT EXISTS crawler_contests (
+    platform TEXT NOT NULL,
+    contest_id TEXT NOT NULL,
+    contest_name TEXT NOT NULL,
+    start_time INTEGER,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (platform, contest_id)
+);

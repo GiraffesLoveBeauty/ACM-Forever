@@ -138,6 +138,11 @@ class TaskListTests(unittest.TestCase):
 class ProblemSyncTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         asyncio.get_running_loop().slow_callback_duration = 1
+        # Contest-date refresh is covered separately; existing fixtures only
+        # model statement/catalog downloads and must never reach the network.
+        self.contest_refresh = patch("feat.api.acm_api.problem_sync.refresh_contests", return_value=0)
+        self.contest_refresh.start()
+        self.addCleanup(self.contest_refresh.stop)
         self.directory = tempfile.TemporaryDirectory()
         self.db_path = Path(self.directory.name) / "server.db"
         self.env = patch.dict(os.environ, {

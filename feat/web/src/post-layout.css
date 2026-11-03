@@ -1,0 +1,397 @@
+/* Article layouts borrow the reference site's reading hierarchy and use our shared tokens. */
+.post-cover {
+  margin: 0;
+  overflow: hidden;
+  background: var(--subtle-bg);
+  aspect-ratio: 16 / 9;
+}
+.post-cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.post-cover figcaption {
+  display: grid;
+  min-height: 140px;
+  height: 100%;
+  place-items: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+.forum-post-card-layout {
+  display: grid;
+  gap: 22px;
+  align-items: center;
+}
+.forum-post-card-layout.has-cover {
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 26%);
+}
+.forum-post-card-copy {
+  min-width: 0;
+}
+.forum-post-cover-link {
+  display: block;
+  min-width: 0;
+}
+.forum-card-cover {
+  aspect-ratio: 4 / 3;
+}
+body.endfield-design .forum-post-card h2 {
+  margin-top: 10px;
+  line-height: 1.5;
+}
+.forum-post-card .forum-post-excerpt {
+  -webkit-line-clamp: 3;
+  white-space: normal;
+}
+.forum-post-card .forum-post-author {
+  margin-top: 16px;
+}
+.forum-post-card .forum-post-actions {
+  margin-top: 17px;
+  padding-top: 13px;
+  border-top: 1px solid var(--line);
+}
+.forum-view-switch {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 3px;
+  gap: 3px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.forum-view-switch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.forum-view-switch button:hover {
+  color: var(--text);
+  background: var(--hover-bg);
+}
+.forum-view-switch button.active {
+  background: var(--text);
+  color: var(--panel);
+  font-weight: 700;
+}
+.forum-feed-posts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+html body.endfield-design .forum-feed-posts > .forum-post-card {
+  min-width: 0;
+  margin: 0;
+}
+.forum-feed-posts-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: 18px;
+}
+html body.endfield-design .forum-feed-posts-grid > .forum-post-card {
+  display: flex;
+  flex-direction: column;
+  padding: 18px;
+}
+.forum-feed-posts-grid .forum-post-card-layout {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 18px;
+  flex: 1;
+}
+.forum-feed-posts-grid .forum-post-card-copy {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.forum-feed-posts-grid .forum-post-cover-link {
+  order: -1;
+}
+.forum-feed-posts-grid .forum-card-cover {
+  aspect-ratio: 16 / 9;
+}
+.forum-post-cover-placeholder {
+  display: none;
+}
+.forum-feed-posts-grid .forum-post-cover-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--line);
+  background: linear-gradient(135deg, var(--subtle-bg) 50%, var(--panel) 50%);
+  color: var(--muted);
+  font-size: 12px;
+}
+.forum-feed-posts-grid .forum-post-meta {
+  flex-wrap: wrap;
+}
+.forum-feed-posts-grid .forum-post-time {
+  font-size: 10px;
+}
+.forum-feed-posts-grid .forum-post-card h2 {
+  overflow-wrap: anywhere;
+}
+.forum-feed-posts-grid .forum-post-card-copy .forum-post-author {
+  margin-top: auto;
+  padding-top: 16px;
+}
+.forum-feed-posts-grid .forum-post-card .forum-post-actions {
+  column-gap: 14px;
+  row-gap: 0;
+}
+body.endfield-design .forum-post-layout {
+  width: min(94vw, 1200px);
+}
+body.endfield-design .forum-post-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 30px;
+}
+.forum-post-detail,
+.forum-article {
+  min-width: 0;
+}
+body.endfield-design .forum-article {
+  padding: clamp(22px, 4vw, 48px);
+}
+.forum-article-header {
+  margin-bottom: 28px;
+}
+body.endfield-design .forum-article h1 {
+  margin: 18px 0;
+  font-size: clamp(26px, 3vw, 38px);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.forum-article-byline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.forum-article-cover {
+  margin: 0 0 32px;
+}
+body.endfield-design .forum-article-body {
+  max-width: 76ch;
+  margin-inline: auto;
+  border: 0;
+  padding-top: 0;
+  font-size: 15px;
+  line-height: 1.95;
+  white-space: normal;
+}
+.forum-markdown img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 22px auto;
+}
+.forum-markdown p:has(> img:only-child) {
+  margin-block: 26px;
+}
+.forum-detail-rail {
+  position: sticky;
+  top: 96px;
+}
+.forum-moderation-cover {
+  max-width: 480px;
+  margin: 18px 0;
+}
+.compose-main {
+  width: min(96vw, 1460px);
+  max-width: none;
+  margin: 28px auto 60px;
+}
+.compose-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 210px;
+  align-items: start;
+  gap: 24px;
+}
+.compose-editor-panel {
+  min-width: 0;
+  padding: clamp(18px, 2.5vw, 32px);
+}
+.compose-basics {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 28px;
+  margin: 28px 0;
+}
+.compose-basics-fields {
+  display: grid;
+  gap: 18px;
+  align-content: start;
+  min-width: 0;
+}
+.compose-basics-fields .compose-field {
+  margin: 0;
+}
+.compose-cover-field {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  min-width: 0;
+  font-size: 13px;
+}
+.compose-cover-field small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.compose-cover-empty,
+.compose-cover-preview {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+.compose-cover-empty {
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  border: 1px dashed var(--line);
+  background: var(--subtle-bg);
+  color: var(--text);
+  cursor: pointer;
+}
+.compose-cover-empty:hover {
+  border-color: var(--brand);
+}
+.compose-cover-empty b {
+  font-size: 24px;
+  font-weight: 400;
+}
+.compose-cover-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.compose-body-label {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.compose-editing-panes {
+  min-width: 0;
+}
+.compose-editing-panes.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: stretch;
+}
+.compose-editing-panes .compose-textarea {
+  display: block;
+  min-height: 520px;
+  padding: 20px;
+  border: 0;
+  border-radius: 0;
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 14px;
+  line-height: 1.85;
+}
+.compose-editing-panes .compose-preview {
+  min-width: 0;
+  min-height: 520px;
+  border: 0;
+  border-radius: 0;
+  border-left: 1px solid var(--line);
+  font-size: 14px;
+  line-height: 1.85;
+}
+.compose-editing-panes:not(.split) .compose-preview {
+  border-left: 0;
+}
+.compose-image-hint,
+.compose-image-status {
+  margin: 0;
+  padding: 10px 16px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  border-bottom: 1px solid var(--line);
+}
+.compose-image-status {
+  color: var(--brand-strong);
+}
+@media (max-width: 1100px) {
+  .compose-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .compose-sidebar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 900px) {
+  body.endfield-design .forum-post-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .forum-detail-rail {
+    display: none;
+  }
+}
+@media (max-width: 640px) {
+  .forum-view-switch button {
+    min-height: 40px;
+  }
+  .forum-post-card-layout.has-cover,
+  .compose-basics,
+  .compose-editing-panes.split,
+  .compose-sidebar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .forum-post-cover-link {
+    order: -1;
+  }
+  .forum-card-cover {
+    aspect-ratio: 16 / 9;
+  }
+  .forum-post-card .forum-post-actions {
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .compose-main {
+    width: calc(100% - 24px);
+    margin-top: 18px;
+  }
+  .compose-cover-field {
+    max-width: 100%;
+  }
+  .compose-editing-panes .compose-textarea,
+  .compose-editing-panes .compose-preview {
+    min-height: 320px;
+    padding: 16px;
+    font-size: 16px;
+  }
+  .compose-editing-panes.split .compose-preview {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    max-height: none;
+  }
+  .compose-actions {
+    position: static;
+    margin: 20px 0 0;
+    padding: 0;
+    border-top: 0;
+  }
+  .compose-view-tabs button,
+  .markdown-toolbar button,
+  .compose-cover-actions button {
+    min-height: 40px;
+  }
+}

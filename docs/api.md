@@ -2,13 +2,15 @@
 
 本文面向 Web、机器人和其他需要读取 ACM-Forever 数据的程序调用者。代码实现是当前行为的最终依据；接口有变化时，应在同一个 PR 中更新本文和自动化测试。
 
+作者修改帖子、驳回后重投、私有文字历史及审核版本参数见 [forum-post-revisions.md（帖子修改与重新投稿接口）](forum-post-revisions.md)。
+
 ## 选择接口和认证方式
 
 | 调用方 | 接口前缀 | 认证方式 | 适用范围 |
 | --- | --- | --- | --- |
 | 浏览器 WebUI | `/api/*` | 登录 Cookie；写请求带 `X-CSRF-Token` | 用户资料、做题看板、训练、论坛、管理功能 |
 | 受信任的服务端程序（如梓喵） | `/internal/v1/*` | `Authorization: Bearer <ACM_BOT_API_TOKEN>` | 成员数据、做题记录、排行榜、训练、同步任务等 |
-| 公开只读调用方 | 部分 `/api/forum/*`、`/api/community/leaderboard` | 无 | 公开论坛内容和公开排行榜 |
+| 公开只读调用方 | 部分 `/api/forum/*`、`/api/community/leaderboard`、`/api/wiki/*` | 无 | 公开论坛内容和公开排行榜 |
 
 不要把服务端 Token 写进网页、App、桌面程序或公开仓库。客户端应用应由自己的服务端调用内部接口，再只向客户端提供所需数据。`/internal/v1/*` 不接受 Web 登录 Cookie 代替 Bearer Token。
 
@@ -135,7 +137,7 @@ response.raise_for_status()
 
 ## 普通成员训练闭环
 
-个人入口为 `/home.html`、`/my-problems.html` 和 `/problem.html`。个人中心的“查看全部已 AC”对 member / admin / root 均指向 `/my-problems.html?scope=solved`，仅展示会话本人的 AC；此地址需要登录，刷新、直链、登录及首次改密保留范围、筛选和页码。旧 `/problem-bank.html` 仍供普通成员使用，admin / root 访问时进入统一后台题库；两种个人题库地址默认展示全站目录，可切换“我已 AC”。
+个人入口为 `/home.html`、`/my-problems.html` 和 `/problem.html`。主导航和个人中心的“题库”对 member / admin / root 均进入独立 `/my-problems.html`，可浏览全站目录、查看本人已 AC 及收藏；不提供成员 QQ 选择，收藏归属取当前会话。“查看全部已 AC”指向 `/my-problems.html?scope=solved`，仅展示会话本人的 AC；此地址需要登录，刷新、直链、登录及首次改密保留范围、筛选和页码。旧 `/problem-bank.html` 仍供普通成员使用，admin / root 访问时进入统一后台题库。
 
 认证初始化失败进入 `/auth-unavailable.html?next=...`。恢复页跳过自动认证初始化，首次请求超时（15 秒）后即可展示反馈，不会自行发起第二次认证；直接打开恢复页也不查询认证。用户点击“重试原页面”才重新请求并恢复原目标。普通成员访问后台，服务端直链返回 403，客户端导航提供无权限页面。
 
@@ -143,7 +145,17 @@ response.raise_for_status()
 
 `GET /api/me/problems?scope=solved` 从会话读取 QQ，客户端的 `qq_id/owner_qq_id` 不改变归属。以平台和题号去重，返回 `ac_at`（Unix 秒），按最近 AC 时间倒序，再按平台、题号稳定排序。`platform/tag/state=favorite/page/page_size` 与总数使用相同条件；`tag` 同时匹配题名、题号和标签。本人范围默认每页 20、上限 100，默认全站目录仍为 500、上限 500。返回 `items/total/returned/page/page_size`；无效 `scope` 或非整数分页参数返回 400。
 
+`GET /api/me/problems/tracker` 为个人题库的比赛进度矩阵提供数据，member / admin / root 均只读取会话本人，客户端身份参数不改变归属。支持 `platform`（空、`codeforces`、`atcoder`）、`tag`（比赛 ID / 题号 / 题名 / 标签）、`scope=all|solved`、`state=favorite`、`page` 和 `page_size`（默认 20、上限 50）。无效参数返回 400；未登录或未完成首次改密沿用本人接口权限。
+
+返回 `items/total/page/page_size`，`total` 为比赛数量。每个比赛含 `platform/contest_id/contest_name/start_time/total_count/solved_count/attempted_count/problems`；题目含 `platform/problem_id/problem_index/problem_name/problem_rating/status/ac_at/last_submit_at/is_favorite`。`status` 为 `solved`（已 AC）、`attempted`（有提交记录且未 AC）、`unseen`（未记录），时间为 Unix 秒。`start_time` 为真实比赛开始时间，未收录时为 null；默认按开始时间倒序，未知时间在后，同时间以平台和自然比赛 ID 稳定排序，再进行分页。AC 证据优先于之后的失败提交；收藏和提交状态只关联本人。按自然题序排列 D1 / D2 等题目，筛选先选择比赛，再返回该场全部已入库题目，分页不会切开比赛。前端每页完整展开 20 场，使用页面纵向滚动。仅使用本地目录、比赛缓存和提交数据，不调用 OJ 或触发采集；未记录不代表原站没有提交，目录和尝试记录均可能尚未同步完整。
+
+前端 `/my-problems.html?view=tracker` 切换比赛进度；默认列表省略 `view`。前端题库的平台筛选默认 Codeforces，不提供“全部平台”；未指定或无效平台回落为 `codeforces`，清除筛选同样恢复该默认值。接口自身仍支持空平台供兼容调用。站内题面返回白名单保留 `view=tracker` 和已有范围、筛选、页码，排除身份参数。
+
 个人中心的最近 AC 和个人题库均打开站内题面。`from` 仅接受 `/home.html`、携带允许筛选参数的 `/problem-bank.html` 或 `/my-problems.html`；外部网址、管理地址和身份参数会被排除，返回时保留实际个人入口。个人列表与收藏对所有角色均使用 `/api/me/problems`，归属只取会话本人；成员详情及 PDF 读取复用 `/api/me/problems/<platform>/<problem_id>` 和后缀 `/statement.pdf`，admin / root 的详情沿用原管理读取接口，两者均不会触发采集。
+
+比赛进度中的题目若仅有会话本人的提交尝试、尚无题库目录，两个题目详情入口均回退读取本人的 `submission_attempts`，返回题号、所属比赛和规范的原题链接，`content_available=false`、`samples=[]`，沿用“题面尚未采集”提示。此回退不读取其他账号的尝试，不返回源码或提交详情，也不联网或新增目录；无本人的有效记录时仍返回 404。已有采集题面和目录元数据优先。
+
+CF 详情及 PDF 接口在读取时统一解析 `100A` / `cf_100A` 等前缀和大小写别名，包括旧目录、推荐和 AC 元数据；题号仍保留在原记录中，详情返回实际命中的题号。同一 CF 题号存在多条目录记录时，优先已保存的题面，可用性相同时优先精确题号；PDF 读取优先已有 PDF，继续支持 Range。AtCoder 题号保持精确匹配。
 
 ### 绑定与同步接口
 
@@ -177,6 +189,8 @@ Web 归属验证当前实现 Codeforces：账号存在性使用已有验证器�
 
 题库管理页的 **题库记录** 可视化浏览 `crawler_problems` 中的目录数据、采集状态、样例数和更新时间，并按平台、题面状态及题号 / 题名 / 比赛 ID 搜索。对应的 `GET /api/admin/database/problems` 仅限 Web 管理员 / Root，支持 `q`、`platform`、`status`、`page` 和 `page_size`；题面正文通过下方题目详情接口读取。
 
+管理页按 **服务端数据库 → 拉取题目 → 题库记录** 排列；浏览和收藏题目的独立题库通过主导航进入，不再混排在管理页。初始化、目录导入和采集批次完成后刷新题库记录，并保留记录表当前筛选和页码。
+
 题库列表右侧的 **打开题目** 进入 `/problem.html?platform=codeforces&problem_id=cf_1843A` 等站内详情页，读取服务端已保存的题面与样例。管理员使用 `GET /api/problems/<platform>/<problem_id>`，普通成员使用 `GET /api/me/problems/<platform>/<problem_id>`；都要求登录且完成首次改密。返回题名、难度、标签、原题链接 `problem_url`、`statement_html/statement_text`、题面语言、`samples`、采集时间、最近采集状态和 `content_available`。读取不触发爬虫；题目不存在返回 404，只收录目录时返回 200 且 `content_available=false`，提示等待采集或管理员重试。更新失败但仍有旧题面时继续展示已保存内容。详情页的“查看原题”按钮在新标签页打开数据库中记录的原题链接，正文尚未采集时也可使用。
 
 详情页清理外部 HTML，保留样例空格和换行并提供复制按钮；公式使用本地 KaTeX 0.19.0 输出 MathML（[配置说明](https://katex.org/docs/autorender)）。题面图片目前仍从 AtCoder / Codeforces 的 HTTPS 域名加载，尚未存入本地数据库；其它来源的图片显示占位文字。仅详情页允许这些图片域名，其它页面继续使用原有内容安全策略。
@@ -184,6 +198,8 @@ Web 归属验证当前实现 Codeforces：账号存在性使用已有验证器�
 CF 原题未提供样例时（如 171E 的空样例区），采集成功并返回 `samples=[]`；存在一侧输入或输出、缺少 `pre` 等损坏样例仍报错。已有样例的 HTML 刷新结果意外变空时，继续保留旧题面和样例。
 
 AtCoder 仅输出题在输入章节明确无输入时返回 `samples[].input=""`。原站明确省略巨大输出时返回 `output=null` 及 `output_note`（官方说明），网页显示“输出说明”且不提供复制输出；调用方不能将该说明或 null 当作期望答案。APG 课程及错误程序演示保留在正文，不作为同一道题的正式样例。叙述重复、历史错编号的处理边界见[采集说明](crawler-samples.md#样例直接保存在题目中)。原站 404 和空题面仍记录失败，便于后续重试。
+
+旧 ICPC 输出标题和严格配对的多组无编号样例也可采集。源编号从 0 开始时，`samples[].index` 规范为正数，并由 `source_index` 保存原编号。附件型样例可返回 `input=null` / `output=null`、对应的 `input_note/output_note` 及 `attachments: [{url, name}]`；附件仅保留官方 `https://img.atcoder.jp/` ZIP 链接，未展开为文本。未提供输出的官方补充输入同样通过 `output_note` 说明。null 不表示空字符串答案。首选语言排版损坏但页面内另一语言可严格解析时，整体回退并如实记录实际 `statement_language`；`requested_language` 仍保存原请求。
 
 PDF 题面（如 497D）将原始字节保存到 SQLite 的 `crawler_problems.statement_pdf`，详情返回 `statement_format="pdf"`、`content_available=true`；JSON 不包含二进制。HTML / 纯文本题面分别返回 `statement_format="html"` / `"text"`，未采集时为 null。详情页的 **打开已采集 PDF** 使用本站 `GET /api/problems/<platform>/<problem_id>/statement.pdf`，成员使用 `/api/me/problems/<platform>/<problem_id>/statement.pdf`；权限与详情接口相同，支持字节范围读取，未保存 PDF 返回 404。PDF 中的图示、公式和样例按原文件保留，暂不拆分为结构化 `samples`，不计入样例组数。PDF 校验文件头、结束标记和 20 MiB 上限；不完整文件采集失败且保留旧内容。
 
@@ -327,6 +343,8 @@ page = response.json()  # rows、total、page、page_size
 | `GET /api/forum/categories` | 公开 | 论坛分类 |
 | `GET /api/forum/posts` | 公开 | 帖子分页；支持 `page`、`page_size`、`sort`、`q`、`category` |
 | `GET /api/forum/posts/<id>` | 公开 | 帖子详情和已发布评论 |
+| `POST /api/forum/images` | Web 登录 + CSRF | 上传帖子图片；`multipart/form-data` 字段 `image`，接受静态 PNG/JPEG/WebP，最大 5 MB |
+| `GET /api/forum/images/<id>` | 按引用状态授权 | 已发布帖子中的图片公开；其余仅上传者、引用内容的作者及已提交帖子的审核员可读 |
 | `POST /api/me/avatar` | Web 登录 + CSRF | 上传当前成员头像；`multipart/form-data` 字段 `avatar`，接受 PNG/JPEG/WebP，最大 2 MB、最长边 4096 像素 |
 | `DELETE /api/me/avatar` | Web 登录 + CSRF | 移除当前头像并恢复默认头像 |
 | `POST /api/forum/posts` | Web 登录 + CSRF | 创建帖子；正文和标题通过审核后公开 |
@@ -346,6 +364,37 @@ page = response.json()  # rows、total、page、page_size
 `GET /api/me/profile` 的 `user` 对象包含 `avatar_url`；论坛帖子列表和详情中的作者以及详情评论也包含头像地址。Web 端会在上传前自动缩放并压缩常见图片格式；直接调用 API 的客户端应自行控制文件大小。头像图片保存在服务端数据目录，并通过 `/uploads/avatars/<随机文件名>` 提供；未设置头像的前端使用 `public/assets/default-avatar.png`。
 
 帖子正文按 Markdown 源文保存在数据库中，Web 端渲染前会清理 HTML。草稿属于登录成员本人，不能通过公开论坛 API 查看；保存草稿不会进入待审核队列，调用提交接口后才会转换成待审核帖子。
+
+### 回复通知与投稿进度
+
+登录成员可通过页头“通知”进入 `/notifications.html`。未读数在页面可见时每 30 秒更新，切回页面或修改已读状态时也会刷新。通知保存在数据库中，退出或刷新不会丢失。评论通知发送给话题作者；回复还会通知被回复评论的作者，同一条评论对同一收件人仅通知一次，不发送评论者给自己的通知。审核通过或退回会通知投稿人，管理员退回时须填写原因。
+
+| 接口 | 权限 | 行为 |
+| --- | --- | --- |
+| `GET /api/me/notifications/count` | 成员登录 | 返回本人 `unread_count` |
+| `GET /api/me/notifications` | 成员登录 | 返回 `rows/total/page/page_size/unread_count/latest_id`；支持 `unread=1`、`page`、`page_size`（默认 20、上限 50） |
+| `POST /api/me/notifications/<id>/read` | 成员登录 + CSRF | 将本人的通知标为已读，可重复调用；他人通知返回 404 |
+| `POST /api/me/notifications/read-all` | 成员登录 + CSRF | JSON 传列表返回的整数 `through_id: latest_id`，只标记该快照及之前的本人通知，保留此后到达的新通知 |
+| `GET /api/forum/mine/posts/<id>` | 成员登录 | 仅作者可读的投稿原文、封面、状态、提交时间、`reviewed_at` 与 `review_reason`；他人（含管理员）访问此个人接口返回 404 |
+| `POST /api/forum/moderation/posts/<id>` | 管理员 + CSRF | `decision` 为 `publish/reject`；退回时 `reason` 必须为非空字符串，最多 1000 字符；仅处理待审核帖子 |
+
+通知不返回评论正文或账号 QQ，`target_url` 由服务器按当前可见性生成；原话题不可访问时不提供跳转，已隐藏或移除的回复不再提供对应回复链接。回复链接带 `comment_id` 与 `#comment-<id>`；公开详情支持该参数，在默认前 500 条评论之外最多补充目标评论及其父评论，仍校验同一话题和公开状态。已读不会授予原内容访问权限。
+
+发帖成功后进入 `/my-post.html?id=<id>` 查看实际状态（等待审核 / 审核通过 / 审核未通过 / 已删除），个人中心“我的话题”也提供入口和退回原因；未公开原文仅作者可在个人接口查看，公开帖子接口不放宽。审核通知和状态修改、回复通知和评论写入分别处于同一事务，失败整体回滚。
+
+数据库初始化增量添加 `forum_posts.review_reason` 和 `forum_notifications`，可重复执行；保留原帖子和已有图片，不补发历史通知。旧的退回记录未保存原因时，界面明确提示此前未记录原因。回退代码不会删除新增表和字段；恢复生产数据仍应使用发布前的数据库及上传目录备份。
+
+### 帖子封面与正文图片
+
+上传接口返回 `201` 和 `{id, url, width, height, size_bytes}`。在草稿创建、保存或直接发帖的 JSON 中传入 `cover_image_id` 设置封面，传 `null` 移除封面；正文使用 `![说明](/api/forum/images/<id>)` 插入图片。列表、详情及审核记录返回可空的 `cover_url`，草稿详情同时返回 `cover_image_id`。旧客户端不传封面字段时按无封面保存。
+
+Web 编辑器支持选图、粘贴和拖入，接受最大 20 MB 的原图，上传前自动缩小至最长边 2560 像素并压缩；直接调用上传 API 时文件必须小于等于 5 MB，最长边不超过 10000 像素且不超过 2000 万像素。服务器实际解码并重编码为 WebP，移除原始文件名与 EXIF 元数据，不接受 SVG 或动图。每篇帖子最多引用 30 张图片，每个账号最多存储 1000 张、合计 200 MB。
+
+图片引用与草稿或帖子在同一事务中保存。其他成员的私有图片不能被引用；已公开图片可被其他帖子复用，已有合法引用在原帖删除后仍可用于本人草稿。未提交草稿中的图片不会向管理员开放；提交审核后审核员可查看，发布后访客可查看。图片不使用公开缓存，帖子移除后仅在仍有其他已发布引用时继续公开。移除封面或删除草稿会解除对应引用；删除帖子通过状态隐藏内容及图片。上传文件暂时保留并计入账号限额，当前不自动回收。
+
+删除成员时，图片上传记录的归属自动置空，不再阻塞原有的成员删除流程；其他帖子和草稿的图片引用及访问规则继续生效。没有剩余引用的私有图片仍不可访问，使用相同 QQ 重新创建账号也不会获得旧图片的所有权。已有图片表会在启动时自动迁移，保留图片元数据及引用。
+
+元数据和引用存入 SQLite 的 `forum_images` / `forum_image_links`，文件保存在 `ACM_DATABASE_PATH` 所在目录的 `uploads/forum/`。备份或迁移时须同时保留数据库和上传目录。反向代理须允许至少 6 MB 的请求体（如 Nginx 的 `client_max_body_size 6m`），以容纳 5 MB 图片和 multipart 字段。Markdown 仅展示本站上传接口生成的图片，外链或 data URL 图片会显示替代文字。
 
 ## CF 练习赛选题管理员接口
 
@@ -444,3 +493,16 @@ else:
 | `503` | 服务或必要配置不可用；稍后重试或联系服务维护者 |
 
 建议为所有请求设置超时，对 `429` 和临时 `5xx` 使用有上限的退避重试；不要对非幂等写操作盲目重试，以免重复创建数据。
+
+## Wiki 知识手册与共享 Markdown
+
+Wiki 使用 `/api/wiki/*` 公开读取当前发布内容，admin/root 使用 `/api/admin/wiki/*` 维护分类、文章和修订；维护写请求沿用 Cookie 与 CSRF。读者不需要绑定 OJ。分类、文章源文、发布指针与历史独立持久化，草稿不会改变公开正文和检索结果。
+
+- `GET /api/wiki/navigation`、`/categories/<id>`、`/pages?category_id=...`、`/search?q=...`：目录与分页检索；默认 20、上限 50。
+- `GET /api/wiki/pages/<slug>`、`/revisions`、`/revisions/<id>`：当前正文与可公开历史。
+- `GET /api/wiki/pages/<slug>/markdown`：公开源文下载；`revision_id` 选择公开历史。
+- `POST /api/markdown/assets`：multipart `file/document_type/document_id`；Wiki 类型仅管理员，论坛草稿仅本人；PNG/JPEG/WebP 实际解码，2MB/4096px。
+- `GET /api/markdown/assets/<id>`：按发布引用与文档归属鉴权，私有资源匿名返回 404。
+- 论坛公开话题和本人草稿的 `/markdown` 下载调用同一源文导出逻辑。
+
+文章修订写入携带 `version/base_revision_id`；分类写入携带目录版本；409 必须保留输入并核对最新状态。发布和删除携带 `idempotency_key`。所有维护接口和源文下载不进入公共缓存；公开 JSON 支持 ETag（弱标签、多标签与 `*`）。公开目录、分类、文章列表和搜索使用应用级有界字节缓存及数据库版本校验，返回 `Cache-Control: public, max-age=0, must-revalidate` 和 `Server-Timing`；正文及公开历史本轮不缓存响应体。可通过 `ACM_WIKI_CACHE_ENABLED=false` 关闭，数据库恢复后必须重启或清空所有 worker 的缓存。完整请求表、限制、删除预览、恢复与持久化配置见 [Wiki 实现与运维说明](wiki.md)。

@@ -2,6 +2,8 @@
 /feat/data/
 /feat/web/node_modules/
 /feat/web/dist/
+/feat/web/playwright-report/
+/feat/web/test-results/
 /feat/.pnpm-store/
 /feat/web/.pnpm-store/
 __pycache__/

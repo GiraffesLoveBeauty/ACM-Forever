@@ -9,10 +9,12 @@ import { adminFilters } from '../src/lib/admin.js';
 import { memberFilters, problemReturn } from '../src/lib/member-problems.js';
 import { cleanupCompiled, find, loadSfc, mount, settle, textOf } from './helpers/vue-harness.mjs';
 const Home = (await import(await loadSfc('src/views/Home.vue'))).default;
+const Header = (await import(await loadSfc('src/components/Header.vue'))).default;
 const Problems = (await import(await loadSfc('src/views/MemberProblems.vue'))).default;
 const Problem = (await import(await loadSfc('src/views/Problem.vue'))).default;
 const Bindings = (await import(await loadSfc('src/components/OjBindings.vue'))).default;
 const View = { render: () => h(RouterView) };
+const PersonalView = { render: () => h('div', [h(Header), h(RouterView)]) };
 const keys = [
   'window',
   'document',
@@ -138,10 +140,13 @@ test('member filters and return sources exclude owner/admin state and external U
   assert.equal(normalized.scope, 'solved');
   assert(!('owner_qq_id' in normalized));
   assert.equal(memberFilters({ page: ['2'], scope: 'unsafe' }).page, 2);
+  for (const platform of [undefined, '', 'unknown'])
+    assert.equal(memberFilters({ platform }).platform, 'codeforces');
+  assert.equal(memberFilters({ platform: 'atcoder' }).platform, 'atcoder');
   assert.equal(problemReturn('/home.html'), '/home.html');
   assert.equal(
     problemReturn('/problem-bank.html?scope=solved&page=3&qq_id=99999999'),
-    '/problem-bank.html?scope=solved&page=3',
+    '/problem-bank.html?scope=solved&platform=codeforces&page=3',
   );
   assert.equal(
     problemReturn(
@@ -360,6 +365,48 @@ test('direct authentication recovery opens without starting session initializati
 });
 
 for (const role of ['member', 'admin', 'root']) {
+  test(`${role} personal-center catalog stays in the member flow under the actual guard`, async () => {
+    setAuth({ authenticated: true, role, qq_id: '12345678', csrf_token: 'test-only' }, true);
+    mounted = await mount(PersonalView, routes, '/home.html', {
+      openTheme() {},
+      toggleTheme() {},
+      setDesignTemplate() {},
+    });
+    const catalog = find(mounted.root, (node) => node.type === 'a' && textOf(node) === '题库')[0];
+    const navigation = find(
+      mounted.root,
+      (node) => node.type === 'a' && textOf(node) === '▦ 题库',
+    )[0];
+    assert(navigation, 'global navigation exposes the independent problem bank');
+    assert.equal(navigation.props.href, catalog.props.href);
+    const request = globalThis.fetch;
+    globalThis.fetch = (url, options) =>
+      url === '/api/auth/me'
+        ? Promise.resolve(response({ authenticated: true, role, qq_id: '12345678' }))
+        : request(url, options);
+    await loadActualGuard();
+    await realRouter.push(catalog.props.href);
+    assert.equal(realRouter.currentRoute.value.fullPath, '/my-problems.html');
+    await click(catalog);
+    assert.equal(mounted.router.currentRoute.value.fullPath, '/my-problems.html');
+    assert(calls.some(({ url }) => url.startsWith('/api/me/problems?')));
+    const list = calls.find(({ url }) => url.startsWith('/api/me/problems?'));
+    assert.equal(new URL(list.url, 'https://acm.test').searchParams.get('platform'), 'codeforces');
+    assert(!textOf(mounted.root).includes('全部平台'));
+    assert(
+      !calls.some(({ url }) => url.startsWith('/api/admin/') || url.startsWith('/api/problems?')),
+    );
+    await click(links('查看题面')[0]);
+    const back = links('返回题库')[0];
+    await realRouter.push(back.props.href);
+    assert.equal(realRouter.currentRoute.value.fullPath, '/my-problems.html?platform=codeforces');
+    await click(back);
+    assert.equal(
+      mounted.router.currentRoute.value.fullPath,
+      '/my-problems.html?platform=codeforces',
+    );
+  });
+
   test(`${role} Home complete AC link stays in personal problems during filtering and statement round trips`, async () => {
     setAuth({ authenticated: true, role, qq_id: '12345678', csrf_token: 'test-only' }, true);
     mounted = await mount(View, routes, '/home.html');
@@ -371,17 +418,23 @@ for (const role of ['member', 'admin', 'root']) {
     await click(buttons('下一页')[0]);
     assert.equal(
       mounted.router.currentRoute.value.fullPath,
-      '/my-problems.html?scope=solved&page=2',
+      '/my-problems.html?scope=solved&platform=codeforces&page=2',
     );
     await click(links('查看题面')[0]);
-    assert.equal(links('返回题库')[0].props.href, '/my-problems.html?scope=solved&page=2');
+    assert.equal(
+      links('返回题库')[0].props.href,
+      '/my-problems.html?scope=solved&platform=codeforces&page=2',
+    );
     await click(links('返回题库')[0]);
     assert.equal(
       mounted.router.currentRoute.value.fullPath,
-      '/my-problems.html?scope=solved&page=2',
+      '/my-problems.html?scope=solved&platform=codeforces&page=2',
     );
     await click(buttons('清除筛选')[0]);
-    assert.equal(mounted.router.currentRoute.value.fullPath, '/my-problems.html?scope=solved');
+    assert.equal(
+      mounted.router.currentRoute.value.fullPath,
+      '/my-problems.html?scope=solved&platform=codeforces',
+    );
     await click(buttons('收藏')[0]);
     assert(
       calls.some(

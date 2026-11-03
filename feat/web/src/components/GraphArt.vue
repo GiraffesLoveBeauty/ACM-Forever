@@ -1,7 +1,11 @@
 <script setup>
 import { ref, computed, inject } from 'vue';
+import AngelCityArt from './AngelCityArt.vue';
+import MinecraftArt from './MinecraftArt.vue';
 const getDesignTemplate = inject('getDesignTemplate', () => 'original');
 const isPhase = computed(() => getDesignTemplate() === 'phase');
+const isAngelCity = computed(() => getDesignTemplate() === 'angel-city');
+const isMinecraft = computed(() => getDesignTemplate() === 'minecraft');
 const points = [
   { id: 's', x: 50, y: 151 },
   { id: 'u', x: 114, y: 83 },
@@ -72,6 +76,8 @@ const activeEdges = computed(
 </script>
 <template>
   <figure class="forum-algorithm-art" aria-label="空间算法图谱">
+    <AngelCityArt v-if="isAngelCity" />
+    <MinecraftArt v-if="isMinecraft" />
     <template v-if="isPhase">
       <div class="phase-tracks phase-tracks-in" aria-hidden="true"></div>
       <div class="phase-tracks phase-tracks-out" aria-hidden="true"></div>

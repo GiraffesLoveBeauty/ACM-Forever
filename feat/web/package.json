@@ -11,11 +11,13 @@
     "dev": "vite --configLoader native --host 127.0.0.1",
     "build": "vite build --configLoader native",
     "test": "node --test tests/*.test.mjs",
+    "test:e2e": "playwright test",
     "preview": "vite preview --configLoader native --host 127.0.0.1",
     "format": "prettier --write src tests vite.config.js index.html package.json"
   },
   "dependencies": {
     "dompurify": "^3.2.7",
+    "highlight.js": "11.11.1",
     "katex": "0.19.0",
     "marked": "^16.4.0",
     "pdfjs-dist": "6.4.299",
@@ -23,6 +25,7 @@
     "vue-router": "^4.5.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.56.1",
     "@vitejs/plugin-vue": "^6.0.1",
     "jsdom": "27.4.0",
     "prettier": "3.6.2",

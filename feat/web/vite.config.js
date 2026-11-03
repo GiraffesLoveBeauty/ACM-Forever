@@ -1,7 +1,14 @@
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { resolve, relative, sep, extname } from 'node:path';
-import { cpSync, mkdirSync, createReadStream, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  mkdirSync,
+  createReadStream,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 
 // Shared public assets keep their historical URLs; legacy HTML pages are not part of the Vue build.
 const media = ['icpc-logo.png', 'default-avatar.png', 'hero-halftone.svg'];
@@ -21,13 +28,21 @@ export default defineConfig({
           const pathname = req.url?.split('?')[0] || '';
           if (!pathname.startsWith('/assets/')) return next();
           const pdfAsset = pathname.startsWith('/assets/pdfjs/');
-          const assetRoot = pdfAsset ? resolve('node_modules/pdfjs-dist') : resolve('../api/acm_api/public');
-          const assetPath = resolve(assetRoot, pdfAsset ? pathname.slice('/assets/pdfjs/'.length) : pathname.slice(1));
+          const assetRoot = pdfAsset
+            ? resolve('node_modules/pdfjs-dist')
+            : resolve('../api/acm_api/public');
+          const assetPath = resolve(
+            assetRoot,
+            pdfAsset ? pathname.slice('/assets/pdfjs/'.length) : pathname.slice(1),
+          );
           const assetRelative = relative(assetRoot, assetPath);
           if (
-            !assetRelative || assetRelative.startsWith(`..${sep}`) || assetRelative === '..' ||
+            !assetRelative ||
+            assetRelative.startsWith(`..${sep}`) ||
+            assetRelative === '..' ||
             !existsSync(assetPath)
-          ) return next();
+          )
+            return next();
           const contentTypes = {
             '.css': 'text/css; charset=utf-8',
             '.js': 'text/javascript; charset=utf-8',
@@ -37,7 +52,10 @@ export default defineConfig({
             '.woff': 'font/woff',
             '.woff2': 'font/woff2',
           };
-          res.setHeader('Content-Type', contentTypes[extname(assetPath)] || 'application/octet-stream');
+          res.setHeader(
+            'Content-Type',
+            contentTypes[extname(assetPath)] || 'application/octet-stream',
+          );
           createReadStream(assetPath).pipe(res);
         });
       },
@@ -45,8 +63,16 @@ export default defineConfig({
         mkdirSync('dist/assets', { recursive: true });
         for (const file of media)
           cpSync(resolve('../api/acm_api/public/assets', file), resolve('dist/assets', file));
+        // Keep the locally bundled pixel font's copyright and component notices in releases.
+        const fontNotices = 'src/assets/fonts/fusion-pixel';
+        for (const file of ['OFL.txt', 'LICENSES', 'README.md'])
+          cpSync(resolve(fontNotices, file), resolve('dist/assets/fonts/fusion-pixel', file), {
+            recursive: true,
+          });
         for (const folder of ['cmaps', 'standard_fonts'])
-          cpSync(resolve('node_modules/pdfjs-dist', folder), resolve('dist/assets/pdfjs', folder), { recursive: true });
+          cpSync(resolve('node_modules/pdfjs-dist', folder), resolve('dist/assets/pdfjs', folder), {
+            recursive: true,
+          });
         const html = readFileSync('dist/index.html', 'utf8');
         writeFileSync(
           'dist/retired.html',

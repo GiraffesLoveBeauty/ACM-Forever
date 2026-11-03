@@ -264,15 +264,35 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
     return placeholder;
   });
   const html = window.marked.parse(markdownSafeText, { gfm: true, breaks: true });
-  const safeHtml = window.DOMPurify.sanitize(html, {
+  let safeHtml = window.DOMPurify.sanitize(html, {
     ALLOWED_TAGS: [
-      "a", "blockquote", "br", "code", "del", "em", "h1", "h2", "h3", "h4", "h5", "h6",
+      "img", "a", "blockquote", "br", "code", "del", "em", "h1", "h2", "h3", "h4", "h5", "h6",
       "hr", "li", "ol", "p", "pre", "strong", "sub", "sup", "table", "tbody", "td", "th",
       "thead", "tr", "ul",
     ],
-    ALLOWED_ATTR: ["href", "title", "class", "start"],
-    FORBID_TAGS: ["style", "iframe", "img", "video", "audio", "form"],
+    ALLOWED_ATTR: ["href", "title", "class", "start", "src", "alt"],
+    FORBID_TAGS: ["style", "iframe", "video", "audio", "form"],
   });
+  const imageContainer = document.createElement("template");
+  imageContainer.innerHTML = safeHtml;
+  for (const image of imageContainer.content.querySelectorAll("img")) {
+    const source = image.getAttribute("src") || "";
+    const managedPath = /^\/api\/(?:forum\/images|markdown\/assets)\/[a-f0-9]{32}$/;
+    let allowed = managedPath.test(source);
+    if (!allowed) {
+      try {
+        const url = new URL(source, window.location.origin);
+        allowed = url.origin === window.location.origin && !url.search && !url.hash && managedPath.test(url.pathname);
+      } catch { /* Invalid or external URLs are rendered as text. */ }
+    }
+    if (!allowed) {
+      image.replaceWith(document.createTextNode(`[图片待上传：${image.alt || "未关联资源"}]`));
+      continue;
+    }
+    image.setAttribute("loading", "lazy");
+    image.setAttribute("decoding", "async");
+  }
+  safeHtml = imageContainer.innerHTML;
   const escapeHtml = value => value.replace(/[&<>"']/g, character => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   })[character]);
@@ -324,8 +344,8 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
   container.innerHTML = withFormulas;
   const placeholderPattern = new RegExp(`${placeholderPrefix}(\\d+)LITERAL`, "g");
   const restoreLiteralAttribute = value => value.replace(placeholderPattern, (placeholder, index) => escapedLiterals[Number(index)]?.text ?? placeholder);
-  container.querySelectorAll("[href], [title]").forEach(element => {
-    ["href", "title"].forEach(attribute => {
+  container.querySelectorAll("[href], [title], [alt]").forEach(element => {
+    ["href", "title", "alt"].forEach(attribute => {
       if (element.hasAttribute(attribute)) element.setAttribute(attribute, restoreLiteralAttribute(element.getAttribute(attribute)));
     });
   });
@@ -363,6 +383,15 @@ window.renderForumMarkdown = function renderForumMarkdown(source) {
       fragment.appendChild(document.createTextNode(node.nodeValue.slice(previousIndex)));
     }
     node.parentNode.replaceChild(fragment, node);
+  });
+  container.querySelectorAll("img").forEach(image => {
+    let allowed = false;
+    try {
+      const url = new URL(image.getAttribute("src"), location.origin);
+      allowed = url.origin === location.origin && !url.search && !url.hash && /^\/api\/markdown\/assets\/[a-f0-9]{32}$/.test(url.pathname);
+    } catch { /* An invalid URL is displayed as a missing resource. */ }
+    if (!allowed) image.replaceWith(document.createTextNode(`[图片待上传：${image.alt || "未关联资源"}]`));
+    else { image.loading = "lazy"; image.decoding = "async"; }
   });
   return container.innerHTML;
 };
