@@ -339,6 +339,42 @@ class LifecycleApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code, 409, await response.get_json())
             self.assertFalse(await self.sql('SELECT 1 FROM forum_drafts'))
 
+    async def test_post_edit_request_cannot_create_draft_after_actor_closes(self):
+        from feat.api.acm_api import forum_api as forum_module
+        async with self.app.test_app():
+            client = self.app.test_client()
+            headers = await self.account_login(client, role='member')
+            response = await client.post('/api/forum/posts', headers=headers, json={'title': 'Original post', 'body': 'Original content', 'category_id': 1})
+            post_id = (await response.get_json())['id']
+            original = forum_module.get_db
+            async def close_before_write():
+                await self.closed_fixture()
+                return await original()
+            with patch.object(forum_module, 'get_db', close_before_write):
+                response = await client.post(f'/api/forum/mine/posts/{post_id}/edit', headers=headers, json={})
+            self.assertEqual(response.status_code, 409, await response.get_json())
+            self.assertFalse(await self.sql('SELECT 1 FROM forum_drafts'))
+
+    async def test_post_resubmission_cannot_write_history_after_actor_closes(self):
+        from feat.api.acm_api import forum_api as forum_module
+        async with self.app.test_app():
+            client = self.app.test_client()
+            headers = await self.account_login(client, role='member')
+            response = await client.post('/api/forum/posts', headers=headers, json={'title': 'Original post', 'body': 'Original content', 'category_id': 1})
+            post_id = (await response.get_json())['id']
+            response = await client.post(f'/api/forum/mine/posts/{post_id}/edit', headers=headers, json={})
+            draft_id = (await response.get_json())['id']
+            draft = await (await client.get(f'/api/forum/drafts/{draft_id}')).get_json()
+            original = forum_module.get_db
+            async def close_before_write():
+                await self.closed_fixture()
+                return await original()
+            with patch.object(forum_module, 'get_db', close_before_write):
+                response = await client.post(f'/api/forum/drafts/{draft_id}/submit', headers=headers, json={'edit_version': draft['edit_version']})
+            self.assertEqual(response.status_code, 409, await response.get_json())
+            self.assertFalse(await self.sql('SELECT 1 FROM forum_post_history'))
+            self.assertEqual((await self.sql('SELECT content_version FROM forum_posts'))[0][0], 1)
+
     async def test_binding_response_cannot_recreate_state_after_closure(self):
         async with self.app.test_app():
             client = self.app.test_client()
