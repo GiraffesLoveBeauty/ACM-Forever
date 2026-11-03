@@ -299,7 +299,7 @@ API 回归新增 `tests/test_member_training.py`，共 20 项，覆盖三种 Web
 
 ## 账号注销（Issue #83）
 
-策略 `closure-v1` 已由需求方确认。普通成员在个人中心的“账号安全”进入 `/account-closure.html`，阅读影响清单，输入当前密码、勾选并填写“注销账号”。管理员和 root 必须先由另一有效 root 完成交接并降为 member，legacy 管理身份不支持注销。
+策略 `closure-v2` 已由需求方确认，允许注销后的 QQ 创建全新账号。普通成员在个人中心的“账号安全”进入 `/account-closure.html`，阅读影响清单，输入当前密码、勾选并填写“注销账号”。管理员和 root 必须先由另一有效 root 完成交接并降为 member，legacy 管理身份不支持注销。
 
 `ACM_ACCOUNT_CLOSURE_ENABLED` **默认 false**；部署前完成全端联调、旧写入进程排空、备份与恢复验证后，才由运维设置为 `true`。关闭开关只停止接受新预览/注销；已有回执、清理和所有 closed 防护继续运行。`/api/auth/me` 的 `account_closure_enabled` 控制前端入口。
 
@@ -307,8 +307,8 @@ API 回归新增 `tests/test_member_training.py`，共 20 项，覆盖三种 Web
 
 审计保留 180 天，回执秘密有效 24 小时，仅哈希入库。`GET /api/admin/account-closures/audit` 仅有效 Web root 可读，返回脱敏主体；密码、Cookie、CSRF、明文回执及密码指纹不入审计。备份最长保留 30 天属于部署方运维措施，应用不会自行删除任意外部备份目录。
 
-新增表为 `account_closure_requests`、`account_lifecycle_audit`、`account_sensitive_action_limits`、`account_closure_cleanup_tasks` 和 `account_closure_resource_revocations`；CF job 增加隐私版本，成员分项增加 epoch（旧分项 0，不获写回豁免）。迁移可重复，默认不关闭任何账号。最小墓碑禁止普通开户/UPSERT/启用/重置/Bot 删除重新激活。
+新增表为 `account_closure_requests`、`account_lifecycle_audit`、`account_sensitive_action_limits`、`account_closure_cleanup_tasks`、`account_closure_resource_revocations`、`account_registrations` 和 `account_closed_content`；CF job 增加隐私版本，成员分项增加 epoch（旧分项 0，不获写回豁免）。迁移可重复，默认不关闭任何账号。管理员可在单个创建账号表单填写原 QQ、新昵称和新密码，建立更高 epoch 的全新代际；旧数据、公共作者身份和权限不继承。最小墓碑仍禁止 UPSERT/普通启用/重置/Bot 删除恢复旧代际，批量发放不隐式重开。新建记录、用户与凭据在同一事务写入；历史 Wiki author 不变，由内容墓碑保持匿名。
 
-所有新增写入口在最终事务调用 `require_active_user`，Web 操作者还须 `require_web_actor`。后台任务捕获 epoch 后在每次最终写回复核，不能仅依赖本进程取消任务。最后 root 保护按真实可用凭据判断；legacy 管理入口不能作为继任 root。
+普通业务写入口在最终事务调用 `require_active_user`；同 QQ 新建由 `account_registration_service.py` 单独校验 closed 快照与新代际记录，Web 操作者还须 `require_web_actor`。单人/全员后台任务在排队时捕获 epoch 和绑定快照，在每次最终写回复核，不能仅依赖本进程取消任务。最后 root 保护按真实可用凭据判断；legacy 管理入口不能作为继任 root。
 
 恢复旧备份前必须保留并重放最新墓碑、凭据版本和资源撤销清单，且使旧 Cookie 失效。禁止把旧备份直接覆盖后开放登录。运行细节、测试及尚未完成的实际客户端联调见 [issue-83-account-closure.md（策略、实现与发布验收）](../../docs/issue-83-account-closure.md)。正式回归为 `tests/test_account_lifecycle.py`、`tests/test_account_closure.py`、前端与浏览器 `account-closure` 用例。

@@ -510,7 +510,7 @@ Wiki 使用 `/api/wiki/*` 公开读取当前发布内容，admin/root 使用 `/a
 
 ## Issue #83：账号注销与生命周期
 
-策略 `closure-v1` 已确认，生产新注销开关 `ACM_ACCOUNT_CLOSURE_ENABLED` 默认关闭。`GET /api/auth/me` 返回 `account_closure_enabled`；在所有实际客户端、旧写入节点和运维措施验收前保持关闭。详细处理清单见 [issue-83-account-closure.md（账号注销与发布验收）](issue-83-account-closure.md)。
+策略 `closure-v2` 已按最新要求确认（允许同 QQ 新建账号），生产新注销开关 `ACM_ACCOUNT_CLOSURE_ENABLED` 默认关闭。`GET /api/auth/me` 返回 `account_closure_enabled`；在所有实际客户端、旧写入节点和运维措施验收前保持关闭。详细处理清单见 [issue-83-account-closure.md（账号注销与发布验收）](issue-83-account-closure.md)。
 
 | 接口 | 身份与参数 | 结果 |
 | --- | --- | --- |
@@ -522,17 +522,17 @@ Wiki 使用 `/api/wiki/*` 公开读取当前发布内容，admin/root 使用 `/a
 注销 POST JSON：
 
 ```json
-{"current_password":"原样传入，不 trim","confirm_text":"注销账号","policy_version":"closure-v1","expected_account_epoch":1}
+{"current_password":"原样传入，不 trim","confirm_text":"注销账号","policy_version":"closure-v2","expected_account_epoch":1}
 ```
 
 请求只允许上述四个字段；`qq_id/owner_qq_id/target_qq_id` 等目标字段拒绝。密码最长 256 字符，不持久化，也不参与幂等指纹。预览秘密本身不能授权关闭。提交前再次在事务内核对凭据、hash、epoch、角色、策略与预览版本；失败回滚。
 
-已提交请求先走秘密认证的只读回放分支，允许旧登录失效后重试，并且不会清除另一个新账号的会话。不同非密码意图返回 `IDEMPOTENCY_CONFLICT`。未知、错误秘密及过期回执统一 404；回执 24 小时后失效。只关闭新请求开关不会禁用已有结果查询。网络中断或 5xx 应显示“结果待确认”，保留回执查询，不能以 `/auth/me` 未登录推断成功。
+已提交请求先走秘密认证的只读回放分支，允许旧登录失效后重试，并且不会清除另一个新账号或同 QQ 新代际的会话；已提交的 v1 回执保持原策略版本并可只读回放。不同非密码意图返回 `IDEMPOTENCY_CONFLICT`。未知、错误秘密及过期回执统一 404；回执 24 小时后失效。只关闭新请求开关不会禁用已有结果查询。网络中断或 5xx 应显示“结果待确认”，保留回执查询，不能以 `/auth/me` 未登录推断成功。
 
 | 场景 | HTTP / 结果码 | 调用方处理 |
 | --- | --- | --- |
 | 开关未启用 | 404 `FEATURE_DISABLED` | 隐藏新注销入口 |
-| 账号 closed / 旧 epoch | 409 `ACCOUNT_CLOSED` / `ACCOUNT_CHANGED` | 停止写入；不通过开户或重置绕过 |
+| 账号 closed / 旧 epoch | 409 `ACCOUNT_CLOSED` / `ACCOUNT_CHANGED` | 停止旧代际写入；新建账号须走管理员单个创建入口 |
 | 密码错误 / CSRF 不符 | 403 `REAUTH_FAILED` / `CSRF_INVALID` | 清密码输入，重新核对 |
 | 角色交接 / 最后 root | 409 `ROLE_HANDOVER_REQUIRED` / `LAST_ROOT_PROTECTED` | 由另一有效 root 完成交接并降为 member |
 | 强制改密尚未完成 | 409 `MUST_CHANGE_PASSWORD`（审计读取为 428） | 先完成改密 |
@@ -543,6 +543,12 @@ Wiki 使用 `/api/wiki/*` 公开读取当前发布内容，admin/root 使用 `/a
 
 限频窗口 15 分钟：预览每账号 10/IP 60；重新认证每账号 5/IP 20（验证前预留预算，成功尝试也计入）；提交入口每 IP 60；回执每 IP 120。保存 HMAC，不存额外明文 IP。仅信任配置的代理来源。
 
-`GET /api/admin/web-accounts` 中 closed 行保留状态和 closed_at，QQ 脱敏，`qq_id=null`，`display_qq_id` 和不可逆 HMAC `account_key` 用于显示/列表键；所有恢复操作禁用。公共帖子/评论增加 `author_closed`，作者显示“已注销用户”、头像 null；Wiki 历史同样派生展示，数据库不可变 author 保留受限引用。
+`GET /api/admin/web-accounts` 中 closed 行保留状态和 closed_at，QQ 脱敏，`qq_id=null`，`display_qq_id` 和不可逆 HMAC `account_key` 用于显示/列表键；原账号的启用与重置操作禁用；同 QQ 可通过单个创建账号建立全新代际。公共帖子/评论增加 `author_closed`，作者显示“已注销用户”、头像 null；Wiki 历史同样派生展示，数据库不可变 author 保留受限引用。
 
 CF 持久 job 成员捕获 epoch，closed 分项不能被晚到成功覆盖；旧快照缺 epoch 必须重排。JSON 任务快照去标识化，候选结果需重新核验，同批其他成员继续执行。所有 Web/受信 Bot 写入仍执行权限、CSRF/服务令牌及最终事务生命周期校验。
+
+同 QQ 新建账号仍使用 `POST /api/admin/web-accounts`，原有管理员权限、角色分配范围与 CSRF 不变；`qq_id`、新 `name` 和 `initial_password` 必填。成功返回 201、`new_generation=true` 和 `must_change_password=true`；未注销的现有 Web 账号返回 409，不覆盖凭据。状态在创建前后变化则返回 409 `ACCOUNT_CHANGED`，事务失败整体回滚。批量发放、普通启用、密码重置、机器人建档及导入不能替代此入口。
+
+预览的 `retention_notice` 返回 `recovery_supported=false`、`reopen_supported=true` 和 `qq_reuse_supported=true`；后两项表示允许同 QQ 创建全新账号，不能恢复旧资料。
+
+新建时 account_epoch 与凭据版本继续递增，OJ 绑定、训练/提交记录、草稿和权限不继承；保留的帖子、评论及 Wiki 仍显示“已注销用户”，新账号不能在“我的帖子”中看到或取得旧内容作者权限，不接收发给旧作者的回复提醒。`GET /api/auth/me` 增加 `account_epoch`，用于前端清理旧代际缓存。回执只读回放同时比较 QQ 和 epoch，不会清掉新会话；旧任务也不能因同 QQ 再次 active 而恢复写回。
