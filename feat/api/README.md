@@ -84,6 +84,7 @@ python3 -m api.sync_contests --database /home/WYJ/acm-forever-data/acm_forever.d
 | 变量 | 用途 |
 | --- | --- |
 | `ACM_API_HOST` / `ACM_API_PORT` | 监听地址和端口，默认 `127.0.0.1:8088`，沿用原 WebUI 端口 |
+| `ACM_ACCOUNT_IMPORT_ENABLED` | Excel 批量开户开关，默认 `false`；启用前完成迁移及联调。关闭后仍可查已有结果 |
 | `ACM_DATABASE_PATH` | SQLite 数据库文件路径，默认 `./data/acm_forever.db` |
 | `ACM_MARKDOWN_UPLOAD_DIR` | Wiki/论坛持久化图片目录，默认数据库同级 `uploads/markdown`；必须在代码同步目录外 |
 | `ACM_PUBLIC_BASE_URL` | Markdown 导出图片的公开站点根地址，例如 `https://实际域名`，不带路径 |
@@ -295,3 +296,16 @@ API 回归新增 `tests/test_member_training.py`，共 20 项，覆盖三种 Web
 数据库初始化增量创建 `acm_api/wiki.sql` 中的表、索引与约束，可重复执行，不生成业务示例。图片经 Pillow 实际解码；服务总请求上限为 6 MB，Wiki/共享图片接口仍单独限制单张 2 MB；论坛图片接口限制单张 5 MB，需核对反向代理配置。`ACM_MARKDOWN_UPLOAD_DIR` 与数据库一起备份，不能使用部署制品目录存放资源；外部站点下载需要配置 `ACM_PUBLIC_BASE_URL`。
 
 接口合约、并发控制、资源清理、升级及代码/数据库/资源恢复步骤见 [Wiki 文档](../../docs/wiki.md)。`tests/test_wiki.py` 会随现有 unittest discover 自动运行。
+
+
+## Excel 批量开户
+
+统一管理中心“成员账号 → Excel 导入”，支持模板下载、受控解析、逐行预检、分段开户、一次性初始凭据和无密码结果报告。只对具名 Web admin/root 开放。设置 `ACM_ACCOUNT_IMPORT_ENABLED=true` 启用，默认关闭；表格仅创建普通成员，旧共享管理登录不支持此入口。
+
+安装 requirements 中锁定的 openpyxl/defusedxml。初始化新增批次、行、段、绑定来源四张表，可重复执行且保留既有账号、绑定和证据。解析使用可终止子进程，最大 5 MiB / 200 行、8 秒；PBKDF2 在最多 2 个线程的有界执行器运行，不持有写事务。批次确认窗口 30 分钟，确认后执行窗口 2 小时，每段 10 人；不自动向外部 OJ 发请求或触发同步。
+
+初始化增加 `schema_migrations` 迁移台账，`users_empty_nickname_v1` 只对历史空昵称执行一次回填：有 CF handle 时使用该值，否则使用 QQ。非空昵称（包括与 QQ 相同的昵称）均保留，后续 OJ 核验、改绑、解绑不参与昵称迁移判断。此台账须随数据库备份和恢复，不要手动清除以重复迁移；回退旧代码可能重新启用旧昵称回填逻辑，应使用匹配版本和数据库备份恢复。
+
+原始上传位于数据库目录下 `private/account-imports`，不使用上传文件名或公开静态目录；解析结束删除。启动、每小时及上传时执行有界清理，回收过期资料和遗留文件；到期批次读取也立即清理资料副本。初始密码不落盘、日志、数据库或普通报告，只有原始创建响应返回。保留与恢复细节见 [admin-account-import.md（操作与发布说明）](../../docs/admin-account-import.md)。
+
+#83 尚为独立 PR 时，当前 main 无注销列仍可运行。若存在其真实 `account_state/account_epoch`，导入自动阻断 closed，冻结代际，并安装同事务注销脱敏触发器。注销 QQ 的重新开户使用 #83 单个创建的显式新代际入口，Excel 不恢复旧身份。两个 PR 最终合并时需保留双方初始化和保护逻辑，发布前对最终构建再联调。

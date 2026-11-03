@@ -30,5 +30,7 @@
 - [web-performance.md（Web 性能采样与加载验收）](docs/web-performance.md)
 - [crawler-samples.md（采集命令、JSON 字段与 SQLite 入库）](docs/crawler-samples.md)
 - [issue-52-member-training.md（普通成员训练闭环实施与验收）](docs/issue-52-member-training.md)
+- [admin-account-import.md（Excel 批量开户操作说明）](docs/admin-account-import.md)
+- [issue-84-account-import.md（Excel 批量开户与 OJ 资料导入设计及实施记录）](docs/issue-84-account-import.md)
 
 - [wiki.md（Wiki 知识手册、共享 Markdown、接口与备份恢复）](docs/wiki.md)

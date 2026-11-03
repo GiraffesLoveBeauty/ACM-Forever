@@ -75,6 +75,7 @@ async def apply_binding(db, qq_id, platform, account, *, expected=None, actor=No
     if previous[0].casefold() != (account or "").casefold():
         await db.execute(f"UPDATE users SET {field}=? WHERE qq_id=?", (account or None, qq_id))
         await clear_platform_records(db, qq_id, canonical)
+        await db.execute("DELETE FROM binding_provenance WHERE qq_id=? AND platform=?", (qq_id, canonical))
     await db.execute("DELETE FROM account_bind_verifications WHERE qq_id=? AND platform IN (?,?)", (qq_id, canonical, "cf" if canonical == "codeforces" else canonical))
     await audit(db, actor or qq_id, qq_id, canonical, "unbind" if not account else "replace" if previous[0] else "bind")
 
@@ -135,7 +136,11 @@ async def create_verification(db, qq_id, platform, data):
     await reserve(db, qq_id, platform, "verification")
     previous = await snapshot(db, qq_id, platform)
     if previous[0].casefold() == account.casefold():
-        raise BindingError("该账号已绑定，无需重复验证。", "already_bound")
+        # Imported identities still need the member's proof of ownership. Match
+        # both account and generation so stale provenance cannot authorize this.
+        imported = await row(db, "SELECT 1 FROM binding_provenance WHERE qq_id=? AND platform=? AND binding_version=? AND account_canonical=? AND source='admin_import' AND owner_verified_at IS NULL", (qq_id, platform, previous[1], account.casefold()))
+        if not imported:
+            raise BindingError("该账号已绑定，无需重复验证。", "already_bound")
     owner = await row(db, f"SELECT qq_id FROM users WHERE LOWER(TRIM({field}))=LOWER(?) AND qq_id<>?", (account, qq_id))
     if owner:
         raise BindingError("该 OJ 账号已绑定给其他成员。", "account_occupied")
@@ -180,8 +185,10 @@ async def confirm_verification(db, qq_id, platform, data):
     if expected[0]:
         await require_password(db, qq_id, data, expected[0])
     await apply_binding(db, qq_id, platform, pending["account"], expected=expected)
+    await record_provenance(db, qq_id, platform, "member_verified", actor=qq_id)
     await db.commit()
-    return {"success": True, "account": pending["account"], "message": "绑定成功。"}
+    same_account = expected[0].casefold() == pending["account"].casefold()
+    return {"success": True, "account": pending["account"], "message": "当前账号归属核验成功。" if same_account else "绑定成功。"}
 
 
 async def unbind(db, qq_id, platform, data):
@@ -218,7 +225,16 @@ async def bindings_summary(db, qq_id):
         status = "running" if live_sync else active["status"] if active and account else "success" if state and state["last_status"] in {"success", "backfill"} else "failed" if state and state["last_status"] not in {"never", "migrated"} else "never"
         message = {"never": "账号已绑定，尚无成功同步记录。" if account else "尚未绑定 OJ 账号。", "queued": "同步已排队。", "running": "正在同步，已有记录仍可查看。", "success": "同步成功。", "failed": "最近同步失败或任务已中断，可重试；有效历史数据保留。"}[status]
         result.append({"platform": platform, "label": LABELS[platform], "account": account, "binding_status": "pending" if pending else "bound" if account else "unbound", "self_service": platform == "codeforces", "sync_status": status, "last_success_at": state["last_success_at"] if state else 0, "message": message, "verification": {"account": pending["account"], "verification_id": pending["verification_id"], "code": pending["verification_code"], "expires_at": pending["expires_at"]} if pending else None})
+    for item in result:
+        provenance = await row(db, "SELECT source,owner_verified_at,existence_status FROM binding_provenance WHERE qq_id=? AND platform=? AND binding_version=? AND account_canonical=?", (qq_id, item["platform"], user[platform_spec(item["platform"])[2]], item["account"].casefold()))
+        item["provenance"] = dict(provenance) if provenance else None
     return result
+
+async def record_provenance(db, qq_id, platform, source, *, actor=None, batch_id=None, now=None):
+    platform, _, _ = platform_spec(platform)
+    account, version = await snapshot(db, qq_id, platform)
+    now = int(time.time()) if now is None else now
+    await db.execute("INSERT INTO binding_provenance(qq_id,platform,binding_version,account_canonical,source,actor_qq_id,import_batch_id,recorded_at,owner_verified_at,existence_status) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(qq_id,platform) DO UPDATE SET binding_version=excluded.binding_version,account_canonical=excluded.account_canonical,source=excluded.source,actor_qq_id=excluded.actor_qq_id,import_batch_id=excluded.import_batch_id,recorded_at=excluded.recorded_at,owner_verified_at=excluded.owner_verified_at,existence_status=excluded.existence_status", (qq_id, platform, version, account.casefold(), source, str(actor) if actor else None, batch_id, now, now if source == "member_verified" else None, "exists" if source == "member_verified" else "not_checked"))
 
 async def mark_dispatch_failure(db, qq_id, platform, expected):
     _, field, version = platform_spec(platform)

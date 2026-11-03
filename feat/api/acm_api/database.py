@@ -359,7 +359,17 @@ async def connect_db(db_path):
             "? FROM users WHERE " + field + " IS NOT NULL AND TRIM(" + field + ") <> ''",
             (platform, int(time.time())),
         )
-    await db.execute("UPDATE users SET name = cf_handle WHERE cf_handle IS NOT NULL AND TRIM(cf_handle) <> '' AND (name IS NULL OR TRIM(name) = '' OR name = qq_id)")
+    from .account_import_service import initialize_imports
+    await initialize_imports(db)
+    # Backfill genuinely empty legacy nicknames once. A nonempty QQ nickname is
+    # already a chosen value, independent of mutable OJ accounts or provenance.
+    await db.execute("CREATE TABLE IF NOT EXISTS schema_migrations(name TEXT PRIMARY KEY,applied_at INTEGER NOT NULL)")
+    await db.execute(
+        "UPDATE users SET name=COALESCE(NULLIF(TRIM(cf_handle),''),qq_id) "
+        "WHERE (name IS NULL OR TRIM(name)='') "
+        "AND NOT EXISTS(SELECT 1 FROM schema_migrations WHERE name='users_empty_nickname_v1')"
+    )
+    await db.execute("INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES('users_empty_nickname_v1',?)", (int(time.time()),))
     await db.executescript(Path(__file__).with_name("wiki.sql").read_text(encoding="utf-8"))
     await db.commit()
     return db
