@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import { initializeAuth, auth, safeNext, notify } from './lib/api.js';
+import { initializeAuth, auth, safeNext, notify, pageLoadError } from './lib/api.js';
 const legacy = {
   '/member.html': 'members',
   '/challenge.html': 'training',
@@ -20,6 +20,7 @@ export const sections = {
   tasks: '同步任务',
   moderation: '内容审核',
   settings: '全局设置',
+  wiki: 'Wiki 知识手册',
 };
 const router = createRouter({
   history: createWebHistory(),
@@ -41,6 +42,16 @@ const router = createRouter({
       meta: { title: '发布话题' },
     },
     {
+      path: '/notifications.html',
+      component: () => import('./views/Notifications.vue'),
+      meta: { title: '我的通知' },
+    },
+    {
+      path: '/my-post.html',
+      component: () => import('./views/MyPost.vue'),
+      meta: { title: '投稿进度' },
+    },
+    {
       path: '/auth-unavailable.html',
       component: () => import('./views/Notice.vue'),
       meta: { public: true, title: '暂时无法确认登录状态', authError: true },
@@ -49,6 +60,11 @@ const router = createRouter({
       path: '/forbidden.html',
       component: () => import('./views/Notice.vue'),
       meta: { public: true, title: '无权访问', forbidden: true },
+    },
+    {
+      path: '/wiki.html',
+      component: () => import('./views/Wiki.vue'),
+      meta: { public: true, title: 'Wiki 知识手册', body: 'wiki-page' },
     },
     {
       path: '/home.html',
@@ -109,18 +125,38 @@ const router = createRouter({
     },
   ],
   scrollBehavior(to, from, saved) {
+    if (to.hash) {
+      try {
+        const el = document.getElementById(decodeURIComponent(to.hash.slice(1)));
+        if (el) return { el, top: 110 };
+      } catch {}
+    }
     return saved || (to.path === from.path ? false : { top: 0 });
   },
 });
 router.beforeEach(async (to) => {
   // Recovery must mount immediately; only an explicit retry starts authentication again.
   if (to.meta.authError) return;
+  // Public reading and the login form remain available while authentication is slow.
+  if (to.meta.public && !auth.authenticated) {
+    initializeAuth()
+      .then(async () => {
+        await router.isReady();
+        if (router.currentRoute.value.fullPath !== to.fullPath || !auth.authenticated) return;
+        const next = to.path === '/login.html' ? safeNext(to.query.next) : to.fullPath;
+        if (auth.must_change_password && !to.meta.retired)
+          return router.replace({ path: '/change-password.html', query: { next } });
+        if (to.path === '/login.html') return router.replace(next);
+      })
+      .catch(() => {});
+    return;
+  }
   try {
     await initializeAuth();
   } catch {
     if (!to.meta.public) return { path: '/auth-unavailable.html', query: { next: to.fullPath } };
   }
-  const target = to.fullPath;
+  const target = to.path === '/login.html' ? safeNext(to.query.next) : to.fullPath;
   if (
     !to.meta.retired &&
     auth.authenticated &&
@@ -132,11 +168,11 @@ router.beforeEach(async (to) => {
     return { path: '/login.html', query: { next: target } };
   if (to.path === '/login.html' && auth.authenticated) {
     const next = safeNext(to.query.next);
-    return next.split(/[?#]/)[0] === '/login.html' ? '/index.html' : next;
+    return next;
   }
   if (to.meta.admin && !['admin', 'root'].includes(auth.role)) return { path: '/forbidden.html' };
   if (to.meta.section && ['admin', 'root'].includes(auth.role))
-    return { path: '/admin.html', query: { ...to.query, section: to.meta.section } };
+    return { path: '/admin.html', query: { ...to.query, section: to.meta.section }, hash: to.hash };
   if (to.path === '/admin.html') {
     const query = { ...to.query };
     let changed = false;
@@ -155,22 +191,29 @@ router.beforeEach(async (to) => {
     if (
       query.tab &&
       !(
-        { 'cf-practice': ['recent', 'check'], moderation: ['posts', 'reports'] }[query.section] ||
-        []
+        {
+          'cf-practice': ['recent', 'check'],
+          moderation: ['posts', 'reports'],
+          wiki: ['categories', 'pages'],
+        }[query.section] || []
       ).includes(query.tab)
     ) {
       delete query.tab;
       changed = true;
     }
-    if (changed) return { path: to.path, query, replace: true };
+    if (changed) return { path: to.path, query, hash: to.hash, replace: true };
   }
 });
 router.afterEach((to, from, failure) => {
   if (failure) return;
+  pageLoadError.value = null;
   document.title = `${to.meta.title} · ACM Forever`;
   document.body.className =
     to.meta.admin && to.path === '/admin.html'
       ? 'forum-page endfield-design admin-console'
       : `forum-page endfield-design ${to.meta.body || ''}`;
+});
+router.onError((_error, to) => {
+  pageLoadError.value = { target: to.fullPath };
 });
 export default router;

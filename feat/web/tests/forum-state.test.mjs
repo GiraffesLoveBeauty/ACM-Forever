@@ -1,0 +1,290 @@
+import assert from 'node:assert/strict';
+import { after, afterEach, beforeEach, test } from 'node:test';
+import { h } from 'vue';
+import { RouterView } from 'vue-router';
+import { forumState, forumQuery, forumReturn } from '../src/lib/forum-state.js';
+import { setAuth } from '../src/lib/api.js';
+import { cleanupCompiled, find, loadSfc, mount, settle, textOf } from './helpers/vue-harness.mjs';
+const Forum = (await import(await loadSfc('src/views/Forum.vue'))).default;
+const previousFetch = globalThis.fetch;
+const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
+let mounted, calls, fail, scrollY, scrolls, positions, holdFeed, pendingFeeds;
+beforeEach(() => {
+  calls = [];
+  fail = false;
+  scrollY = 0;
+  scrolls = [];
+  positions = new Map();
+  holdFeed = false;
+  pendingFeeds = [];
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      get scrollY() {
+        return scrollY;
+      },
+      scrollTo(_x, y) {
+        scrollY = y;
+        scrolls.push(y);
+      },
+    },
+  });
+  Object.defineProperty(globalThis, 'sessionStorage', {
+    configurable: true,
+    value: {
+      getItem: (key) => positions.get(key) ?? null,
+      setItem: (key, value) => positions.set(key, value),
+    },
+  });
+  setAuth({ authenticated: false }, true);
+  globalThis.fetch = async (url) => {
+    calls.push(url);
+    let data = [];
+    if (url.includes('/forum/posts?')) {
+      const query = new URL(url, 'http://localhost').searchParams;
+      if (query.get('page_size') === '4') data = { rows: [] };
+      else
+        data = {
+          total: 25,
+          rows: [{ id: Number(query.get('page')), title: '分页话题', excerpt: '正文' }],
+        };
+    }
+    const result = new Response(JSON.stringify(fail ? { message: '临时故障' } : data), {
+      status: fail ? 503 : 200,
+    });
+    if (holdFeed && url.includes('page_size=12'))
+      return new Promise((resolve) => pendingFeeds.push(() => resolve(result)));
+    return result;
+  };
+});
+afterEach(async () => {
+  mounted?.unmount();
+  pendingFeeds.forEach((resolve) => resolve());
+  await settle();
+  mounted = null;
+  globalThis.fetch = previousFetch;
+  if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+  else delete globalThis.window;
+  if (previousStorage) Object.defineProperty(globalThis, 'sessionStorage', previousStorage);
+  else delete globalThis.sessionStorage;
+});
+after(cleanupCompiled);
+const open = async (path) => {
+  mounted = await mount(
+    { render: () => h(RouterView) },
+    [
+      { path: '/index.html', component: Forum },
+      { path: '/post.html', component: { render: () => h('p', '帖子') } },
+    ],
+    path,
+  );
+};
+const click = async (label) => {
+  const button = find(
+    mounted.root,
+    (node) => node.type === 'button' && textOf(node).trim() === label,
+  )[0];
+  assert.ok(button, label);
+  await button.props.onClick();
+  await settle();
+};
+test('URL state is bounded and forum return targets cannot escape the listing', () => {
+  assert.deepEqual(
+    forumState({ sort: 'bad', page: 'no', q: ['private'], category: '../x', view: 'bad' }),
+    { sort: 'latest', page: 1, q: '', category: '', view: 'list' },
+  );
+  assert.equal(forumState({ page: '999999999999' }).page, 1000000);
+  const state = forumState({ sort: 'hot', page: '2', q: ' 图论 ', category: 'help', view: 'grid' });
+  assert.deepEqual(forumState(forumQuery(state)), state);
+  for (const value of ['//example.org', '/admin.html', '/post.html?id=1', '/\\evil', null])
+    assert.equal(forumReturn(value), '/index.html');
+  assert.equal(forumReturn('/index.html?page=2&view=grid'), '/index.html?page=2&view=grid');
+});
+test('opening a shared page restores filtering, pagination and grid mode', async () => {
+  await open('/index.html?category=help&q=图论&page=2&view=grid');
+  const call = calls.find((url) => url.includes('page_size=12'));
+  const query = new URL(call, 'http://localhost').searchParams;
+  assert.equal(query.get('page'), '2');
+  assert.equal(query.get('q'), '图论');
+  assert.equal(query.get('category'), 'help');
+  assert.ok(
+    find(mounted.root, (node) => String(node.props.class).includes('forum-feed-posts-grid')).length,
+  );
+  const post = find(mounted.root, (node) => node.type === 'a' && textOf(node) === '分页话题')[0];
+  assert.equal(
+    new URL(post.props.href, 'http://localhost').searchParams.get('from'),
+    encodeURI(mounted.router.currentRoute.value.fullPath),
+  );
+});
+test('pagination and browser back restore the actual page from the URL', async () => {
+  await open('/index.html?page=2&view=list');
+  await click('下一页');
+  assert.equal(mounted.router.currentRoute.value.query.page, '3');
+  mounted.router.back();
+  await settle();
+  assert.equal(mounted.router.currentRoute.value.query.page, '2');
+  assert.match(calls.at(-1), /page=2/);
+});
+
+test('slow pagination back and forward restore each page after its cards render', async () => {
+  await open('/index.html?view=list');
+  scrollY = 1800;
+  holdFeed = true;
+  await click('下一页');
+  assert.equal(positions.get('acm.forum.scroll:/index.html?view=list'), '1800');
+  pendingFeeds.shift()();
+  await settle();
+  scrollY = 720;
+  mounted.router.back();
+  await settle();
+  assert.equal(positions.get('acm.forum.scroll:/index.html?page=2&view=list'), '720');
+  scrollY = 0; // Model the short loading page clamping the router's saved scroll position.
+  pendingFeeds.shift()();
+  await settle();
+  assert.equal(scrollY, 1800);
+  assert.match(textOf(mounted.root), /分页话题/);
+  mounted.router.forward();
+  await settle();
+  scrollY = 0;
+  pendingFeeds.shift()();
+  await settle();
+  assert.equal(scrollY, 720);
+});
+
+test('returning to a page saved at its top restores zero after a delayed response', async () => {
+  await open('/index.html?view=list');
+  await click('下一页');
+  holdFeed = true;
+  mounted.router.back();
+  await settle();
+  scrollY = 300;
+  scrolls = [];
+  pendingFeeds.shift()();
+  await settle();
+  assert.deepEqual(scrolls, [0]);
+});
+
+test('rapid back and forward while loading preserves both saved reading positions', async () => {
+  await open('/index.html?view=list');
+  scrollY = 1800;
+  await click('下一页');
+  scrollY = 720;
+  holdFeed = true;
+  mounted.router.back();
+  await settle();
+  scrollY = 100; // The loading page is shorter than the saved page-one position.
+  mounted.router.forward();
+  await settle();
+  assert.equal(positions.get('acm.forum.scroll:/index.html?view=list'), '1800');
+  scrollY = 80;
+  mounted.router.back();
+  await settle();
+  assert.equal(positions.get('acm.forum.scroll:/index.html?page=2&view=list'), '720');
+  pendingFeeds.shift()(); // A cancelled response must not make the loading page saveable.
+  pendingFeeds.shift()();
+  await settle();
+  assert.equal(
+    find(mounted.root, (node) => node.props.id === 'forum-feed')[0].props['aria-busy'],
+    true,
+  );
+  pendingFeeds.shift()();
+  await settle();
+  assert.equal(scrollY, 1800);
+  mounted.router.forward();
+  await settle();
+  pendingFeeds.shift()();
+  await settle();
+  assert.equal(scrollY, 720);
+});
+
+test('leaving a loading listing does not overwrite its saved reading position', async () => {
+  await open('/index.html?view=list');
+  scrollY = 1800;
+  await click('下一页');
+  scrollY = 720;
+  holdFeed = true;
+  mounted.router.back();
+  await settle();
+  scrollY = 100;
+  await mounted.router.push('/post.html?id=1');
+  await settle();
+  assert.equal(positions.get('acm.forum.scroll:/index.html?view=list'), '1800');
+  mounted.router.back();
+  await settle();
+  pendingFeeds.shift()(); // Resolve the request aborted when leaving the previous instance.
+  pendingFeeds.shift()();
+  await settle();
+  assert.equal(scrollY, 1800);
+});
+
+test('leaving a failed listing keeps its saved position for a successful retry', async () => {
+  await open('/index.html?view=list');
+  scrollY = 1800;
+  await click('下一页');
+  fail = true;
+  mounted.router.back();
+  await settle();
+  assert.match(textOf(mounted.root), /话题加载失败/);
+  scrollY = 100;
+  await mounted.router.push('/post.html?id=1');
+  await settle();
+  assert.equal(positions.get('acm.forum.scroll:/index.html?view=list'), '1800');
+  fail = false;
+  mounted.router.back();
+  await settle();
+  assert.equal(scrollY, 1800);
+  scrollY = 2100;
+  await mounted.router.push('/post.html?id=1');
+  await settle();
+  assert.equal(positions.get('acm.forum.scroll:/index.html?view=list'), '2100');
+});
+
+test('hash navigation and back keep loaded posts without another request while offline', async () => {
+  await open('/index.html?page=2&view=grid');
+  const requested = [...calls];
+  assert.match(textOf(mounted.root), /分页话题/);
+  fail = true;
+  await mounted.router.push('/index.html?page=2&view=grid#forum-feed');
+  await settle();
+  assert.deepEqual(calls, requested);
+  assert.match(textOf(mounted.root), /分页话题/);
+  assert.doesNotMatch(textOf(mounted.root), /话题加载失败|临时故障/);
+  mounted.router.back();
+  await settle();
+  assert.equal(mounted.router.currentRoute.value.hash, '');
+  assert.deepEqual(calls, requested);
+  assert.match(textOf(mounted.root), /分页话题/);
+});
+
+test('equivalent listing queries do not reload or discard posts', async () => {
+  await open('/index.html?q=图论&page=2&view=list');
+  const requested = [...calls];
+  fail = true;
+  await mounted.router.replace('/index.html?view=list&page=02&q=图论&tracking=test');
+  await settle();
+  assert.deepEqual(calls, requested);
+  assert.match(textOf(mounted.root), /分页话题/);
+});
+
+test('sorting resets the page and retains the current search', async () => {
+  await open('/index.html?q=图论&page=2&view=list');
+  await click('热门');
+  assert.equal(mounted.router.currentRoute.value.query.page, undefined);
+  assert.equal(mounted.router.currentRoute.value.query.sort, 'hot');
+  assert.equal(mounted.router.currentRoute.value.query.q, '图论');
+});
+test('view mode can be shared and a page beyond the end is corrected', async () => {
+  await open('/index.html?page=99&view=list');
+  assert.equal(mounted.router.currentRoute.value.query.page, '3');
+  await click('网格');
+  assert.equal(mounted.router.currentRoute.value.query.view, 'grid');
+});
+test('an empty failed listing provides a working retry action', async () => {
+  fail = true;
+  await open('/index.html');
+  assert.match(textOf(mounted.root), /话题加载失败/);
+  fail = false;
+  await click('重试');
+  assert.match(textOf(mounted.root), /分页话题/);
+});

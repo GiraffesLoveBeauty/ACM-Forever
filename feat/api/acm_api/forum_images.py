@@ -7,6 +7,7 @@ import time
 import warnings
 from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 import mistune
@@ -23,21 +24,32 @@ _render_markdown = mistune.create_markdown(escape=False)
 
 
 class _ImageReferences(HTMLParser):
-    def __init__(self):
+    def __init__(self, origins=()):
         super().__init__(convert_charrefs=True)
         self.ids = set()
+        self.origins = {origin.rstrip("/").lower() for origin in origins if origin}
 
     def handle_starttag(self, tag, attrs):
         attribute = {"img": "src", "a": "href"}.get(tag)
         if attribute:
-            match = IMAGE_REFERENCE.fullmatch(dict(attrs).get(attribute) or "")
+            source = dict(attrs).get(attribute) or ""
+            if not source.startswith("/") or source.startswith("//"):
+                try:
+                    url = urlsplit(source)
+                    origin = f"{url.scheme}://{url.netloc}".lower()
+                    if url.scheme not in {"http", "https"} or origin not in self.origins or url.query or url.fragment or url.username or url.password:
+                        return
+                    source = url.path
+                except ValueError:
+                    return
+            match = IMAGE_REFERENCE.fullmatch(source)
             if match:
                 self.ids.add(match[1])
 
 
-def referenced_images(body):
+def referenced_images(body, origins=()):
     # Parse Markdown so code samples and prose do not accidentally publish images.
-    parser = _ImageReferences()
+    parser = _ImageReferences(origins)
     parser.feed(_render_markdown(body))
     return parser.ids
 
@@ -72,9 +84,35 @@ def normalize_image(contents):
         raise ValueError("无法读取图片，请上传有效的 PNG、JPEG 或 WebP 图片。") from error
 
 
+def thumbnail_path(folder, image_id):
+    """Generate a bounded derivative atomically; authorization is checked by the caller."""
+    source = Path(folder) / f"{image_id}.webp"
+    target = Path(folder) / "thumbnails" / f"{image_id}.webp"
+    if not source.is_file():
+        raise FileNotFoundError()
+    if target.is_file():
+        return target
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(f".{secrets.token_hex(8)}.tmp")
+    try:
+        with Image.open(source) as image:
+            image.thumbnail((640, 640), Image.Resampling.LANCZOS)
+            image.save(temporary, "WEBP", quality=78, method=4)
+        try:
+            temporary.replace(target)
+        except PermissionError:
+            # Windows can refuse replacing a file concurrently created/opened by
+            # another request. Its atomic winner is already a complete derivative.
+            if not target.is_file():
+                raise
+    finally:
+        temporary.unlink(missing_ok=True)
+    return target
+
+
 async def sync_image_links(db, owner, body, cover_id, *, draft_id=None, post_id=None):
     """Validate references and update them in the caller's content transaction."""
-    ids = referenced_images(body)
+    ids = referenced_images(body, (request.host_url, current_app.config.get("PUBLIC_BASE_URL", "")))
     if cover_id:
         ids.add(cover_id)
     if len(ids) > 30:
@@ -148,6 +186,9 @@ async def upload_forum_image():
 async def read_forum_image(image_id):
     if not IMAGE_ID.fullmatch(image_id):
         abort(404)
+    variant = request.args.get("variant", "original")
+    if variant not in {"original", "thumb"}:
+        return jsonify({"message": "图片尺寸参数无效。"}), 400
     identity = await _session_identity()
     db = await get_db()
     try:
@@ -172,7 +213,18 @@ async def read_forum_image(image_id):
             abort(404)
     finally:
         await db.close()
-    response = await send_from_directory(current_app.config["FORUM_UPLOAD_DIR"], f"{image_id}.webp", conditional=False)
+    folder = current_app.config["FORUM_UPLOAD_DIR"]
+    if variant == "thumb":
+        try:
+            slots = current_app.extensions.setdefault("forum_thumbnail_slots", asyncio.Semaphore(4))
+            async with slots:
+                path = await asyncio.to_thread(thumbnail_path, folder, image_id)
+        except FileNotFoundError:
+            abort(404)
+        except OSError:
+            return jsonify({"message": "图片暂时无法加载，请稍后重试。"}), 503
+        folder = path.parent
+    response = await send_from_directory(folder, f"{image_id}.webp", conditional=False)
     # A moderation decision or deletion must take effect on subsequent requests.
     response.headers["Cache-Control"] = "private, no-store"
     response.headers["Content-Type"] = "image/webp"

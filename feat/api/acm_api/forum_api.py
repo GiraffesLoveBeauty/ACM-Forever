@@ -1,5 +1,6 @@
 """Public discussion forum API and authenticated member actions."""
 import time
+from .markdown_content import ContentError, record_assets, source_fields
 
 from quart import Blueprint, jsonify, request
 
@@ -12,8 +13,14 @@ from .backend_api import (
     member_required,
 )
 from .forum_images import IMAGE_ID, image_url, sync_image_links
+from .forum_notifications import add_notification
 
 forum_api = Blueprint("forum_api", __name__)
+
+
+@forum_api.errorhandler(ContentError)
+async def content_error(error):
+    return jsonify({"message": str(error), "code": "invalid_content"}), 400
 
 
 async def _viewer_id():
@@ -119,6 +126,12 @@ async def posts():
 
 @forum_api.get("/forum/posts/<int:post_id>")
 async def post_detail(post_id):
+    try:
+        comment_id = int(request.args.get("comment_id", "0"))
+        if not 0 <= comment_id <= 9223372036854775807:
+            raise ValueError()
+    except (TypeError, ValueError):
+        return jsonify({"message": "评论参数无效。"}), 400
     viewer = await _viewer_id()
     db = await get_db()
     try:
@@ -147,6 +160,19 @@ async def post_detail(post_id):
             (post_id,),
         ) as cursor:
             comments = [dict(item) for item in await cursor.fetchall()]
+        if comment_id and not any(comment["id"] == comment_id for comment in comments):
+            # Keep notification links usable beyond the first 500 comments.
+            async with db.execute(
+                "SELECT cm.id,cm.parent_id,cm.body,cm.created_at,"
+                "CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,u.avatar_url AS author_avatar_url "
+                "FROM forum_comments cm JOIN users u ON u.qq_id=cm.author_qq_id WHERE cm.post_id=? AND cm.status='published' "
+                "AND cm.id IN (?,(SELECT parent_id FROM forum_comments WHERE id=? AND post_id=? AND status='published')) "
+                "AND (cm.parent_id IS NULL OR EXISTS(SELECT 1 FROM forum_comments parent WHERE parent.id=cm.parent_id AND parent.status='published'))",
+                (post_id, comment_id, comment_id, post_id),
+            ) as cursor:
+                existing_ids = {comment["id"] for comment in comments}
+                comments.extend(dict(item) for item in await cursor.fetchall() if item["id"] not in existing_ids)
+            comments.sort(key=lambda comment: (comment["created_at"], comment["id"]))
         result = dict(row)
         result["comments"] = comments
         result["views_count"] = int(result["views_count"] or 0) + 1
@@ -162,7 +188,7 @@ async def my_posts():
     db = await get_db()
     try:
         async with db.execute(
-            "SELECT p.id,p.title,p.status,p.created_at,p.updated_at,c.name AS category_name "
+            "SELECT p.id,p.title,p.status,p.created_at,p.updated_at,p.reviewed_at,p.review_reason,c.name AS category_name "
             "FROM forum_posts p JOIN forum_categories c ON c.id=p.category_id "
             "WHERE p.author_qq_id=? AND p.status<>'removed' ORDER BY p.created_at DESC LIMIT 100",
             (qq_id,),
@@ -172,19 +198,34 @@ async def my_posts():
         await db.close()
 
 
+@forum_api.get("/forum/mine/posts/<int:post_id>")
+@member_required
+async def my_post(post_id):
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT p.id,p.title,p.body,p.status,p.created_at,p.updated_at,p.reviewed_at,p.review_reason,"
+            "'/api/forum/images/' || p.cover_image_id AS cover_url,c.name AS category_name "
+            "FROM forum_posts p JOIN forum_categories c ON c.id=p.category_id WHERE p.id=? AND p.author_qq_id=?",
+            (post_id, request.web_identity["qq_id"]),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row:
+            return jsonify({"message": "投稿不存在。"}), 404
+        response = jsonify(dict(row))
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
+    finally:
+        await db.close()
+
+
 def _draft_fields(data):
     if not isinstance(data, dict):
         return None, "请求格式无效。"
-    title_value = data.get("title", "")
-    body_value = data.get("body", "")
-    if not isinstance(title_value, str) or not isinstance(body_value, str):
-        return None, "标题和正文必须是文本。"
-    title = title_value.strip()
-    body = body_value
-    if len(title) > 120:
-        return None, "标题不能超过 120 个字符。"
-    if len(body) > 20000:
-        return None, "正文不能超过 20000 个字符。"
+    try:
+        title, body = source_fields(data)
+    except ContentError as error:
+        return None, str(error)
     category_value = data.get("category_id")
     if category_value in (None, "", 0, "0"):
         category_id = None
@@ -240,6 +281,7 @@ async def create_forum_draft():
             await sync_image_links(db, request.web_identity["qq_id"], data["body"], data["cover_image_id"], draft_id=draft_id)
         except ValueError as error:
             return jsonify({"message": str(error)}), 400
+        await record_assets(db, data["body"], "forum_draft", draft_id, 0, request.web_identity["qq_id"])
         await db.commit()
         return jsonify({"id": draft_id, "updated_at": now, "message": "草稿已保存。"}), 201
     finally:
@@ -288,6 +330,7 @@ async def update_forum_draft(draft_id):
             await sync_image_links(db, request.web_identity["qq_id"], data["body"], data["cover_image_id"], draft_id=draft_id)
         except ValueError as error:
             return jsonify({"message": str(error)}), 400
+        await record_assets(db, data["body"], "forum_draft", draft_id, 0, request.web_identity["qq_id"])
         await db.commit()
         return jsonify({"id": draft_id, "updated_at": now, "message": "草稿已保存。"})
     finally:
@@ -345,6 +388,8 @@ async def submit_forum_draft(draft_id):
             await sync_image_links(db, qq_id, body, draft["cover_image_id"], post_id=post_id)
         except ValueError as error:
             return jsonify({"message": str(error)}), 400
+        await record_assets(db, body, "forum_post", post_id, 0, qq_id)
+        await db.execute("DELETE FROM markdown_asset_references WHERE document_type='forum_draft' AND document_id=?", (draft_id,))
         await db.execute("DELETE FROM forum_drafts WHERE id=? AND author_qq_id=?", (draft_id, qq_id))
         await db.commit()
         return jsonify({"id": post_id, "status": "pending", "message": "帖子已提交，审核通过后会出现在论坛。"}), 201
@@ -379,6 +424,7 @@ async def create_post():
             await sync_image_links(db, request.web_identity["qq_id"], body, data["cover_image_id"], post_id=post_id)
         except ValueError as error:
             return jsonify({"message": str(error)}), 400
+        await record_assets(db, body, "forum_post", post_id, 0, request.web_identity["qq_id"])
         await db.commit()
         return jsonify({"id": post_id, "status": "pending", "message": "帖子已提交，审核通过后会出现在论坛。"}), 201
     finally:
@@ -398,22 +444,31 @@ async def create_comment(post_id):
         parent_id = 0
     db = await get_db()
     try:
-        async with db.execute("SELECT 1 FROM forum_posts WHERE id=? AND status='published'", (post_id,)) as cursor:
-            if not await cursor.fetchone():
+        await db.execute("BEGIN IMMEDIATE")
+        async with db.execute("SELECT author_qq_id FROM forum_posts WHERE id=? AND status='published'", (post_id,)) as cursor:
+            post = await cursor.fetchone()
+            if not post:
                 return jsonify({"message": "帖子不存在。"}), 404
+        recipients = {post["author_qq_id"]: "comment"}
         if parent_id:
             async with db.execute(
-                "SELECT 1 FROM forum_comments WHERE id=? AND post_id=? AND parent_id IS NULL AND status='published'",
+                "SELECT author_qq_id FROM forum_comments WHERE id=? AND post_id=? AND parent_id IS NULL AND status='published'",
                 (parent_id, post_id),
             ) as cursor:
-                if not await cursor.fetchone():
+                parent = await cursor.fetchone()
+                if not parent:
                     return jsonify({"message": "回复目标不存在。"}), 404
+                recipients[parent["author_qq_id"]] = "reply"
         cursor = await db.execute(
             "INSERT INTO forum_comments(post_id,parent_id,author_qq_id,body,created_at) VALUES(?,?,?,?,?)",
             (post_id, parent_id or None, request.web_identity["qq_id"], body, int(time.time())),
         )
+        comment_id = cursor.lastrowid
+        for recipient, kind in recipients.items():
+            if recipient != request.web_identity["qq_id"]:
+                await add_notification(db, recipient, request.web_identity["qq_id"], kind, post_id, comment_id=comment_id)
         await db.commit()
-        return jsonify({"id": cursor.lastrowid, "success": True}), 201
+        return jsonify({"id": comment_id, "success": True}), 201
     finally:
         await db.close()
 
@@ -541,16 +596,26 @@ async def moderate_post(post_id):
     decision = str(data.get("decision", "")).strip() if isinstance(data, dict) else ""
     if decision not in {"publish", "reject"}:
         return jsonify({"message": "审核操作无效。"}), 400
+    reason = data.get("reason", "")
+    if not isinstance(reason, str) or len(reason.strip()) > 1000 or (decision == "reject" and not reason.strip()):
+        return jsonify({"message": "退回时请填写原因，最多 1000 个字符。"}), 400
+    reason = reason.strip() if decision == "reject" else ""
     status = "published" if decision == "publish" else "rejected"
     identity = await _session_identity()
     now = int(time.time())
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        async with db.execute("SELECT author_qq_id FROM forum_posts WHERE id=? AND status='pending'", (post_id,)) as cursor:
+            post = await cursor.fetchone()
+        if not post:
+            return jsonify({"message": "帖子不存在或已处理。"}), 404
         cursor = await db.execute(
-            "UPDATE forum_posts SET status=?,updated_at=?,reviewed_at=?,reviewed_by=? "
+            "UPDATE forum_posts SET status=?,updated_at=?,reviewed_at=?,reviewed_by=?,review_reason=? "
             "WHERE id=? AND status='pending'",
-            (status, now, now, identity.get("qq_id"), post_id),
+            (status, now, now, identity.get("qq_id"), reason, post_id),
         )
+        await add_notification(db, post["author_qq_id"], identity.get("qq_id"), status, post_id)
         await db.commit()
         if cursor.rowcount == 0:
             return jsonify({"message": "帖子不存在或已处理。"}), 404

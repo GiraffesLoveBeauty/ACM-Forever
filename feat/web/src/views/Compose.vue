@@ -1,10 +1,9 @@
 <script setup>
-import { computed, ref, reactive, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { computed, ref, reactive, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { api, useRequests, notify, showError, auth } from '../lib/api.js';
-import { markdown } from '../lib/markdown.js';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
+import { sourceFields } from '../lib/markdown-source.js';
+import MarkdownEditor from '../components/MarkdownEditor.vue';
 import { postImage, uploadPostImage } from '../lib/post-images.js';
 const route = useRoute(),
   router = useRouter(),
@@ -14,10 +13,7 @@ const form = reactive({ title: '', body: '', category_id: null, cover_image_id: 
   drafts = ref([]),
   id = ref(null),
   mode = ref('split'),
-  input = ref(),
-  fileInput = ref(),
   coverInput = ref(),
-  bodyImageInput = ref(),
   imageUploadMessage = ref(''),
   recoveryCandidate = ref(null),
   recoveryKeyForCandidate = ref(''),
@@ -35,7 +31,8 @@ let revision = 0,
   finished = false,
   leaving = false,
   recoveryTabId = '',
-  recoveryResolved = false;
+  recoveryResolved = false,
+  coverController;
 function payload() {
   return {
     title: form.title,
@@ -206,143 +203,37 @@ function discardRecovery() {
   recoveryResolved = true;
   if (revision !== savedRevision) persistRecovery();
 }
-function findFirstMarkdownH1(source) {
-  let offset = 0;
-  for (const token of marked.lexer(source, { gfm: true })) {
-    const raw = String(token.raw || '');
-    if (!raw) continue;
-    let startOffset = source.indexOf(raw, offset);
-    if (token.type === 'heading' && token.depth === 1) {
-      while (startOffset >= 0) {
-        const lineStart = source.lastIndexOf('\n', startOffset - 1) + 1;
-        if (/^[\t ]{0,3}$/.test(source.slice(lineStart, startOffset))) break;
-        startOffset = source.indexOf(raw, startOffset + 1);
-      }
-    }
-    if (startOffset < 0) continue;
-    if (token.type === 'heading' && token.depth === 1) {
-      const inlineHtml = DOMPurify.sanitize(marked.parseInline(token.text || '', { gfm: true }));
-      const titleNode = document.createElement('div');
-      titleNode.innerHTML = inlineHtml;
-      return {
-        startOffset,
-        endOffset: startOffset + raw.length,
-        title: titleNode.textContent.trim(),
-      };
-    }
-    offset = startOffset + raw.length;
-  }
-  return null;
+async function prepareImageUpload() {
+  if (!id.value && revision === savedRevision) revision++;
+  await save();
+  return id.value;
 }
-async function importMarkdown(event) {
+async function uploadBodyImage(file, options) {
+  const result = await uploadPostImage(file, options);
+  if (!postImage(result.url)) throw Error('服务器未返回有效的图片地址。');
+  return result;
+}
+async function selectCover(event) {
   const file = event.target.files?.[0];
   event.target.value = '';
   if (!file || busy.value) return;
-  if (!/\.(md|markdown)$/i.test(file.name)) {
-    notify('请选择 .md 或 .markdown 文件。');
-    return;
-  }
-  if (file.size > 102400) {
-    notify('Markdown 文件不能超过 100 KB。');
-    return;
-  }
-  if (
-    (form.title.trim() || form.body.trim()) &&
-    !confirm('导入 Markdown 会替换当前标题和正文，确定继续吗？')
-  )
-    return;
   busy.value = true;
+  coverController = new AbortController();
+  imageUploadMessage.value = '正在处理并上传封面…';
   try {
-    const text = (await file.text()).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
-    const heading = findFirstMarkdownH1(text);
-    let title = Array.from(file.name.replace(/\.(md|markdown)$/i, ''))
-      .slice(0, 120)
-      .join('');
-    let body = text;
-    if (heading) {
-      title = Array.from(heading.title).slice(0, 120).join('');
-      body = (text.slice(0, heading.startOffset) + text.slice(heading.endOffset)).replace(
-        /^\n+/,
-        '',
-      );
-    }
-    if (Array.from(body).length > 20000)
-      throw Error('Markdown 正文超过 20000 个字符，请精简后再导入。');
-    form.title = title;
-    form.body = body;
-    notify('Markdown 已导入，草稿正在自动保存。');
-  } catch (error) {
-    showError(error);
-  } finally {
-    busy.value = false;
-  }
-}
-async function uploadImages(files, asCover = false) {
-  const images = [...(files || [])];
-  if (!images.length || busy.value) return;
-  if (images.length > 10) return notify('每次最多上传 10 张图片。');
-  let position = input.value?.selectionStart ?? form.body.length;
-  const selectionEnd = input.value?.selectionEnd ?? position;
-  busy.value = true;
-  let completed = 0;
-  try {
-    for (const file of asCover ? images.slice(0, 1) : images) {
-      if (!asCover && Array.from(form.body).length > 19800)
-        throw Error('正文接近 20000 字限制，请精简后再插入图片。');
-      imageUploadMessage.value = `正在处理并上传图片 ${completed + 1} / ${asCover ? 1 : images.length}…`;
-      const result = await uploadPostImage(file);
-      if (!postImage(result.url)) throw Error('服务器未返回有效的图片地址。');
-      if (asCover) form.cover_image_id = result.id;
-      else {
-        const alt =
-          file.name
-            .replace(/\.[^.]+$/, '')
-            .replace(/[\\\[\]\r\n]/g, '')
-            .slice(0, 80) || '图片';
-        const inserted = `\n\n![${alt}](${result.url})\n\n`;
-        form.body =
-          form.body.slice(0, position) +
-          inserted +
-          form.body.slice(completed ? position : selectionEnd);
-        position += inserted.length;
-      }
-      completed++;
-    }
+    const result = await uploadBodyImage(file, { signal: coverController.signal });
+    if (disposed) return;
+    form.cover_image_id = result.id;
     await save();
-    busy.value = false;
-    if (!asCover) {
-      if (mode.value === 'preview') mode.value = 'split';
-      await nextTick();
-      input.value?.focus();
-      input.value?.setSelectionRange(position, position);
-    }
-    imageUploadMessage.value = asCover
-      ? '封面已上传并保存到草稿。'
-      : `${completed} 张图片已插入正文并保存。`;
+    if (!disposed) imageUploadMessage.value = '封面已上传并保存到草稿。';
   } catch (error) {
-    imageUploadMessage.value = error.message;
-    showError(error);
+    if (!disposed && error.name !== 'AbortError') {
+      imageUploadMessage.value = error.message;
+      showError(error);
+    }
   } finally {
-    busy.value = false;
+    if (!disposed) busy.value = false;
   }
-}
-function selectImages(event, asCover = false) {
-  const files = [...(event.target.files || [])];
-  event.target.value = '';
-  uploadImages(files, asCover);
-}
-function pasteImages(event) {
-  const files = [...(event.clipboardData?.files || [])].filter((file) =>
-    file.type.startsWith('image/'),
-  );
-  if (!files.length) return;
-  event.preventDefault();
-  uploadImages(files);
-}
-function dropImages(event) {
-  if (!event.dataTransfer?.files.length) return;
-  event.preventDefault();
-  uploadImages(event.dataTransfer.files);
 }
 async function list() {
   drafts.value = await request('/forum/drafts');
@@ -362,7 +253,7 @@ async function save({ keepalive = false } = {}) {
   saving = (async () => {
     while (revision !== savedRevision && !disposed) {
       const version = revision,
-        data = payload(),
+        data = { ...payload(), ...sourceFields(form) },
         previousId = id.value;
       message.value = '正在保存…';
       const result = await api(id.value ? `/forum/drafts/${id.value}` : '/forum/drafts', {
@@ -442,7 +333,7 @@ async function submit() {
     recoveryResolved = true;
     finished = true;
     notify(data.message || '话题已提交审核');
-    await router.push('/index.html');
+    await router.push(`/my-post.html?id=${data.id}`);
   } catch (e) {
     showError(e);
   } finally {
@@ -473,31 +364,6 @@ async function remove() {
     busy.value = false;
   }
 }
-const formats = {
-  h1: ['# ', ''],
-  h2: ['## ', ''],
-  bold: ['**', '**'],
-  italic: ['*', '*'],
-  strike: ['~~', '~~'],
-  quote: ['> ', ''],
-  ul: ['- ', ''],
-  ol: ['1. ', ''],
-  code: ['`', '`'],
-  codeblock: ['\n```\n', '\n```\n'],
-  link: ['[', '](https://)'],
-};
-async function format(kind) {
-  const node = input.value;
-  if (!node) return;
-  const start = node.selectionStart,
-    end = node.selectionEnd,
-    [before, after] = formats[kind];
-  const text = form.body.slice(start, end) || '文字';
-  form.body = form.body.slice(0, start) + before + text + after + form.body.slice(end);
-  await nextTick();
-  node.focus();
-  node.setSelectionRange(start + before.length, start + before.length + text.length);
-}
 function unload(event) {
   if (revision !== savedRevision || saving || busy.value) {
     event.preventDefault();
@@ -526,6 +392,12 @@ onBeforeRouteLeave(async () => {
     if (!allowed) leaving = false;
     return allowed;
   }
+});
+const stopNavigationError = router.onError(() => {
+  leaving = false;
+});
+const stopNavigationResult = router.afterEach((_to, _from, failure) => {
+  if (failure) leaving = false;
 });
 onMounted(async () => {
   window.addEventListener('beforeunload', unload);
@@ -577,6 +449,9 @@ onMounted(async () => {
 });
 onBeforeUnmount(() => {
   disposed = true;
+  stopNavigationError();
+  stopNavigationResult();
+  coverController?.abort();
   clearTimeout(timer);
   window.removeEventListener('beforeunload', unload);
   window.removeEventListener('pagehide', pagehide);
@@ -613,7 +488,7 @@ onBeforeUnmount(() => {
               >话题标题<input
                 v-model="form.title"
                 :disabled="busy"
-                maxlength="120"
+                maxlength="240"
                 placeholder="用一句话概括你想讨论的内容"
             /></label>
           </div>
@@ -642,7 +517,7 @@ onBeforeUnmount(() => {
               aria-label="选择帖子封面"
               hidden
               :disabled="busy"
-              @change="selectImages($event, true)"
+              @change="selectCover"
             />
             <div class="compose-cover-actions">
               <button
@@ -680,86 +555,25 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
-          <div
-            v-if="mode !== 'preview'"
-            class="markdown-toolbar"
-            role="toolbar"
-            aria-label="Markdown 格式工具"
-          >
-            <button type="button" :disabled="busy" @click="fileInput?.click()">导入 .md</button>
-            <input
-              ref="fileInput"
-              type="file"
-              accept=".md,.markdown,text/markdown,text/plain"
-              aria-label="选择 Markdown 文件"
-              hidden
-              :disabled="busy"
-              @change="importMarkdown"
-            />
-            <button type="button" :disabled="busy" @click="bodyImageInput?.click()">
-              插入图片
-            </button>
-            <input
-              ref="bodyImageInput"
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              aria-label="选择正文图片"
-              multiple
-              hidden
-              :disabled="busy"
-              @change="selectImages"
-            />
-            <span class="toolbar-divider"></span>
-            <button
-              v-for="(label, key) in {
-                h1: 'H1',
-                h2: 'H2',
-                bold: 'B',
-                italic: 'I',
-                strike: 'S',
-                quote: '❝',
-                ul: '• 列表',
-                ol: '1. 列表',
-                code: '</>',
-                codeblock: '代码块',
-                link: '链接',
-              }"
-              :key="key"
-              :disabled="busy"
-              @click="format(key)"
-            >
-              {{ label }}
-            </button>
-          </div>
           <p class="compose-image-hint">
             支持选择、粘贴或拖入 PNG / JPEG / WebP，原图最大 20 MB，上传前会自动压缩。
           </p>
           <p v-if="imageUploadMessage" class="compose-image-status" role="status">
             {{ imageUploadMessage }}
           </p>
-          <div class="compose-editing-panes" :class="{ split: mode === 'split' }">
-            <textarea
-              v-if="mode !== 'preview'"
-              ref="input"
-              v-model="form.body"
-              class="compose-textarea"
-              :disabled="busy"
-              rows="18"
-              maxlength="20000"
-              placeholder="记录你的思路…"
-              aria-label="帖子 Markdown 正文"
-              @paste="pasteImages"
-              @dragover.prevent
-              @drop="dropImages"
-            ></textarea>
-            <div
-              v-if="mode !== 'write'"
-              v-forum-math
-              class="compose-preview forum-markdown"
-              aria-label="帖子正文预览"
-              v-html="markdown(form.body)"
-            ></div>
-          </div>
+          <MarkdownEditor
+            v-model="form.body"
+            v-model:title="form.title"
+            :mode="mode"
+            :disabled="busy"
+            document-type="forum_draft"
+            :document-id="id"
+            :prepare-upload="prepareImageUpload"
+            :upload-image="uploadBodyImage"
+            :download-url="id ? `/api/forum/drafts/${id}/markdown` : ''"
+            @uploading="busy = $event"
+            @uploaded="save().catch(showError)"
+          />
         </section>
         <div class="compose-actions">
           <button class="btn" :disabled="busy" @click="save().catch(showError)">保存草稿</button

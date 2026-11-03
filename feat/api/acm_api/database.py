@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """数据库初始化、设置读写与排行榜查询。"""
 import time
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 import aiosqlite
@@ -182,6 +183,10 @@ async def connect_db(db_path):
         "title TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '', "
         "created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)"
     )
+    async with db.execute("PRAGMA table_info(forum_posts)") as cursor:
+        post_columns = {row["name"] for row in await cursor.fetchall()}
+    if "review_reason" not in post_columns:
+        await db.execute("ALTER TABLE forum_posts ADD COLUMN review_reason TEXT NOT NULL DEFAULT ''")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_drafts_author_updated ON forum_drafts(author_qq_id, updated_at DESC)")
     for table in ("forum_posts", "forum_drafts"):
         async with db.execute(f"PRAGMA table_info({table})") as cursor:
@@ -233,6 +238,17 @@ async def connect_db(db_path):
         "status TEXT NOT NULL DEFAULT 'published' CHECK(status IN ('published','hidden','removed')), created_at INTEGER NOT NULL)"
     )
     await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_comments_post_created ON forum_comments(post_id, status, created_at)")
+    await db.execute(
+        "CREATE TABLE IF NOT EXISTS forum_notifications ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, recipient_qq_id TEXT NOT NULL REFERENCES users(qq_id) ON DELETE CASCADE, "
+        "actor_qq_id TEXT REFERENCES users(qq_id) ON DELETE SET NULL, "
+        "kind TEXT NOT NULL CHECK(kind IN ('comment','reply','published','rejected')), "
+        "post_id INTEGER NOT NULL REFERENCES forum_posts(id) ON DELETE CASCADE, "
+        "comment_id INTEGER REFERENCES forum_comments(id) ON DELETE SET NULL, "
+        "created_at INTEGER NOT NULL, read_at INTEGER, UNIQUE(recipient_qq_id,comment_id))"
+    )
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_notifications_recipient ON forum_notifications(recipient_qq_id,id DESC)")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_notifications_unread ON forum_notifications(recipient_qq_id,read_at,id DESC)")
     await db.execute(
         "CREATE TABLE IF NOT EXISTS forum_post_likes ("
         "post_id INTEGER NOT NULL REFERENCES forum_posts(id) ON DELETE CASCADE, "
@@ -335,6 +351,7 @@ async def connect_db(db_path):
             (platform, int(time.time())),
         )
     await db.execute("UPDATE users SET name = cf_handle WHERE cf_handle IS NOT NULL AND TRIM(cf_handle) <> '' AND (name IS NULL OR TRIM(name) = '' OR name = qq_id)")
+    await db.executescript(Path(__file__).with_name("wiki.sql").read_text(encoding="utf-8"))
     await db.commit()
     return db
 

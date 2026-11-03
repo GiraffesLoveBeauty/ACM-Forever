@@ -29,6 +29,7 @@ export async function logoutSession() {
   setAuth(anonymousAuth(), true);
 }
 export const notification = ref('');
+export const pageLoadError = ref(null);
 let noticeTimer;
 export function notify(message) {
   notification.value = String(message || '');
@@ -37,13 +38,27 @@ export function notify(message) {
     notification.value = '';
   }, 5000);
 }
-export function safeNext(value, fallback = '/index.html') {
-  return typeof value === 'string' &&
-    value.startsWith('/') &&
-    !value.startsWith('//') &&
-    !/[\\\x00-\x1f]/.test(value)
-    ? value
-    : fallback;
+export function safeNext(value, fallback = '/index.html', exclude = []) {
+  if (
+    typeof value !== 'string' ||
+    !value.startsWith('/') ||
+    value.startsWith('//') ||
+    /[\\\x00-\x1f\x7f]/.test(value)
+  )
+    return fallback;
+  try {
+    const url = new URL(value, 'https://acm.invalid');
+    const path = decodeURIComponent(url.pathname).toLowerCase();
+    if (
+      path.startsWith('//') ||
+      /[\\\x00-\x1f\x7f]/.test(path) ||
+      ['/login.html', '/auth-unavailable.html', '/forbidden.html', ...exclude].includes(path)
+    )
+      return fallback;
+    return value;
+  } catch {
+    return fallback;
+  }
 }
 export function avatar(value) {
   return /^\/uploads\/avatars\/[a-f0-9]{32}\.(png|jpg|webp)$/.test(value || '')
@@ -124,12 +139,14 @@ export async function api(path, options = {}) {
       setAuth(anonymousAuth(), true);
       if (!path.startsWith('/auth/'))
         location.assign(
-          '/login.html?next=' + encodeURIComponent(location.pathname + location.search),
+          '/login.html?next=' +
+            encodeURIComponent(location.pathname + location.search + (location.hash || '')),
         );
     }
     if (response.status === 428 && location.pathname !== '/change-password.html')
       location.assign(
-        '/change-password.html?next=' + encodeURIComponent(location.pathname + location.search),
+        '/change-password.html?next=' +
+          encodeURIComponent(location.pathname + location.search + (location.hash || '')),
       );
     if (!response.ok)
       throw Object.assign(Error(data.message || data.error || `HTTP ${response.status}`), {

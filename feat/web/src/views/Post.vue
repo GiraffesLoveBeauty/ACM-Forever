@@ -1,9 +1,25 @@
 <script setup>
+import { forumReturn } from '../lib/forum-state.js';
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useRequests, auth, avatar, date, showError, notify } from '../lib/api.js';
-import { markdown } from '../lib/markdown.js';
+import { downloadMarkdown } from '../lib/wiki.js';
+import { markdown, controlledImage } from '../lib/markdown.js';
+import { codeBlocks as vCodeBlocks } from '../lib/code-blocks.js';
 import PostCover from '../components/PostCover.vue';
+import ImageLightbox from '../components/ImageLightbox.vue';
+const imageViewer = ref();
+function viewImage(event) {
+  if (event.type === 'keydown' && !['Enter', ' '].includes(event.key)) return;
+  if (
+    event.target.tagName === 'IMG' &&
+    !event.target.closest('a') &&
+    controlledImage(event.target.getAttribute('src'))
+  ) {
+    event.preventDefault();
+    imageViewer.value.open(event.target.getAttribute('src'), event.target.alt);
+  }
+}
 const route = useRoute(),
   router = useRouter(),
   request = useRequests();
@@ -16,12 +32,29 @@ const post = ref(),
   input = ref(),
   toc = ref([]),
   activeHeading = ref('');
-let observer;
+let observer, downloadController;
+async function download() {
+  try {
+    downloadController?.abort();
+    downloadController = new AbortController();
+    await downloadMarkdown(`/api/forum/posts/${post.value.id}/markdown`, downloadController.signal);
+    notify('Markdown 已下载。');
+  } catch (e) {
+    if (e.name !== 'AbortError') showError(e);
+  }
+}
 const roots = computed(() => (post.value?.comments || []).filter((c) => !c.parent_id));
 async function load() {
   try {
     if (!route.query.id) throw Error('没有指定话题。');
-    post.value = await request(`/forum/posts/${encodeURIComponent(route.query.id)}`, {}, 'post');
+    const commentQuery = /^\d+$/.test(String(route.query.comment_id || ''))
+      ? `?comment_id=${route.query.comment_id}`
+      : '';
+    post.value = await request(
+      `/forum/posts/${encodeURIComponent(route.query.id)}${commentQuery}`,
+      {},
+      'post',
+    );
     document.title = `${post.value.title} · ACM Forever`;
     await buildToc();
   } catch (e) {
@@ -32,6 +65,12 @@ async function buildToc() {
   await nextTick();
   observer?.disconnect();
   const headings = [...(article.value?.querySelectorAll('h1,h2,h3') || [])];
+  for (const image of article.value?.querySelectorAll('img') || []) {
+    if (!controlledImage(image.getAttribute('src')) || image.closest('a')) continue;
+    image.tabIndex = 0;
+    image.setAttribute('role', 'button');
+    image.setAttribute('aria-label', `放大查看：${image.alt || '正文图片'}`);
+  }
   toc.value = headings.map((node, i) => {
     node.id = `post-section-${i + 1}`;
     return { id: node.id, text: node.textContent, level: node.tagName.slice(1) };
@@ -107,7 +146,7 @@ async function comment() {
   }
 }
 watch(
-  () => route.query.id,
+  () => [route.query.id, route.query.comment_id],
   () => {
     post.value = null;
     error.value = '';
@@ -117,11 +156,21 @@ watch(
   },
   { immediate: true },
 );
-onBeforeUnmount(() => observer?.disconnect());
+watch(
+  () => route.hash,
+  async () => {
+    await nextTick();
+    if (route.hash) document.getElementById(route.hash.slice(1))?.scrollIntoView();
+  },
+);
+onBeforeUnmount(() => {
+  observer?.disconnect();
+  downloadController?.abort();
+});
 </script>
 <template>
   <main class="forum-post-layout">
-    <RouterLink class="forum-back-link" to="/index.html">← 返回论坛</RouterLink>
+    <RouterLink class="forum-back-link" :to="forumReturn(route.query.from)">← 返回论坛</RouterLink>
     <div v-if="error" class="forum-empty">
       <h2>话题暂时无法打开</h2>
       <p>{{ error }}</p>
@@ -151,15 +200,20 @@ onBeforeUnmount(() => observer?.disconnect());
             :src="post.cover_url"
             :alt="`${post.title}的封面`"
             eager
+            zoom
             class="forum-article-cover"
           />
           <div
             ref="article"
             class="forum-article-body forum-markdown"
             v-forum-math
+            v-code-blocks
+            @click="viewImage"
+            @keydown="viewImage"
             v-html="markdown(post.body)"
           ></div>
           <div class="forum-detail-actions">
+            <button class="btn" @click="download">下载 MD</button>
             <button
               class="btn"
               :class="{ 'is-active': post.viewer_liked }"
@@ -201,7 +255,13 @@ onBeforeUnmount(() => observer?.disconnect());
             </div>
           </form>
           <div v-if="!roots.length" class="forum-empty">还没有评论，来开启第一轮讨论吧。</div>
-          <article v-for="item in roots" :key="item.id" class="forum-comment">
+          <article
+            v-for="item in roots"
+            :key="item.id"
+            :id="`comment-${item.id}`"
+            class="forum-comment"
+            :class="{ 'is-highlighted-comment': route.hash === `#comment-${item.id}` }"
+          >
             <div class="forum-post-author">
               <img
                 class="forum-avatar small"
@@ -215,7 +275,9 @@ onBeforeUnmount(() => observer?.disconnect());
             <div
               v-for="reply in post.comments.filter((r) => Number(r.parent_id) === Number(item.id))"
               :key="reply.id"
+              :id="`comment-${reply.id}`"
               class="forum-comment-reply"
+              :class="{ 'is-highlighted-comment': route.hash === `#comment-${reply.id}` }"
             >
               <div class="forum-post-author">
                 <img
@@ -256,5 +318,6 @@ onBeforeUnmount(() => observer?.disconnect());
         <RouterLink class="forum-rank-link" to="/leaderboard.html">♛　查看社区刷题榜</RouterLink>
       </aside>
     </div>
+    <ImageLightbox ref="imageViewer" />
   </main>
 </template>
