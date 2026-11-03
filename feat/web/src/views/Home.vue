@@ -320,5 +320,17 @@ onBeforeUnmount(() => {
         <p v-if="!posts.length" class="empty">这里还没有内容，去论坛看看吧。</p>
       </div>
     </section>
+    <section v-if="auth.account_closure_enabled" class="community-panel account-security-panel">
+      <h2>账号安全</h2>
+      <p>注销会清理私有数据并停止账号服务，提交后不可恢复。</p>
+      <RouterLink class="btn" to="/account-closure.html">了解并申请注销账号</RouterLink>
+    </section>
   </main>
 </template>
+
+<style scoped>
+.account-security-panel {
+  padding: 24px;
+  margin-top: 24px;
+}
+</style>

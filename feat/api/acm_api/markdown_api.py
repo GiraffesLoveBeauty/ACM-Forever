@@ -138,7 +138,7 @@ async def asset(asset_id):
         return Response(status=404)
     db = await get_db()
     try:
-        row = await one(db, "SELECT * FROM markdown_assets WHERE id=?", (asset_id,))
+        row = await one(db, "SELECT * FROM markdown_assets WHERE id=? AND NOT EXISTS(SELECT 1 FROM account_closure_resource_revocations v WHERE v.resource_kind='markdown' AND v.resource_id=markdown_assets.id)", (asset_id,))
         if not row:
             return Response(status=404)
         public = await asset_public(db, asset_id)

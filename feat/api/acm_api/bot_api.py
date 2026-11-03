@@ -1,5 +1,6 @@
 """Authenticated service-to-service API for the NCatBot adapter."""
 import hmac
+import inspect
 import time
 from functools import wraps
 
@@ -1469,7 +1470,10 @@ async def list_sync_tasks():
     provider = current_app.config.get("PLUGIN_CONFIG", {}).get("_task_provider")
     if not provider:
         return jsonify({"success": False, "message": "Sync task status is unavailable."}), 503
-    return jsonify({"tasks": provider()})
+    tasks = provider()
+    if inspect.isawaitable(tasks):
+        tasks = await tasks
+    return jsonify({"tasks": tasks})
 
 
 @bot_api.post("/sync/tasks/<task_id>/cancel")

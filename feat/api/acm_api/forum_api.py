@@ -109,7 +109,7 @@ async def posts():
         sql = (
             "SELECT p.id,p.title,substr(p.body,1,420) AS excerpt,p.created_at,p.updated_at,p.is_pinned,p.views_count,"
             "'/api/forum/images/' || p.cover_image_id AS cover_url,"
-            "c.slug AS category_slug,c.name AS category_name,CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,u.avatar_url AS author_avatar_url,"
+            "c.slug AS category_slug,c.name AS category_name,CASE WHEN u.account_state='closed' THEN '已注销用户' WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,CASE WHEN u.account_state='closed' THEN NULL ELSE u.avatar_url END AS author_avatar_url,u.account_state='closed' AS author_closed,"
             "(SELECT COUNT(*) FROM forum_post_likes l WHERE l.post_id=p.id) AS likes_count,"
             "(SELECT COUNT(*) FROM forum_comments cm WHERE cm.post_id=p.id AND cm.status='published') AS comments_count,"
             "EXISTS(SELECT 1 FROM forum_post_likes vl WHERE vl.post_id=p.id AND vl.qq_id=?) AS viewer_liked,"
@@ -139,7 +139,7 @@ async def post_detail(post_id):
         async with db.execute(
             "SELECT p.id,p.title,p.body,p.created_at,p.updated_at,p.views_count,p.is_pinned,"
             "'/api/forum/images/' || p.cover_image_id AS cover_url,"
-            "c.slug AS category_slug,c.name AS category_name,CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,u.avatar_url AS author_avatar_url,"
+            "c.slug AS category_slug,c.name AS category_name,CASE WHEN u.account_state='closed' THEN '已注销用户' WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,CASE WHEN u.account_state='closed' THEN NULL ELSE u.avatar_url END AS author_avatar_url,u.account_state='closed' AS author_closed,"
             "(SELECT COUNT(*) FROM forum_post_likes l WHERE l.post_id=p.id) AS likes_count,"
             "EXISTS(SELECT 1 FROM forum_post_likes vl WHERE vl.post_id=p.id AND vl.qq_id=?) AS viewer_liked,"
             "EXISTS(SELECT 1 FROM forum_bookmarks vb WHERE vb.post_id=p.id AND vb.qq_id=?) AS viewer_bookmarked,"
@@ -155,7 +155,7 @@ async def post_detail(post_id):
         await db.commit()
         async with db.execute(
             "SELECT cm.id,cm.parent_id,cm.body,cm.created_at,"
-            "CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,u.avatar_url AS author_avatar_url "
+            "CASE WHEN u.account_state='closed' THEN '已注销用户' WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,CASE WHEN u.account_state='closed' THEN NULL ELSE u.avatar_url END AS author_avatar_url,u.account_state='closed' AS author_closed "
             "FROM forum_comments cm JOIN users u ON u.qq_id=cm.author_qq_id "
             "WHERE cm.post_id=? AND cm.status='published' ORDER BY cm.created_at,cm.id LIMIT 500",
             (post_id,),
@@ -165,7 +165,7 @@ async def post_detail(post_id):
             # Keep notification links usable beyond the first 500 comments.
             async with db.execute(
                 "SELECT cm.id,cm.parent_id,cm.body,cm.created_at,"
-                "CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,u.avatar_url AS author_avatar_url "
+                "CASE WHEN u.account_state='closed' THEN '已注销用户' WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,CASE WHEN u.account_state='closed' THEN NULL ELSE u.avatar_url END AS author_avatar_url,u.account_state='closed' AS author_closed "
                 "FROM forum_comments cm JOIN users u ON u.qq_id=cm.author_qq_id WHERE cm.post_id=? AND cm.status='published' "
                 "AND cm.id IN (?,(SELECT parent_id FROM forum_comments WHERE id=? AND post_id=? AND status='published')) "
                 "AND (cm.parent_id IS NULL OR EXISTS(SELECT 1 FROM forum_comments parent WHERE parent.id=cm.parent_id AND parent.status='published'))",
@@ -586,7 +586,7 @@ async def my_bookmarks():
     try:
         async with db.execute(
             "SELECT p.id,p.title,p.created_at,c.name AS category_name,"
-            "CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,u.avatar_url AS author_avatar_url "
+            "CASE WHEN u.account_state='closed' THEN '已注销用户' WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,CASE WHEN u.account_state='closed' THEN NULL ELSE u.avatar_url END AS author_avatar_url,u.account_state='closed' AS author_closed "
             "FROM forum_bookmarks b JOIN forum_posts p ON p.id=b.post_id "
             "JOIN forum_categories c ON c.id=p.category_id JOIN users u ON u.qq_id=p.author_qq_id "
             "WHERE b.qq_id=? AND p.status='published' ORDER BY b.created_at DESC LIMIT 100",
@@ -705,7 +705,7 @@ async def moderation_reports():
         async with db.execute(
             "SELECT r.id,r.post_id,r.reason,r.created_at,p.title,p.body,p.status AS post_status,"
             "'/api/forum/images/' || p.cover_image_id AS cover_url,"
-            "CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS reporter_name "
+            "CASE WHEN u.account_state='closed' THEN '已注销用户' WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS reporter_name "
             "FROM forum_reports r JOIN forum_posts p ON p.id=r.post_id "
             "JOIN users u ON u.qq_id=r.reporter_qq_id WHERE r.status='pending' ORDER BY r.created_at LIMIT 200"
         ) as cursor:

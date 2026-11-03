@@ -384,9 +384,9 @@ onBeforeUnmount(() => {
         </form>
       </details>
       <div class="admin-account-list">
-        <article v-for="row in accounts" :key="row.qq_id" class="list-item">
+        <article v-for="row in accounts" :key="row.qq_id || row.account_key" class="list-item">
           <span
-            ><b>{{ row.name }} · QQ {{ row.qq_id }}</b
+            ><b>{{ row.name }} · QQ {{ row.qq_id || row.display_qq_id }}</b
             ><br /><small
               >{{ row.role }} ·
               {{

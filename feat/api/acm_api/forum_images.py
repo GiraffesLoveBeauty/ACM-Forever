@@ -120,7 +120,7 @@ async def sync_image_links(db, owner, body, cover_id, *, draft_id=None, post_id=
         raise ValueError("每篇帖子最多使用 30 张图片。")
     for image_id in ids:
         async with db.execute(
-            "SELECT 1 FROM forum_images i WHERE i.id=? AND (i.owner_qq_id=? OR EXISTS("
+            "SELECT 1 FROM forum_images i WHERE i.id=? AND NOT EXISTS(SELECT 1 FROM account_closure_resource_revocations v WHERE v.resource_kind='forum' AND v.resource_id=i.id) AND (i.owner_qq_id=? OR EXISTS("
             "SELECT 1 FROM forum_image_links l JOIN forum_posts p ON p.id=l.post_id "
             "WHERE l.image_id=i.id AND p.status='published') OR EXISTS("
             "SELECT 1 FROM forum_image_links l LEFT JOIN forum_drafts d ON d.id=l.draft_id "
@@ -202,7 +202,7 @@ async def read_forum_image(image_id):
             "EXISTS(SELECT 1 FROM forum_image_links l LEFT JOIN forum_drafts d ON d.id=l.draft_id "
             "LEFT JOIN forum_posts p ON p.id=l.post_id WHERE l.image_id=i.id "
             "AND (d.author_qq_id=? OR p.author_qq_id=?)) AS referenced_by_viewer "
-            "FROM forum_images i WHERE i.id=?",
+            "FROM forum_images i WHERE i.id=? AND NOT EXISTS(SELECT 1 FROM account_closure_resource_revocations v WHERE v.resource_kind='forum' AND v.resource_id=i.id)",
             (identity["qq_id"] if identity else None, identity["qq_id"] if identity else None, image_id),
         ) as cursor:
             image = await cursor.fetchone()

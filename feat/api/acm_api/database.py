@@ -363,6 +363,16 @@ async def connect_db(db_path):
         )
     await db.execute("UPDATE users SET name = cf_handle WHERE account_state='active' AND cf_handle IS NOT NULL AND TRIM(cf_handle) <> '' AND (name IS NULL OR TRIM(name) = '' OR name = qq_id)")
     await db.executescript(Path(__file__).with_name("wiki.sql").read_text(encoding="utf-8"))
+    await db.executescript(Path(__file__).with_name("account_closure.sql").read_text(encoding="utf-8"))
+    async with db.execute("PRAGMA table_info(cf_practice_job_members)") as cursor:
+        columns = {row["name"] for row in await cursor.fetchall()}
+    if "account_epoch" not in columns:
+        # A historical task without a captured epoch cannot acquire a new identity.
+        await db.execute("ALTER TABLE cf_practice_job_members ADD COLUMN account_epoch INTEGER NOT NULL DEFAULT 0")
+    async with db.execute("PRAGMA table_info(cf_practice_jobs)") as cursor:
+        columns = {row["name"] for row in await cursor.fetchall()}
+    if "privacy_revision" not in columns:
+        await db.execute("ALTER TABLE cf_practice_jobs ADD COLUMN privacy_revision INTEGER NOT NULL DEFAULT 0")
     await db.commit()
     return db
 

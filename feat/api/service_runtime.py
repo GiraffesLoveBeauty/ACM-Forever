@@ -218,6 +218,28 @@ class WebTaskManager:
         )
         return [{key: item.get(key) for key in keys} for item in self.tasks.values()]
 
+    async def public_snapshots(self):
+        # Every worker filters its own in-memory task cache against durable
+        # tombstones; a local cancellation callback alone is insufficient.
+        async with aiosqlite.connect(str(self.sync_engine.db_path)) as db:
+            async with db.execute("SELECT qq_id FROM users WHERE account_state='closed'") as cursor:
+                closed = {row[0] for row in await cursor.fetchall()}
+        snapshots = self.snapshots()
+        for item in snapshots:
+            if item.get("qq_id") in closed:
+                item.update(qq_id=None, bindings={}, result=None, status="cancelled")
+            elif item.get("qq_id") == "*" and isinstance(item.get("result"), dict):
+                item["result"] = {key: value for key, value in item["result"].items() if key not in closed}
+                if closed and "error" in item["result"]:
+                    item["result"]["error"] = "后台同步失败，请重试"
+        return snapshots
+
+    def revoke_account_tasks(self, qq_id):
+        for item in self.tasks.values():
+            if item.get("qq_id") == str(qq_id):
+                self.cancel(item["id"])
+                item.update(bindings={}, result=None, status="cancelled")
+
     def cancel(self, task_id):
         item = self.tasks.get(str(task_id))
         task = item.get("_task") if item else None

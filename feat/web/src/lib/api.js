@@ -8,6 +8,7 @@ const anonymousAuth = () => ({
   csrf_token: '',
   avatar_url: null,
   must_change_password: false,
+  account_closure_enabled: false,
 });
 export const auth = reactive(anonymousAuth());
 export function setAuth(data, newSession = false) {
@@ -107,6 +108,8 @@ export async function api(path, options = {}) {
       delete body.owner_qq_id;
     }
   }
+  const closureRequest =
+    path === '/me/account-closure' || /^\/account-closures\/[a-f0-9]{32}$/.test(path);
   const { timeoutMs = 15000, signal, ...rest } = options;
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -137,7 +140,7 @@ export async function api(path, options = {}) {
       (!path.startsWith('/auth/') || ['/auth/me', '/auth/logout'].includes(path))
     ) {
       setAuth(anonymousAuth(), true);
-      if (!path.startsWith('/auth/'))
+      if (!closureRequest && !path.startsWith('/auth/'))
         location.assign(
           '/login.html?next=' +
             encodeURIComponent(location.pathname + location.search + (location.hash || '')),
@@ -208,4 +211,23 @@ export function useRequests() {
 }
 export function showError(error) {
   if (error.name !== 'AbortError') notify(error.message);
+}
+
+// Only an invalidation signal is shared. Receipt capabilities stay in this tab.
+export function finishAccountClosure() {
+  setAuth(anonymousAuth(), true);
+  initialization = null;
+  try {
+    localStorage.setItem('acm-account-closed', String(Date.now()) + ':' + Math.random());
+  } catch {
+    /* Server-side epoch checks still revoke every old session. */
+  }
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key !== 'acm-account-closed' || !event.newValue) return;
+    setAuth(anonymousAuth(), true);
+    initialization = null;
+    location.replace('/index.html');
+  });
 }

@@ -67,7 +67,7 @@ async def notifications():
             "SELECT n.id,n.kind,n.post_id,n.comment_id,n.created_at,n.read_at,p.status AS post_status,"
             "CASE WHEN p.status='published' OR p.author_qq_id=? THEN p.title ELSE '原话题已不可访问' END AS post_title,"
             "CASE WHEN p.author_qq_id=? AND n.kind='rejected' THEN p.review_reason ELSE '' END AS review_reason,"
-            "CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS actor_name,"
+            "CASE WHEN n.actor_qq_id IS NULL OR u.account_state='closed' THEN '已注销用户' WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS actor_name,"
             "p.author_qq_id=? AS own_post,cm.status='published' AND (cm.parent_id IS NULL OR parent.status='published') AS comment_available "
             "FROM forum_notifications n JOIN forum_posts p ON p.id=n.post_id "
             "LEFT JOIN users u ON u.qq_id=n.actor_qq_id LEFT JOIN forum_comments cm ON cm.id=n.comment_id "

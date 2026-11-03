@@ -59,7 +59,7 @@ async def record_assets(db, body, kind, document_id, revision_id, actor):
     assets = {m[2] for m in ASSET_RE.finditer(body)}
     for asset_id in assets:
         row = await (
-            await db.execute("SELECT * FROM markdown_assets WHERE id=?", (asset_id,))
+            await db.execute("SELECT * FROM markdown_assets WHERE id=? AND NOT EXISTS(SELECT 1 FROM account_closure_resource_revocations v WHERE v.resource_kind='markdown' AND v.resource_id=markdown_assets.id)", (asset_id,))
         ).fetchone()
         own_post_reference = kind in {"forum_draft", "forum_post"} and bool(await (await db.execute(
             "SELECT 1 FROM markdown_asset_references a JOIN forum_posts p ON a.document_type='forum_post' AND p.id=a.document_id WHERE a.asset_id=? AND p.author_qq_id=? LIMIT 1", (asset_id, actor)

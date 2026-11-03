@@ -1,7 +1,7 @@
 """Lifecycle foundation regressions; all users and databases are synthetic.
 
-There is intentionally no closure API fixture: this stage must not open or run
-an account-closing operation before the policy decision is recorded.
+The intake switch remains off by default; full closure contracts are covered in
+test_account_closure after the policy confirmation.
 """
 import asyncio
 import os
@@ -461,7 +461,7 @@ class LifecycleApiTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 await db.close()
 
-    async def test_closure_endpoint_is_not_exposed_before_policy_confirmation(self):
+    async def test_closure_intake_is_disabled_by_default(self):
         async with self.app.test_app():
             client = self.app.test_client()
             await self.account_login(client, role='member')

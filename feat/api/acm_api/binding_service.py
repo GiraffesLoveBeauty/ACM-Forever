@@ -1,5 +1,6 @@
 """Shared account identity, evidence cleanup and verified Web binding operations."""
 import asyncio
+import inspect
 import re
 import secrets
 import time
@@ -223,6 +224,8 @@ async def bindings_summary(db, qq_id):
         raise BindingError("成员资料不存在。", "member_missing", 404)
     provider = current_app.config.get("PLUGIN_CONFIG", {}).get("_task_provider")
     tasks = provider() if callable(provider) else []
+    if inspect.isawaitable(tasks):
+        tasks = await tasks
     result = []
     for platform in LABELS:
         _, field, version_field = platform_spec(platform)

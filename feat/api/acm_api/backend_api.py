@@ -479,7 +479,7 @@ async def api_auth_me():
             avatar_url = user["avatar_url"] if user else None
         finally:
             await db.close()
-    return jsonify({"authenticated": True, "csrf_token": session.get("webui_csrf"), "root": identity["role"] == "root", "role": identity["role"], "qq_id": identity["qq_id"], "must_change_password": identity["must_change_password"], "avatar_url": avatar_url})
+    return jsonify({"authenticated": True, "csrf_token": session.get("webui_csrf"), "root": identity["role"] == "root", "role": identity["role"], "qq_id": identity["qq_id"], "must_change_password": identity["must_change_password"], "avatar_url": avatar_url, "account_closure_enabled": current_app.config.get("ACCOUNT_CLOSURE_ENABLED", False)})
 
 
 @api.route("/auth/change-password", methods=["POST"])
@@ -549,7 +549,15 @@ async def api_web_accounts():
                 "a.temporary_password_expires_at,u.name,u.status,u.school,u.account_state,u.closed_at "
                 "FROM web_accounts a JOIN users u ON u.qq_id=a.qq_id ORDER BY a.created_at DESC"
             ) as cursor:
-                return jsonify([dict(row) for row in await cursor.fetchall()])
+                items = [dict(row) for row in await cursor.fetchall()]
+            for item in items:
+                if item["account_state"] == "closed":
+                    qq_id = item["qq_id"]
+                    item["account_key"] = hmac.new(str(current_app.secret_key).encode(), ("closed:" + qq_id).encode(), hashlib.sha256).hexdigest()[:24]
+                    edge = 1 if len(qq_id) < 6 else 2
+                    item["display_qq_id"] = qq_id[:edge] + "****" + qq_id[-edge:]
+                    item["qq_id"] = None
+            return jsonify(items)
 
         data = await request.get_json(silent=True) or {}
         if not isinstance(data, dict):
@@ -951,7 +959,9 @@ async def api_admins():
             normalized.append(qq_id)
     if not callable(updater):
         return jsonify({"success": False, "message": "管理员配置服务尚未就绪。"}), 503
-    result = updater(normalized)
+    result = updater(normalized, request.web_identity)
+    if inspect.isawaitable(result):
+        result = await result
     LOG.info("WebUI 管理员列表已更新：%s", normalized)
     return jsonify({"success": True, **result})
 
@@ -960,7 +970,10 @@ async def api_admins():
 @admin_required
 async def api_tasks():
     provider = current_app.config.get("PLUGIN_CONFIG", {}).get("_task_provider")
-    return jsonify(provider() if callable(provider) else [])
+    tasks = provider() if callable(provider) else []
+    if inspect.isawaitable(tasks):
+        tasks = await tasks
+    return jsonify(tasks)
 
 
 @api.route("/tasks/<task_id>/cancel", methods=["POST"])
@@ -1741,6 +1754,8 @@ async def api_ui_preferences():
                     raise ValueError()
             except (TypeError, ValueError, KeyError):
                 return jsonify({"success": False, "message": "font_scale 必须在 0.8–1.5 之间。"}), 400
+            await db.execute("BEGIN IMMEDIATE")
+            await require_web_actor(db, request.web_identity, roles={"admin", "root"})
             await db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('webui_preferences',?)", (json.dumps({"font_scale": scale}),))
             await db.commit()
         return jsonify({"font_scale": scale})
@@ -1766,6 +1781,8 @@ async def api_contest_report_settings():
         schedule_time = str(data.get("time", "") or "").strip()
         if schedule_time and not valid_contest_report_time(schedule_time):
             return jsonify({"success": False, "message": "时间格式应为 24 小时制 HH:MM，例如 08:30。"}), 400
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity, roles={"admin", "root"})
         await db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('contest_report_time',?)", (schedule_time,))
         await db.commit()
         updater = current_app.config.get("PLUGIN_CONFIG", {}).get("_contest_report_updater")
