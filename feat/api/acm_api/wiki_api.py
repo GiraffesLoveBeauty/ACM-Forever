@@ -2,6 +2,7 @@
 
 import hashlib
 import sqlite3
+from time import perf_counter
 from functools import wraps
 from urllib.parse import urlsplit
 
@@ -9,6 +10,7 @@ from quart import Blueprint, Response, current_app, jsonify, request
 from .backend_api import _session_identity, admin_required, get_db
 from .markdown_content import ContentError, export_markdown
 from . import wiki_service as svc
+from .wiki_cache import database_namespace
 
 wiki_api = Blueprint("wiki_api", __name__)
 
@@ -50,49 +52,85 @@ def attachment(title, body, slug):
     )
 
 
-def endpoint(write=False, public=False):
+def endpoint(write=False, public=False, cache=None):
     def decorate(func):
         @wraps(func)
         async def run(*args, **kwargs):
+            started = perf_counter()
             db = await get_db()
             try:
                 if write:
                     await db.execute("BEGIN IMMEDIATE")
+                elif public:
+                    # Version keys and response data must use one WAL read snapshot.
+                    await db.execute("BEGIN")
                 data = await request.get_json(silent=True) if write else request.args
                 if write and not isinstance(data, dict):
                     raise svc.WikiError("请求必须为 JSON 对象。")
                 identity = await _session_identity() if write else None
-                result = await func(
-                    db, data, identity["qq_id"] if identity else "", *args, **kwargs
-                )
-                if write:
-                    await db.commit()
-                if isinstance(result, Response):
-                    return result
-                response = jsonify(result)
-                if not public:
-                    response.headers["Cache-Control"] = "private, no-store"
-                if public:
-                    tag = (
-                        '"'
-                        + hashlib.sha256(svc.encode(result).encode()).hexdigest()
-                        + '"'
+                store = current_app.extensions["wiki_public_cache"]
+                key = None
+                version_ms = query_ms = json_ms = 0
+                cache_status = "bypass"
+                if cache:
+                    if cache in {"pages", "search"}:
+                        data = svc.public_list_query(data, search=cache == "search")
+                    if cache == "category":
+                        svc.integer(kwargs["category_id"])
+                    state = await svc.settings(db)
+                    versions = (state["public_content_version"],)
+                    if cache in {"navigation", "category"}:
+                        versions += (state["navigation_version"],)
+                    key = (
+                        store.generation,
+                        database_namespace(current_app.config["DB_PATH"]),
+                        cache,
+                        tuple(sorted(kwargs.items())),
+                        tuple(sorted(data.items())) if cache in {"pages", "search"} else (),
+                        versions,
                     )
-                    response.headers.update(
-                        {
-                            "ETag": tag,
-                            "Cache-Control": "public, max-age=0, must-revalidate",
-                        }
+                    version_ms = (perf_counter() - started) * 1000
+                enabled = cache and current_app.config["WIKI_CACHE_ENABLED"]
+                entry = store.get(key) if enabled else None
+                if entry is not None:
+                    body, content_type, tag = entry.body, entry.content_type, entry.etag
+                    cache_status = "hit"
+                else:
+                    query_started = perf_counter()
+                    result = await func(
+                        db, data, identity["qq_id"] if identity else "", *args, **kwargs
                     )
-                    if request.headers.get("If-None-Match") == tag:
-                        return Response(
-                            status=304,
-                            headers={
-                                "ETag": tag,
-                                "Cache-Control": "public, max-age=0, must-revalidate",
-                            },
+                    query_ms = (perf_counter() - query_started) * 1000
+                    if write:
+                        await db.commit()
+                    if isinstance(result, Response):
+                        return result
+                    json_started = perf_counter()
+                    response = jsonify(result)
+                    if not public:
+                        response.headers["Cache-Control"] = "private, no-store"
+                        return response
+                    body = await response.get_data()
+                    content_type = response.content_type
+                    tag = hashlib.sha256(body).hexdigest()
+                    json_ms = (perf_counter() - json_started) * 1000
+                    if enabled:
+                        cache_status = (
+                            "miss" if store.put(key, body, content_type, tag) else "skip"
                         )
-                return response
+                headers = {
+                    "ETag": '"' + tag + '"',
+                    "Cache-Control": "public, max-age=0, must-revalidate",
+                }
+                if cache:
+                    headers["Server-Timing"] = (
+                        f'wiki-cache;desc="{cache_status}", wiki-version;dur={version_ms:.3f}, '
+                        f'wiki-query;dur={query_ms:.3f}, wiki-json;dur={json_ms:.3f}'
+                    )
+                tags = request.if_none_match
+                if tags.star_tag or tags.contains_weak(tag):
+                    return Response(status=304, headers=headers)
+                return Response(body, content_type=content_type, headers=headers)
             except (svc.WikiError, ContentError) as error:
                 if write:
                     await db.rollback()
@@ -115,7 +153,11 @@ def endpoint(write=False, public=False):
                     409,
                 )
             finally:
-                await db.close()
+                try:
+                    if public and not write:
+                        await db.rollback()
+                finally:
+                    await db.close()
 
         return run
 
@@ -123,13 +165,13 @@ def endpoint(write=False, public=False):
 
 
 @wiki_api.get("/wiki/navigation")
-@endpoint(public=True)
+@endpoint(public=True, cache="navigation")
 async def navigation(db, data, actor):
     return await svc.navigation(db)
 
 
 @wiki_api.get("/wiki/categories/<int:category_id>")
-@endpoint(public=True)
+@endpoint(public=True, cache="category")
 async def category(db, data, actor, category_id):
     item = await svc.category(db, category_id)
     nav = await svc.navigation(db)
@@ -147,13 +189,13 @@ async def category(db, data, actor, category_id):
 
 
 @wiki_api.get("/wiki/pages")
-@endpoint(public=True)
+@endpoint(public=True, cache="pages")
 async def pages(db, data, actor):
     return await svc.page_list(db, data)
 
 
 @wiki_api.get("/wiki/search")
-@endpoint(public=True)
+@endpoint(public=True, cache="search")
 async def search(db, data, actor):
     return await svc.page_list(db, data, search=True)
 

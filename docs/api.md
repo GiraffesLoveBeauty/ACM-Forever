@@ -2,6 +2,8 @@
 
 本文面向 Web、机器人和其他需要读取 ACM-Forever 数据的程序调用者。代码实现是当前行为的最终依据；接口有变化时，应在同一个 PR 中更新本文和自动化测试。
 
+作者修改帖子、驳回后重投、私有文字历史及审核版本参数见 [forum-post-revisions.md（帖子修改与重新投稿接口）](forum-post-revisions.md)。
+
 ## 选择接口和认证方式
 
 | 调用方 | 接口前缀 | 认证方式 | 适用范围 |
@@ -503,4 +505,4 @@ Wiki 使用 `/api/wiki/*` 公开读取当前发布内容，admin/root 使用 `/a
 - `GET /api/markdown/assets/<id>`：按发布引用与文档归属鉴权，私有资源匿名返回 404。
 - 论坛公开话题和本人草稿的 `/markdown` 下载调用同一源文导出逻辑。
 
-文章修订写入携带 `version/base_revision_id`；分类写入携带目录版本；409 必须保留输入并核对最新状态。发布和删除携带 `idempotency_key`。所有维护接口和源文下载不进入公共缓存；公开 JSON 支持 ETag。完整请求表、限制、删除预览、恢复与持久化配置见 [Wiki 实现与运维说明](wiki.md)。
+文章修订写入携带 `version/base_revision_id`；分类写入携带目录版本；409 必须保留输入并核对最新状态。发布和删除携带 `idempotency_key`。所有维护接口和源文下载不进入公共缓存；公开 JSON 支持 ETag（弱标签、多标签与 `*`）。公开目录、分类、文章列表和搜索使用应用级有界字节缓存及数据库版本校验，返回 `Cache-Control: public, max-age=0, must-revalidate` 和 `Server-Timing`；正文及公开历史本轮不缓存响应体。可通过 `ACM_WIKI_CACHE_ENABLED=false` 关闭，数据库恢复后必须重启或清空所有 worker 的缓存。完整请求表、限制、删除预览、恢复与持久化配置见 [Wiki 实现与运维说明](wiki.md)。

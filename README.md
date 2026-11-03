@@ -22,9 +22,12 @@
 - [api.md（API 调用指南）](docs/api.md)
 - [command-line-operations.md（网站服务管理、日志和数据库查询）](docs/command-line-operations.md)
 - [backup-and-diagnostics.md（数据库与图片备份、诊断和恢复）](docs/backup-and-diagnostics.md)
+- [forum-post-revisions.md（帖子修改、重投和版本冲突）](docs/forum-post-revisions.md)
 - [markdown-code-blocks.md（代码高亮、字体和复制）](docs/markdown-code-blocks.md)
+- [comment-markdown.md（评论 Markdown、公式和代码）](docs/comment-markdown.md)
 - [README.md（Vue 前端开发与构建）](feat/web/README.md)
 - [theme-development.md（个人主题开发与投稿规范）](docs/theme-development.md)
+- [web-performance.md（Web 性能采样与加载验收）](docs/web-performance.md)
 - [crawler-samples.md（采集命令、JSON 字段与 SQLite 入库）](docs/crawler-samples.md)
 - [issue-52-member-training.md（普通成员训练闭环实施与验收）](docs/issue-52-member-training.md)
 

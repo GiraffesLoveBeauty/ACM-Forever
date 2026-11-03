@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS wiki_pages (
  id INTEGER PRIMARY KEY, slug TEXT NOT NULL UNIQUE, category_id INTEGER NOT NULL REFERENCES wiki_categories(id),
  published_revision_id INTEGER, draft_revision_id INTEGER, version INTEGER NOT NULL DEFAULT 1,
  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS wiki_pages_category ON wiki_pages(category_id);
 CREATE TABLE IF NOT EXISTS wiki_revisions (
  id INTEGER PRIMARY KEY, page_id INTEGER NOT NULL REFERENCES wiki_pages(id), parent_revision_id INTEGER REFERENCES wiki_revisions(id),
  title TEXT NOT NULL, body TEXT NOT NULL, metadata TEXT NOT NULL, author TEXT NOT NULL,

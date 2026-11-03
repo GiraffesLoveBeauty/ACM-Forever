@@ -17,6 +17,7 @@ from .acm_api.database import connect_db
 from .acm_api.forum_api import forum_api
 from .acm_api.forum_notifications import forum_notification_api
 from .acm_api.wiki_api import wiki_api
+from .acm_api.wiki_cache import WikiResponseCache
 from .acm_api.markdown_api import markdown_api
 from .acm_api.forum_images import forum_image_api
 from .acm_api.cf_practice import PracticeQuery
@@ -91,6 +92,8 @@ def create_app():
         SESSION_COOKIE_SECURE=_bool_env("ACM_WEBUI_COOKIE_SECURE", False),
     )
     app.config["DB_PATH"] = str(db_path)
+    app.config["WIKI_CACHE_ENABLED"] = _bool_env("ACM_WIKI_CACHE_ENABLED", True)
+    app.extensions["wiki_public_cache"] = WikiResponseCache()
     app.config["AVATAR_UPLOAD_DIR"] = db_path.parent / "uploads" / "avatars"
     app.config["MARKDOWN_UPLOAD_DIR"] = Path(os.getenv("ACM_MARKDOWN_UPLOAD_DIR", str(db_path.parent / "uploads" / "markdown"))).expanduser()
     app.config["PUBLIC_BASE_URL"] = os.getenv("ACM_PUBLIC_BASE_URL", "").strip()
