@@ -70,6 +70,44 @@ class ForumRevisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(public['likes_count'], 1)
         self.assertNotIn('history', public)
 
+    async def test_new_draft_stale_submit_keeps_latest_draft_until_confirmed(self):
+        created = await self.owner.post('/api/forum/drafts', headers=self.headers[self.owner], json={
+            'title': '两个标签页的普通新帖', 'body': '第一份尚未提交的正文。', 'category_id': 2,
+        })
+        self.assertEqual(created.status_code, 201)
+        old = await created.get_json()
+        did = old['id']
+        await self.save(did)
+        stale = await self.owner.post(f'/api/forum/drafts/{did}/submit', headers=self.headers[self.owner], json={'edit_version': old['edit_version']})
+        self.assertEqual(stale.status_code, 409)
+        current = await (await self.owner.get(f'/api/forum/drafts/{did}')).get_json()
+        self.assertEqual(current['title'], '补充后的算法题解')
+        self.assertEqual(current['body'], '修改后的完整思路和实现。')
+        self.assertGreater(current['edit_version'], old['edit_version'])
+        self.assertEqual(await self.sql('SELECT id FROM forum_posts'), [])
+        submitted = await self.submit(did)
+        post = await (await self.owner.get(f"/api/forum/mine/posts/{submitted['id']}")).get_json()
+        self.assertEqual(post['body'], current['body'])
+        self.assertEqual((await self.owner.get(f'/api/forum/drafts/{did}')).status_code, 404)
+
+    async def test_new_draft_legacy_submit_without_version_remains_supported(self):
+        created = await self.owner.post('/api/forum/drafts', headers=self.headers[self.owner], json={
+            'title': '旧客户端的普通新帖', 'body': '旧客户端没有版本字段。', 'category_id': 2,
+        })
+        did = (await created.get_json())['id']
+        await self.save(did)
+        submitted = await self.owner.post(f'/api/forum/drafts/{did}/submit', headers=self.headers[self.owner], json={})
+        self.assertEqual(submitted.status_code, 201)
+
+    async def test_revision_submit_requires_version_and_json_object(self):
+        pid = await self.post()
+        did = await self.edit(pid)
+        for payload, expected in [({}, 409), ({'edit_version': None}, 409), (['invalid'], 400)]:
+            with self.subTest(payload=payload):
+                response = await self.owner.post(f'/api/forum/drafts/{did}/submit', headers=self.headers[self.owner], json=payload)
+                self.assertEqual(response.status_code, expected)
+                self.assertEqual((await self.owner.get(f'/api/forum/drafts/{did}')).status_code, 200)
+
     async def test_rejection_reason_archived_and_resubmit_is_same_post(self):
         pid = await self.post(publish=False)
         await self.admin.post(f'/api/forum/moderation/posts/{pid}', headers=self.headers[self.admin], json={'decision': 'reject', 'reason': '请补充正确性证明'})

@@ -1,5 +1,49 @@
 import { test, expect } from '@playwright/test';
 
+test('an untouched old tab cannot submit another tabs updated new-post draft', async ({
+  page,
+  context,
+}) => {
+  const login = await context.request.post('/api/auth/login', {
+    data: { qq_id: '10000001', password: 'Browser-fixture-only!2026' },
+  });
+  const { csrf_token } = await login.json();
+  const created = await context.request.post('/api/forum/drafts', {
+    headers: { 'X-CSRF-Token': csrf_token },
+    data: { title: '最初确认的普通新帖', body: '第一个标签页读取的正文。', category_id: 2 },
+  });
+  expect(created.status()).toBe(201);
+  const { id } = await created.json();
+  await page.goto('/compose.html?draft_id=' + id);
+  await expect(page.getByLabel('Markdown 正文')).toHaveValue('第一个标签页读取的正文。');
+  const second = await context.newPage();
+  try {
+    await second.goto('/compose.html?draft_id=' + id);
+    await second.getByLabel('Markdown 正文').fill('另一个标签页已经保存的新正文。');
+    const saved = second.waitForResponse(
+      (response) =>
+        response.url().endsWith('/api/forum/drafts/' + id) && response.request().method() === 'PUT',
+    );
+    await second.getByRole('button', { name: '保存草稿', exact: true }).click();
+    expect((await saved).status()).toBe(200);
+    const submitted = page.waitForResponse((response) =>
+      response.url().endsWith(`/api/forum/drafts/${id}/submit`),
+    );
+    await page.getByRole('button', { name: '提交审核', exact: true }).click();
+    expect((await submitted).status()).toBe(409);
+    await expect(page).toHaveURL(new RegExp('compose.html\\?draft_id=' + id + '$'));
+    await expect(page.getByLabel('Markdown 正文')).toHaveValue('第一个标签页读取的正文。');
+    const current = await context.request.get('/api/forum/drafts/' + id);
+    expect(current.status()).toBe(200);
+    expect((await current.json()).body).toBe('另一个标签页已经保存的新正文。');
+  } finally {
+    await second.close();
+    await context.request.delete('/api/forum/drafts/' + id, {
+      headers: { 'X-CSRF-Token': csrf_token },
+    });
+  }
+});
+
 test('author revises, reviewer rejects and author resubmits the same post', async ({
   page,
   context,

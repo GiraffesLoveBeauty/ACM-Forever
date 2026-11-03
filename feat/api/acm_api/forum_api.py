@@ -369,6 +369,8 @@ async def delete_forum_draft(draft_id):
 async def submit_forum_draft(draft_id):
     qq_id = request.web_identity["qq_id"]
     submitted = await request.get_json(silent=True) or {}
+    if not isinstance(submitted, dict):
+        return jsonify({"message": "提交内容必须是 JSON 对象。"}), 400
     db = await get_db()
     try:
         await db.execute("BEGIN IMMEDIATE")
@@ -379,7 +381,7 @@ async def submit_forum_draft(draft_id):
             draft = await cursor.fetchone()
         if not draft:
             return jsonify({"message": "草稿不存在。"}), 404
-        if draft["source_post_id"] and (not isinstance(submitted, dict) or submitted.get("edit_version") != draft["edit_version"]):
+        if (draft["source_post_id"] or "edit_version" in submitted) and submitted.get("edit_version") != draft["edit_version"]:
             return jsonify({"message": "草稿已被其他标签页修改，请复制当前输入后重新载入。"}), 409
         title, body, category_id = draft["title"].strip(), draft["body"].strip(), draft["category_id"]
         if not 4 <= len(title) <= 120:
