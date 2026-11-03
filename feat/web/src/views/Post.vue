@@ -8,6 +8,8 @@ import { markdown, controlledImage } from '../lib/markdown.js';
 import { codeBlocks as vCodeBlocks } from '../lib/code-blocks.js';
 import PostCover from '../components/PostCover.vue';
 import ImageLightbox from '../components/ImageLightbox.vue';
+import CommentEditor from '../components/CommentEditor.vue';
+import CommentMarkdown from '../components/CommentMarkdown.vue';
 const imageViewer = ref();
 function viewImage(event) {
   if (event.type === 'keydown' && !['Enter', ' '].includes(event.key)) return;
@@ -130,6 +132,10 @@ async function deletePost() {
 }
 async function comment() {
   if (loginRequired() || busy.value) return;
+  if (Array.from(body.value.trim()).length < 2 || Array.from(body.value.trim()).length > 5000) {
+    notify('评论长度需要在 2 到 5000 个字符之间。');
+    return;
+  }
   busy.value = true;
   try {
     await request(`/forum/posts/${route.query.id}/comments`, {
@@ -240,14 +246,7 @@ onBeforeUnmount(() => {
             <span>{{ post.comments?.length || 0 }} 条评论</span>
           </div>
           <form class="forum-comment-form" @submit.prevent="comment">
-            <textarea
-              ref="input"
-              v-model="body"
-              rows="3"
-              maxlength="5000"
-              required
-              placeholder="写下你的问题、想法或补充…"
-            ></textarea>
+            <CommentEditor ref="input" v-model="body" :disabled="busy" />
             <div class="forum-comment-form-bottom">
               <button v-if="parent" type="button" class="btn" @click="parent = 0">
                 正在回复评论 · 取消回复</button
@@ -270,7 +269,7 @@ onBeforeUnmount(() => {
               /><b>{{ item.author_name }}</b
               ><time>{{ date(item.created_at) }}</time>
             </div>
-            <p class="plain-comment">{{ item.body }}</p>
+            <CommentMarkdown :source="item.body" />
             <button class="forum-reply-button" @click="focusComment(item.id)">回复</button>
             <div
               v-for="reply in post.comments.filter((r) => Number(r.parent_id) === Number(item.id))"
@@ -287,7 +286,7 @@ onBeforeUnmount(() => {
                 /><b>{{ reply.author_name }}</b
                 ><time>{{ date(reply.created_at) }}</time>
               </div>
-              <p class="plain-comment">{{ reply.body }}</p>
+              <CommentMarkdown :source="reply.body" />
             </div>
           </article>
         </section>

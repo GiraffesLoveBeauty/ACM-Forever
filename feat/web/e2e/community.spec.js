@@ -90,7 +90,7 @@ test('submit, moderate, comment, reply and author deletion use the real API', as
     await noHorizontalOverflow(page);
     await page.locator('.forum-comment-form textarea').fill('成员的测试评论');
     await page.getByRole('button', { name: '发布评论' }).click();
-    await expect(page.locator('.plain-comment', { hasText: '成员的测试评论' })).toBeVisible();
+    await expect(page.locator('.comment-markdown', { hasText: '成员的测试评论' })).toBeVisible();
     await reviewer.goto('/post.html?id=' + id);
     await reviewer
       .locator('.forum-comment')
