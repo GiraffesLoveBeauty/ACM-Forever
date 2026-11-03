@@ -1,7 +1,12 @@
 import { api } from './api.js';
+import { affectsPublicWiki, invalidateWikiNavigation } from './wiki-navigation.js';
 export const wikiKey = () => crypto.randomUUID();
 export const wikiApi = (path, options = {}) => api('/wiki' + path, options);
-export const adminWikiApi = (path, options = {}) => api('/admin/wiki' + path, options);
+export async function adminWikiApi(path, options = {}, request = api) {
+  const value = await request('/admin/wiki' + path, options);
+  if (affectsPublicWiki(path, options)) invalidateWikiNavigation();
+  return value;
+}
 export function headingSlug(text, fallback = 'section') {
   return (
     text
