@@ -355,6 +355,9 @@ onBeforeUnmount(() => {
       <h2>账号管理</h2>
       <details class="admin-create">
         <summary>单个创建账号</summary>
+        <p class="muted">
+          已注销的 QQ 可在这里创建全新账号，须填写新昵称和密码；旧资料、私有数据及权限不会继承。
+        </p>
         <form class="admin-create-body" @submit.prevent="create">
           <div class="admin-create-grid">
             <label
@@ -384,30 +387,45 @@ onBeforeUnmount(() => {
         </form>
       </details>
       <div class="admin-account-list">
-        <article v-for="row in accounts" :key="row.qq_id" class="list-item">
+        <article v-for="row in accounts" :key="row.qq_id || row.account_key" class="list-item">
           <span
-            ><b>{{ row.name }} · QQ {{ row.qq_id }}</b
+            ><b>{{ row.name }} · QQ {{ row.qq_id || row.display_qq_id }}</b
             ><br /><small
-              >{{ row.role }} · {{ row.is_active ? '启用' : '停用' }} ·
-              {{ row.must_change_password ? '待改密' : '已完成改密' }} · 最近登录
+              >{{ row.role }} ·
+              {{
+                row.account_state === 'closed'
+                  ? '已注销（可通过创建账号重新开户）'
+                  : row.is_active
+                    ? '启用'
+                    : '停用'
+              }}
+              · {{ row.must_change_password ? '待改密' : '已完成改密' }} · 最近登录
               {{ date(row.last_login_at) }}</small
             ></span
           ><span class="chips"
             ><button
               v-if="row.role === 'member' && row.must_change_password && row.is_active"
               class="btn"
-              :disabled="busy"
+              :disabled="busy || row.account_state === 'closed'"
               @click="action(row, 'temporary')"
             >
               重发临时密码</button
-            ><button class="btn" :disabled="busy" @click="action(row, 'password')">
+            ><button
+              class="btn"
+              :disabled="busy || row.account_state === 'closed'"
+              @click="action(row, 'password')"
+            >
               设置初始密码</button
-            ><button class="btn" :disabled="busy" @click="action(row, 'active')">
+            ><button
+              class="btn"
+              :disabled="busy || row.account_state === 'closed'"
+              @click="action(row, 'active')"
+            >
               {{ row.is_active ? '停用' : '启用' }}</button
             ><select
               v-if="auth.role === 'root'"
               :value="row.role"
-              :disabled="busy"
+              :disabled="busy || row.account_state === 'closed'"
               @change="changeRole(row, $event)"
             >
               <option value="member">成员</option>

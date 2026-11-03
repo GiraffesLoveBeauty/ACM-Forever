@@ -318,10 +318,14 @@ class AccountImportTests(unittest.IsolatedAsyncioTestCase):
         await db.close()
 
     async def test_lifecycle_closed_block_and_redaction_hook(self):
-        # Schema compatibility test; actual #83 integration is run separately.
+        # Low-level hook coverage; real closure and new-generation routes are tested below.
         db=await self.db()
-        await db.execute("ALTER TABLE users ADD COLUMN account_state TEXT NOT NULL DEFAULT 'active'")
-        await db.execute("ALTER TABLE users ADD COLUMN account_epoch INTEGER NOT NULL DEFAULT 1")
+        async with db.execute("PRAGMA table_info(users)") as cursor:
+            columns = {item["name"] for item in await cursor.fetchall()}
+        if "account_state" not in columns:
+            await db.execute("ALTER TABLE users ADD COLUMN account_state TEXT NOT NULL DEFAULT 'active'")
+        if "account_epoch" not in columns:
+            await db.execute("ALTER TABLE users ADD COLUMN account_epoch INTEGER NOT NULL DEFAULT 1")
         await imports.initialize_imports(db)
         await db.execute("INSERT INTO users(qq_id,name,account_state) VALUES('10000084','已注销','closed')")
         await db.commit();await db.close()
@@ -343,6 +347,91 @@ class AccountImportTests(unittest.IsolatedAsyncioTestCase):
                                      json={'old_password': temporary, 'new_password': PASSWORD})
         self.assertEqual(response.status_code, 200, await response.get_json())
         return await self.login('10000084')
+
+    async def close_import_member(self, client, headers):
+        self.app.config['ACCOUNT_CLOSURE_ENABLED'] = True
+        response = await client.get('/api/me/account-closure/preview')
+        self.assertEqual(response.status_code, 200, await response.get_json())
+        preview = await response.get_json()
+        response = await client.post('/api/me/account-closure', headers={
+            **headers, 'Idempotency-Key': preview['request_id'],
+            'X-Closure-Receipt': preview['receipt_token'],
+        }, json={'current_password': PASSWORD, 'confirm_text': '注销账号',
+                 'policy_version': preview['policy_version'],
+                 'expected_account_epoch': preview['account_epoch']})
+        self.assertEqual(response.status_code, 200, await response.get_json())
+        self.assertEqual((await response.get_json())['status'], 'closed')
+        return preview
+
+    async def test_real_closure_redacts_import_and_explicit_new_account_stays_separate(self):
+        member, headers = await self.imported_member_login()
+        old_session, _ = await self.login('10000084')
+        receipt = await self.close_import_member(member, headers)
+        batch, rows = await self.preview([['10000084', '不得从 Excel 重开']])
+        self.assertEqual(rows[0]['action'], 'blocked_closed')
+        self.assertFalse(rows[0]['can_submit'])
+        created = await self.client.post('/api/admin/web-accounts', headers=self.headers,
+                                         json={'qq_id': '10000084', 'name': '新代际昵称',
+                                               'initial_password': PASSWORD})
+        self.assertEqual(created.status_code, 201, await created.get_json())
+        self.assertTrue((await created.get_json())['new_generation'])
+        fresh, fresh_headers = await self.login('10000084')
+        changed = await fresh.post('/api/auth/change-password', headers=fresh_headers,
+                                   json={'old_password': PASSWORD, 'new_password': 'Fresh-Import!2026'})
+        self.assertEqual(changed.status_code, 200, await changed.get_json())
+        fresh, _ = await self.login('10000084', 'Fresh-Import!2026')
+        profile = await (await fresh.get('/api/me/profile')).get_json()
+        self.assertEqual((await (await fresh.get('/api/auth/me')).get_json())['account_epoch'], 3)
+        self.assertEqual(profile['user']['name'], '新代际昵称')
+        self.assertFalse(profile['user']['cf_handle'])
+        self.assertEqual(profile['recent_ac'], [])
+        self.assertTrue(all(item['provenance'] is None for item in profile['bindings']))
+        self.assertEqual((await old_session.get('/api/me/profile')).status_code, 401)
+        replay = await fresh.get('/api/account-closures/' + receipt['request_id'],
+                                 headers={'X-Closure-Receipt': receipt['receipt_token']})
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual((await fresh.get('/api/me/profile')).status_code, 200)
+        _, rows = await self.preview([['10000084', '不得覆盖新代际']])
+        self.assertEqual(rows[0]['action'], 'skipped_existing')
+        db = await self.db()
+        try:
+            async with db.execute("SELECT qq_id,payload_json FROM account_import_rows WHERE status='created'") as cursor:
+                self.assertEqual([tuple(item) for item in await cursor.fetchall()], [('', '{}')])
+        finally:
+            await db.close()
+
+    async def test_closed_import_operator_and_new_generation_cannot_reclaim_old_batch(self):
+        batch, rows = await self.preview([['10000084', '旧操作者的待导入资料']])
+        root, root_headers = await self.login('10000003')
+        demoted = await root.patch('/api/admin/web-accounts/10000001', headers=root_headers,
+                                   json={'role': 'member'})
+        self.assertEqual(demoted.status_code, 200, await demoted.get_json())
+        member, member_headers = await self.login('10000001')
+        await self.close_import_member(member, member_headers)
+        created = await root.post('/api/admin/web-accounts', headers=root_headers,
+                                  json={'qq_id': '10000001', 'name': '新管理员',
+                                        'role': 'admin', 'initial_password': PASSWORD})
+        self.assertEqual(created.status_code, 201, await created.get_json())
+        fresh, fresh_headers = await self.login('10000001')
+        changed = await fresh.post('/api/auth/change-password', headers=fresh_headers,
+                                   json={'old_password': PASSWORD, 'new_password': 'Fresh-Admin!2026'})
+        self.assertEqual(changed.status_code, 200, await changed.get_json())
+        fresh, fresh_headers = await self.login('10000001', 'Fresh-Admin!2026')
+        for client in (fresh, root):
+            response = await client.get(PREFIX + '/' + batch['id'])
+            self.assertEqual(response.status_code, 404, await response.get_json())
+        response = await fresh.post(PREFIX + '/' + batch['id'] + '/commit',
+                                    headers=fresh_headers, json=self.intent(rows))
+        self.assertEqual(response.status_code, 404, await response.get_json())
+        db = await self.db()
+        try:
+            stored = await imports.row(db, 'SELECT actor_qq_id,status,payload_purged FROM account_import_batches WHERE id=?', (batch['id'],))
+            self.assertEqual(tuple(stored), ('', 'cancelled', 1))
+            stored = await imports.row(db, 'SELECT qq_id,payload_json FROM account_import_rows WHERE batch_id=?', (batch['id'],))
+            self.assertEqual(tuple(stored), ('', '{}'))
+            self.assertIsNone(await imports.row(db, "SELECT * FROM users WHERE qq_id='10000084'"))
+        finally:
+            await db.close()
 
     async def binding_evidence(self):
         db = await self.db()

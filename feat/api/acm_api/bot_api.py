@@ -1,5 +1,6 @@
 """Authenticated service-to-service API for the NCatBot adapter."""
 import hmac
+import inspect
 import time
 from functools import wraps
 
@@ -9,12 +10,26 @@ from quart import Blueprint, current_app, jsonify, request
 from .backend_api import _clear_platform_records, _fetch_leaderboard, _leaderboard_options
 from .cf_client import cf_request
 from .database import validate_submission_data
+from .account_lifecycle_service import AccountLifecycleError, require_active_user
 from .difficulty import challenge_filter, challenge_time_limit, neighboring_difficulties, normalize_platform
 from .training_logic import score_candidate
 
 from .binding_service import BINDING_FIELDS as _BINDING_FIELDS, apply_binding, snapshot
 
 bot_api = Blueprint("bot_api", __name__)
+
+
+@bot_api.errorhandler(AccountLifecycleError)
+async def lifecycle_error_response(error):
+    return jsonify({"success": False, "code": error.code, "message": str(error)}), error.status
+
+
+async def _bot_write(db, qq_id, *, allow_missing=False):
+    if not db.in_transaction:
+        await db.execute("BEGIN IMMEDIATE")
+    captured = getattr(request, "lifecycle_snapshot", None)
+    epoch = captured["account_epoch"] if captured and captured["qq_id"] == str(qq_id) else None
+    return await require_active_user(db, qq_id, expected_epoch=epoch, allow_missing=allow_missing)
 
 
 def service_required(func):
@@ -27,6 +42,15 @@ def service_required(func):
         supplied = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
         if not supplied or not hmac.compare_digest(supplied, expected):
             return jsonify({"success": False, "message": "Unauthorized."}), 401
+        qq_id = (request.view_args or {}).get("qq_id")
+        request.lifecycle_snapshot = None
+        if qq_id:
+            db = await _db()
+            try:
+                user = await require_active_user(db, qq_id, allow_missing=True)
+                request.lifecycle_snapshot = dict(user) if user else None
+            finally:
+                await db.close()
         return await func(*args, **kwargs)
     return wrapper
 
@@ -73,7 +97,7 @@ async def list_users():
         async with db.execute(
             "SELECT qq_id,name,real_name,cf_handle,luogu_id,nowcoder_id,"
             "atcoder_handle,cjlu_username,status,school,challenge_rating,last_sync_timestamp "
-            "FROM users ORDER BY qq_id LIMIT ? OFFSET ?",
+            "FROM users WHERE account_state='active' ORDER BY qq_id LIMIT ? OFFSET ?",
             (limit, offset),
         ) as cursor:
             rows = [dict(row) for row in await cursor.fetchall()]
@@ -91,8 +115,8 @@ async def lookup_users():
     db = await _db()
     try:
         async with db.execute(
-            "SELECT qq_id,name,cf_handle FROM users WHERE qq_id=? "
-            "OR LOWER(cf_handle)=LOWER(?) OR LOWER(name)=LOWER(?) ORDER BY qq_id LIMIT 25",
+            "SELECT qq_id,name,cf_handle FROM users WHERE account_state='active' AND (qq_id=? "
+            "OR LOWER(cf_handle)=LOWER(?) OR LOWER(name)=LOWER(?)) ORDER BY qq_id LIMIT 25",
             (query, query, query),
         ) as cursor:
             return jsonify([dict(row) for row in await cursor.fetchall()])
@@ -183,6 +207,7 @@ async def update_user_profile(qq_id):
         return jsonify({"success": False, "message": "No supported profile fields were supplied."}), 400
     db = await _db()
     try:
+        await _bot_write(db, qq_id, allow_missing=False)
         assignments = ",".join(f"{field}=?" for field in fields)
         cursor = await db.execute(
             f"UPDATE users SET {assignments} WHERE qq_id=?",
@@ -256,6 +281,7 @@ async def put_bind_verification(qq_id, platform):
         return jsonify({"success": False, "message": "Invalid pending account verification."}), 400
     db = await _db()
     try:
+        await _bot_write(db, qq_id, allow_missing=True)
         async with db.execute("SELECT 1 FROM users WHERE qq_id=?", (qq_id,)) as cursor:
             exists = await cursor.fetchone()
         if not exists:
@@ -305,7 +331,7 @@ async def create_bind_verifications(qq_id):
         normalized.append((platform, account, code, now, expires_at, binding[0]))
     db = await _db()
     try:
-        await db.execute("BEGIN IMMEDIATE")
+        await _bot_write(db, qq_id, allow_missing=True)
         async with db.execute("SELECT * FROM users WHERE qq_id=?", (qq_id,)) as cursor:
             user = await cursor.fetchone()
         for platform, account, _code, _created, _expires, field in normalized:
@@ -344,6 +370,7 @@ async def delete_bind_verification(qq_id, platform):
         return jsonify({"success": False, "message": "Invalid QQ number."}), 400
     db = await _db()
     try:
+        await _bot_write(db, qq_id, allow_missing=False)
         await db.execute(
             "DELETE FROM account_bind_verifications WHERE qq_id=? AND platform=?",
             (qq_id, str(platform).strip().lower()),
@@ -362,12 +389,15 @@ async def delete_user(qq_id):
         return jsonify({"success": False, "message": "Invalid QQ number."}), 400
     db = await _db()
     try:
-        await db.execute("BEGIN IMMEDIATE")
+        await _bot_write(db, qq_id, allow_missing=False)
         async with db.execute("SELECT name FROM users WHERE qq_id=?", (qq_id,)) as cursor:
             user = await cursor.fetchone()
         if not user:
             await db.rollback()
             return jsonify({"success": False, "message": "User not found."}), 404
+        async with db.execute("SELECT 1 FROM web_accounts WHERE qq_id=?", (qq_id,)) as cursor:
+            if await cursor.fetchone():
+                raise AccountLifecycleError("WEB_ACCOUNT_PROTECTED", "Web 账号不能通过 Bot 删除成员资料，请使用本人账号生命周期流程。")
         for table, owner_field in (
             ("submissions", "user_qq_id"),
             ("submission_attempts", "owner_qq_id"),
@@ -418,7 +448,7 @@ async def confirm_account_binding(qq_id, platform):
     now = int(time.time())
     db = await _db()
     try:
-        await db.execute("BEGIN IMMEDIATE")
+        await _bot_write(db, qq_id, allow_missing=True)
         async with db.execute(
             "SELECT account,verification_code,expires_at FROM account_bind_verifications WHERE qq_id=? AND platform=?",
             (qq_id, platform),
@@ -455,7 +485,7 @@ async def remove_account_binding(qq_id, platform):
     field, normalized_platform = binding
     db = await _db()
     try:
-        await db.execute("BEGIN IMMEDIATE")
+        await _bot_write(db, qq_id, allow_missing=False)
         async with db.execute(f"SELECT {field} FROM users WHERE qq_id=?", (qq_id,)) as cursor:
             user = await cursor.fetchone()
         await db.execute(
@@ -507,6 +537,7 @@ async def put_notification_preferences(qq_id):
     enabled = bool(data.get("enabled", False))
     db = await _db()
     try:
+        await _bot_write(db, qq_id, allow_missing=True)
         await db.execute(
             "INSERT INTO notification_preferences(qq_id,inactive_days,enabled,last_notified_at) VALUES(?,?,?,0) "
             "ON CONFLICT(qq_id) DO UPDATE SET inactive_days=excluded.inactive_days,enabled=excluded.enabled",
@@ -576,7 +607,7 @@ async def inactive_notification_candidates():
         async with db.execute(
             "SELECT p.qq_id,p.inactive_days,p.last_notified_at,u.name,MAX(s.submit_time) AS last_submit_time "
             "FROM notification_preferences p JOIN users u ON u.qq_id=p.qq_id "
-            "LEFT JOIN submissions s ON s.user_qq_id=p.qq_id WHERE p.enabled=1 "
+            "LEFT JOIN submissions s ON s.user_qq_id=p.qq_id WHERE p.enabled=1 AND u.account_state='active' "
             "GROUP BY p.qq_id,p.inactive_days,p.last_notified_at,u.name"
         ) as cursor:
             rows = [dict(row) for row in await cursor.fetchall()]
@@ -601,6 +632,7 @@ async def mark_inactive_notification_sent(qq_id):
         return jsonify({"success": False, "message": "Invalid QQ number."}), 400
     db = await _db()
     try:
+        await _bot_write(db, qq_id, allow_missing=False)
         await db.execute(
             "UPDATE notification_preferences SET last_notified_at=? WHERE qq_id=?",
             (int(time.time()), qq_id),
@@ -627,6 +659,7 @@ async def create_random_challenge(qq_id):
     now = int(time.time())
     db = await _db()
     try:
+        await _bot_write(db, qq_id, allow_missing=False)
         async with db.execute("SELECT challenge_rating FROM users WHERE qq_id=?", (qq_id,)) as cursor:
             user = await cursor.fetchone()
         rating = int(user["challenge_rating"] or 1000) if user else 1000
@@ -690,6 +723,7 @@ async def get_active_random_challenge(qq_id):
         return jsonify({"success": False, "message": "Invalid QQ number."}), 400
     db = await _db()
     try:
+        await _bot_write(db, qq_id, allow_missing=True)
         now = int(time.time())
         await db.execute(
             "UPDATE random_challenges SET status='expired' WHERE qq_id=? AND status='active' AND expires_at<?",
@@ -724,6 +758,7 @@ async def complete_random_challenge(qq_id):
             return jsonify({"success": False, "message": "No active challenge."}), 404
         challenge = dict(challenge)
         if now > int(challenge["expires_at"]):
+            await _bot_write(db, qq_id)
             await db.execute("UPDATE random_challenges SET status='expired' WHERE id=?", (challenge["id"],))
             await db.commit()
             return jsonify({"success": False, "message": "Challenge expired."}), 410
@@ -751,6 +786,7 @@ async def complete_random_challenge(qq_id):
                 solved = await cursor.fetchone()
         if not solved:
             return jsonify({"success": False, "message": "The problem is not in recent accepted submissions."}), 409
+        await _bot_write(db, qq_id)
         await db.execute(
             "UPDATE random_challenges SET status='completed',completed_at=? WHERE id=? AND status='active'",
             (now, challenge["id"]),
@@ -769,6 +805,7 @@ async def abandon_random_challenges(qq_id):
         return jsonify({"success": False, "message": "Invalid QQ number."}), 400
     db = await _db()
     try:
+        await _bot_write(db, qq_id, allow_missing=False)
         cursor = await db.execute(
             "UPDATE random_challenges SET status='abandoned' WHERE qq_id=? AND status='active'",
             (qq_id,),
@@ -798,7 +835,7 @@ async def create_bot_training(qq_id):
         return jsonify({"success": False, "message": str(exc)}), 400
     db = await _db()
     try:
-        await db.execute("BEGIN IMMEDIATE")
+        await _bot_write(db, qq_id, allow_missing=False)
         now = int(time.time())
         await db.execute(
             "UPDATE random_challenges SET status='expired' WHERE qq_id=? AND status='active' AND expires_at<?",
@@ -881,6 +918,7 @@ async def list_bot_training(qq_id):
         return jsonify({"success": False, "message": "Invalid QQ number."}), 400
     db = await _db()
     try:
+        await _bot_write(db, qq_id, allow_missing=True)
         now = int(time.time())
         await db.execute(
             "UPDATE random_challenges SET status='expired' WHERE qq_id=? AND status='active' AND expires_at<?",
@@ -915,6 +953,7 @@ async def complete_bot_training(qq_id, zone):
         challenge = dict(challenge)
         now = int(time.time())
         if now > int(challenge["expires_at"]):
+            await _bot_write(db, qq_id)
             await db.execute("UPDATE random_challenges SET status='expired' WHERE id=?", (challenge["id"],))
             await db.commit()
             return jsonify({"success": False, "message": "Training expired."}), 410
@@ -934,6 +973,7 @@ async def complete_bot_training(qq_id, zone):
                 solved = await cursor.fetchone()
         if not solved:
             return jsonify({"success": False, "message": "Training problem is not accepted yet."}), 409
+        await _bot_write(db, qq_id)
         await db.execute(
             "UPDATE random_challenges SET status='completed',completed_at=? WHERE id=? AND status='active'",
             (now, challenge["id"]),
@@ -953,6 +993,7 @@ async def cancel_bot_training(qq_id):
         return jsonify({"success": False, "message": "Invalid user or training zone."}), 400
     db = await _db()
     try:
+        await _bot_write(db, qq_id, allow_missing=False)
         sql = "UPDATE random_challenges SET status='abandoned' WHERE qq_id=? AND status='active'"
         params = [qq_id]
         if zone:
@@ -1067,6 +1108,7 @@ async def upsert_user(qq_id):
     values["name"] = values["name"] or values["cf_handle"] or qq_id
     db = await _db()
     try:
+        await _bot_write(db, qq_id, allow_missing=True)
         await db.execute(
             "INSERT INTO users(qq_id,name,real_name,cf_handle,luogu_id,nowcoder_id,"
             "atcoder_handle,cjlu_username,status,school) VALUES(?,?,?,?,?,?,?,?,?,?) "
@@ -1158,6 +1200,9 @@ async def add_submissions():
         missing = sorted(set(qq_ids) - found)
         if missing:
             return jsonify({"success": False, "message": "Unknown users.", "qq_ids": missing}), 404
+        await db.execute("BEGIN IMMEDIATE")
+        for qq_id in qq_ids:
+            await require_active_user(db, qq_id)
         before = db.total_changes
         await db.executemany(
             "INSERT OR IGNORE INTO submissions"
@@ -1397,6 +1442,8 @@ async def submit_account_sync(qq_id):
     if not submit:
         return jsonify({"success": False, "message": "Account sync is unavailable."}), 503
     result = submit(qq_id, platforms, days=days)
+    if inspect.isawaitable(result):
+        result = await result
     if not result:
         return jsonify({"success": False, "message": "No supported platforms were selected."}), 400
     return jsonify({"success": True, **result}), 202
@@ -1414,6 +1461,8 @@ async def submit_all_account_sync():
     except (TypeError, ValueError):
         return jsonify({"success": False, "message": "days must be an integer."}), 400
     result = submit(days=days)
+    if inspect.isawaitable(result):
+        result = await result
     if not result:
         return jsonify({"success": False, "message": "An account sync is already running."}), 409
     return jsonify({"success": True, **result}), 202
@@ -1425,7 +1474,10 @@ async def list_sync_tasks():
     provider = current_app.config.get("PLUGIN_CONFIG", {}).get("_task_provider")
     if not provider:
         return jsonify({"success": False, "message": "Sync task status is unavailable."}), 503
-    return jsonify({"tasks": provider()})
+    tasks = provider()
+    if inspect.isawaitable(tasks):
+        tasks = await tasks
+    return jsonify({"tasks": tasks})
 
 
 @bot_api.post("/sync/tasks/<task_id>/cancel")

@@ -24,6 +24,11 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
+      path: '/account-closure.html',
+      component: () => import('./views/AccountClosure.vue'),
+      meta: { public: true, title: '注销账号' },
+    },
+    {
       path: '/',
       alias: '/index.html',
       component: () => import('./views/Forum.vue'),

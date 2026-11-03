@@ -52,7 +52,11 @@ function reloadPage() {
     <component
       :is="Component"
       v-if="route.meta.public || auth.authenticated"
-      :key="`${route.path}:${auth.authenticated}:${auth.qq_id || ''}`"
+      :key="
+        route.path === '/account-closure.html'
+          ? route.path
+          : `${route.path}:${auth.authenticated}:${auth.qq_id || ''}`
+      "
     />
   </RouterView>
   <ThemeEditor ref="themeEditor" />

@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 import aiosqlite
 
 from .problem_bank import initialize_problem_bank
+from .account_lifecycle_service import migrate_account_lifecycle
 
 
 @asynccontextmanager
@@ -46,6 +47,7 @@ async def connect_db(db_path):
     await db.execute(
         "CREATE TABLE IF NOT EXISTS users (qq_id TEXT PRIMARY KEY, name TEXT NOT NULL, cf_handle TEXT, luogu_id TEXT, nowcoder_id TEXT, atcoder_handle TEXT, status TEXT, school TEXT, last_sync_timestamp INTEGER DEFAULT 0);"
     )
+    await migrate_account_lifecycle(db)
     await db.execute(
         "CREATE TABLE IF NOT EXISTS web_accounts ("
         "qq_id TEXT PRIMARY KEY REFERENCES users(qq_id) ON DELETE CASCADE, "
@@ -356,7 +358,7 @@ async def connect_db(db_path):
             "(user_qq_id, platform, cursor_timestamp, last_success_at, last_status, updated_at) "
             f"SELECT qq_id, ?, COALESCE(last_sync_timestamp, 0), COALESCE(last_sync_timestamp, 0), "
             "CASE WHEN COALESCE(last_sync_timestamp, 0) > 0 THEN 'migrated' ELSE 'never' END, "
-            "? FROM users WHERE " + field + " IS NOT NULL AND TRIM(" + field + ") <> ''",
+            "? FROM users WHERE account_state='active' AND " + field + " IS NOT NULL AND TRIM(" + field + ") <> ''",
             (platform, int(time.time())),
         )
     from .account_import_service import initialize_imports
@@ -366,11 +368,21 @@ async def connect_db(db_path):
     await db.execute("CREATE TABLE IF NOT EXISTS schema_migrations(name TEXT PRIMARY KEY,applied_at INTEGER NOT NULL)")
     await db.execute(
         "UPDATE users SET name=COALESCE(NULLIF(TRIM(cf_handle),''),qq_id) "
-        "WHERE (name IS NULL OR TRIM(name)='') "
+        "WHERE account_state='active' AND (name IS NULL OR TRIM(name)='') "
         "AND NOT EXISTS(SELECT 1 FROM schema_migrations WHERE name='users_empty_nickname_v1')"
     )
     await db.execute("INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES('users_empty_nickname_v1',?)", (int(time.time()),))
     await db.executescript(Path(__file__).with_name("wiki.sql").read_text(encoding="utf-8"))
+    await db.executescript(Path(__file__).with_name("account_closure.sql").read_text(encoding="utf-8"))
+    async with db.execute("PRAGMA table_info(cf_practice_job_members)") as cursor:
+        columns = {row["name"] for row in await cursor.fetchall()}
+    if "account_epoch" not in columns:
+        # A historical task without a captured epoch cannot acquire a new identity.
+        await db.execute("ALTER TABLE cf_practice_job_members ADD COLUMN account_epoch INTEGER NOT NULL DEFAULT 0")
+    async with db.execute("PRAGMA table_info(cf_practice_jobs)") as cursor:
+        columns = {row["name"] for row in await cursor.fetchall()}
+    if "privacy_revision" not in columns:
+        await db.execute("ALTER TABLE cf_practice_jobs ADD COLUMN privacy_revision INTEGER NOT NULL DEFAULT 0")
     await db.commit()
     return db
 

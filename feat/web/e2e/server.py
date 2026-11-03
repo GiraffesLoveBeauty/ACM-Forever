@@ -25,6 +25,7 @@ async def run(port):
             "ACM_WEBUI_SECRET_KEY": secrets.token_hex(32),
             "ACM_BOOTSTRAP_ROOT_QQ_ID": "",
             "ACM_BOOTSTRAP_ROOT_PASSWORD": "",
+            "ACM_ACCOUNT_CLOSURE_ENABLED": "true",
         })
         from feat.api.acm_api.auth_service import hash_password
         from feat.api.acm_api.database import connect_db
@@ -38,7 +39,10 @@ async def run(port):
         try:
             now = int(time.time())
             encoded = hash_password("Browser-fixture-only!2026")
-            for qq, role in [("10000001", "member"), ("10000002", "member"), ("10000003", "admin")]:
+            for qq, role in [("10000001", "member"), ("10000002", "member"), ("10000003", "admin"),
+                             ("10000004", "member"), ("10000005", "member"),
+                             ("10000006", "member"), ("10000007", "member"),
+                             ("10000008", "member"), ("10000009", "member")]:
                 await db.execute("INSERT INTO users(qq_id,name) VALUES(?,?)", (qq, "浏览器测试" + role))
                 await db.execute(
                     "INSERT INTO web_accounts(qq_id,password_hash,role,must_change_password,is_active,created_at,updated_at) "

@@ -34,3 +34,4 @@
 - [issue-84-account-import.md（Excel 批量开户与 OJ 资料导入设计及实施记录）](docs/issue-84-account-import.md)
 
 - [wiki.md（Wiki 知识手册、共享 Markdown、接口与备份恢复）](docs/wiki.md)
+- [issue-83-account-closure.md（账号注销、同 QQ 新建账号与发布验收）](docs/issue-83-account-closure.md)

@@ -1,4 +1,5 @@
 """Managed forum images, draft references and publication visibility."""
+
 import asyncio
 import io
 import re
@@ -13,7 +14,9 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 import mistune
 from quart import Blueprint, abort, current_app, jsonify, request, send_from_directory
 
+from .account_closure_service import closed_content_sql
 from .backend_api import _session_identity, get_db, member_required
+from .account_lifecycle_service import require_web_actor
 
 forum_image_api = Blueprint("forum_image_api", __name__)
 IMAGE_ID = re.compile(r"[a-f0-9]{32}")
@@ -119,12 +122,12 @@ async def sync_image_links(db, owner, body, cover_id, *, draft_id=None, post_id=
         raise ValueError("每篇帖子最多使用 30 张图片。")
     for image_id in ids:
         async with db.execute(
-            "SELECT 1 FROM forum_images i WHERE i.id=? AND (i.owner_qq_id=? OR EXISTS("
+            "SELECT 1 FROM forum_images i WHERE i.id=? AND NOT EXISTS(SELECT 1 FROM account_closure_resource_revocations v WHERE v.resource_kind='forum' AND v.resource_id=i.id) AND (i.owner_qq_id=? OR EXISTS("
             "SELECT 1 FROM forum_image_links l JOIN forum_posts p ON p.id=l.post_id "
             "WHERE l.image_id=i.id AND p.status='published') OR EXISTS("
             "SELECT 1 FROM forum_image_links l LEFT JOIN forum_drafts d ON d.id=l.draft_id "
             "LEFT JOIN forum_posts p ON p.id=l.post_id WHERE l.image_id=i.id "
-            "AND (d.author_qq_id=? OR p.author_qq_id=?)))", (image_id, owner, owner, owner),
+            f"AND (d.author_qq_id=? OR (p.author_qq_id=? AND NOT {closed_content_sql('forum_post', 'p')}))))", (image_id, owner, owner, owner),
         ) as cursor:
             if not await cursor.fetchone():
                 raise ValueError("正文或封面引用了不存在或无权使用的图片，请重新上传。")
@@ -158,6 +161,7 @@ async def upload_forum_image():
     written = False
     try:
         await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity)
         async with db.execute(
             "SELECT COALESCE(SUM(size_bytes),0) AS bytes,COUNT(*) AS count FROM forum_images WHERE owner_qq_id=?", (owner,),
         ) as cursor:
@@ -199,8 +203,8 @@ async def read_forum_image(image_id):
             "WHERE l.image_id=i.id AND p.status<>'removed') AS submitted,"
             "EXISTS(SELECT 1 FROM forum_image_links l LEFT JOIN forum_drafts d ON d.id=l.draft_id "
             "LEFT JOIN forum_posts p ON p.id=l.post_id WHERE l.image_id=i.id "
-            "AND (d.author_qq_id=? OR p.author_qq_id=?)) AS referenced_by_viewer "
-            "FROM forum_images i WHERE i.id=?",
+            f"AND (d.author_qq_id=? OR (p.author_qq_id=? AND NOT {closed_content_sql('forum_post', 'p')}))) AS referenced_by_viewer "
+            "FROM forum_images i WHERE i.id=? AND NOT EXISTS(SELECT 1 FROM account_closure_resource_revocations v WHERE v.resource_kind='forum' AND v.resource_id=i.id)",
             (identity["qq_id"] if identity else None, identity["qq_id"] if identity else None, image_id),
         ) as cursor:
             image = await cursor.fetchone()
