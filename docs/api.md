@@ -506,3 +506,58 @@ Wiki 使用 `/api/wiki/*` 公开读取当前发布内容，admin/root 使用 `/a
 - 论坛公开话题和本人草稿的 `/markdown` 下载调用同一源文导出逻辑。
 
 文章修订写入携带 `version/base_revision_id`；分类写入携带目录版本；409 必须保留输入并核对最新状态。发布和删除携带 `idempotency_key`。所有维护接口和源文下载不进入公共缓存；公开 JSON 支持 ETag（弱标签、多标签与 `*`）。公开目录、分类、文章列表和搜索使用应用级有界字节缓存及数据库版本校验，返回 `Cache-Control: public, max-age=0, must-revalidate` 和 `Server-Timing`；正文及公开历史本轮不缓存响应体。可通过 `ACM_WIKI_CACHE_ENABLED=false` 关闭，数据库恢复后必须重启或清空所有 worker 的缓存。完整请求表、限制、删除预览、恢复与持久化配置见 [Wiki 实现与运维说明](wiki.md)。
+
+## Excel 批量开户与 OJ 资料导入
+
+管理入口 `/admin.html?section=accounts&tab=import`。部署设置 `ACM_ACCOUNT_IMPORT_ENABLED=true` 后允许新上传及执行，默认关闭。全部接口要求具名个人 Web `admin/root`，旧共享 root、普通成员和匿名请求不能使用。写接口沿用 Cookie 与 `X-CSRF-Token`；表格不能指定角色、密码或 QQBot 管理员。
+
+| 方法与路径 | 功能 |
+| --- | --- |
+| `GET /api/admin/account-imports/capabilities` | 开关、模板版本、5 MiB/200 行限制、每段 10 人和有效期 |
+| `GET /api/admin/account-imports/template` | 下载 `account-import-v1.xlsx` |
+| `POST /api/admin/account-imports/preview` | 仅一个 multipart `file`，不接受其他表单字段；201 返回预检摘要 |
+| `GET /api/admin/account-imports/{id}` | 无密码摘要、冻结范围、恢复标识及当前处理段 |
+| `GET /api/admin/account-imports/{id}/rows` | `status/page/page_size`，默认每页 100、最大 100，逐行结果 |
+| `POST /api/admin/account-imports/{id}/commit` | 冻结选择并处理下一段；原始创建响应一次返回凭据 |
+| `POST /api/admin/account-imports/{id}/cancel` | 空对象请求，停止未处理行，保留已创建账号 |
+| `GET /api/admin/account-imports/{id}/report` | 无密码、强制字符串单元格的 `.xlsx` 报告，到期返回 410 |
+
+关闭开关后仍可查询、取消及下载未过期报告。默认只有同一账号代际的操作者可访问；root 只读审计其他操作者批次，不能接管提交。凭据版本变化后旧批次只读。
+
+首次确认只接受以下字段：
+
+```json
+{
+  "preview_version": 1,
+  "selected_row_ids": ["opaque-server-row-id"],
+  "acknowledge_admin_binding": true,
+  "idempotency_key": "random-request-key-at-least-16-chars"
+}
+```
+
+有新 OJ 写入时必须确认对应关系。所选行只能来自该批次且可执行，已有成员只补开户；错误、占用、已有/停用/注销账号不覆盖。确认时重新检查成员快照、绑定占用和管理员权限。
+
+继续请求只接受：
+
+```json
+{
+  "preview_version": 1,
+  "selection_digest": "server-confirmed-digest",
+  "continuation_token": "server-issued-next-token",
+  "idempotency_key": "another-random-request-key"
+}
+```
+
+每段 10 人，写事务外准备强随机密码和 PBKDF2 哈希，逐行业务与台账原子提交。批次内只有一个处理段，SQLite 唯一约束、90 秒租约及随机令牌阻止跨 worker 重复或迟到提交；段有 20 秒启动新行预算。当前段执行完返回 `paused` 并附 `next_chunk_token` 时，可以显式继续。`chunk_status=interrupted` 必须停止自动循环并查询、核对结果。
+
+同幂等键同请求正在处理返回 202；结束后重放返回无密码结果；同键不同内容返回 409。换幂等键不能绕过处理段互斥或冻结范围。刷新恢复不自动继续写入。
+
+创建响应的 `credentials` 只含本请求新创建账号的 `row_id/qq_id/name/temporary_password/expires_at`。`credentials_replayed=false`；摘要、行、报告和重放均不提供明文。服务器不持久保存可恢复密码，也不能保证客户端收到原始响应。响应丢失后先查成功名单，再走已有受控重新发放入口，不能盲目重置。
+
+所有导入响应 `Cache-Control: no-store`，下载设置 Excel MIME、固定文件名和 `nosniff`。表格报告不含密码、公式或外链；凭据文本仅在当前浏览器内存生成。
+
+关键错误码：`named_admin_required/actor_changed`（403）、`batch_not_found`（404）、`idempotency_conflict/batch_busy/selection_changed/account_changed`（409）、`batch_expired/report_expired`（410）、`file_size`（413）、`invalid_workbook/unsafe_content/resource_limit/parse_timeout`（422）、`parse_busy/hash_busy/capacity_limit`（429）、`import_disabled`（503）。字段或选择格式错误返回 400。行级冲突放入对应行结果，不将其他已创建行回滚。
+
+新绑定摘要增加可选 `provenance`：`source=admin_import`、`owner_verified_at=null`、`existence_status=not_checked`；原 `binding_status/self_service/sync_status` 含义不变。现有 CF 本人核验成功后来源为 `member_verified`。不自动同步、不覆盖已有档案或证据。
+
+操作与保留规则见 [admin-account-import.md（Excel 批量开户操作说明）](admin-account-import.md)，设计、实现状态和验证见 [issue-84-account-import.md（Issue #84 实施记录）](issue-84-account-import.md)。
