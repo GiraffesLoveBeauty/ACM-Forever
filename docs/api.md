@@ -171,6 +171,8 @@ CF 详情及 PDF 接口在读取时统一解析 `100A` / `cf_100A` 等前缀和�
 
 Web 归属验证当前实现 Codeforces：账号存在性使用已有验证器，归属只检查目标 `user.info` 的 `firstName/lastName/organization`。用户将验证码写入公开资料，不提供 OJ 密码。其他平台 `self_service=false`，保留查看、同步、密码确认后的解绑和管理员代操作；真实平台归属验证联测前不开放自助绑定 / 改绑。此次自动测试与浏览器测试使用模拟 CF 资料，真实账号的正向归属验证仍待联测。
 
+管理员导入且尚未完成本人核验的 Codeforces 绑定，允许向 `verification` 申请当前 handle（忽略大小写）的验证码；来源记录必须匹配当前账号与绑定版本且 `owner_verified_at=null`。确认接口仍要求当前 Web 密码、明确确认和服务端公开资料归属验证。成功后原子更新来源为 `member_verified`，保留原账号、绑定版本、AC、提交证据及活动挑战；仍沿用确认后的同步调度。已核验、无来源记录或来源与当前绑定不匹配时，重复申请当前 handle 返回 `409 already_bound`。
+
 `binding_status` 为 `unbound/pending/bound`，同步为 `never/queued/running/success/failed`。`last_success_at` 为 Unix 秒，0 代表没有成功记录。`verification` 含 `account/verification_id/code/expires_at`，不能将该资料发给其他成员。服务重启后丢失的运行中任务显示失败并可重试；旧账号的任务不会使新绑定显示同步中。绑定提交与同步调度分别反馈：排队失败时响应仍表明绑定成功，`sync_status=failed`，刷新后仍能看到失败状态。
 
 限频按成员、平台、动作持久保存：申请验证码间隔 30 秒，确认与解绑间隔 3 秒，同步间隔 60 秒，每个动作最多 15 次 / 15 分钟；上游核验并发最多 4。常见错误为 `confirmation_required`（400）、`invalid_password`（403）、`ownership_unverified`（400）、`verification_expired/verification_changed/binding_changed/account_occupied`（409）、`rate_limited`（429）、`upstream_unavailable/verification_unavailable`（503）。仅浏览器提交“已验证”不会完成绑定。
