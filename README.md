@@ -26,6 +26,7 @@
 - [comment-markdown.md（评论 Markdown、公式和代码）](docs/comment-markdown.md)
 - [README.md（Vue 前端开发与构建）](feat/web/README.md)
 - [theme-development.md（个人主题开发与投稿规范）](docs/theme-development.md)
+- [web-performance.md（Web 性能采样与加载验收）](docs/web-performance.md)
 - [crawler-samples.md（采集命令、JSON 字段与 SQLite 入库）](docs/crawler-samples.md)
 - [issue-52-member-training.md（普通成员训练闭环实施与验收）](docs/issue-52-member-training.md)
 
