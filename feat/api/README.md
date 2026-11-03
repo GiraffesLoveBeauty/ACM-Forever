@@ -311,4 +311,4 @@ API 回归新增 `tests/test_member_training.py`，共 20 项，覆盖三种 Web
 
 普通业务写入口在最终事务调用 `require_active_user`；同 QQ 新建由 `account_registration_service.py` 单独校验 closed 快照与新代际记录，Web 操作者还须 `require_web_actor`。单人/全员后台任务在排队时捕获 epoch 和绑定快照，在每次最终写回复核，不能仅依赖本进程取消任务。最后 root 保护按真实可用凭据判断；legacy 管理入口不能作为继任 root。
 
-恢复旧备份前必须保留并重放最新墓碑、凭据版本和资源撤销清单，且使旧 Cookie 失效。禁止把旧备份直接覆盖后开放登录。运行细节、测试及尚未完成的实际客户端联调见 [issue-83-account-closure.md（策略、实现与发布验收）](../../docs/issue-83-account-closure.md)。正式回归为 `tests/test_account_lifecycle.py`、`tests/test_account_closure.py`、前端与浏览器 `account-closure` 用例。
+恢复旧备份前必须保留并重放最新注销/新建代际、内容作者墓碑、凭据版本和资源撤销清单，且使旧 Cookie 失效。禁止把旧备份直接覆盖后开放登录。运行细节、测试及尚未完成的实际客户端联调见 [issue-83-account-closure.md（策略、实现与发布验收）](../../docs/issue-83-account-closure.md)。正式回归为 `tests/test_account_lifecycle.py`、`tests/test_account_closure.py`、前端与浏览器 `account-closure` 用例。
