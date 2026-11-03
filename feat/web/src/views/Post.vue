@@ -232,6 +232,12 @@ onBeforeUnmount(() => {
             ><button class="btn" :disabled="busy" @click="action('report')">举报</button
             ><button
               v-if="post.viewer_is_author"
+              class="btn"
+              @click="router.push(`/my-post.html?id=${post.id}`)"
+            >
+              修改帖子</button
+            ><button
+              v-if="post.viewer_is_author"
               class="btn forum-delete-post"
               :disabled="busy"
               @click="deletePost"

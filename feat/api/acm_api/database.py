@@ -187,6 +187,15 @@ async def connect_db(db_path):
         post_columns = {row["name"] for row in await cursor.fetchall()}
     if "review_reason" not in post_columns:
         await db.execute("ALTER TABLE forum_posts ADD COLUMN review_reason TEXT NOT NULL DEFAULT ''")
+    if "content_version" not in post_columns:
+        await db.execute("ALTER TABLE forum_posts ADD COLUMN content_version INTEGER NOT NULL DEFAULT 1")
+    async with db.execute("PRAGMA table_info(forum_drafts)") as cursor:
+        draft_columns = {row["name"] for row in await cursor.fetchall()}
+    for column, definition in (("source_post_id", "INTEGER REFERENCES forum_posts(id)"), ("source_version", "INTEGER"), ("source_status", "TEXT"), ("edit_version", "INTEGER NOT NULL DEFAULT 1")):
+        if column not in draft_columns:
+            await db.execute(f"ALTER TABLE forum_drafts ADD COLUMN {column} {definition}")
+    await db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_forum_draft_source ON forum_drafts(author_qq_id,source_post_id) WHERE source_post_id IS NOT NULL")
+    await db.execute("CREATE TABLE IF NOT EXISTS forum_post_history (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER NOT NULL REFERENCES forum_posts(id) ON DELETE CASCADE, content_version INTEGER NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL, category_id INTEGER NOT NULL, status TEXT NOT NULL, review_reason TEXT NOT NULL, reviewed_at INTEGER, saved_at INTEGER NOT NULL, UNIQUE(post_id,content_version))")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_forum_drafts_author_updated ON forum_drafts(author_qq_id, updated_at DESC)")
     for table in ("forum_posts", "forum_drafts"):
         async with db.execute(f"PRAGMA table_info({table})") as cursor:
