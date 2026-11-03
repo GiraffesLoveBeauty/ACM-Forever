@@ -9,7 +9,7 @@ import time
 import unittest
 import zipfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import aiosqlite
 from openpyxl import load_workbook
@@ -334,16 +334,116 @@ class AccountImportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await imports.row(db,"SELECT COUNT(*) n FROM binding_provenance WHERE qq_id='10000085'"))['n'],0)
         await db.close()
 
-    async def test_provenance_updates_after_same_handle_member_verification(self):
-        batch,rows=await self.preview([['10000084','','','','','Demo84']]);await self.execute(batch,rows)
-        db=await self.db()
-        await db.execute('BEGIN IMMEDIATE')
-        await binding_service.apply_binding(db,'10000084','codeforces','Demo84',expected=('Demo84',1))
-        await binding_service.record_provenance(db,'10000084','codeforces','member_verified',actor='10000084')
-        await db.commit()
-        source=await imports.row(db,"SELECT * FROM binding_provenance WHERE qq_id='10000084'")
-        self.assertEqual(source['source'],'member_verified');self.assertTrue(source['owner_verified_at'])
-        await db.close()
+    async def imported_member_login(self, nickname=''):
+        batch, rows = await self.preview([['10000084', nickname, '', '', '', 'Demo84']])
+        created = await self.execute(batch, rows)
+        temporary = created['credentials'][0]['temporary_password']
+        client, headers = await self.login('10000084', temporary)
+        response = await client.post('/api/auth/change-password', headers=headers,
+                                     json={'old_password': temporary, 'new_password': PASSWORD})
+        self.assertEqual(response.status_code, 200, await response.get_json())
+        return await self.login('10000084')
+
+    async def binding_evidence(self):
+        db = await self.db()
+        try:
+            evidence = {}
+            for table, owner in [('users', 'qq_id'), ('submissions', 'user_qq_id'),
+                                 ('submission_attempts', 'owner_qq_id'),
+                                 ('user_platform_sync_state', 'user_qq_id'),
+                                 ('random_challenges', 'qq_id')]:
+                async with db.execute(f'SELECT * FROM {table} WHERE {owner}=?', ('10000084',)) as cursor:
+                    evidence[table] = [dict(item) for item in await cursor.fetchall()]
+            return evidence
+        finally:
+            await db.close()
+
+    async def test_same_handle_verification_uses_real_routes_and_keeps_evidence(self):
+        client, headers = await self.imported_member_login()
+        self.app.config['PLUGIN_CONFIG']['_account_sync_submitter'] = lambda *args: {'id': 'synthetic-sync'}
+        db = await self.db()
+        try:
+            await db.execute("INSERT INTO submissions(user_qq_id,platform,problem_id,submit_time) VALUES('10000084','codeforces','1A',100)")
+            await db.execute("INSERT INTO submission_attempts(owner_qq_id,platform,external_submission_id,problem_id,verdict,submitted_at,created_at) VALUES('10000084','codeforces','synthetic-84','1A','OK',100,100)")
+            await db.execute("INSERT INTO user_platform_sync_state(user_qq_id,platform,cursor_timestamp,last_success_at,last_status,full_history_at,coverage_through_at,updated_at) VALUES('10000084','codeforces',100,100,'success',100,100,100)")
+            await db.execute("INSERT INTO random_challenges(qq_id,platform,problem_id,problem_url,challenge_rating,time_limit_minutes,created_at,expires_at) VALUES('10000084','codeforces','1A','https://codeforces.com/problemset/problem/1/A',1000,60,100,200)")
+            await db.commit()
+        finally:
+            await db.close()
+        before = await self.binding_evidence()
+        # Case differences must still verify the currently bound identity without a rebind.
+        with patch.object(binding_service, 'validate_account', AsyncMock(return_value='Demo84')) as validate:
+            response = await client.post('/api/me/bindings/codeforces/verification', headers=headers,
+                                         json={'account': 'demo84'})
+        self.assertEqual(response.status_code, 200, await response.get_json())
+        validate.assert_awaited_once_with('codeforces', 'demo84')
+        pending = await response.get_json()
+        body = {'verification_id': pending['verification_id'], 'password': PASSWORD,
+                'confirmed': True, 'current_account': 'Demo84'}
+        with patch.object(binding_service, 'verify_ownership', AsyncMock(return_value=False)):
+            rejected = await client.post('/api/me/bindings/codeforces/confirm', headers=headers, json=body)
+        self.assertEqual(rejected.status_code, 400)
+        self.assertEqual((await rejected.get_json())['code'], 'ownership_unverified')
+        self.assertEqual(await self.binding_evidence(), before)
+        db = await self.db()
+        try:
+            source = await imports.row(db, "SELECT * FROM binding_provenance WHERE qq_id='10000084'")
+            self.assertEqual(source['source'], 'admin_import')
+            self.assertIsNone(source['owner_verified_at'])
+            await db.execute("DELETE FROM binding_rate_limits WHERE qq_id='10000084' AND action='confirm'")
+            await db.commit()
+        finally:
+            await db.close()
+        with patch.object(binding_service, 'verify_ownership', AsyncMock(return_value=True)) as verify:
+            confirmed = await client.post('/api/me/bindings/cf/confirm', headers=headers, json=body)
+        self.assertEqual(confirmed.status_code, 202, await confirmed.get_json())
+        verify.assert_awaited_once_with('codeforces', 'Demo84', pending['code'])
+        self.assertEqual(await self.binding_evidence(), before)
+        profile = await (await client.get('/api/me/profile')).get_json()
+        cf = next(item for item in profile['bindings'] if item['platform'] == 'codeforces')
+        self.assertEqual(cf['provenance']['source'], 'member_verified')
+        self.assertTrue(cf['provenance']['owner_verified_at'])
+        self.assertEqual(cf['provenance']['existence_status'], 'exists')
+        db = await self.db()
+        try:
+            self.assertIsNone(await imports.row(db, "SELECT * FROM account_bind_verifications WHERE qq_id='10000084'"))
+            await db.execute("DELETE FROM binding_rate_limits WHERE qq_id='10000084'")
+            await db.commit()
+        finally:
+            await db.close()
+        replay = await client.post('/api/me/bindings/cf/confirm', headers=headers, json=body)
+        self.assertEqual((await replay.get_json())['code'], 'verification_expired')
+        repeated = await client.post('/api/me/bindings/cf/verification', headers=headers, json={'account': 'Demo84'})
+        self.assertEqual((await repeated.get_json())['code'], 'already_bound')
+        for _ in range(2):
+            db = await connect_db(self.path)
+            await db.close()
+        self.assertEqual((await self.binding_evidence())['users'], before['users'])
+
+    async def test_same_handle_requires_current_unverified_import_provenance(self):
+        client, headers = await self.imported_member_login()
+        cases = [('member_verified', 1, 'demo84', 123), ('admin_import', 2, 'demo84', None),
+                 ('admin_import', 1, 'another', None), ('admin_import', 1, 'demo84', 123),
+                 ('legacy', 1, 'demo84', None), (None, 1, 'demo84', None)]
+        for source, version, account, verified_at in cases:
+            with self.subTest(source=source, version=version, account=account, verified_at=verified_at):
+                db = await self.db()
+                try:
+                    if source is None:
+                        await db.execute("DELETE FROM binding_provenance WHERE qq_id='10000084'")
+                    else:
+                        await db.execute("UPDATE binding_provenance SET source=?,binding_version=?,account_canonical=?,owner_verified_at=? WHERE qq_id='10000084'",
+                                         (source, version, account, verified_at))
+                    await db.execute("DELETE FROM binding_rate_limits WHERE qq_id='10000084'")
+                    await db.commit()
+                finally:
+                    await db.close()
+                with patch.object(binding_service, 'validate_account', AsyncMock()) as upstream:
+                    response = await client.post('/api/me/bindings/cf/verification', headers=headers,
+                                                 json={'account': 'Demo84'})
+                self.assertEqual(response.status_code, 409, await response.get_json())
+                self.assertEqual((await response.get_json())['code'], 'already_bound')
+                upstream.assert_not_awaited()
 
     async def test_feature_switch_keeps_existing_results_readable(self):
         batch,_=await self.preview([['10000084']])
@@ -404,13 +504,54 @@ class AccountImportTests(unittest.IsolatedAsyncioTestCase):
         response=await self.client.post(PREFIX+'/'+batch['id']+'/commit',json=changed,headers=self.headers)
         self.assertEqual(response.status_code,409)
 
-    async def test_reinitialize_preserves_import_nickname_and_binding_change_removes_source(self):
-        batch,rows=await self.preview([['10000084','','','','','Demo84']]);await self.execute(batch,rows)
-        db=await connect_db(self.path)
-        self.assertEqual((await imports.row(db,"SELECT name FROM users WHERE qq_id='10000084'"))['name'],'10000084')
-        await db.execute("UPDATE users SET cf_handle='Changed84' WHERE qq_id='10000084'");await db.commit()
-        self.assertIsNone(await imports.row(db,"SELECT * FROM binding_provenance WHERE qq_id='10000084'"))
-        await db.close()
+    async def test_import_nickname_survives_real_rebinding_unbinding_and_restarts(self):
+        client, headers = await self.imported_member_login()
+        self.app.config['PLUGIN_CONFIG']['_account_sync_submitter'] = lambda *args: {'id': 'synthetic-sync'}
+        with patch.object(binding_service, 'validate_account', AsyncMock(return_value='Changed84')):
+            response = await client.post('/api/me/bindings/cf/verification', headers=headers,
+                                         json={'account': 'Changed84'})
+        self.assertEqual(response.status_code, 200, await response.get_json())
+        pending = await response.get_json()
+        body = {'verification_id': pending['verification_id'], 'password': PASSWORD,
+                'confirmed': True, 'current_account': 'Demo84'}
+        with patch.object(binding_service, 'verify_ownership', AsyncMock(return_value=True)):
+            response = await client.post('/api/me/bindings/cf/confirm', headers=headers, json=body)
+        self.assertEqual(response.status_code, 202, await response.get_json())
+        for operation in ('rebind', 'unbind'):
+            if operation == 'unbind':
+                response = await client.delete('/api/me/bindings/cf', headers=headers,
+                                               json={'password': PASSWORD, 'confirmed': True,
+                                                     'current_account': 'Changed84'})
+                self.assertEqual(response.status_code, 200, await response.get_json())
+            for _ in range(2):
+                db = await connect_db(self.path)
+                try:
+                    user = await imports.row(db, "SELECT * FROM users WHERE qq_id='10000084'")
+                    self.assertEqual(user['name'], '10000084')
+                    self.assertEqual(user['cf_handle'], 'Changed84' if operation == 'rebind' else None)
+                    source = await imports.row(db, "SELECT * FROM binding_provenance WHERE qq_id='10000084'")
+                    if operation == 'rebind':
+                        self.assertEqual(source['source'], 'member_verified')
+                    else:
+                        self.assertIsNone(source)
+                finally:
+                    await db.close()
+
+    async def test_explicit_qq_nickname_and_admin_rebinding_survive_restarts(self):
+        await self.imported_member_login(nickname='10000084')
+        db = await self.db()
+        try:
+            await db.execute("UPDATE users SET cf_handle='Changed84' WHERE qq_id='10000084'")
+            await db.commit()
+            self.assertIsNone(await imports.row(db, "SELECT * FROM binding_provenance WHERE qq_id='10000084'"))
+        finally:
+            await db.close()
+        for _ in range(2):
+            db = await connect_db(self.path)
+            try:
+                self.assertEqual((await imports.row(db, "SELECT name FROM users WHERE qq_id='10000084'"))['name'], '10000084')
+            finally:
+                await db.close()
 
     async def test_real_timeout_terminates_parser_process(self):
         processes=[]
@@ -423,3 +564,39 @@ class AccountImportTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(imports.ImportError):await imports.parse_upload(workbook([['10000084']]))
         self.assertEqual(len(processes),1)
         self.assertIsNotNone(processes[0].returncode)
+
+
+class NicknameMigrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_legacy_empty_names_are_backfilled_once_and_qq_names_are_explicit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'legacy.db'
+            async with aiosqlite.connect(path) as db:
+                await db.execute('CREATE TABLE users(qq_id TEXT PRIMARY KEY, name TEXT, cf_handle TEXT, luogu_id TEXT, nowcoder_id TEXT, atcoder_handle TEXT, status TEXT, school TEXT, last_sync_timestamp INTEGER DEFAULT 0)')
+                await db.executemany('INSERT INTO users(qq_id,name,cf_handle) VALUES(?,?,?)', [
+                    ('10000081', '', 'Legacy81'), ('10000082', None, None),
+                    ('10000083', '10000083', 'Chosen83'), ('10000084', 'Chosen nickname', 'Demo84'),
+                ])
+                await db.commit()
+            db = await connect_db(path)
+            try:
+                async with db.execute('SELECT qq_id,name FROM users ORDER BY qq_id') as cursor:
+                    self.assertEqual([tuple(row) for row in await cursor.fetchall()], [
+                        ('10000081', 'Legacy81'), ('10000082', '10000082'),
+                        ('10000083', '10000083'), ('10000084', 'Chosen nickname'),
+                    ])
+                await db.execute("UPDATE users SET name='' WHERE qq_id='10000081'")
+                await db.execute("INSERT INTO users(qq_id,name,cf_handle) VALUES('10000085','10000085','New85')")
+                await db.commit()
+            finally:
+                await db.close()
+            for _ in range(2):
+                db = await connect_db(path)
+                try:
+                    async with db.execute('SELECT qq_id,name FROM users ORDER BY qq_id') as cursor:
+                        self.assertEqual([tuple(row) for row in await cursor.fetchall()], [
+                            ('10000081', ''), ('10000082', '10000082'),
+                            ('10000083', '10000083'), ('10000084', 'Chosen nickname'),
+                            ('10000085', '10000085'),
+                        ])
+                finally:
+                    await db.close()

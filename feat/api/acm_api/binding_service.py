@@ -136,7 +136,11 @@ async def create_verification(db, qq_id, platform, data):
     await reserve(db, qq_id, platform, "verification")
     previous = await snapshot(db, qq_id, platform)
     if previous[0].casefold() == account.casefold():
-        raise BindingError("该账号已绑定，无需重复验证。", "already_bound")
+        # Imported identities still need the member's proof of ownership. Match
+        # both account and generation so stale provenance cannot authorize this.
+        imported = await row(db, "SELECT 1 FROM binding_provenance WHERE qq_id=? AND platform=? AND binding_version=? AND account_canonical=? AND source='admin_import' AND owner_verified_at IS NULL", (qq_id, platform, previous[1], account.casefold()))
+        if not imported:
+            raise BindingError("该账号已绑定，无需重复验证。", "already_bound")
     owner = await row(db, f"SELECT qq_id FROM users WHERE LOWER(TRIM({field}))=LOWER(?) AND qq_id<>?", (account, qq_id))
     if owner:
         raise BindingError("该 OJ 账号已绑定给其他成员。", "account_occupied")
@@ -183,7 +187,8 @@ async def confirm_verification(db, qq_id, platform, data):
     await apply_binding(db, qq_id, platform, pending["account"], expected=expected)
     await record_provenance(db, qq_id, platform, "member_verified", actor=qq_id)
     await db.commit()
-    return {"success": True, "account": pending["account"], "message": "绑定成功。"}
+    same_account = expected[0].casefold() == pending["account"].casefold()
+    return {"success": True, "account": pending["account"], "message": "当前账号归属核验成功。" if same_account else "绑定成功。"}
 
 
 async def unbind(db, qq_id, platform, data):
