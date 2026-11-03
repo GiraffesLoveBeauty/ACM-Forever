@@ -5,8 +5,10 @@ const props = defineProps({
   activeId: Number,
   management: Boolean,
   disabled: Boolean,
+  busy: Boolean,
+  error: { type: String, default: '' },
 });
-defineEmits(['select']);
+defineEmits(['select', 'retry']);
 const tops = computed(() => props.categories.filter((c) => c.parent_id == null));
 const count = (id) => props.categories.filter((c) => c.parent_id === id).length;
 const icons = [
@@ -18,6 +20,11 @@ const icons = [
 <template>
   <aside class="wiki-categories" :aria-label="management ? '管理 Wiki 大类导航' : 'Wiki 大类导航'">
     <p class="wiki-nav-label">WIKI / 大类导航</p>
+    <p v-if="busy" role="status">正在更新分类…</p>
+    <div v-if="error" class="wiki-feedback" role="alert">
+      <p>{{ error }}</p>
+      <button type="button" class="btn" :disabled="busy" @click="$emit('retry')">重试目录</button>
+    </div>
     <nav aria-label="知识大类">
       <button
         v-for="(top, index) in tops"
@@ -44,7 +51,7 @@ const icons = [
         >
       </button>
     </nav>
-    <p v-if="!tops.length" class="muted">知识目录正在准备</p>
+    <p v-if="!tops.length && !busy && !error" class="muted">知识目录正在准备</p>
     <div v-if="management" class="wiki-nav-tail">
       <RouterLink class="btn" to="/wiki.html">← 返回 Wiki</RouterLink>
     </div>
