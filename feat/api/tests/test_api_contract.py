@@ -63,7 +63,7 @@ class ApiContractTests(unittest.IsolatedAsyncioTestCase):
             response = await client.get("/member.html?qq_id=12345678")
             params = parse_qs(urlsplit(response.headers["Location"]).query)
             self.assertEqual(params, {"section": ["members"], "qq_id": ["12345678"]})
-            for old, section in [("challenge", "training"), ("problem-bank", "problems"), ("contest-review", "contests")]:
+            for old, section in [("problem-bank", "problems")]:
                 response = await client.get("/" + old + ".html")
                 self.assertEqual(parse_qs(urlsplit(response.headers["Location"]).query)["section"], [section])
 

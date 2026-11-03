@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, onBeforeUnmount } from 'vue';
+import { computed, ref, watch, onBeforeUnmount } from 'vue';
 import { useRequests, date } from '../lib/api.js';
 const props = defineProps({ bindings: { type: Array, default: () => [] } });
 const emit = defineEmits(['refresh']);
@@ -13,6 +13,25 @@ const selected = ref(null),
   busy = ref(false),
   message = ref(''),
   error = ref('');
+const verifying = computed(() => ['verify', 'verify-current'].includes(mode.value));
+const verifyingCurrent = computed(
+  () =>
+    verifying.value &&
+    (challenge.value
+      ? sameAccount(challenge.value.account, selected.value?.account)
+      : mode.value === 'verify-current'),
+);
+function sameAccount(first, second) {
+  return Boolean(first && second) && first.toLowerCase() === second.toLowerCase();
+}
+function needsCurrentVerification(binding) {
+  return (
+    binding.self_service &&
+    binding.account &&
+    binding.provenance?.source === 'admin_import' &&
+    !binding.provenance.owner_verified_at
+  );
+}
 function close() {
   selected.value = null;
   password.value = '';
@@ -24,8 +43,14 @@ function open(binding, action) {
   close();
   selected.value = binding;
   mode.value = action;
-  account.value = '';
-  challenge.value = binding.verification;
+  const pending = binding.verification;
+  const pendingCurrent = sameAccount(pending?.account, binding.account);
+  challenge.value =
+    ['verify', 'verify-current'].includes(action) &&
+    (action === 'verify-current') === pendingCurrent
+      ? pending
+      : null;
+  account.value = challenge.value?.account || (action === 'verify-current' ? binding.account : '');
   message.value = '';
   error.value = '';
 }
@@ -110,13 +135,21 @@ onBeforeUnmount(close);
         <small>最近成功同步：{{ date(binding.last_success_at) }}</small>
         <div class="chips">
           <button
+            v-if="needsCurrentVerification(binding)"
+            class="btn"
+            :disabled="busy"
+            @click="open(binding, 'verify-current')"
+          >
+            核验当前账号
+          </button>
+          <button
             v-if="binding.self_service"
             class="btn"
             :disabled="busy"
             @click="open(binding, 'verify')"
           >
             {{
-              binding.verification
+              binding.verification && !sameAccount(binding.verification.account, binding.account)
                 ? '继续验证 / 重新申请'
                 : binding.account
                   ? '改绑账号'
@@ -134,6 +167,12 @@ onBeforeUnmount(close);
             </button></template
           >
         </div>
+        <p v-if="binding.provenance?.source === 'admin_import'" class="muted">
+          管理员导入录入，尚未完成本人归属核验；同步状态与归属核验分别记录。
+        </p>
+        <p v-else-if="binding.provenance?.source === 'member_verified'" class="muted">
+          已通过本人归属核验。
+        </p>
         <p v-if="!binding.self_service" class="muted">
           该平台的网页归属验证尚未开放，绑定或改绑请联系管理员。
         </p>
@@ -144,18 +183,28 @@ onBeforeUnmount(close);
         {{ selected.label }} ·
         {{
           {
-            verify: selected.account ? '验证新账号' : '首次绑定',
+            verify: verifyingCurrent
+              ? '核验当前账号'
+              : selected.account
+                ? '验证新账号'
+                : '首次绑定',
+            'verify-current': '核验当前账号',
             unbind: '确认解绑',
             sync: '同步本人记录',
           }[mode]
         }}
       </h3>
       <button class="btn" :disabled="busy" @click="close">取消</button>
-      <template v-if="mode === 'verify'">
+      <template v-if="verifying">
+        <p v-if="verifyingCurrent" role="note">
+          仅核验当前账号的本人归属，保留现有绑定、AC、提交证据和训练挑战；核验成功后按现有流程同步记录。
+        </p>
         <form @submit.prevent="perform('verification', { account })">
           <label
-            >新账号<input
+            >{{ mode === 'verify-current' ? '当前账号' : '新账号'
+            }}<input
               v-model.trim="account"
+              :readonly="mode === 'verify-current'"
               required
               maxlength="64"
               autocomplete="off" /></label
@@ -174,8 +223,8 @@ onBeforeUnmount(close);
           </p>
         </div>
       </template>
-      <template v-if="mode === 'unbind' || (mode === 'verify' && selected.account && challenge)">
-        <p role="note">
+      <template v-if="mode === 'unbind' || (verifying && selected.account && challenge)">
+        <p v-if="!verifyingCurrent" role="note">
           当前账号：{{ selected.account }}。解绑或成功改绑会清理该平台的
           AC、提交证据及同步状态，并结束该平台进行中的训练挑战；收藏与历史学习资料保留，其他平台不受影响。
         </p>
@@ -186,15 +235,19 @@ onBeforeUnmount(close);
             autocomplete="current-password"
             maxlength="256"
         /></label>
-        <label><input v-model="confirmed" type="checkbox" />我已确认平台、账号和以上数据影响</label>
+        <label
+          ><input v-model="confirmed" type="checkbox" />{{
+            verifyingCurrent ? '我确认核验当前账号的归属' : '我已确认平台、账号和以上数据影响'
+          }}</label
+        >
       </template>
       <button
-        v-if="mode === 'verify' && challenge"
+        v-if="verifying && challenge"
         class="btn primary"
         :disabled="busy || (Boolean(selected.account) && (!password || !confirmed))"
         @click="confirmBinding"
       >
-        {{ busy ? '验证中…' : '确认验证并绑定' }}
+        {{ busy ? '验证中…' : verifyingCurrent ? '确认核验' : '确认验证并绑定' }}
       </button>
       <button
         v-if="mode === 'unbind'"

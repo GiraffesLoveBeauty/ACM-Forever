@@ -105,6 +105,7 @@ def create_app():
     )
     app.config["DB_PATH"] = str(db_path)
     app.config["ACCOUNT_CLOSURE_ENABLED"] = _bool_env("ACM_ACCOUNT_CLOSURE_ENABLED", False)
+    app.config["ACCOUNT_IMPORT_ENABLED"] = _bool_env("ACM_ACCOUNT_IMPORT_ENABLED", False)
     app.config["WIKI_CACHE_ENABLED"] = _bool_env("ACM_WIKI_CACHE_ENABLED", True)
     app.extensions["wiki_public_cache"] = WikiResponseCache()
     app.config["AVATAR_UPLOAD_DIR"] = db_path.parent / "uploads" / "avatars"
@@ -184,6 +185,8 @@ def create_app():
         "markdown": app.config["MARKDOWN_UPLOAD_DIR"],
     })
     app.extensions["account_closure_cleanup"] = closure_cleanup
+    from .acm_api.account_import_api import account_import_api, maintenance_once, maintenance_loop
+    app.register_blueprint(account_import_api)
 
     @app.before_serving
     async def initialize_service():
@@ -211,10 +214,19 @@ def create_app():
         await sync_engine.start()
         await practice_jobs.start()
         await closure_cleanup.start()
+        await maintenance_once(app)
+        app.extensions["account_import_maintenance"] = asyncio.create_task(maintenance_loop(app))
 
     @app.after_serving
     async def close_service():
         await closure_cleanup.close()
+        import_task = app.extensions.pop("account_import_maintenance", None)
+        if import_task:
+            import_task.cancel()
+            await asyncio.gather(import_task, return_exceptions=True)
+        executor = app.extensions.pop("account_password_executor", None)
+        if executor:
+            executor.close()
         await task_manager.close()
         await practice_jobs.close()
         await sync_engine.close()
@@ -383,7 +395,7 @@ _PUBLIC_PAGES = {
 _ANONYMOUS_PAGES = {"account-closure.html", "wiki.html", "index.html", "login.html", "post.html", "leaderboard.html", "auth-unavailable.html", "forbidden.html"}
 _ADMIN_PAGES = {"admin.html", "member.html", "tasks.html", "settings.html", "forum-moderation.html", "cf-practice.html"}
 _RETIRED_PAGES = {"reviews.html", "submissions.html", "workspace.html"}
-_LEGACY_ADMIN_PAGES = {"member.html": "members", "challenge.html": "training", "problem-bank.html": "problems", "contest-review.html": "contests", "tasks.html": "tasks", "settings.html": "settings", "forum-moderation.html": "moderation", "cf-practice.html": "cf-practice"}
+_LEGACY_ADMIN_PAGES = {"member.html": "members", "problem-bank.html": "problems", "tasks.html": "tasks", "settings.html": "settings", "forum-moderation.html": "moderation", "cf-practice.html": "cf-practice"}
 
 
 app = create_app()

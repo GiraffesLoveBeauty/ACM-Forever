@@ -20,6 +20,7 @@ from quart import Blueprint, Response, current_app, jsonify, request, session
 
 import logging
 
+from .web_account_service import prepare_password, insert_web_account, creation_state, AccountCreationError
 from .auth_service import (
     generate_temporary_password,
     hash_password,
@@ -580,7 +581,7 @@ async def api_web_accounts():
             return jsonify({"success": False, "message": error}), 400
         now = int(time.time())
         creation_snapshot = await user_lifecycle(db, qq_id)
-        password_hash = hash_password(initial_password)
+        password_hash = await prepare_password(initial_password)
         temporary_password_expires_at = _temporary_password_expiry(now) if role == "member" else None
         await db.execute("BEGIN IMMEDIATE")
         actor = await require_web_actor(db, request.web_identity, roles={"root"} if role != "member" else {"admin", "root"})
@@ -614,15 +615,14 @@ async def api_web_accounts():
                 "INSERT INTO users(qq_id,name,status,school) VALUES(?,?,?,?)",
                 (qq_id, name, status, school),
             )
-        await db.execute(
-            "INSERT INTO web_accounts(qq_id,password_hash,role,must_change_password,is_active,credential_version,created_at,updated_at,temporary_password_expires_at) "
-            "VALUES(?,?,?,1,1,1,?,?,?)",
-            (qq_id, password_hash, role, now, now, temporary_password_expires_at),
-        )
+        await insert_web_account(db, qq_id, password_hash, role=role, now=now, expires_at=temporary_password_expires_at)
         await db.commit()
         _clear_login_failures((f"account:{qq_id}",))
         message = "成员资料与 Web 账号已创建。" if not member else "Web 账号已绑定到现有成员资料。"
         return jsonify({"success": True, "qq_id": qq_id, "role": role, "must_change_password": True, "message": message}), 201
+    except AccountCreationError as exc:
+        await db.rollback()
+        return jsonify({"success": False, "code": exc.code, "message": str(exc)}), exc.status
     except sqlite3.IntegrityError:
         await db.rollback()
         return jsonify({"success": False, "message": "账号创建冲突，请确认成员 QQ 号唯一。"}), 409
@@ -740,7 +740,10 @@ async def api_batch_create_web_accounts():
     for item in eligible:
         temporary_password = generate_temporary_password(used_passwords)
         item["temporary_password"] = temporary_password
-        item["password_hash"] = hash_password(temporary_password)
+        try:
+            item["password_hash"] = await prepare_password(temporary_password)
+        except AccountCreationError as exc:
+            return jsonify({"success": False, "code": exc.code, "message": str(exc)}), exc.status
 
     created = []
     if eligible:
@@ -768,12 +771,11 @@ async def api_batch_create_web_accounts():
                 if account_exists:
                     skipped.append({"qq_id": item["qq_id"], "reason": "already_exists"})
                     continue
-                await db.execute(
-                    "INSERT INTO web_accounts(qq_id,password_hash,role,must_change_password,is_active,"
-                    "credential_version,created_at,updated_at,temporary_password_expires_at) "
-                    "VALUES(?,?, 'member',1,1,1,?,?,?)",
-                    (item["qq_id"], item["password_hash"], now, now, expires_at),
-                )
+                state, _, _ = await creation_state(db, item["qq_id"])
+                if state != "create_web_account_only":
+                    skipped.append({"qq_id": item["qq_id"], "reason": state})
+                    continue
+                await insert_web_account(db, item["qq_id"], item["password_hash"], now=now, expires_at=expires_at)
                 created.append({
                     "qq_id": item["qq_id"],
                     "name": item["name"],

@@ -26,9 +26,14 @@ provide('registerLeaveGuard', (handler) => {
     if (leaveGuard === handler) leaveGuard = () => true;
   };
 });
-onBeforeRouteLeave(() => leaveGuard());
+onBeforeRouteLeave((to) => leaveGuard(to));
 onBeforeRouteUpdate((to) => {
-  if ((to.query.section || 'accounts') !== section.value) return leaveGuard();
+  if (
+    (to.query.section || 'accounts') !== section.value ||
+    (section.value === 'accounts' &&
+      (to.query.tab !== route.query.tab || to.query.import_id !== route.query.import_id))
+  )
+    return leaveGuard(to);
 });
 onMounted(async () => {
   try {

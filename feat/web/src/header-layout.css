@@ -1,0 +1,90 @@
+/* Shared geometry loads after the design templates; their colors stay intact. */
+html[data-custom-theme][data-design-template] body.endfield-design .forum-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: 'brand navigation actions';
+  gap: 12px 20px;
+  height: auto;
+}
+html[data-custom-theme][data-design-template] body.endfield-design .forum-brand {
+  grid-area: brand;
+  min-width: 0;
+}
+html[data-custom-theme][data-design-template] body.endfield-design .primary-nav {
+  grid-area: navigation;
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: center;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+}
+html[data-custom-theme][data-design-template] body.endfield-design .forum-header-actions {
+  grid-area: actions;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  width: auto;
+  margin: 0;
+}
+html[data-custom-theme][data-design-template] body.endfield-design .forum-header-actions > .btn {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  font-size: inherit;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+html[data-custom-theme][data-design-template]
+  body.endfield-design
+  .forum-header-actions
+  > .account-avatar-button {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  aspect-ratio: 1;
+  padding: 3px;
+}
+html[data-custom-theme][data-design-template] body.endfield-design .header-account-avatar {
+  display: block;
+  flex: none;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+.forum-header-actions .forum-notification-bell svg {
+  flex: none;
+}
+@media (max-width: 1480px) {
+  html[data-custom-theme][data-design-template] body.endfield-design .forum-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'brand actions'
+      'navigation navigation';
+  }
+  html[data-custom-theme][data-design-template] body.endfield-design .primary-nav {
+    justify-content: flex-start;
+    border-top: 1px solid var(--line);
+    padding-top: 10px;
+  }
+}
+@media (max-width: 900px) {
+  html[data-custom-theme][data-design-template] body.endfield-design .forum-header {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'brand' 'actions' 'navigation';
+    position: static;
+    padding: 14px;
+  }
+  html[data-custom-theme][data-design-template] body.endfield-design .forum-header-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+}

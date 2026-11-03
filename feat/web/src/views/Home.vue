@@ -174,6 +174,7 @@ onBeforeUnmount(() => {
     </section>
     <section class="community-panel">
       <div class="panel-heading"><h2>训练与题目</h2></div>
+      <p class="panel-caption">查看本人的今日训练、题库和赛事复盘。</p>
       <div class="chips">
         <RouterLink class="btn" to="/challenge.html">今日训练</RouterLink
         ><RouterLink class="btn" to="/my-problems.html">题库</RouterLink

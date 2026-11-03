@@ -84,6 +84,7 @@ python3 -m api.sync_contests --database /home/WYJ/acm-forever-data/acm_forever.d
 | 变量 | 用途 |
 | --- | --- |
 | `ACM_API_HOST` / `ACM_API_PORT` | 监听地址和端口，默认 `127.0.0.1:8088`，沿用原 WebUI 端口 |
+| `ACM_ACCOUNT_IMPORT_ENABLED` | Excel 批量开户开关，默认 `false`；启用前完成迁移及联调。关闭后仍可查已有结果 |
 | `ACM_DATABASE_PATH` | SQLite 数据库文件路径，默认 `./data/acm_forever.db` |
 | `ACM_MARKDOWN_UPLOAD_DIR` | Wiki/论坛持久化图片目录，默认数据库同级 `uploads/markdown`；必须在代码同步目录外 |
 | `ACM_PUBLIC_BASE_URL` | Markdown 导出图片的公开站点根地址，例如 `https://实际域名`，不带路径 |
@@ -168,7 +169,7 @@ Bot 服务接口包括：
 
 每个功能模块通过 Vue 组件与 `feat/web/src/lib/api.js` 管理请求、监听器和定时器的生命周期。离开时取消页面查询和轮询，旧响应不会替换新模块。账号发放结果切换前提示复制，离开后清除临时密码，不写入模块缓存、浏览历史或浏览器存储。CF 已提交的后台任务继续运行；`feat/web/src/lib/admin.js` 在模块内存中保存待确认提交，提交确认请求独立于组件生命周期，最多等待 30 秒，沿用公共 API 的会话与 CSRF 校验。确认回调只保存任务编号或错误；同一后台页面内切换模块后返回，恢复同一个任务的轮询并重新核验候选结果，等待确认与执行期间禁用重复同步和候选操作。任务即使在返回前已完成也不会重新提交；确认失败在当前或返回后的 CF 模块显示错误并允许重试。该内存不跨整页刷新或关闭保存。
 
-普通成员导航仅保留论坛、排行榜、个人中心。个人中心保留最近 AC 摘要和今日训练、题库、赛事复盘入口；管理员打开这些共用旧路径会转入后台对应模块，普通成员继续使用前台。旧成员详情地址保留 `qq_id`；登录、强制改密保留目标路径及参数。普通成员访问后台页面仍由服务端返回 403，各业务接口保持权限和 CSRF 校验。
+个人中心提供今日训练 `/challenge.html`、题库 `/my-problems.html` 和赛事复盘 `/contest-review.html` 的独立入口，member / admin / root 均查看会话本人数据。今日训练与赛事复盘只调用对应 `/api/me/` 接口，不接受客户端指定成员 QQ，不再将管理员重定向至后台。管理后台仅对管理员与 Root 显示，保留训练管理、复盘管理等管理操作；普通成员直接访问后台页面或管理接口仍返回 403。旧成员详情地址保留 `qq_id`；登录、强制改密保留目标路径及参数，各写接口保持 CSRF 校验。
 
 待复习 / 待复盘、提交时间线、笔记与计划工作区已下线。旧 `reviews.html/submissions.html/workspace.html` 显示“功能已下线”，提供个人中心和管理中心入口；专属 Web API 返回 410，详见 [api.md（API 调用指南）](../../docs/api.md#已下线的-web-功能)。历史笔记、复习、计划表保留存档，无删除表或数据迁移；换绑清理提交证据时也保留学习资料。提交记录与提交尝试继续保存和同步，供排行榜、训练统计、CF 查重及机器人使用。CF 同步和赛事状态更新不再创建复习队列或计划条目。
 
@@ -312,3 +313,15 @@ API 回归新增 `tests/test_member_training.py`，共 20 项，覆盖三种 Web
 普通业务写入口在最终事务调用 `require_active_user`；同 QQ 新建由 `account_registration_service.py` 单独校验 closed 快照与新代际记录，Web 操作者还须 `require_web_actor`。单人/全员后台任务在排队时捕获 epoch 和绑定快照，在每次最终写回复核，不能仅依赖本进程取消任务。最后 root 保护按真实可用凭据判断；legacy 管理入口不能作为继任 root。
 
 恢复旧备份前必须保留并重放最新注销/新建代际、内容作者墓碑、凭据版本和资源撤销清单，且使旧 Cookie 失效。禁止把旧备份直接覆盖后开放登录。运行细节、测试及尚未完成的实际客户端联调见 [issue-83-account-closure.md（策略、实现与发布验收）](../../docs/issue-83-account-closure.md)。正式回归为 `tests/test_account_lifecycle.py`、`tests/test_account_closure.py`、前端与浏览器 `account-closure` 用例。
+
+## Excel 批量开户
+
+统一管理中心“成员账号 → Excel 导入”，支持模板下载、受控解析、逐行预检、分段开户、一次性初始凭据和无密码结果报告。只对具名 Web admin/root 开放。设置 `ACM_ACCOUNT_IMPORT_ENABLED=true` 启用，默认关闭；表格仅创建普通成员，旧共享管理登录不支持此入口。
+
+安装 requirements 中锁定的 openpyxl/defusedxml。初始化新增批次、行、段、绑定来源四张表，可重复执行且保留既有账号、绑定和证据。解析使用可终止子进程，最大 5 MiB / 200 行、8 秒；PBKDF2 在最多 2 个线程的有界执行器运行，不持有写事务。批次确认窗口 30 分钟，确认后执行窗口 2 小时，每段 10 人；不自动向外部 OJ 发请求或触发同步。
+
+初始化增加 `schema_migrations` 迁移台账，`users_empty_nickname_v1` 只对历史空昵称执行一次回填：有 CF handle 时使用该值，否则使用 QQ。非空昵称（包括与 QQ 相同的昵称）均保留，后续 OJ 核验、改绑、解绑不参与昵称迁移判断。此台账须随数据库备份和恢复，不要手动清除以重复迁移；回退旧代码可能重新启用旧昵称回填逻辑，应使用匹配版本和数据库备份恢复。
+
+原始上传位于数据库目录下 `private/account-imports`，不使用上传文件名或公开静态目录；解析结束删除。启动、每小时及上传时执行有界清理，回收过期资料和遗留文件；到期批次读取也立即清理资料副本。初始密码不落盘、日志、数据库或普通报告，只有原始创建响应返回。保留与恢复细节见 [admin-account-import.md（操作与发布说明）](../../docs/admin-account-import.md)。
+
+#83 尚为独立 PR 时，当前 main 无注销列仍可运行。若存在其真实 `account_state/account_epoch`，导入自动阻断 closed，冻结代际，并安装同事务注销脱敏触发器。注销 QQ 的重新开户使用 #83 单个创建的显式新代际入口，Excel 不恢复旧身份。两个 PR 最终合并时需保留双方初始化和保护逻辑，发布前对最终构建再联调。

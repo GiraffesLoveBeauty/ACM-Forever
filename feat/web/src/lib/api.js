@@ -112,7 +112,7 @@ export async function api(path, options = {}) {
   }
   const closureRequest =
     path === '/me/account-closure' || /^\/account-closures\/[a-f0-9]{32}$/.test(path);
-  const { timeoutMs = 15000, signal, ...rest } = options;
+  const { timeoutMs = 15000, signal, responseType, ...rest } = options;
   const controller = new AbortController();
   const abort = () => controller.abort();
   if (signal?.aborted) abort();
@@ -134,7 +134,10 @@ export async function api(path, options = {}) {
         ...rest.headers,
       },
     });
-    const data = await response.json().catch(() => ({}));
+    const data =
+      response.ok && responseType === 'blob'
+        ? await response.blob()
+        : await response.json().catch(() => ({}));
     if (sessionVersion !== adminSessionVersion())
       throw new DOMException('登录会话已改变', 'AbortError');
     if (

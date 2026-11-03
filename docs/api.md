@@ -128,9 +128,9 @@ response.raise_for_status()
 | `GET/PUT /api/ui/preferences` | admin/root；只返回 / 更新 `font_scale`，旧导航隐藏、排序、复习配置不再参与页面生成 |
 | `GET /api/problems`、`GET /api/me/problems` | 管理员可附 `owner_qq_id`，成员接口始终使用会话 QQ；支持 `platform/tag/state=favorite/page/page_size`；题目按平台和 ID 去重，优先目录元数据；分页返回 `items/total/returned/page/page_size`，默认 500、上限 500；不返回笔记 |
 | `PUT /api/problems/<platform>/<problem_id>/state`、`PUT /api/me/problems/<platform>/<problem_id>/state` | 正文 `is_favorite` 为必填布尔，管理员另传 `owner_qq_id`；只更新收藏与时间，不覆盖历史状态 / 笔记；提交 `note_md` 返回 410 |
-| `GET /api/contest/reviews`、`GET /api/me/contest/reviews` | 管理员传 `owner_qq_id/contest_id`，成员仅 `contest_id`；返回比赛题目、verdict、rating、status，不暴露自由笔记 |
-| `PUT /api/contest/reviews`、`PUT /api/me/contest/reviews` | 正文 `contest_id/problem_id` 必填，管理员另传 `owner_qq_id`；`status/verdict/rating` 至少一个，只更新提供的字段；省略字段及历史 `note_md` 原值保留 |
-| `/api/challenge/*`、`/api/me/challenge/*`、`/api/me/training/*` | 保留原训练推荐、挑战历史和统计；前台成员请求锁定会话身份 |
+| `GET /api/contest/reviews`、`GET /api/me/contest/reviews` | 管理接口传 `owner_qq_id/contest_id`，本人接口仅 `contest_id`；返回比赛题目、verdict、rating、status，不暴露自由笔记 |
+| `PUT /api/contest/reviews`、`PUT /api/me/contest/reviews` | 正文 `contest_id/problem_id` 必填，管理接口另传 `owner_qq_id`；`status/verdict/rating` 至少一个，只更新提供的字段；省略字段及历史 `note_md` 原值保留 |
+| `/api/challenge/*`、`/api/me/challenge/*`、`/api/me/training/*` | 保留原训练推荐、挑战历史和统计；`/me/` 对 member / admin / root 均锁定会话本人，管理接口仅允许管理员与 Root |
 | `GET /api/tasks`、`POST /api/tasks/<id>/cancel` | admin/root；同步任务与原始结果，刷新 / 取消保留 |
 
 赛事状态统一为 `todo/unsolved/queued/solved/reviewed/ignored`，其中 `reviewed` 可正常保存，`queued` 仅表示待补题状态，不创建复习或计划队列。`rating` 接受整数或 null。任何赛事 `note_md` 写请求均返回 410。所有写请求继续执行 CSRF 校验，模块路由不是权限边界。
@@ -170,6 +170,8 @@ CF 详情及 PDF 接口在读取时统一解析 `100A` / `cf_100A` 等前缀和�
 | `POST /api/me/bindings/<platform>/sync` | 无需指定成员；仅调度本人已绑定的平台；同步创建成功返回 202 和 `task_id` |
 
 Web 归属验证当前实现 Codeforces：账号存在性使用已有验证器，归属只检查目标 `user.info` 的 `firstName/lastName/organization`。用户将验证码写入公开资料，不提供 OJ 密码。其他平台 `self_service=false`，保留查看、同步、密码确认后的解绑和管理员代操作；真实平台归属验证联测前不开放自助绑定 / 改绑。此次自动测试与浏览器测试使用模拟 CF 资料，真实账号的正向归属验证仍待联测。
+
+管理员导入且尚未完成本人核验的 Codeforces 绑定，允许向 `verification` 申请当前 handle（忽略大小写）的验证码；来源记录必须匹配当前账号与绑定版本且 `owner_verified_at=null`。确认接口仍要求当前 Web 密码、明确确认和服务端公开资料归属验证。成功后原子更新来源为 `member_verified`，保留原账号、绑定版本、AC、提交证据及活动挑战；仍沿用确认后的同步调度。已核验、无来源记录或来源与当前绑定不匹配时，重复申请当前 handle 返回 `409 already_bound`。
 
 `binding_status` 为 `unbound/pending/bound`，同步为 `never/queued/running/success/failed`。`last_success_at` 为 Unix 秒，0 代表没有成功记录。`verification` 含 `account/verification_id/code/expires_at`，不能将该资料发给其他成员。服务重启后丢失的运行中任务显示失败并可重试；旧账号的任务不会使新绑定显示同步中。绑定提交与同步调度分别反馈：排队失败时响应仍表明绑定成功，`sync_status=failed`，刷新后仍能看到失败状态。
 
@@ -552,3 +554,58 @@ CF 持久 job 成员捕获 epoch，closed 分项不能被晚到成功覆盖；�
 预览的 `retention_notice` 返回 `recovery_supported=false`、`reopen_supported=true` 和 `qq_reuse_supported=true`；后两项表示允许同 QQ 创建全新账号，不能恢复旧资料。
 
 新建时 account_epoch 与凭据版本继续递增，OJ 绑定、训练/提交记录、草稿和权限不继承；保留的帖子、评论及 Wiki 仍显示“已注销用户”，新账号不能在“我的帖子”中看到或取得旧内容作者权限，不接收发给旧作者的回复提醒。`GET /api/auth/me` 增加 `account_epoch`，用于前端清理旧代际缓存。回执只读回放同时比较 QQ 和 epoch，不会清掉新会话；旧任务也不能因同 QQ 再次 active 而恢复写回。
+
+## Excel 批量开户与 OJ 资料导入
+
+管理入口 `/admin.html?section=accounts&tab=import`。部署设置 `ACM_ACCOUNT_IMPORT_ENABLED=true` 后允许新上传及执行，默认关闭。全部接口要求具名个人 Web `admin/root`，旧共享 root、普通成员和匿名请求不能使用。写接口沿用 Cookie 与 `X-CSRF-Token`；表格不能指定角色、密码或 QQBot 管理员。
+
+| 方法与路径 | 功能 |
+| --- | --- |
+| `GET /api/admin/account-imports/capabilities` | 开关、模板版本、5 MiB/200 行限制、每段 10 人和有效期 |
+| `GET /api/admin/account-imports/template` | 下载 `account-import-v1.xlsx` |
+| `POST /api/admin/account-imports/preview` | 仅一个 multipart `file`，不接受其他表单字段；201 返回预检摘要 |
+| `GET /api/admin/account-imports/{id}` | 无密码摘要、冻结范围、恢复标识及当前处理段 |
+| `GET /api/admin/account-imports/{id}/rows` | `status/page/page_size`，默认每页 100、最大 100，逐行结果 |
+| `POST /api/admin/account-imports/{id}/commit` | 冻结选择并处理下一段；原始创建响应一次返回凭据 |
+| `POST /api/admin/account-imports/{id}/cancel` | 空对象请求，停止未处理行，保留已创建账号 |
+| `GET /api/admin/account-imports/{id}/report` | 无密码、强制字符串单元格的 `.xlsx` 报告，到期返回 410 |
+
+关闭开关后仍可查询、取消及下载未过期报告。默认只有同一账号代际的操作者可访问；root 只读审计其他操作者批次，不能接管提交。凭据版本变化后旧批次只读。
+
+首次确认只接受以下字段：
+
+```json
+{
+  "preview_version": 1,
+  "selected_row_ids": ["opaque-server-row-id"],
+  "acknowledge_admin_binding": true,
+  "idempotency_key": "random-request-key-at-least-16-chars"
+}
+```
+
+有新 OJ 写入时必须确认对应关系。所选行只能来自该批次且可执行，已有成员只补开户；错误、占用、已有/停用/注销账号不覆盖。确认时重新检查成员快照、绑定占用和管理员权限。
+
+继续请求只接受：
+
+```json
+{
+  "preview_version": 1,
+  "selection_digest": "server-confirmed-digest",
+  "continuation_token": "server-issued-next-token",
+  "idempotency_key": "another-random-request-key"
+}
+```
+
+每段 10 人，写事务外准备强随机密码和 PBKDF2 哈希，逐行业务与台账原子提交。批次内只有一个处理段，SQLite 唯一约束、90 秒租约及随机令牌阻止跨 worker 重复或迟到提交；段有 20 秒启动新行预算。当前段执行完返回 `paused` 并附 `next_chunk_token` 时，可以显式继续。`chunk_status=interrupted` 必须停止自动循环并查询、核对结果。
+
+同幂等键同请求正在处理返回 202；结束后重放返回无密码结果；同键不同内容返回 409。换幂等键不能绕过处理段互斥或冻结范围。刷新恢复不自动继续写入。
+
+创建响应的 `credentials` 只含本请求新创建账号的 `row_id/qq_id/name/temporary_password/expires_at`。`credentials_replayed=false`；摘要、行、报告和重放均不提供明文。服务器不持久保存可恢复密码，也不能保证客户端收到原始响应。响应丢失后先查成功名单，再走已有受控重新发放入口，不能盲目重置。
+
+所有导入响应 `Cache-Control: no-store`，下载设置 Excel MIME、固定文件名和 `nosniff`。表格报告不含密码、公式或外链；凭据文本仅在当前浏览器内存生成。
+
+关键错误码：`named_admin_required/actor_changed`（403）、`batch_not_found`（404）、`idempotency_conflict/batch_busy/selection_changed/account_changed`（409）、`batch_expired/report_expired`（410）、`file_size`（413）、`invalid_workbook/unsafe_content/resource_limit/parse_timeout`（422）、`parse_busy/hash_busy/capacity_limit`（429）、`import_disabled`（503）。字段或选择格式错误返回 400。行级冲突放入对应行结果，不将其他已创建行回滚。
+
+新绑定摘要增加可选 `provenance`：`source=admin_import`、`owner_verified_at=null`、`existence_status=not_checked`；原 `binding_status/self_service/sync_status` 含义不变。现有 CF 本人核验成功后来源为 `member_verified`。不自动同步、不覆盖已有档案或证据。
+
+操作与保留规则见 [admin-account-import.md（Excel 批量开户操作说明）](admin-account-import.md)，设计、实现状态和验证见 [issue-84-account-import.md（Issue #84 实施记录）](issue-84-account-import.md)。
