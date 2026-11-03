@@ -12,6 +12,8 @@ const form = reactive({ title: '', body: '', category_id: null, cover_image_id: 
   categories = ref([]),
   drafts = ref([]),
   id = ref(null),
+  sourcePost = ref(null),
+  editVersion = ref(null),
   mode = ref('split'),
   coverInput = ref(),
   imageUploadMessage = ref(''),
@@ -258,10 +260,14 @@ async function save({ keepalive = false } = {}) {
       message.value = '正在保存…';
       const result = await api(id.value ? `/forum/drafts/${id.value}` : '/forum/drafts', {
         method: id.value ? 'PUT' : 'POST',
-        body: data,
+        body: {
+          ...data,
+          ...(editVersion.value == null ? {} : { edit_version: editVersion.value }),
+        },
         keepalive,
       });
       id.value = result.id;
+      editVersion.value = result.edit_version ?? null;
       if (previousId !== id.value) migrateRecovery(previousId, id.value);
       savedRevision = version;
       if (revision === version) {
@@ -303,6 +309,8 @@ async function choose(draftId) {
       cover_image_id: data.cover_image_id || null,
     });
     id.value = draftId;
+    sourcePost.value = data.source_post_id || null;
+    editVersion.value = data.edit_version ?? null;
     revision = 0;
     savedRevision = 0;
     recoveryCandidate.value = null;
@@ -327,7 +335,10 @@ async function submit() {
     if (!form.title.trim() || !form.body.trim() || !form.category_id)
       throw Error('请填写版块、标题和正文。');
     await save();
-    const data = await api(`/forum/drafts/${id.value}/submit`, { method: 'POST', body: {} });
+    const data = await api(`/forum/drafts/${id.value}/submit`, {
+      method: 'POST',
+      body: { edit_version: editVersion.value },
+    });
     removeRecoveryKey(recoveryKey());
     removeRecoveryKey(workingRecoveryKey());
     recoveryResolved = true;
@@ -352,6 +363,8 @@ async function remove() {
     loading = true;
     Object.assign(form, { title: '', body: '', category_id: null, cover_image_id: null });
     id.value = null;
+    sourcePost.value = null;
+    editVersion.value = null;
     revision = savedRevision = 0;
     await router.replace('/compose.html');
     await list();
@@ -429,6 +442,8 @@ onMounted(async () => {
           category_id: results[2].value.category_id || null,
           cover_image_id: results[2].value.cover_image_id || null,
         });
+        sourcePost.value = results[2].value.source_post_id || null;
+        editVersion.value = results[2].value.edit_version ?? null;
         discoverRecovery(payload());
         message.value = '已读取草稿';
       } else {
@@ -474,8 +489,13 @@ onBeforeUnmount(() => {
       <section class="compose-editor-panel">
         <div class="compose-heading">
           <span class="panel-eyebrow">WRITE SOMETHING GOOD</span>
-          <h1>发布新话题</h1>
+          <h1>{{ sourcePost ? '修改帖子' : '发布新话题' }}</h1>
           <p>写下问题、题解或训练心得。草稿会自动保存到你的账号。</p>
+          <p v-if="sourcePost" role="status">
+            正在修改原帖 #{{
+              sourcePost
+            }}。保存草稿不影响原帖；提交后原帖会暂时退出公开列表，重新审核通过后恢复。原帖的评论、点赞和收藏会保留。
+          </p>
         </div>
         <div class="compose-basics">
           <div class="compose-basics-fields">
