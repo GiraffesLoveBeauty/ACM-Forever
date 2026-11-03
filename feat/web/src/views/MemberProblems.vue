@@ -155,7 +155,7 @@ watch(() => route.fullPath, load, { immediate: true });
         <template v-if="isTracker">
           <p class="muted">
             {{ current.scope === 'solved' ? '包含本人已 AC 的比赛' : '站内比赛目录' }} · 共
-            {{ total }} 场比赛
+            {{ total }} 场比赛 · 按开始时间从新到旧 · 每页 20 场
           </p>
           <ProblemTracker
             v-if="rows.length"
