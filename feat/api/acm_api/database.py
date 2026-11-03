@@ -359,7 +359,9 @@ async def connect_db(db_path):
             "? FROM users WHERE " + field + " IS NOT NULL AND TRIM(" + field + ") <> ''",
             (platform, int(time.time())),
         )
-    await db.execute("UPDATE users SET name = cf_handle WHERE cf_handle IS NOT NULL AND TRIM(cf_handle) <> '' AND (name IS NULL OR TRIM(name) = '' OR name = qq_id)")
+    from .account_import_service import initialize_imports
+    await initialize_imports(db)
+    await db.execute("UPDATE users SET name = cf_handle WHERE cf_handle IS NOT NULL AND TRIM(cf_handle) <> '' AND (name IS NULL OR TRIM(name) = '' OR name = qq_id) AND NOT EXISTS(SELECT 1 FROM binding_provenance p WHERE p.qq_id=users.qq_id AND p.source='admin_import')")
     await db.executescript(Path(__file__).with_name("wiki.sql").read_text(encoding="utf-8"))
     await db.commit()
     return db

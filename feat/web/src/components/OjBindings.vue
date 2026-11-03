@@ -134,6 +134,12 @@ onBeforeUnmount(close);
             </button></template
           >
         </div>
+        <p v-if="binding.provenance?.source === 'admin_import'" class="muted">
+          管理员导入录入，尚未完成本人归属核验；同步状态与归属核验分别记录。
+        </p>
+        <p v-else-if="binding.provenance?.source === 'member_verified'" class="muted">
+          已通过本人归属核验。
+        </p>
         <p v-if="!binding.self_service" class="muted">
           该平台的网页归属验证尚未开放，绑定或改绑请联系管理员。
         </p>

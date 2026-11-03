@@ -208,10 +208,11 @@ router.beforeEach(async (to) => {
       query.tab &&
       !(
         {
+          accounts: ['import'],
           'cf-practice': ['recent', 'check'],
           moderation: ['posts', 'reports'],
           wiki: ['categories', 'pages'],
-        }[query.section] || []
+        }[query.section || 'accounts'] || []
       ).includes(query.tab)
     ) {
       delete query.tab;

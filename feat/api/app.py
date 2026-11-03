@@ -92,6 +92,7 @@ def create_app():
         SESSION_COOKIE_SECURE=_bool_env("ACM_WEBUI_COOKIE_SECURE", False),
     )
     app.config["DB_PATH"] = str(db_path)
+    app.config["ACCOUNT_IMPORT_ENABLED"] = _bool_env("ACM_ACCOUNT_IMPORT_ENABLED", False)
     app.config["WIKI_CACHE_ENABLED"] = _bool_env("ACM_WIKI_CACHE_ENABLED", True)
     app.extensions["wiki_public_cache"] = WikiResponseCache()
     app.config["AVATAR_UPLOAD_DIR"] = db_path.parent / "uploads" / "avatars"
@@ -163,6 +164,9 @@ def create_app():
     }
     app.config["PLUGIN_CONFIG"] = plugin_config
 
+    from .acm_api.account_import_api import account_import_api, maintenance_once, maintenance_loop
+    app.register_blueprint(account_import_api)
+
     @app.before_serving
     async def initialize_service():
         if not secret_key:
@@ -197,9 +201,18 @@ def create_app():
             await db.close()
         await sync_engine.start()
         await practice_jobs.start()
+        await maintenance_once(app)
+        app.extensions["account_import_maintenance"] = asyncio.create_task(maintenance_loop(app))
 
     @app.after_serving
     async def close_service():
+        import_task = app.extensions.pop("account_import_maintenance", None)
+        if import_task:
+            import_task.cancel()
+            await asyncio.gather(import_task, return_exceptions=True)
+        executor = app.extensions.pop("account_password_executor", None)
+        if executor:
+            executor.close()
         await task_manager.close()
         await practice_jobs.close()
         await sync_engine.close()
