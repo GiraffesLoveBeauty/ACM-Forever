@@ -104,6 +104,9 @@ function description(problem) {
                 >{{ contest.platform === 'codeforces' ? 'Codeforces' : 'AtCoder' }} ·
                 {{ contest.contest_id }}</small
               >
+              <small class="tracker-start-time">{{
+                contest.start_time ? `开始 ${date(contest.start_time)}` : '比赛时间未收录'
+              }}</small>
               <span class="tracker-progress"
                 >已 AC {{ contest.solved_count }} / {{ contest.total_count
                 }}<template v-if="contest.attempted_count">
@@ -186,8 +189,8 @@ function description(problem) {
 }
 .tracker-scroll {
   max-width: 100%;
-  max-height: 75vh;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
 }
@@ -221,9 +224,6 @@ td {
   white-space: normal;
 }
 thead th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
   padding: 14px 16px;
   background: var(--panel);
   white-space: nowrap;

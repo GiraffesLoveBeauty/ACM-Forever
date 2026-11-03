@@ -67,6 +67,18 @@ python3 -m api.init_db --database /home/WYJ/acm-forever-data/acm_forever.db
 
 CF 支持没有样例的题目及直接返回 PDF 的题面。PDF 原文件存入 SQLite，详情页通过本站接口打开，图示与样例保留在 PDF 中，暂不拆分为结构化样例。启动或初始化时自动给旧题库补充 `statement_pdf BLOB` 列，不清空数据；失败记录可再次按比赛 / 指定题号采集，默认只跳过成功题目。
 
+### 补全已有题库的比赛时间
+
+比赛进度按真实开始时间倒序排列。启动或初始化会补齐 `crawler_contests` 表，初始化仍只建立表结构；已有题库升级后，在 API 部署目录执行以下命令补全比赛名称与开始时间：
+
+```bash
+python3 -m api.sync_contests --database /home/WYJ/acm-forever-data/acm_forever.db --platform all
+```
+
+省略数据库参数时读取 `ACM_DATABASE_PATH`。命令仅更新比赛元数据，保留题目、题面、样例和用户记录。CF 数据来自 [`contest.list` 的 `startTimeSeconds`](https://codeforces.com/apiHelp/objects#Contest)，AtCoder 使用 [AtCoder Problems 文档](https://github.com/kenkoooo/AtCoderProblems/blob/master/doc/api.md) 中的 `contests.json` 数据集。也可用已下载的原始 JSON 离线导入，例如 `--platform codeforces --input /path/to/codeforces-contests.json`；AtCoder 同理，`--input` 须指定单个平台。
+
+后续 CF 单场采集保存 standings 返回的比赛时间，AtCoder 和 CF 全平台采集按需更新过期的比赛缓存（24 小时）。附属元数据刷新失败会在任务结果中记录 `contest_metadata_error`，已有缓存和题面采集继续保留；可重试上述补全命令。比赛进度页面只读取本地缓存，缺少时间的比赛排在最后并标注“比赛时间未收录”。
+
 ## 环境变量
 
 | 变量 | 用途 |

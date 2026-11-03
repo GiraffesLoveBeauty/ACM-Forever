@@ -129,6 +129,8 @@ async def contest_tracker(db, owner, options):
     """Group complete local contests before filtering/paging; never perform network I/O."""
     catalog = {}
     aliases = {}
+    async with db.execute("SELECT platform,contest_id,contest_name,start_time FROM crawler_contests") as cursor:
+        contest_info = {(row["platform"], row["contest_id"]): dict(row) for row in await cursor.fetchall()}
 
     def add(row):
         prior_key = aliases.get((row["platform"], row["problem_id"]))
@@ -222,9 +224,11 @@ async def contest_tracker(db, owner, options):
         if options["platform"] and platform != options["platform"]:
             continue
         contest_id = problem["contest_id"]
+        info = contest_info.get((platform, contest_id), {})
         group = contests.setdefault((platform, contest_id), {
             "platform": platform, "contest_id": contest_id,
-            "contest_name": problem["contest_name"] or (f"Codeforces #{contest_id}" if platform == "codeforces" else f"AtCoder {contest_id}"),
+            "contest_name": info.get("contest_name") or problem["contest_name"] or (f"Codeforces #{contest_id}" if platform == "codeforces" else f"AtCoder {contest_id}"),
+            "start_time": info.get("start_time"),
             "problems": [],
         })
         group["problems"].append(problem)
@@ -250,7 +254,8 @@ async def contest_tracker(db, owner, options):
             problem.pop("tags")
             problem.pop("contest_name")
         result.append(group)
-    result.sort(key=lambda item: (item["platform"], natural_key(item["contest_id"])), reverse=True)
+    result.sort(key=lambda item: (item["start_time"] is not None, item["start_time"] or 0,
+                                  item["platform"], natural_key(item["contest_id"])), reverse=True)
     start = (options["page"] - 1) * options["page_size"]
     return {"items": result[start:start + options["page_size"]], "total": len(result),
             "page": options["page"], "page_size": options["page_size"]}

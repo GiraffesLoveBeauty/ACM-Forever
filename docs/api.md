@@ -145,7 +145,7 @@ response.raise_for_status()
 
 `GET /api/me/problems/tracker` 为个人题库的比赛进度矩阵提供数据，member / admin / root 均只读取会话本人，客户端身份参数不改变归属。支持 `platform`（空、`codeforces`、`atcoder`）、`tag`（比赛 ID / 题号 / 题名 / 标签）、`scope=all|solved`、`state=favorite`、`page` 和 `page_size`（默认 20、上限 50）。无效参数返回 400；未登录或未完成首次改密沿用本人接口权限。
 
-返回 `items/total/page/page_size`，`total` 为比赛数量。每个比赛含 `platform/contest_id/contest_name/total_count/solved_count/attempted_count/problems`；题目含 `platform/problem_id/problem_index/problem_name/problem_rating/status/ac_at/last_submit_at/is_favorite`。`status` 为 `solved`（已 AC）、`attempted`（有提交记录且未 AC）、`unseen`（未记录），时间为 Unix 秒。AC 证据优先于之后的失败提交；收藏和提交状态只关联本人。按自然题序排列 D1 / D2 等题目，筛选先选择比赛，再返回该场全部已入库题目，分页不会切开比赛。仅使用本地目录和提交数据，不调用 OJ 或触发采集；未记录不代表原站没有提交，目录和尝试记录均可能尚未同步完整。
+返回 `items/total/page/page_size`，`total` 为比赛数量。每个比赛含 `platform/contest_id/contest_name/start_time/total_count/solved_count/attempted_count/problems`；题目含 `platform/problem_id/problem_index/problem_name/problem_rating/status/ac_at/last_submit_at/is_favorite`。`status` 为 `solved`（已 AC）、`attempted`（有提交记录且未 AC）、`unseen`（未记录），时间为 Unix 秒。`start_time` 为真实比赛开始时间，未收录时为 null；默认按开始时间倒序，未知时间在后，同时间以平台和自然比赛 ID 稳定排序，再进行分页。AC 证据优先于之后的失败提交；收藏和提交状态只关联本人。按自然题序排列 D1 / D2 等题目，筛选先选择比赛，再返回该场全部已入库题目，分页不会切开比赛。前端每页完整展开 20 场，使用页面纵向滚动。仅使用本地目录、比赛缓存和提交数据，不调用 OJ 或触发采集；未记录不代表原站没有提交，目录和尝试记录均可能尚未同步完整。
 
 前端 `/my-problems.html?view=tracker` 切换比赛进度；默认列表省略 `view`。前端题库的平台筛选默认 Codeforces，不提供“全部平台”；未指定或无效平台回落为 `codeforces`，清除筛选同样恢复该默认值。接口自身仍支持空平台供兼容调用。站内题面返回白名单保留 `view=tracker` 和已有范围、筛选、页码，排除身份参数。
 

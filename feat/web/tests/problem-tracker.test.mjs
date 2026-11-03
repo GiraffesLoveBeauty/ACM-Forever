@@ -47,6 +47,7 @@ const fixture = () => ({
       platform: 'codeforces',
       contest_id: '2000',
       contest_name: 'Synthetic CF Round',
+      start_time: 1735700400,
       total_count: 4,
       solved_count: 1,
       attempted_count: 1,
@@ -155,6 +156,8 @@ test('tracker renders whole contests with explicit solved, attempted and unrecor
   assert.equal(find(mounted.root, (node) => node.type === 'table').length, 1);
   assert(text.includes('Synthetic CF Round'));
   assert(text.includes('Synthetic AtCoder Contest'));
+  assert(text.includes('开始 2025/1/1'));
+  assert(text.includes('比赛时间未收录'));
   assert.equal(
     problemLinks().length,
     6,
