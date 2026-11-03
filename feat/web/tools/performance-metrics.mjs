@@ -52,3 +52,44 @@ export function phases(timing) {
     total: delta(timing.responseEnd, timing.startTime),
   };
 }
+
+export function contentApiPaths(path) {
+  const url = new URL(path, 'https://audit.invalid');
+  if (['/', '/index.html'].includes(url.pathname))
+    return ['/api/forum/posts', '/api/forum/categories'];
+  if (url.pathname === '/leaderboard.html') return ['/api/community/leaderboard'];
+  if (url.pathname === '/post.html')
+    return ['/api/forum/posts/' + encodeURIComponent(url.searchParams.get('id') || '')];
+  if (url.pathname === '/wiki.html')
+    return [
+      '/api/wiki/navigation',
+      ...(url.searchParams.has('slug')
+        ? ['/api/wiki/pages/' + encodeURIComponent(url.searchParams.get('slug'))]
+        : []),
+    ];
+  return [];
+}
+
+export function contentResponseError(path, data) {
+  if (path === '/api/forum/categories')
+    return Array.isArray(data) ? null : 'Expected a category list';
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return 'Expected a content object';
+  const list = {
+    '/api/forum/posts': 'rows',
+    '/api/community/leaderboard': 'rows',
+    '/api/wiki/navigation': 'categories',
+    '/api/wiki/pages': 'items',
+  }[path];
+  if (list) return Array.isArray(data[list]) ? null : `Expected a ${list} list`;
+  if (/^\/api\/(forum\/posts|wiki\/pages)\/[^/]+$/.test(path))
+    return typeof data.body === 'string' ? null : 'Expected an article body';
+  if (path.startsWith('/api/wiki/categories/'))
+    return data.category && Array.isArray(data.children) ? null : 'Expected category content';
+  return null;
+}
+
+export function reportHasFailures(report) {
+  return [report.pages, report.probes, report.discovery].some((rows) =>
+    rows?.some((row) => row.error),
+  );
+}

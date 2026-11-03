@@ -6,6 +6,9 @@ import {
   summarize,
   phases,
   resourceKind,
+  contentApiPaths,
+  contentResponseError,
+  reportHasFailures,
 } from '../tools/performance-metrics.mjs';
 test('failed and absent samples cannot be reported as fast successes', () => {
   assert.deepEqual(
@@ -16,6 +19,29 @@ test('failed and absent samples cannot be reported as fast successes', () => {
     { samples: 4, success: 2, median: 150, p95: 200 },
   );
   assert.equal(percentile([], 0.95), null);
+});
+
+test('content checks distinguish valid empty results from error payloads', () => {
+  assert.equal(contentResponseError('/api/forum/posts', { rows: [], total: 0 }), null);
+  assert.equal(contentResponseError('/api/community/leaderboard', { rows: [], total: 0 }), null);
+  assert.equal(contentResponseError('/api/wiki/navigation', { categories: [] }), null);
+  for (const data of [null, [], {}, { message: 'unavailable' }, { rows: null }])
+    assert.ok(contentResponseError('/api/forum/posts', data));
+  assert.ok(contentResponseError('/api/wiki/pages/example', { message: 'unavailable' }));
+  assert.deepEqual(contentApiPaths('/post.html?id=7'), ['/api/forum/posts/7']);
+  assert.deepEqual(contentApiPaths('/wiki.html?slug=example'), [
+    '/api/wiki/navigation',
+    '/api/wiki/pages/example',
+  ]);
+});
+
+test('discovery failures fail an audit even when every sampled page and probe succeeds', () => {
+  const report = { pages: [{ readable: 100 }], probes: [{ total: 10 }], discovery: [] };
+  assert.equal(reportHasFailures(report), false);
+  report.discovery.push({ outcome: 'empty' });
+  assert.equal(reportHasFailures(report), false);
+  report.discovery.push({ outcome: 'failed', error: 'timeout' });
+  assert.equal(reportHasFailures(report), true);
 });
 test('nearest rank p95 retains a slow tail rather than averaging it away', () => {
   assert.equal(percentile([5, 10, 900], 0.95), 900);
