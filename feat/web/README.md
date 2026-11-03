@@ -57,12 +57,12 @@ pnpm build
 
 生成 `dist/`，Quart 在 `8088` 上提供构建后的页面与资源。未构建时页面返回 `503` 并提示构建；API 仍可单独使用。`pnpm preview` 仅预览静态制品，业务联调使用 Vite 开发代理或 Quart。
 
-保留 `/index.html`、`/post.html?id=...`、`/compose.html?draft_id=...`、`/home.html`、`/leaderboard.html`、登录与改密路径，后台仍是 `/admin.html?section=...&tab=...`。新增受保护的个人题库 `/my-problems.html`，供所有登录角色查看本人 AC。旧管理入口与普通成员的训练、题库、赛事复盘链接也保留。
+保留 `/index.html`、`/post.html?id=...`、`/compose.html?draft_id=...`、`/home.html`、`/leaderboard.html`、登录与改密路径，后台仍是 `/admin.html?section=...&tab=...`。个人题库 `/my-problems.html`、今日训练 `/challenge.html` 和赛事复盘 `/contest-review.html` 对所有登录角色提供独立前台页面，固定当前账号本人，不再因管理员身份跳转后台。
 
 ## 目录
 
 - `src/views/`：社区与账户页面、后台壳及旧入口。
-- `src/admin/`：成员账号、成员资料、训练、题库、CF 选题、赛事复盘、同步任务、审核、设置。
+- `src/admin/`：成员账号、成员资料、训练管理、题库管理、CF 选题、复盘管理、同步任务、审核、设置，仅管理员与 Root 可访问。
 - `src/components/`：导航、主题编辑器、图谱、插图、话题卡片和分页。
 - `src/lib/`：请求与会话、Markdown 消毒、主题色算法、头像压缩、后台状态。
 - `vite.config.js`：开发代理、生产媒体复制与构建配置。

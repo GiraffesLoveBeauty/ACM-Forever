@@ -73,7 +73,7 @@ function clear() {
 watch(() => route.fullPath, load, { immediate: true });
 </script>
 <template>
-  <main class="community-main member-problems">
+  <main class="community-main member-problems" :class="{ 'member-problems-tracker': isTracker }">
     <RouterLink class="forum-back-link" to="/home.html">← 返回个人中心</RouterLink>
     <h1>题库</h1>
     <p>浏览站内题目，或查看本人已 AC 的题目。打开题面后可回到当前筛选与页码。</p>
@@ -209,6 +209,14 @@ watch(() => route.fullPath, load, { immediate: true });
 </template>
 
 <style scoped>
+.community-main.member-problems-tracker {
+  width: min(1920px, calc(100% - 32px));
+  padding-inline: 0;
+}
+.member-problems-tracker > .card {
+  min-width: 0;
+  padding: 16px;
+}
 .member-problem-scopes {
   gap: 12px;
   margin: 24px 0;
@@ -257,6 +265,12 @@ form.member-problem-filters {
   white-space: nowrap;
 }
 @media (max-width: 640px) {
+  .community-main.member-problems-tracker {
+    width: calc(100% - 24px);
+  }
+  .member-problems-tracker > .card {
+    padding: 12px;
+  }
   .member-problem-filters > label,
   .member-problem-filters > .member-problem-search {
     flex-basis: 100%;

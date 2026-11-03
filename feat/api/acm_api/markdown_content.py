@@ -61,12 +61,16 @@ async def record_assets(db, body, kind, document_id, revision_id, actor):
         row = await (
             await db.execute("SELECT * FROM markdown_assets WHERE id=?", (asset_id,))
         ).fetchone()
+        own_post_reference = kind in {"forum_draft", "forum_post"} and bool(await (await db.execute(
+            "SELECT 1 FROM markdown_asset_references a JOIN forum_posts p ON a.document_type='forum_post' AND p.id=a.document_id WHERE a.asset_id=? AND p.author_qq_id=? LIMIT 1", (asset_id, actor)
+        )).fetchone())
         if not row or not (
             row["owner"] == actor
             and row["document_type"] == "forum_draft"
             or kind == "wiki"
             and row["document_type"] == "wiki"
             or await asset_public(db, asset_id)
+            or own_post_reference
         ):
             raise ContentError("图片资源不存在或无权引用，请重新上传。")
     await db.execute(

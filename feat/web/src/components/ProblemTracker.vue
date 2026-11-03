@@ -161,6 +161,8 @@ function description(problem) {
 
 <style scoped>
 .problem-tracker {
+  --tracker-contest-width: 220px;
+  --tracker-problem-width: 136px;
   min-width: 0;
 }
 .tracker-legend {
@@ -229,9 +231,9 @@ thead th {
   white-space: nowrap;
 }
 .tracker-number {
-  width: 64px;
-  min-width: 64px;
-  padding: 16px 10px;
+  width: 44px;
+  min-width: 44px;
+  padding: 12px 6px;
   text-align: center;
   color: var(--muted);
 }
@@ -239,10 +241,10 @@ thead th {
   position: sticky;
   left: 0;
   z-index: 1;
-  width: 260px;
-  min-width: 260px;
-  max-width: 260px;
-  padding: 16px;
+  width: var(--tracker-contest-width);
+  min-width: var(--tracker-contest-width);
+  max-width: var(--tracker-contest-width);
+  padding: 12px;
   background: var(--panel);
   color: var(--text);
   box-shadow: 1px 0 var(--line);
@@ -276,17 +278,17 @@ progress {
   accent-color: #35b76c;
 }
 .tracker-problem {
-  width: 172px;
-  min-width: 172px;
-  max-width: 172px;
+  width: var(--tracker-problem-width);
+  min-width: var(--tracker-problem-width);
+  max-width: var(--tracker-problem-width);
 }
 .tracker-problem a {
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 8px;
   height: 100%;
-  min-height: 136px;
-  padding: 16px;
+  min-height: 124px;
+  padding: 12px;
   color: var(--text);
   text-decoration: none;
 }
@@ -316,23 +318,19 @@ progress {
   margin-top: auto;
 }
 .tracker-blank {
-  min-width: 172px;
+  min-width: var(--tracker-problem-width);
   background: var(--subtle-bg);
 }
+@media (min-width: 641px) and (max-width: 1320px) {
+  .problem-tracker {
+    --tracker-contest-width: 200px;
+    --tracker-problem-width: 120px;
+  }
+}
 @media (max-width: 640px) {
-  .tracker-contest {
-    width: 190px;
-    min-width: 190px;
-    max-width: 190px;
-    padding: 12px;
-  }
-  .tracker-problem {
-    width: 152px;
-    min-width: 152px;
-    max-width: 152px;
-  }
-  .tracker-problem a {
-    padding: 12px;
+  .problem-tracker {
+    --tracker-contest-width: 140px;
+    --tracker-problem-width: 136px;
   }
 }
 </style>

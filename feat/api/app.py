@@ -359,7 +359,7 @@ _PUBLIC_PAGES = {
 _ANONYMOUS_PAGES = {"wiki.html", "index.html", "login.html", "post.html", "leaderboard.html", "auth-unavailable.html", "forbidden.html"}
 _ADMIN_PAGES = {"admin.html", "member.html", "tasks.html", "settings.html", "forum-moderation.html", "cf-practice.html"}
 _RETIRED_PAGES = {"reviews.html", "submissions.html", "workspace.html"}
-_LEGACY_ADMIN_PAGES = {"member.html": "members", "challenge.html": "training", "problem-bank.html": "problems", "contest-review.html": "contests", "tasks.html": "tasks", "settings.html": "settings", "forum-moderation.html": "moderation", "cf-practice.html": "cf-practice"}
+_LEGACY_ADMIN_PAGES = {"member.html": "members", "problem-bank.html": "problems", "tasks.html": "tasks", "settings.html": "settings", "forum-moderation.html": "moderation", "cf-practice.html": "cf-practice"}
 
 
 app = create_app()

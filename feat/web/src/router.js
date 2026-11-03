@@ -2,9 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import { initializeAuth, auth, safeNext, notify, pageLoadError } from './lib/api.js';
 const legacy = {
   '/member.html': 'members',
-  '/challenge.html': 'training',
   '/problem-bank.html': 'problems',
-  '/contest-review.html': 'contests',
   '/tasks.html': 'tasks',
   '/settings.html': 'settings',
   '/forum-moderation.html': 'moderation',
@@ -16,7 +14,7 @@ export const sections = {
   training: '训练管理',
   problems: '题库管理',
   'cf-practice': 'CF 练习赛选题',
-  contests: '赛事复盘',
+  contests: '复盘管理',
   tasks: '同步任务',
   moderation: '内容审核',
   settings: '全局设置',
@@ -97,6 +95,16 @@ const router = createRouter({
       meta: { title: '题库' },
     },
     {
+      path: '/challenge.html',
+      component: () => import('./views/MemberTraining.vue'),
+      meta: { title: '今日训练', body: 'member-activity-page' },
+    },
+    {
+      path: '/contest-review.html',
+      component: () => import('./views/MemberContestReview.vue'),
+      meta: { title: '赛事复盘', body: 'member-activity-page' },
+    },
+    {
       path: '/problem.html',
       component: () => import('./views/Problem.vue'),
       meta: { title: '题目详情' },
@@ -109,7 +117,7 @@ const router = createRouter({
           : () => import('./views/MemberTool.vue'),
       meta: {
         section,
-        admin: !['training', 'problems', 'contests'].includes(section),
+        admin: section !== 'problems',
         title: section === 'problems' ? '题库' : sections[section],
       },
     })),
@@ -171,6 +179,14 @@ router.beforeEach(async (to) => {
     return next;
   }
   if (to.meta.admin && !['admin', 'root'].includes(auth.role)) return { path: '/forbidden.html' };
+  if (['/challenge.html', '/contest-review.html'].includes(to.path)) {
+    const query = { ...to.query };
+    if (Object.hasOwn(query, 'qq_id') || Object.hasOwn(query, 'owner_qq_id')) {
+      delete query.qq_id;
+      delete query.owner_qq_id;
+      return { path: to.path, query, hash: to.hash, replace: true };
+    }
+  }
   if (to.meta.section && ['admin', 'root'].includes(auth.role))
     return { path: '/admin.html', query: { ...to.query, section: to.meta.section }, hash: to.hash };
   if (to.path === '/admin.html') {
