@@ -98,26 +98,35 @@ async def audit(db, actor, action, before, after):
 
 async def navigation(db, admin=False):
     state = await settings(db)
+    # Public reads never compute or materialize private draft statistics.
+    draft_select = ", COALESCE(dc.draft_count,0) AS draft_count" if admin else ""
+    draft_join = """
+ LEFT JOIN (SELECT category_id,COUNT(*) draft_count FROM wiki_pages
+ WHERE published_revision_id IS NULL OR draft_revision_id<>published_revision_id
+ GROUP BY category_id) dc ON dc.category_id=c.id""" if admin else ""
+    columns = "c.*" if admin else "c.id,c.parent_id,c.name,c.description,c.sort_order,c.version"
     categories = await rows(
         db,
-        """SELECT c.*,
- (SELECT COUNT(*) FROM wiki_pages p JOIN wiki_revisions r ON r.id=p.published_revision_id WHERE p.category_id=c.id AND r.hidden=0) published_count,
- (SELECT COUNT(*) FROM wiki_pages p WHERE p.category_id=c.id AND (p.published_revision_id IS NULL OR p.draft_revision_id<>p.published_revision_id)) draft_count
- FROM wiki_categories c WHERE c.deleted_at IS NULL ORDER BY c.sort_order,c.id""",
+        "SELECT " + columns + ", COALESCE(pc.published_count,0) AS published_count" + draft_select + """
+ FROM wiki_categories c
+ LEFT JOIN (SELECT p.category_id,COUNT(*) published_count
+ FROM wiki_pages p JOIN wiki_revisions r ON r.id=p.published_revision_id
+ WHERE r.hidden=0 GROUP BY p.category_id) pc ON pc.category_id=c.id""" + draft_join + """
+ WHERE c.deleted_at IS NULL ORDER BY c.sort_order,c.id""",
     )
+    totals = {}
+    for child in categories:
+        if child["parent_id"] is not None:
+            total = totals.setdefault(child["parent_id"], [0, 0])
+            total[0] += child["published_count"]
+            if admin:
+                total[1] += child["draft_count"]
     for top in categories:
         if top["parent_id"] is None:
-            top["published_count"] = sum(
-                c["published_count"] for c in categories if c["parent_id"] == top["id"]
-            )
-            top["draft_count"] = sum(
-                c["draft_count"] for c in categories if c["parent_id"] == top["id"]
-            )
-    if not admin:
-        for item in categories:
-            item.pop("draft_count", None)
-            item.pop("name_key", None)
-            item.pop("deleted_at", None)
+            published, drafts = totals.get(top["id"], [0, 0])
+            top["published_count"] = published
+            if admin:
+                top["draft_count"] = drafts
     result = {"categories": categories, **state}
     if admin:
         result["operations"] = await rows(
@@ -650,19 +659,26 @@ def paging(query):
     return page, size
 
 
-async def page_list(db, query, admin=False, search=False):
+def public_list_query(query, search=False):
+    """Validate before cache lookup, preserving first-value/unknown-argument semantics."""
     page, size = paging(query)
+    cid = integer(query["category_id"]) if query.get("category_id") else None
+    q = text(query.get("q", ""), 100, "关键词")
+    if search and not q:
+        raise WikiError("请输入搜索关键词。")
+    return {"page": page, "page_size": size, "category_id": cid, "q": q}
+
+
+async def page_list(db, query, admin=False, search=False):
+    parsed = public_list_query(query, search=search)
+    page, size, cid, q = (parsed[k] for k in ("page", "page_size", "category_id", "q"))
     conditions = ["c.deleted_at IS NULL", "t.deleted_at IS NULL"]
     params = []
     if not admin:
         conditions += ["p.published_revision_id IS NOT NULL", "r.hidden=0"]
-    if query.get("category_id"):
-        cid = integer(query["category_id"])
+    if cid is not None:
         conditions.append("(c.id=? OR c.parent_id=?)")
         params.extend([cid, cid])
-    q = text(query.get("q", ""), 100, "关键词")
-    if search and not q:
-        raise WikiError("请输入搜索关键词。")
     if q:
         needle = (
             "%"

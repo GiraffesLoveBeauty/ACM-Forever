@@ -1,7 +1,8 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { auth, useRequests } from '../lib/api.js';
+import { api, auth, useRequests } from '../lib/api.js';
+import { createWikiNavigationLoader, peekWikiNavigation } from '../lib/wiki-navigation.js';
 import { downloadMarkdown } from '../lib/wiki.js';
 import { markdown } from '../lib/markdown.js';
 import WikiCategoryNav from '../components/WikiCategoryNav.vue';
@@ -10,7 +11,11 @@ import Pager from '../components/Pager.vue';
 const route = useRoute(),
   router = useRouter(),
   request = useRequests();
-const nav = ref(),
+const navigationLoader = createWikiNavigationLoader(request);
+const nav = ref(peekWikiNavigation()),
+  navigationBusy = ref(false),
+  navigationError = ref(''),
+  renderedContentKey = ref(''),
   detail = ref(),
   article = ref(),
   results = ref(),
@@ -44,7 +49,10 @@ const articleTab = computed(() => (route.query.tab === 'practice' ? 'practice' :
 let revision = 0,
   timer,
   suggestionRevision = 0,
-  downloadController;
+  downloadController,
+  contentController,
+  navigationRevision = 0,
+  disposed = false;
 function closeSearch() {
   clearTimeout(timer);
   suggestionRevision++;
@@ -109,9 +117,68 @@ function searchKeys(event) {
 function searchBlur(event) {
   if (!event.currentTarget.contains(event.relatedTarget)) closeSearch();
 }
-async function load() {
+const contentKey = computed(() =>
+  JSON.stringify([
+    route.query.category,
+    route.query.slug,
+    queryText.value,
+    route.query.page,
+    route.query.revision,
+  ]),
+);
+const staleContent = computed(
+  () =>
+    !!(article.value || detail.value || results.value) &&
+    renderedContentKey.value !== contentKey.value,
+);
+async function ensureNavigation(force = false) {
+  const current = ++navigationRevision;
+  navigationBusy.value = !peekWikiNavigation() || force;
+  navigationError.value = '';
+  try {
+    let data;
+    try {
+      data = await navigationLoader.load(force);
+    } catch (e) {
+      if (e.codeName !== 'wiki_navigation_invalidated' || disposed) throw e;
+      data = await navigationLoader.load(true);
+    }
+    if (!disposed && current === navigationRevision) nav.value = data;
+    return data;
+  } catch (e) {
+    if (!disposed && current === navigationRevision && e.name !== 'AbortError')
+      navigationError.value = e.message;
+    throw e;
+  } finally {
+    if (!disposed && current === navigationRevision) navigationBusy.value = false;
+  }
+}
+function refreshNavigationIfStale() {
+  if (!document.hidden && !peekWikiNavigation() && !navigationBusy.value)
+    ensureNavigation().catch(() => {});
+}
+function retryNavigation() {
+  if (route.query.slug || queryText.value) ensureNavigation(true).catch(() => {});
+  else load(true);
+}
+function categoryDetail(navigation, id) {
+  const category = navigation.categories.find((c) => String(c.id) === String(id));
+  if (!category) return null;
+  const parent = navigation.categories.find((c) => c.id === category.parent_id);
+  return {
+    category,
+    path: category.parent_id == null ? [category] : [parent, category].filter(Boolean),
+    children: navigation.categories.filter((c) => c.parent_id === category.id),
+  };
+}
+async function load(forceNavigation = false) {
   const current = ++revision;
+  const targetKey = contentKey.value;
+  const target = { ...route.query, q: queryText.value };
   downloadController?.abort();
+  contentController?.abort();
+  const controller = new AbortController();
+  contentController = controller;
   busy.value = true;
   error.value = '';
   downloadError.value = '';
@@ -119,44 +186,51 @@ async function load() {
   showHistory.value = false;
   tocOpen.value = false;
   closeSearch();
-  search.value = queryText.value;
+  search.value = target.q;
+  // Start navigation independently. A directory failure must never block an article/search.
+  const navigationPromise = ensureNavigation(forceNavigation === true);
+  navigationPromise.catch(() => {});
+  const content = (path) => api(path, { signal: controller.signal });
   try {
-    const navigation = await request('/wiki/navigation', {}, 'wiki-navigation');
-    if (current !== revision) return;
-    nav.value = navigation;
     let nextArticle = null,
       nextDetail = null,
       nextResults = null;
-    if (route.query.slug) {
-      const slug = encodeURIComponent(String(route.query.slug));
-      const suffix = /^\d+$/.test(String(route.query.revision || ''))
-        ? '/revisions/' + route.query.revision
+    if (target.slug) {
+      const slug = encodeURIComponent(String(target.slug));
+      const suffix = /^\d+$/.test(String(target.revision || ''))
+        ? '/revisions/' + target.revision
         : '';
-      nextArticle = await request('/wiki/pages/' + slug + suffix, {}, 'wiki-content');
-    } else if (queryText.value) {
-      nextResults = await request(
-        '/wiki/search?' + new URLSearchParams({ q: queryText.value, page: route.query.page || 1 }),
-        {},
-        'wiki-content',
+      nextArticle = await content('/wiki/pages/' + slug + suffix);
+    } else if (target.q) {
+      nextResults = await content(
+        '/wiki/search?' +
+          new URLSearchParams({
+            q: target.q,
+            page: target.page || 1,
+          }),
       );
     } else {
-      const category = route.query.category || navigation.default_category_id || tops.value[0]?.id;
-      if (category) {
-        nextDetail = await request(
-          '/wiki/categories/' + encodeURIComponent(category),
-          {},
-          'wiki-content',
-        );
-        if (current !== revision) return;
-        nextResults = await request(
+      let navigation = await navigationPromise;
+      if (current !== revision) return;
+      const id =
+        target.category ||
+        navigation.default_category_id ||
+        navigation.categories.find((c) => c.parent_id == null)?.id;
+      if (id) {
+        nextDetail = categoryDetail(navigation, id);
+        if (!nextDetail) {
+          navigation = await ensureNavigation(true);
+          if (current !== revision) return;
+          nextDetail = categoryDetail(navigation, id);
+        }
+        if (!nextDetail) throw Object.assign(Error('分类不存在或已调整。'), { status: 404 });
+        nextResults = await content(
           '/wiki/pages?' +
             new URLSearchParams({
-              category_id: category,
-              page: nextDetail.category.parent_id == null ? 1 : route.query.page || 1,
+              category_id: id,
+              page: nextDetail.category.parent_id == null ? 1 : target.page || 1,
               page_size: nextDetail.category.parent_id == null ? 3 : 20,
             }),
-          {},
-          'wiki-list',
         );
       }
     }
@@ -165,11 +239,19 @@ async function load() {
     article.value = nextArticle;
     detail.value = nextDetail;
     results.value = nextResults;
+    renderedContentKey.value = targetKey;
     document.title = `${nextArticle?.title || nextDetail?.category.name || 'Wiki'} · ACM Forever`;
   } catch (e) {
-    if (current === revision && e.name !== 'AbortError')
+    if (current === revision && e.name !== 'AbortError') {
       error.value =
         e.status === 404 ? '内容或分类不存在、已调整或尚未公开，请重新选择分类。' : e.message;
+      if (e.status === 404) {
+        article.value = detail.value = results.value = null;
+        headings.value = [];
+        renderedContentKey.value = '';
+        document.title = 'Wiki · ACM Forever';
+      }
+    }
   } finally {
     if (current === revision) busy.value = false;
   }
@@ -231,7 +313,17 @@ watch(
   { immediate: true },
 );
 watch(() => route.fullPath, closeSearch);
+onMounted(() => {
+  window.addEventListener('focus', refreshNavigationIfStale);
+  document.addEventListener('visibilitychange', refreshNavigationIfStale);
+});
 onBeforeUnmount(() => {
+  disposed = true;
+  navigationRevision++;
+  navigationLoader.dispose();
+  contentController?.abort();
+  window.removeEventListener('focus', refreshNavigationIfStale);
+  document.removeEventListener('visibilitychange', refreshNavigationIfStale);
   revision++;
   closeSearch();
   downloadController?.abort();
@@ -321,6 +413,9 @@ onBeforeUnmount(() => {
       <WikiCategoryNav
         :categories="nav?.categories || []"
         :active-id="activeTop"
+        :busy="navigationBusy"
+        :error="navigationError"
+        @retry="retryNavigation"
         @select="go({ category: $event })"
       />
     </dialog>
@@ -328,10 +423,20 @@ onBeforeUnmount(() => {
       <WikiCategoryNav
         :categories="nav?.categories || []"
         :active-id="activeTop"
+        :busy="navigationBusy"
+        :error="navigationError"
+        @retry="retryNavigation"
         @select="go({ category: $event })"
       />
       <section class="wiki-content" :aria-busy="busy">
         <p v-if="busy" role="status">正在加载 Wiki…</p>
+        <p v-if="staleContent" class="muted" role="status">
+          {{
+            busy
+              ? '正在加载当前地址，下面暂时显示上次内容。'
+              : '当前地址尚未加载成功，下面为上次成功内容。'
+          }}
+        </p>
         <div v-if="error" class="card wiki-feedback" role="alert">
           <p>{{ error }}</p>
           <div class="chips">
@@ -351,7 +456,7 @@ onBeforeUnmount(() => {
               ><span>/</span><span aria-current="page">{{ article.title }}</span></template
             >
           </nav>
-          <div v-if="article" class="wiki-reader-layout">
+          <div v-if="article" class="wiki-reader-layout" :inert="staleContent || undefined">
             <div class="wiki-reader-main">
               <header class="wiki-article-heading">
                 <span class="wiki-kicker"

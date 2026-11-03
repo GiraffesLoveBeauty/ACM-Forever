@@ -2,7 +2,7 @@
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import WikiCategoryNav from './WikiCategoryNav.vue';
-import { wikiKey } from '../lib/wiki.js';
+import { adminWikiApi as requestWikiAdmin, wikiKey } from '../lib/wiki.js';
 import { useRequests } from '../lib/api.js';
 const request = useRequests(),
   route = useRoute(),
@@ -55,7 +55,7 @@ async function focusPanel() {
   panel.value?.scrollIntoView?.({ block: 'nearest' });
   panel.value?.querySelector('input,select')?.focus({ preventScroll: true });
 }
-const adminWikiApi = (path, options = {}) => request('/admin/wiki' + path, options);
+const adminWikiApi = (path, options = {}) => requestWikiAdmin(path, options, request);
 const state = ref(),
   error = ref(''),
   conflict = ref(false),

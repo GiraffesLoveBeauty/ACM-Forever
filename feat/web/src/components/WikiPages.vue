@@ -2,7 +2,7 @@
 import { computed, inject, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { auth, useRequests } from '../lib/api.js';
-import { downloadMarkdown, wikiKey } from '../lib/wiki.js';
+import { adminWikiApi as requestWikiAdmin, downloadMarkdown, wikiKey } from '../lib/wiki.js';
 import { sourceFields } from '../lib/markdown-source.js';
 import MarkdownEditor from './MarkdownEditor.vue';
 import MarkdownView from './MarkdownView.vue';
@@ -11,7 +11,7 @@ const route = useRoute(),
   router = useRouter(),
   request = useRequests(),
   registerLeave = inject('registerLeaveGuard', () => () => {});
-const adminWikiApi = (path, options = {}) => request('/admin/wiki' + path, options);
+const adminWikiApi = (path, options = {}) => requestWikiAdmin(path, options, request);
 const nav = ref(),
   listing = ref(),
   page = ref(),
