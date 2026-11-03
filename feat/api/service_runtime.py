@@ -214,6 +214,10 @@ class WebTaskManager:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT * FROM users WHERE account_state='active' ORDER BY qq_id") as cursor:
                 members = [dict(row) for row in await cursor.fetchall()]
+        # Reading the durable snapshots yields control. Reserve only if another
+        # request has not queued a task while that read was in progress.
+        if any(item.get("status") in {"queued", "running"} for item in self.tasks.values()):
+            return None
         task_id = uuid.uuid4().hex[:12]
         item = {
             "id": task_id,

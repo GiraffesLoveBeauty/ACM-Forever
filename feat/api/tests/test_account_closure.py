@@ -336,6 +336,21 @@ class ClosureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.sql("SELECT account_epoch,name FROM users WHERE qq_id=?", (QQ,)))[0], {"account_epoch": 3, "name": "Updated fresh member"})
         self.assertEqual(await self.sql("SELECT * FROM web_accounts WHERE qq_id=?", (QQ,)), before)
 
+    async def test_concurrent_all_sync_submissions_reserve_one_snapshot(self):
+        from feat.api.service_runtime import WebTaskManager
+        manager = WebTaskManager(self.app.sync_engine)
+        release = asyncio.Event()
+        async def paused(*args, **kwargs):
+            await release.wait()
+        try:
+            with patch.object(self.app.sync_engine, "sync_all_accounts", side_effect=paused):
+                results = await asyncio.gather(manager.submit_all_accounts_sync(), manager.submit_all_accounts_sync())
+                self.assertEqual(sum(result is not None for result in results), 1)
+                self.assertEqual(len(manager.tasks), 1)
+        finally:
+            release.set()
+            await manager.close()
+
     async def test_intake_off_by_default_does_not_create_intents(self):
         self.app.config["ACCOUNT_CLOSURE_ENABLED"] = False
         self.assertEqual((await self.client.get("/api/me/account-closure/preview")).status_code, 404)
