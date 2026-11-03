@@ -116,6 +116,7 @@ beforeEach(() => {
     if (url.startsWith('/api/admin/database/problems?'))
       return response({ items: [saved()], total: 1, page: 1 });
     if (url === '/api/tasks') return response([]);
+    if (url.startsWith('/api/me/problems/tags?')) return response({ tags: ['math'] });
     if (url.startsWith('/api/me/problems?')) return response({ items: [saved()], total: 1 });
     if (/^\/api\/me\/problems\/[^/]+\/[^/]+\/state$/.test(url) && options.method === 'PUT')
       return response({ success: true });

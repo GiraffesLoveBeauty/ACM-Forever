@@ -33,6 +33,7 @@ from .cf_client import cf_request
 from .problem_sync import sync_options
 from .problem_bank import problem_bank_status
 from .problem_tracker import attempt_problem_metadata, contest_tracker, problem_id_aliases, tracker_options
+from .problem_tags import effective_problem_tags, has_problem_tag, problem_tags
 from .database import connect_db
 from . import binding_service
 from .binding_service import clear_platform_records as _clear_platform_records
@@ -1373,8 +1374,8 @@ async def _save_contest_state(owner, data):
 
 
 # Prefer the catalog metadata and collapse repeated submission rows to one problem.
-_PROBLEM_QUERY = """SELECT p.platform,p.problem_id,p.problem_name,p.problem_rating,p.problem_url,p.tags,
-    COALESCE(s.is_favorite,0) AS is_favorite FROM (
+_PROBLEM_QUERY_PREFIX = "SELECT p.platform,p.problem_id,p.problem_name,p.problem_rating,p.problem_url,"
+_PROBLEM_QUERY_SUFFIX = """COALESCE(s.is_favorite,0) AS is_favorite FROM (
       SELECT *,ROW_NUMBER() OVER(PARTITION BY platform,problem_id ORDER BY source,submit_time DESC) AS position
       FROM (
         SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags,0 AS source,0 AS submit_time FROM recommendations
@@ -1383,6 +1384,13 @@ _PROBLEM_QUERY = """SELECT p.platform,p.problem_id,p.problem_name,p.problem_rati
       ) catalog
     ) p LEFT JOIN user_problem_state s ON s.owner_qq_id=? AND s.platform=p.platform AND s.problem_id=p.problem_id
     WHERE p.position=1"""
+_PROBLEM_QUERY = _PROBLEM_QUERY_PREFIX + "p.tags," + _PROBLEM_QUERY_SUFFIX
+# Only tag projection differs for members. Preserve catalog metadata and personal state.
+_MEMBER_PROBLEM_QUERY = _PROBLEM_QUERY_PREFIX + """problem_effective_tags(
+    (SELECT tags FROM crawler_problems c WHERE c.platform=p.platform AND c.problem_id=p.problem_id),
+    (SELECT tags FROM recommendations r WHERE r.platform=p.platform AND r.problem_id=p.problem_id),
+    (SELECT tags FROM submissions ac WHERE ac.user_qq_id=? AND ac.platform=p.platform AND ac.problem_id=p.problem_id)
+    ) AS tags,""" + _PROBLEM_QUERY_SUFFIX
 
 
 @api.route("/problems", methods=["GET"])
@@ -2031,14 +2039,18 @@ async def api_me_problems():
     qq_id = _me_qq_id()
     platform = _field(request.args, "platform", 24)
     tag = _field(request.args, "tag", 100)
+    problem_tag = request.args.get("problem_tag", "").strip()
+    if len(problem_tag) > 100:
+        return jsonify({"success": False, "message": "题目标签最多 100 个字符。"}), 400
     state = _field(request.args, "state", 20)
     db = await get_db()
     try:
+        await db.create_function("problem_effective_tags", 3, effective_problem_tags, deterministic=True)
         scope = request.args.get("scope", "all")
         if scope not in {"all", "solved"}:
             return jsonify({"success": False, "message": "无效的题目范围。"}), 400
-        query = _PROBLEM_QUERY
-        params = [qq_id]
+        query = "SELECT p.* FROM (" + _MEMBER_PROBLEM_QUERY + ") p WHERE 1=1"
+        params = [qq_id, qq_id]
         if scope == "solved":
             query = "SELECT p.*,ac.ac_at FROM (" + query + ") p JOIN (SELECT platform,problem_id,MAX(submit_time) AS ac_at FROM submissions WHERE user_qq_id=? GROUP BY platform,problem_id) ac ON ac.platform=p.platform AND ac.problem_id=p.problem_id WHERE 1=1"
             params.append(qq_id)
@@ -2048,14 +2060,15 @@ async def api_me_problems():
         if tag:
             query += " AND (p.problem_name LIKE ? OR p.problem_id LIKE ? OR COALESCE(p.tags,'') LIKE ?)"
             params.extend([f"%{tag}%", f"%{tag}%", f"%{tag}%"])
+        if problem_tag:
+            await db.create_function("problem_has_tag", 2, has_problem_tag, deterministic=True)
+            query += " AND problem_has_tag(p.tags,?)=1"
+            params.append(problem_tag)
         if state == "favorite":
-            query += " AND p.is_favorite=1" if scope == "solved" else " AND COALESCE(s.is_favorite,0)=1"
+            query += " AND p.is_favorite=1"
         elif state == "inbox":
-            if scope == "solved":
-                query += " AND NOT EXISTS(SELECT 1 FROM user_problem_state prior WHERE prior.owner_qq_id=? AND prior.platform=p.platform AND prior.problem_id=p.problem_id AND COALESCE(prior.state,'inbox')<>'inbox')"
-                params.append(qq_id)
-            else:
-                query += " AND COALESCE(s.state,'inbox')='inbox'"
+            query += " AND NOT EXISTS(SELECT 1 FROM user_problem_state prior WHERE prior.owner_qq_id=? AND prior.platform=p.platform AND prior.problem_id=p.problem_id AND COALESCE(prior.state,'inbox')<>'inbox')"
+            params.append(qq_id)
         count_query = "SELECT COUNT(*) FROM (" + query + ") filtered"
         async with db.execute(count_query, tuple(params)) as cursor:
             total = int((await cursor.fetchone())[0])
@@ -2068,6 +2081,33 @@ async def api_me_problems():
         async with db.execute(query, tuple(params + [size, (page - 1) * size])) as cursor:
             items = [dict(row) for row in await cursor.fetchall()]
         return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": size})
+    finally:
+        await db.close()
+
+
+@api.route("/me/problems/tags", methods=["GET"])
+@member_required
+async def api_me_problem_tags():
+    platform = _field(request.args, "platform", 24)
+    if platform and platform not in {"codeforces", "atcoder", "luogu", "nowcoder", "cjlu"}:
+        return jsonify({"success": False, "message": "无效的题目平台。"}), 400
+    query = "SELECT DISTINCT tags FROM (" + _MEMBER_PROBLEM_QUERY + ") WHERE tags<>''"
+    params = [_me_qq_id(), _me_qq_id()]
+    if platform:
+        query += " AND platform=?"
+        params.append(platform)
+    db = await get_db()
+    try:
+        await db.create_function("problem_effective_tags", 3, effective_problem_tags, deterministic=True)
+        async with db.execute(query, params) as cursor:
+            values = await cursor.fetchall()
+        tags = {}
+        for row in values:
+            for value in problem_tags(row["tags"]):
+                if len(value) <= 100:
+                    key = value.casefold()
+                    tags[key] = min(tags.get(key, value), value)
+        return jsonify({"tags": [tags[key] for key in sorted(tags)]})
     finally:
         await db.close()
 

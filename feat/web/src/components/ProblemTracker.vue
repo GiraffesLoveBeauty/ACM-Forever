@@ -162,7 +162,7 @@ function description(problem) {
 <style scoped>
 .problem-tracker {
   --tracker-contest-width: 220px;
-  --tracker-problem-width: 136px;
+  --tracker-problem-width: 132px;
   min-width: 0;
 }
 .tracker-legend {

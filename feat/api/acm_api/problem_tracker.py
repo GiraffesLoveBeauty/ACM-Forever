@@ -5,6 +5,7 @@ import re
 from urllib.parse import urlsplit
 
 from .cf_client import problem_url as cf_problem_url
+from .problem_tags import has_problem_tag, problem_tags
 
 
 PLATFORMS = {"codeforces", "atcoder"}
@@ -16,19 +17,23 @@ def tracker_options(args):
     scope = args.get("scope", "all")
     state = args.get("state", "")
     tag = args.get("tag", "")
+    problem_tag = args.get("problem_tag", "")
     if platform and platform not in PLATFORMS:
         raise ValueError("比赛进度目前支持 Codeforces 和 AtCoder。")
     if scope not in {"all", "solved"} or state not in {"", "favorite"}:
         raise ValueError("无效的题目范围或收藏筛选。")
     if len(tag) > 100:
         raise ValueError("搜索内容最多 100 个字符。")
+    if len(problem_tag) > 100:
+        raise ValueError("题目标签最多 100 个字符。")
     values = {}
     for key, default, maximum in (("page", "1", 1000000), ("page_size", "20", 50)):
         raw = args.get(key, default)
         if not re.fullmatch(r"[0-9]+", raw) or not 1 <= int(raw) <= maximum:
             raise ValueError(f"{key} 必须为 1–{maximum} 的整数。")
         values[key] = int(raw)
-    return {"platform": platform, "scope": scope, "state": state, "tag": tag.strip().casefold(), **values}
+    return {"platform": platform, "scope": scope, "state": state, "tag": tag.strip().casefold(),
+            "problem_tag": problem_tag.strip(), **values}
 
 
 def natural_key(value):
@@ -140,7 +145,7 @@ async def contest_tracker(db, owner, options):
                 problem["problem_rating"] = rating(row.get("problem_rating"))
             if problem["problem_name"] == problem["problem_id"] and row.get("problem_name"):
                 problem["problem_name"] = row["problem_name"]
-            if not problem["tags"] and row.get("tags"):
+            if not problem_tags(problem["tags"]) and problem_tags(row.get("tags")):
                 problem["tags"] = row["tags"]
             return problem
         parsed = identity(row["platform"], row["problem_id"], row.get("contest_id"),
@@ -237,6 +242,8 @@ async def contest_tracker(db, owner, options):
         if options["scope"] == "solved" and problem["status"] != "solved":
             return False
         if options["state"] == "favorite" and not problem["is_favorite"]:
+            return False
+        if options.get("problem_tag") and not has_problem_tag(problem["tags"], options["problem_tag"]):
             return False
         return not options["tag"] or options["tag"] in " ".join(
             str(value) for value in (problem["problem_id"], problem["problem_name"], problem["tags"],
