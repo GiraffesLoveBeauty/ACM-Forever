@@ -117,11 +117,19 @@ function searchKeys(event) {
 function searchBlur(event) {
   if (!event.currentTarget.contains(event.relatedTarget)) closeSearch();
 }
-const contentKey = computed(() => JSON.stringify([
-  route.query.category, route.query.slug, queryText.value, route.query.page, route.query.revision,
-]));
-const staleContent = computed(() =>
-  !!(article.value || detail.value || results.value) && renderedContentKey.value !== contentKey.value,
+const contentKey = computed(() =>
+  JSON.stringify([
+    route.query.category,
+    route.query.slug,
+    queryText.value,
+    route.query.page,
+    route.query.revision,
+  ]),
+);
+const staleContent = computed(
+  () =>
+    !!(article.value || detail.value || results.value) &&
+    renderedContentKey.value !== contentKey.value,
 );
 async function ensureNavigation(force = false) {
   const current = ++navigationRevision;
@@ -129,8 +137,9 @@ async function ensureNavigation(force = false) {
   navigationError.value = '';
   try {
     let data;
-    try { data = await navigationLoader.load(force); }
-    catch (e) {
+    try {
+      data = await navigationLoader.load(force);
+    } catch (e) {
       if (e.codeName !== 'wiki_navigation_invalidated' || disposed) throw e;
       data = await navigationLoader.load(true);
     }
@@ -153,13 +162,13 @@ function retryNavigation() {
   else load(true);
 }
 function categoryDetail(navigation, id) {
-  const category = navigation.categories.find(c => String(c.id) === String(id));
+  const category = navigation.categories.find((c) => String(c.id) === String(id));
   if (!category) return null;
-  const parent = navigation.categories.find(c => c.id === category.parent_id);
+  const parent = navigation.categories.find((c) => c.id === category.parent_id);
   return {
     category,
     path: category.parent_id == null ? [category] : [parent, category].filter(Boolean),
-    children: navigation.categories.filter(c => c.parent_id === category.id),
+    children: navigation.categories.filter((c) => c.parent_id === category.id),
   };
 }
 async function load(forceNavigation = false) {
@@ -183,21 +192,30 @@ async function load(forceNavigation = false) {
   navigationPromise.catch(() => {});
   const content = (path) => api(path, { signal: controller.signal });
   try {
-    let nextArticle = null, nextDetail = null, nextResults = null;
+    let nextArticle = null,
+      nextDetail = null,
+      nextResults = null;
     if (target.slug) {
       const slug = encodeURIComponent(String(target.slug));
       const suffix = /^\d+$/.test(String(target.revision || ''))
-        ? '/revisions/' + target.revision : '';
+        ? '/revisions/' + target.revision
+        : '';
       nextArticle = await content('/wiki/pages/' + slug + suffix);
     } else if (target.q) {
-      nextResults = await content('/wiki/search?' + new URLSearchParams({
-        q: target.q, page: target.page || 1,
-      }));
+      nextResults = await content(
+        '/wiki/search?' +
+          new URLSearchParams({
+            q: target.q,
+            page: target.page || 1,
+          }),
+      );
     } else {
       let navigation = await navigationPromise;
       if (current !== revision) return;
-      const id = target.category || navigation.default_category_id ||
-        navigation.categories.find(c => c.parent_id == null)?.id;
+      const id =
+        target.category ||
+        navigation.default_category_id ||
+        navigation.categories.find((c) => c.parent_id == null)?.id;
       if (id) {
         nextDetail = categoryDetail(navigation, id);
         if (!nextDetail) {
@@ -206,11 +224,14 @@ async function load(forceNavigation = false) {
           nextDetail = categoryDetail(navigation, id);
         }
         if (!nextDetail) throw Object.assign(Error('分类不存在或已调整。'), { status: 404 });
-        nextResults = await content('/wiki/pages?' + new URLSearchParams({
-          category_id: id,
-          page: nextDetail.category.parent_id == null ? 1 : target.page || 1,
-          page_size: nextDetail.category.parent_id == null ? 3 : 20,
-        }));
+        nextResults = await content(
+          '/wiki/pages?' +
+            new URLSearchParams({
+              category_id: id,
+              page: nextDetail.category.parent_id == null ? 1 : target.page || 1,
+              page_size: nextDetail.category.parent_id == null ? 3 : 20,
+            }),
+        );
       }
     }
     if (current !== revision) return;
@@ -222,8 +243,8 @@ async function load(forceNavigation = false) {
     document.title = `${nextArticle?.title || nextDetail?.category.name || 'Wiki'} · ACM Forever`;
   } catch (e) {
     if (current === revision && e.name !== 'AbortError') {
-      error.value = e.status === 404
-        ? '内容或分类不存在、已调整或尚未公开，请重新选择分类。' : e.message;
+      error.value =
+        e.status === 404 ? '内容或分类不存在、已调整或尚未公开，请重新选择分类。' : e.message;
       if (e.status === 404) {
         article.value = detail.value = results.value = null;
         headings.value = [];
@@ -410,7 +431,11 @@ onBeforeUnmount(() => {
       <section class="wiki-content" :aria-busy="busy">
         <p v-if="busy" role="status">正在加载 Wiki…</p>
         <p v-if="staleContent" class="muted" role="status">
-          {{ busy ? '正在加载当前地址，下面暂时显示上次内容。' : '当前地址尚未加载成功，下面为上次成功内容。' }}
+          {{
+            busy
+              ? '正在加载当前地址，下面暂时显示上次内容。'
+              : '当前地址尚未加载成功，下面为上次成功内容。'
+          }}
         </p>
         <div v-if="error" class="card wiki-feedback" role="alert">
           <p>{{ error }}</p>

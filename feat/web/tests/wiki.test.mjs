@@ -8,6 +8,7 @@ import { JSDOM } from 'jsdom';
 const dom = new JSDOM('<!doctype html><html><body></body></html>', {
   url: 'http://127.0.0.1/wiki.html',
   runScripts: 'outside-only',
+  pretendToBeVisual: true,
 });
 for (const name of [
   'window',
@@ -27,6 +28,7 @@ for (const name of [
 const { createApp, h, nextTick, ref } = await import('vue');
 const { createRouter, createMemoryHistory, RouterView } = await import('vue-router');
 const { setAuth } = await import('../src/lib/api.js');
+const { invalidateWikiNavigation } = await import('../src/lib/wiki-navigation.js');
 const { importMarkdownFile, missingImages, sourceFields } = await import(
   '../src/lib/markdown-source.js'
 );
@@ -118,6 +120,7 @@ async function mount(component, path, props = {}, admin = Pages) {
   await settle();
 }
 beforeEach(() => {
+  invalidateWikiNavigation();
   calls = [];
   releases = [];
   savedPage = null;
@@ -389,7 +392,7 @@ test('upload failure keeps source and retry inserts at the original caret; unmou
   assert.equal(call.signal.aborted, true);
 });
 
-test('reader uses actual article classification, gives members no management entry and preserves content after a failed query', async () => {
+test('reader uses actual article classification, gives members no management entry and clears old content on 404', async () => {
   setAuth({ authenticated: true, role: 'member', qq_id: 'member' }, true);
   await mount(null, '/wiki.html?slug=dsu&category=999');
   assert.ok(host.textContent.includes('公开正文'));
@@ -402,7 +405,7 @@ test('reader uses actual article classification, gives members no management ent
   await router.push('/wiki.html?slug=missing');
   await settle();
   assert.ok(host.textContent.includes('内容或分类不存在'));
-  assert.ok(host.textContent.includes('公开正文'));
+  assert.equal(host.textContent.includes('公开正文'), false);
 });
 
 test('reader route replacement ignores late search responses and navigation supports browser history', async () => {
@@ -909,4 +912,195 @@ test('custom forum image uploads abort on editor disposal without inserting a la
   await settle();
   assert.equal(signal.aborted, true);
   assert.equal(updates, 0);
+});
+
+const wikiCalls = () => calls.filter((c) => c.url.startsWith('/api/wiki/'));
+
+test('default and cached category pagination use only the directory and list endpoints', async () => {
+  await mount(null, '/wiki.html');
+  assert.equal(wikiCalls().length, 2);
+  assert.equal(wikiCalls()[0].url, '/api/wiki/navigation');
+  assert.ok(wikiCalls()[1].url.startsWith('/api/wiki/pages?'));
+  calls.length = 0;
+  await router.push('/wiki.html?category=2&page=2');
+  await settle();
+  assert.equal(wikiCalls().length, 1);
+  assert.ok(wikiCalls()[0].url.includes('category_id=2&page=2'));
+  assert.equal(
+    wikiCalls().some((c) => c.url.includes('/categories/')),
+    false,
+  );
+});
+
+test('article and search start before a slow directory and render independently', async () => {
+  const fallback = globalThis.fetch;
+  let release;
+  globalThis.fetch = (url, options) =>
+    url === '/api/wiki/navigation'
+      ? new Promise((resolve) => {
+          release = () => resolve(response(nav));
+        })
+      : fallback(url, options);
+  await mount(null, '/wiki.html?slug=dsu');
+  assert.ok(host.textContent.includes('公开正文'));
+  assert.ok(host.textContent.includes('正在更新分类'));
+  assert.equal(q('.wiki-content').getAttribute('aria-busy'), 'false');
+  release();
+  await settle();
+  assert.ok(q('.wiki-categories .active'));
+  invalidateWikiNavigation();
+  await router.push('/wiki.html?q=独立搜索');
+  await settle();
+  assert.equal(releases.length, 1);
+  releases[0]();
+  await settle();
+  assert.ok(q('.wiki-article-card').textContent.includes('独立搜索'));
+  assert.ok(host.textContent.includes('正在更新分类'));
+  release();
+  await settle();
+});
+
+test('directory failure keeps the readable article and its retry does not reload the article', async () => {
+  const fallback = globalThis.fetch;
+  let fail = true;
+  globalThis.fetch = (url, options) =>
+    url === '/api/wiki/navigation' && fail
+      ? Promise.resolve(response({ message: '合成目录离线' }, 503))
+      : fallback(url, options);
+  await mount(null, '/wiki.html?slug=dsu');
+  assert.ok(host.textContent.includes('公开正文'));
+  assert.ok(host.textContent.includes('合成目录离线'));
+  fail = false;
+  calls.length = 0;
+  await click('重试目录');
+  assert.equal(host.textContent.includes('合成目录离线'), false);
+  assert.equal(wikiCalls().length, 1);
+  assert.equal(wikiCalls()[0].url, '/api/wiki/navigation');
+});
+
+test('network error preserves labelled previous content while the directory stays usable', async () => {
+  const fallback = globalThis.fetch;
+  globalThis.fetch = (url, options) =>
+    url === '/api/wiki/pages/offline'
+      ? Promise.resolve(response({ message: '合成网络错误' }, 503))
+      : fallback(url, options);
+  await mount(null, '/wiki.html?slug=dsu');
+  await router.push('/wiki.html?slug=offline');
+  await settle();
+  assert.ok(host.textContent.includes('公开正文'));
+  assert.ok(host.textContent.includes('当前地址尚未加载成功'));
+  assert.ok(q('.wiki-categories button'));
+  assert.ok(button('重试'));
+});
+
+test('cached directory means article switches send one request and abort the old body', async () => {
+  const fallback = globalThis.fetch;
+  let oldSignal;
+  globalThis.fetch = (url, options) => {
+    if (url !== '/api/wiki/pages/slow') return fallback(url, options);
+    oldSignal = options.signal;
+    return new Promise((resolve) =>
+      releases.push(() =>
+        resolve(
+          response({
+            ...source,
+            slug: 'slow',
+            title: '迟到旧正文',
+            path: nav.categories,
+          }),
+        ),
+      ),
+    );
+  };
+  await mount(null, '/wiki.html?slug=dsu');
+  calls.length = 0;
+  await router.push('/wiki.html?slug=slow');
+  await settle();
+  assert.ok(host.textContent.includes('正在加载当前地址'));
+  await router.push('/wiki.html?slug=dsu');
+  await settle();
+  assert.equal(oldSignal.aborted, true);
+  assert.equal(wikiCalls().length, 1);
+  assert.equal(wikiCalls()[0].url, '/api/wiki/pages/dsu');
+  releases[0]();
+  await settle();
+  assert.equal(host.textContent.includes('迟到旧正文'), false);
+  assert.equal(host.textContent.includes('当前地址尚未加载成功'), false);
+});
+
+test('unknown category refreshes the directory once and never requests its article list', async () => {
+  await mount(null, '/wiki.html?category=999');
+  assert.equal(wikiCalls().filter((c) => c.url === '/api/wiki/navigation').length, 2);
+  assert.equal(wikiCalls().filter((c) => c.url.startsWith('/api/wiki/pages?')).length, 0);
+  assert.ok(host.textContent.includes('内容或分类不存在'));
+});
+
+test('expired navigation refreshes on focus while a warm cache and hash navigation stay quiet', async () => {
+  await mount(null, '/wiki.html?slug=dsu');
+  calls.length = 0;
+  window.dispatchEvent(new dom.window.Event('focus'));
+  await settle();
+  await router.push('/wiki.html?slug=dsu#路径压缩');
+  await settle();
+  assert.equal(wikiCalls().length, 0);
+  const now = Date.now;
+  try {
+    Date.now = () => now() + 31_000;
+    window.dispatchEvent(new dom.window.Event('focus'));
+    await settle();
+  } finally {
+    Date.now = now;
+  }
+  assert.deepEqual(
+    wikiCalls().map((c) => c.url),
+    ['/api/wiki/navigation'],
+  );
+});
+
+test('auth-driven replacement aborts the old directory owner and reloads the new view', async () => {
+  const fallback = globalThis.fetch;
+  let oldSignal;
+  globalThis.fetch = (url, options) => {
+    if (url !== '/api/wiki/navigation' || oldSignal) return fallback(url, options);
+    oldSignal = options.signal;
+    return new Promise((resolve) =>
+      releases.push(() =>
+        resolve(
+          response({
+            ...nav,
+            categories: [{ id: 99, name: '过时目录', parent_id: null }],
+          }),
+        ),
+      ),
+    );
+  };
+  await mount(null, '/wiki.html?slug=dsu');
+  app.unmount();
+  app = null;
+  setAuth({ authenticated: true, role: 'member', qq_id: 'member' }, true);
+  await mount(null, '/wiki.html?slug=dsu');
+  assert.equal(oldSignal.aborted, true);
+  assert.ok(host.textContent.includes('公开正文'));
+  releases[0]();
+  await settle();
+  assert.equal(host.textContent.includes('过时目录'), false);
+  assert.ok(host.textContent.includes('知识总览'));
+});
+
+test('empty navigation and empty category results have explicit readable states', async () => {
+  const fallback = globalThis.fetch;
+  globalThis.fetch = (url, options) =>
+    url === '/api/wiki/navigation'
+      ? Promise.resolve(response({ categories: [], default_category_id: null }))
+      : fallback(url, options);
+  await mount(null, '/wiki.html');
+  assert.ok(host.textContent.includes('Wiki 正在建设中'));
+  globalThis.fetch = (url, options) =>
+    url.startsWith('/api/wiki/pages?')
+      ? Promise.resolve(response({ items: [], total: 0 }))
+      : fallback(url, options);
+  invalidateWikiNavigation();
+  await router.push('/wiki.html?category=2');
+  await settle();
+  assert.ok(host.textContent.includes('暂无已发布内容'));
 });

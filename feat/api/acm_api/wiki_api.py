@@ -62,6 +62,7 @@ def endpoint(write=False, public=False, cache=None):
                 if write:
                     await db.execute("BEGIN IMMEDIATE")
                 elif public:
+                    # Version keys and response data must use one WAL read snapshot.
                     await db.execute("BEGIN")
                 data = await request.get_json(silent=True) if write else request.args
                 if write and not isinstance(data, dict):
@@ -80,9 +81,14 @@ def endpoint(write=False, public=False, cache=None):
                     versions = (state["public_content_version"],)
                     if cache in {"navigation", "category"}:
                         versions += (state["navigation_version"],)
-                    key = (store.generation, database_namespace(current_app.config["DB_PATH"]),
-                           cache, tuple(sorted(kwargs.items())), tuple(sorted(data.items()))
-                           if cache in {"pages", "search"} else (), versions)
+                    key = (
+                        store.generation,
+                        database_namespace(current_app.config["DB_PATH"]),
+                        cache,
+                        tuple(sorted(kwargs.items())),
+                        tuple(sorted(data.items())) if cache in {"pages", "search"} else (),
+                        versions,
+                    )
                     version_ms = (perf_counter() - started) * 1000
                 enabled = cache and current_app.config["WIKI_CACHE_ENABLED"]
                 entry = store.get(key) if enabled else None
@@ -109,9 +115,13 @@ def endpoint(write=False, public=False, cache=None):
                     tag = hashlib.sha256(body).hexdigest()
                     json_ms = (perf_counter() - json_started) * 1000
                     if enabled:
-                        cache_status = "miss" if store.put(key, body, content_type, tag) else "skip"
-                headers = {"ETag": '"' + tag + '"',
-                           "Cache-Control": "public, max-age=0, must-revalidate"}
+                        cache_status = (
+                            "miss" if store.put(key, body, content_type, tag) else "skip"
+                        )
+                headers = {
+                    "ETag": '"' + tag + '"',
+                    "Cache-Control": "public, max-age=0, must-revalidate",
+                }
                 if cache:
                     headers["Server-Timing"] = (
                         f'wiki-cache;desc="{cache_status}", wiki-version;dur={version_ms:.3f}, '

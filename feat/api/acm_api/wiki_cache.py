@@ -15,8 +15,14 @@ class CachedResponse:
 
 
 class WikiResponseCache:
-    def __init__(self, max_entries=256, max_bytes=8 * 1024 * 1024,
-                 max_entry_bytes=256 * 1024, ttl=300, clock=time.monotonic):
+    def __init__(
+        self,
+        max_entries=256,
+        max_bytes=8 * 1024 * 1024,
+        max_entry_bytes=256 * 1024,
+        ttl=300,
+        clock=time.monotonic,
+    ):
         self.max_entries = max_entries
         self.max_bytes = max_bytes
         self.max_entry_bytes = max_entry_bytes
@@ -44,8 +50,11 @@ class WikiResponseCache:
 
     def put(self, key, body, content_type, etag):
         size = len(body)
-        if (not self.max_entries or self.ttl <= 0 or
-                size > min(self.max_entry_bytes, self.max_bytes)):
+        if (
+            not self.max_entries
+            or self.ttl <= 0
+            or size > min(self.max_entry_bytes, self.max_bytes)
+        ):
             return False
         now = self.clock()
         for old, entry in list(self.entries.items()):
@@ -53,8 +62,10 @@ class WikiResponseCache:
                 self._remove(old)
         if key in self.entries:
             self._remove(key)
-        while self.entries and (len(self.entries) >= self.max_entries or
-                                self.bytes + size > self.max_bytes):
+        while self.entries and (
+            len(self.entries) >= self.max_entries
+            or self.bytes + size > self.max_bytes
+        ):
             self._remove(next(iter(self.entries)))
             self.evictions += 1
         self.entries[key] = CachedResponse(body, content_type, etag, now)
@@ -67,8 +78,13 @@ class WikiResponseCache:
         self.generation += 1
 
     def stats(self):
-        return {"entries": len(self.entries), "bytes": self.bytes,
-                "hits": self.hits, "misses": self.misses, "evictions": self.evictions}
+        return {
+            "entries": len(self.entries),
+            "bytes": self.bytes,
+            "hits": self.hits,
+            "misses": self.misses,
+            "evictions": self.evictions,
+        }
 
 
 def database_namespace(path):
