@@ -204,7 +204,7 @@ async def my_post(post_id):
     db = await get_db()
     try:
         async with db.execute(
-            "SELECT p.id,p.title,p.body,p.status,p.created_at,p.updated_at,p.reviewed_at,p.review_reason,"
+            "SELECT p.id,p.title,p.body,p.status,p.content_version,p.created_at,p.updated_at,p.reviewed_at,p.review_reason,"
             "'/api/forum/images/' || p.cover_image_id AS cover_url,c.name AS category_name "
             "FROM forum_posts p JOIN forum_categories c ON c.id=p.category_id WHERE p.id=? AND p.author_qq_id=?",
             (post_id, request.web_identity["qq_id"]),
@@ -212,7 +212,9 @@ async def my_post(post_id):
             row = await cursor.fetchone()
         if not row:
             return jsonify({"message": "投稿不存在。"}), 404
-        response = jsonify(dict(row))
+        async with db.execute("SELECT content_version,title,body,category_id,status,review_reason,reviewed_at,saved_at FROM forum_post_history WHERE post_id=? ORDER BY content_version DESC LIMIT 50", (post_id,)) as cursor:
+            history = [dict(item) for item in await cursor.fetchall()]
+        response = jsonify({**dict(row), "history": history})
         response.headers["Cache-Control"] = "private, no-store"
         return response
     finally:
@@ -283,7 +285,7 @@ async def create_forum_draft():
             return jsonify({"message": str(error)}), 400
         await record_assets(db, data["body"], "forum_draft", draft_id, 0, request.web_identity["qq_id"])
         await db.commit()
-        return jsonify({"id": draft_id, "updated_at": now, "message": "草稿已保存。"}), 201
+        return jsonify({"id": draft_id, "edit_version": 1, "updated_at": now, "message": "草稿已保存。"}), 201
     finally:
         await db.close()
 
@@ -294,7 +296,7 @@ async def get_forum_draft(draft_id):
     db = await get_db()
     try:
         async with db.execute(
-            "SELECT d.id,d.category_id,d.title,d.body,d.cover_image_id,d.created_at,d.updated_at "
+            "SELECT d.id,d.category_id,d.title,d.body,d.cover_image_id,d.source_post_id,d.source_version,d.edit_version,d.created_at,d.updated_at "
             "FROM forum_drafts d WHERE d.id=? AND d.author_qq_id=?",
             (draft_id, request.web_identity["qq_id"]),
         ) as cursor:
@@ -309,18 +311,26 @@ async def get_forum_draft(draft_id):
 @forum_api.put("/forum/drafts/<int:draft_id>")
 @member_required
 async def update_forum_draft(draft_id):
-    data, error = _draft_fields(await request.get_json(silent=True) or {})
+    raw = await request.get_json(silent=True) or {}
+    data, error = _draft_fields(raw)
     if error:
         return jsonify({"message": error}), 400
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        async with db.execute("SELECT edit_version,source_post_id FROM forum_drafts WHERE id=? AND author_qq_id=?", (draft_id, request.web_identity["qq_id"])) as cursor:
+            draft = await cursor.fetchone()
+        if not draft:
+            return jsonify({"message": "草稿不存在。"}), 404
+        if (draft["source_post_id"] or "edit_version" in raw) and raw.get("edit_version") != draft["edit_version"]:
+            return jsonify({"message": "草稿已被其他标签页修改，请复制当前输入后重新载入。"}), 409
         if data["category_id"] is not None:
             async with db.execute("SELECT 1 FROM forum_categories WHERE id=?", (data["category_id"],)) as cursor:
                 if not await cursor.fetchone():
                     return jsonify({"message": "请选择有效的帖子分类。"}), 400
         now = int(time.time())
         cursor = await db.execute(
-            "UPDATE forum_drafts SET category_id=?,title=?,body=?,cover_image_id=?,updated_at=? "
+            "UPDATE forum_drafts SET category_id=?,title=?,body=?,cover_image_id=?,updated_at=?,edit_version=edit_version+1 "
             "WHERE id=? AND author_qq_id=?",
             (data["category_id"], data["title"], data["body"], data["cover_image_id"], now, draft_id, request.web_identity["qq_id"]),
         )
@@ -332,7 +342,7 @@ async def update_forum_draft(draft_id):
             return jsonify({"message": str(error)}), 400
         await record_assets(db, data["body"], "forum_draft", draft_id, 0, request.web_identity["qq_id"])
         await db.commit()
-        return jsonify({"id": draft_id, "updated_at": now, "message": "草稿已保存。"})
+        return jsonify({"id": draft_id, "edit_version": draft["edit_version"] + 1, "updated_at": now, "message": "草稿已保存。"})
     finally:
         await db.close()
 
@@ -358,15 +368,19 @@ async def delete_forum_draft(draft_id):
 @member_required
 async def submit_forum_draft(draft_id):
     qq_id = request.web_identity["qq_id"]
+    submitted = await request.get_json(silent=True) or {}
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
         async with db.execute(
-            "SELECT id,category_id,title,body,cover_image_id FROM forum_drafts WHERE id=? AND author_qq_id=?",
+            "SELECT id,category_id,title,body,cover_image_id,source_post_id,source_version,source_status,edit_version FROM forum_drafts WHERE id=? AND author_qq_id=?",
             (draft_id, qq_id),
         ) as cursor:
             draft = await cursor.fetchone()
         if not draft:
             return jsonify({"message": "草稿不存在。"}), 404
+        if draft["source_post_id"] and (not isinstance(submitted, dict) or submitted.get("edit_version") != draft["edit_version"]):
+            return jsonify({"message": "草稿已被其他标签页修改，请复制当前输入后重新载入。"}), 409
         title, body, category_id = draft["title"].strip(), draft["body"].strip(), draft["category_id"]
         if not 4 <= len(title) <= 120:
             return jsonify({"message": "标题长度需要在 4 到 120 个字符之间。"}), 400
@@ -378,12 +392,23 @@ async def submit_forum_draft(draft_id):
             if not await cursor.fetchone():
                 return jsonify({"message": "请选择有效的帖子分类。"}), 400
         now = int(time.time())
-        cursor = await db.execute(
-            "INSERT INTO forum_posts(author_qq_id,category_id,title,body,cover_image_id,status,created_at,updated_at) "
-            "VALUES(?,?,?,?,?,'pending',?,?)",
-            (qq_id, category_id, title, body, draft["cover_image_id"], now, now),
-        )
-        post_id = cursor.lastrowid
+        post_id = draft["source_post_id"]
+        if post_id:
+            async with db.execute("SELECT * FROM forum_posts WHERE id=? AND author_qq_id=?", (post_id, qq_id)) as cursor:
+                original = await cursor.fetchone()
+            if not original or original["status"] == "removed":
+                return jsonify({"message": "原帖已删除，不能重新提交。"}), 409
+            if original["content_version"] != draft["source_version"] or original["status"] != draft["source_status"]:
+                return jsonify({"message": "原帖或审核状态已变化。请保留草稿，重新读取原帖后再编辑。"}), 409
+            await db.execute("INSERT INTO forum_post_history(post_id,content_version,title,body,category_id,status,review_reason,reviewed_at,saved_at) VALUES(?,?,?,?,?,?,?,?,?)", (post_id, original["content_version"], original["title"], original["body"], original["category_id"], original["status"], original["review_reason"], original["reviewed_at"], now))
+            await db.execute("UPDATE forum_posts SET title=?,body=?,category_id=?,cover_image_id=?,status='pending',content_version=content_version+1,updated_at=?,reviewed_at=NULL,reviewed_by=NULL,review_reason='' WHERE id=?", (title, body, category_id, draft["cover_image_id"], now, post_id))
+        else:
+            cursor = await db.execute(
+                "INSERT INTO forum_posts(author_qq_id,category_id,title,body,cover_image_id,status,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,'pending',?,?)",
+                (qq_id, category_id, title, body, draft["cover_image_id"], now, now),
+            )
+            post_id = cursor.lastrowid
         try:
             await sync_image_links(db, qq_id, body, draft["cover_image_id"], post_id=post_id)
         except ValueError as error:
@@ -393,6 +418,32 @@ async def submit_forum_draft(draft_id):
         await db.execute("DELETE FROM forum_drafts WHERE id=? AND author_qq_id=?", (draft_id, qq_id))
         await db.commit()
         return jsonify({"id": post_id, "status": "pending", "message": "帖子已提交，审核通过后会出现在论坛。"}), 201
+    finally:
+        await db.close()
+
+
+@forum_api.post("/forum/mine/posts/<int:post_id>/edit")
+@member_required
+async def edit_own_post(post_id):
+    owner = request.web_identity["qq_id"]
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        async with db.execute("SELECT * FROM forum_posts WHERE id=? AND author_qq_id=? AND status<>'removed'", (post_id, owner)) as cursor:
+            original = await cursor.fetchone()
+        if not original:
+            return jsonify({"message": "投稿不存在或已删除。"}), 404
+        async with db.execute("SELECT id FROM forum_drafts WHERE author_qq_id=? AND source_post_id=?", (owner, post_id)) as cursor:
+            draft = await cursor.fetchone()
+        if draft:
+            return jsonify({"id": draft["id"], "source_post_id": post_id})
+        now = int(time.time())
+        cursor = await db.execute("INSERT INTO forum_drafts(author_qq_id,category_id,title,body,cover_image_id,created_at,updated_at,source_post_id,source_version,source_status) VALUES(?,?,?,?,?,?,?,?,?,?)", (owner, original["category_id"], original["title"], original["body"], original["cover_image_id"], now, now, post_id, original["content_version"], original["status"]))
+        draft_id = cursor.lastrowid
+        await sync_image_links(db, owner, original["body"], original["cover_image_id"], draft_id=draft_id)
+        await record_assets(db, original["body"], "forum_draft", draft_id, 0, owner)
+        await db.commit()
+        return jsonify({"id": draft_id, "source_post_id": post_id}), 201
     finally:
         await db.close()
 
@@ -578,7 +629,7 @@ async def moderation_posts():
     db = await get_db()
     try:
         async with db.execute(
-            "SELECT p.id,p.title,p.body,p.created_at,c.name AS category_name,"
+            "SELECT p.id,p.title,p.body,p.content_version,p.created_at,c.name AS category_name,"
             "'/api/forum/images/' || p.cover_image_id AS cover_url,"
             "CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name "
             "FROM forum_posts p JOIN forum_categories c ON c.id=p.category_id "
@@ -606,10 +657,12 @@ async def moderate_post(post_id):
     db = await get_db()
     try:
         await db.execute("BEGIN IMMEDIATE")
-        async with db.execute("SELECT author_qq_id FROM forum_posts WHERE id=? AND status='pending'", (post_id,)) as cursor:
+        async with db.execute("SELECT author_qq_id,content_version FROM forum_posts WHERE id=? AND status='pending'", (post_id,)) as cursor:
             post = await cursor.fetchone()
         if not post:
             return jsonify({"message": "帖子不存在或已处理。"}), 404
+        if (post["content_version"] > 1 or "content_version" in data) and data.get("content_version") != post["content_version"]:
+            return jsonify({"message": "投稿内容已变化，请刷新后重新审核。"}), 409
         cursor = await db.execute(
             "UPDATE forum_posts SET status=?,updated_at=?,reviewed_at=?,reviewed_by=?,review_reason=? "
             "WHERE id=? AND status='pending'",

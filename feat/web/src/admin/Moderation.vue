@@ -34,7 +34,13 @@ async function decide(id, decision) {
   try {
     await request(`/forum/moderation/${tab.value}/${id}`, {
       method: 'POST',
-      body: { decision, ...(tab.value === 'posts' && decision === 'reject' ? { reason } : {}) },
+      body: {
+        decision,
+        ...(tab.value === 'posts'
+          ? { content_version: rows.value.find((item) => item.id === id)?.content_version }
+          : {}),
+        ...(tab.value === 'posts' && decision === 'reject' ? { reason } : {}),
+      },
     });
     delete reasons[id];
     await load();

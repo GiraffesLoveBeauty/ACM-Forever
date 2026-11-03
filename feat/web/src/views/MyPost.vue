@@ -1,14 +1,16 @@
 <script setup>
 import { ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { useRequests, date } from '../lib/api.js';
 import { markdown } from '../lib/markdown.js';
 import { codeBlocks as vCodeBlocks } from '../lib/code-blocks.js';
 import PostCover from '../components/PostCover.vue';
 
 const route = useRoute(),
+  router = useRouter(),
   request = useRequests();
 const post = ref(null),
+  editing = ref(false),
   error = ref(''),
   loading = ref(false);
 const labels = {
@@ -18,6 +20,20 @@ const labels = {
   removed: '帖子已删除',
 };
 let revision = 0;
+async function edit() {
+  if (editing.value) return;
+  const target = post.value.id;
+  editing.value = true;
+  try {
+    const draft = await request(`/forum/mine/posts/${target}/edit`, { method: 'POST', body: {} });
+    if (String(route.query.id) === String(target))
+      await router.push(`/compose.html?draft_id=${draft.id}`);
+  } catch (e) {
+    if (e.name !== 'AbortError') error.value = e.message;
+  } finally {
+    editing.value = false;
+  }
+}
 async function load() {
   const current = ++revision;
   post.value = null;
@@ -50,6 +66,9 @@ watch(() => route.query.id, load, { immediate: true });
         </div>
         <h2>{{ post.title }}</h2>
         <p class="forum-feedback-tag">{{ labels[post.status] }}</p>
+        <button v-if="post.status !== 'removed'" class="btn" :disabled="editing" @click="edit">
+          {{ post.status === 'rejected' ? '修改后重新投稿' : '修改帖子' }}
+        </button>
         <ol class="forum-submission-timeline">
           <li>
             <b>已提交</b><time>{{ date(post.created_at) }}</time>
@@ -88,6 +107,17 @@ watch(() => route.query.id, load, { immediate: true });
         <PostCover :src="post.cover_url" :alt="`${post.title}的封面`" class="forum-article-cover" />
         <div class="forum-markdown" v-forum-math v-code-blocks v-html="markdown(post.body)"></div>
       </article>
+      <section v-if="post.history?.length" class="community-panel" aria-label="修改记录">
+        <h2>修改记录</h2>
+        <p class="muted">保留历次替换前的文字源文和审核结果；历史附件不作永久归档。</p>
+        <details v-for="entry in post.history" :key="entry.content_version">
+          <summary>
+            第 {{ entry.content_version }} 版 · {{ entry.title }} · {{ labels[entry.status] }}
+          </summary>
+          <p v-if="entry.review_reason">退回原因：{{ entry.review_reason }}</p>
+          <pre style="white-space: pre-wrap; overflow-wrap: anywhere">{{ entry.body }}</pre>
+        </details>
+      </section>
     </template>
   </main>
 </template>
