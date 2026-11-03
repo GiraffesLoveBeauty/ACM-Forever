@@ -126,9 +126,9 @@ response.raise_for_status()
 | `GET/PUT /api/ui/preferences` | admin/root；只返回 / 更新 `font_scale`，旧导航隐藏、排序、复习配置不再参与页面生成 |
 | `GET /api/problems`、`GET /api/me/problems` | 管理员可附 `owner_qq_id`，成员接口始终使用会话 QQ；支持 `platform/tag/state=favorite/page/page_size`；题目按平台和 ID 去重，优先目录元数据；分页返回 `items/total/returned/page/page_size`，默认 500、上限 500；不返回笔记 |
 | `PUT /api/problems/<platform>/<problem_id>/state`、`PUT /api/me/problems/<platform>/<problem_id>/state` | 正文 `is_favorite` 为必填布尔，管理员另传 `owner_qq_id`；只更新收藏与时间，不覆盖历史状态 / 笔记；提交 `note_md` 返回 410 |
-| `GET /api/contest/reviews`、`GET /api/me/contest/reviews` | 管理员传 `owner_qq_id/contest_id`，成员仅 `contest_id`；返回比赛题目、verdict、rating、status，不暴露自由笔记 |
-| `PUT /api/contest/reviews`、`PUT /api/me/contest/reviews` | 正文 `contest_id/problem_id` 必填，管理员另传 `owner_qq_id`；`status/verdict/rating` 至少一个，只更新提供的字段；省略字段及历史 `note_md` 原值保留 |
-| `/api/challenge/*`、`/api/me/challenge/*`、`/api/me/training/*` | 保留原训练推荐、挑战历史和统计；前台成员请求锁定会话身份 |
+| `GET /api/contest/reviews`、`GET /api/me/contest/reviews` | 管理接口传 `owner_qq_id/contest_id`，本人接口仅 `contest_id`；返回比赛题目、verdict、rating、status，不暴露自由笔记 |
+| `PUT /api/contest/reviews`、`PUT /api/me/contest/reviews` | 正文 `contest_id/problem_id` 必填，管理接口另传 `owner_qq_id`；`status/verdict/rating` 至少一个，只更新提供的字段；省略字段及历史 `note_md` 原值保留 |
+| `/api/challenge/*`、`/api/me/challenge/*`、`/api/me/training/*` | 保留原训练推荐、挑战历史和统计；`/me/` 对 member / admin / root 均锁定会话本人，管理接口仅允许管理员与 Root |
 | `GET /api/tasks`、`POST /api/tasks/<id>/cancel` | admin/root；同步任务与原始结果，刷新 / 取消保留 |
 
 赛事状态统一为 `todo/unsolved/queued/solved/reviewed/ignored`，其中 `reviewed` 可正常保存，`queued` 仅表示待补题状态，不创建复习或计划队列。`rating` 接受整数或 null。任何赛事 `note_md` 写请求均返回 410。所有写请求继续执行 CSRF 校验，模块路由不是权限边界。
