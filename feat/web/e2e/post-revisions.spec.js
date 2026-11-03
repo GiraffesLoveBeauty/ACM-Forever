@@ -89,8 +89,13 @@ test('author revises, reviewer rejects and author resubmits the same post', asyn
       .click();
     await page.getByRole('button', { name: '刷新状态', exact: true }).click();
     await page.getByRole('link', { name: '查看已发布话题' }).click();
+    await expect(page).toHaveURL(
+      (url) => url.pathname === '/post.html' && url.searchParams.get('id') === String(id),
+    );
     await expect(
-      page.getByRole('heading', { name: '已经补充的算法说明', exact: true }),
+      page
+        .locator('.forum-article-header')
+        .getByRole('heading', { name: '已经补充的算法说明', level: 1, exact: true }),
     ).toBeVisible();
   } finally {
     await reviewer.close();
