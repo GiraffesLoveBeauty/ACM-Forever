@@ -187,7 +187,6 @@ class LifecycleApiTests(unittest.IsolatedAsyncioTestCase):
             await self.fixture_user('87654321', role='member')
             await self.closed_fixture('87654321')
             operations = (
-                ('POST', '/api/admin/web-accounts', {'qq_id': '87654321', 'name': 'Reopen', 'initial_password': PASSWORD}),
                 ('PATCH', '/api/admin/web-accounts/87654321', {'is_active': True}),
                 ('PATCH', '/api/admin/web-accounts/87654321', {'role': 'root'}),
                 ('POST', '/api/admin/web-accounts/87654321/reset-password', {'initial_password': PASSWORD}),

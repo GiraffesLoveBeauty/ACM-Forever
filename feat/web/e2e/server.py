@@ -41,7 +41,8 @@ async def run(port):
             encoded = hash_password("Browser-fixture-only!2026")
             for qq, role in [("10000001", "member"), ("10000002", "member"), ("10000003", "admin"),
                              ("10000004", "member"), ("10000005", "member"),
-                             ("10000006", "member"), ("10000007", "member")]:
+                             ("10000006", "member"), ("10000007", "member"),
+                             ("10000008", "member"), ("10000009", "member")]:
                 await db.execute("INSERT INTO users(qq_id,name) VALUES(?,?)", (qq, "浏览器测试" + role))
                 await db.execute(
                     "INSERT INTO web_accounts(qq_id,password_hash,role,must_change_password,is_active,created_at,updated_at) "

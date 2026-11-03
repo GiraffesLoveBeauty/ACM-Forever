@@ -1,4 +1,5 @@
 """Managed forum images, draft references and publication visibility."""
+
 import asyncio
 import io
 import re
@@ -13,6 +14,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 import mistune
 from quart import Blueprint, abort, current_app, jsonify, request, send_from_directory
 
+from .account_closure_service import closed_content_sql
 from .backend_api import _session_identity, get_db, member_required
 from .account_lifecycle_service import require_web_actor
 
@@ -125,7 +127,7 @@ async def sync_image_links(db, owner, body, cover_id, *, draft_id=None, post_id=
             "WHERE l.image_id=i.id AND p.status='published') OR EXISTS("
             "SELECT 1 FROM forum_image_links l LEFT JOIN forum_drafts d ON d.id=l.draft_id "
             "LEFT JOIN forum_posts p ON p.id=l.post_id WHERE l.image_id=i.id "
-            "AND (d.author_qq_id=? OR p.author_qq_id=?)))", (image_id, owner, owner, owner),
+            f"AND (d.author_qq_id=? OR (p.author_qq_id=? AND NOT {closed_content_sql('forum_post', 'p')}))))", (image_id, owner, owner, owner),
         ) as cursor:
             if not await cursor.fetchone():
                 raise ValueError("正文或封面引用了不存在或无权使用的图片，请重新上传。")
@@ -201,7 +203,7 @@ async def read_forum_image(image_id):
             "WHERE l.image_id=i.id AND p.status<>'removed') AS submitted,"
             "EXISTS(SELECT 1 FROM forum_image_links l LEFT JOIN forum_drafts d ON d.id=l.draft_id "
             "LEFT JOIN forum_posts p ON p.id=l.post_id WHERE l.image_id=i.id "
-            "AND (d.author_qq_id=? OR p.author_qq_id=?)) AS referenced_by_viewer "
+            f"AND (d.author_qq_id=? OR (p.author_qq_id=? AND NOT {closed_content_sql('forum_post', 'p')}))) AS referenced_by_viewer "
             "FROM forum_images i WHERE i.id=? AND NOT EXISTS(SELECT 1 FROM account_closure_resource_revocations v WHERE v.resource_kind='forum' AND v.resource_id=i.id)",
             (identity["qq_id"] if identity else None, identity["qq_id"] if identity else None, image_id),
         ) as cursor:

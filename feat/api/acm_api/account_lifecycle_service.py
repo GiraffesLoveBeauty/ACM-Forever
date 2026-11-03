@@ -1,7 +1,7 @@
 """Account lifecycle checks shared by Web, Bot, import and background writers.
 
 Call write guards after BEGIN IMMEDIATE on the connection that performs the write.
-This module deliberately provides no account-closing or reopening operation.
+Account creation is explicit; ordinary writes cannot revive a closed generation.
 """
 import time
 
@@ -28,12 +28,24 @@ async def migrate_account_lifecycle(db):
         if name not in columns:
             await db.execute(f"ALTER TABLE users ADD COLUMN {name} {definition}")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_users_account_state ON users(account_state,qq_id)")
+    await db.execute(
+        "CREATE TABLE IF NOT EXISTS account_registrations ("
+        "qq_id TEXT NOT NULL REFERENCES users(qq_id), closed_epoch INTEGER NOT NULL, "
+        "new_epoch INTEGER NOT NULL, created_at INTEGER NOT NULL, "
+        "PRIMARY KEY(qq_id,closed_epoch), CHECK(new_epoch=closed_epoch+1))"
+    )
+    # Replace the v1 guard atomically during initialization. Re-registration is
+    # possible only with an explicit generation record in the same transaction.
+    await db.execute("DROP TRIGGER IF EXISTS users_closed_no_reopen")
     # Narrow invariants also protect against REPLACE's implicit delete, even with
     # recursive_triggers off. Ordinary UPSERTs of active members remain supported.
     triggers = {
         "users_closed_no_reopen": (
             "BEFORE UPDATE OF account_state ON users "
-            "WHEN OLD.account_state='closed' AND NEW.account_state<>'closed' "
+            "WHEN OLD.account_state='closed' AND NEW.account_state<>'closed' AND NOT ("
+            "NEW.account_state='active' AND NEW.account_epoch=OLD.account_epoch+1 AND EXISTS("
+            "SELECT 1 FROM account_registrations r WHERE r.qq_id=OLD.qq_id "
+            "AND r.closed_epoch=OLD.account_epoch AND r.new_epoch=NEW.account_epoch)) "
             "BEGIN SELECT RAISE(ABORT,'ACCOUNT_REOPEN_UNSUPPORTED'); END"
         ),
         "users_closed_no_delete": (
@@ -44,6 +56,11 @@ async def migrate_account_lifecycle(db):
             "BEFORE INSERT ON users WHEN EXISTS(SELECT 1 FROM users "
             "WHERE qq_id=NEW.qq_id AND account_state='closed') "
             "BEGIN SELECT RAISE(ABORT,'ACCOUNT_REOPEN_UNSUPPORTED'); END"
+        ),
+        "users_registration_epoch_insert": (
+            "AFTER INSERT ON users WHEN NEW.account_epoch<COALESCE(("
+            "SELECT MAX(new_epoch) FROM account_registrations WHERE qq_id=NEW.qq_id),1) "
+            "BEGIN SELECT RAISE(ABORT,'ACCOUNT_CHANGED'); END"
         ),
         "users_epoch_monotonic": (
             "BEFORE UPDATE OF account_epoch,account_state ON users "

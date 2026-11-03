@@ -5,6 +5,7 @@ const anonymousAuth = () => ({
   authenticated: false,
   role: null,
   qq_id: null,
+  account_epoch: null,
   csrf_token: '',
   avatar_url: null,
   must_change_password: false,
@@ -15,7 +16,8 @@ export function setAuth(data, newSession = false) {
   if (
     newSession ||
     Boolean(data.authenticated) !== auth.authenticated ||
-    (data.qq_id ?? null) !== auth.qq_id
+    (data.qq_id ?? null) !== auth.qq_id ||
+    (data.account_epoch ?? null) !== auth.account_epoch
   )
     resetAdminSession();
   for (const key of Object.keys(auth)) delete auth[key];
@@ -224,10 +226,18 @@ export function finishAccountClosure() {
   }
 }
 if (typeof window !== 'undefined') {
-  window.addEventListener('storage', (event) => {
+  window.addEventListener('storage', async (event) => {
     if (event.key !== 'acm-account-closed' || !event.newValue) return;
-    setAuth(anonymousAuth(), true);
     initialization = null;
+    try {
+      // Another tab may already have logged into a fresh account generation.
+      // Revalidate the shared cookie before discarding that new login.
+      const current = await api('/auth/me');
+      setAuth(current);
+      if (current.authenticated) return;
+    } catch {
+      setAuth(anonymousAuth(), true);
+    }
     location.replace('/index.html');
   });
 }

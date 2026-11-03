@@ -24,3 +24,10 @@ CREATE TABLE IF NOT EXISTS account_closure_resource_revocations (
  resource_kind TEXT NOT NULL, resource_id TEXT NOT NULL,
  request_id TEXT NOT NULL REFERENCES account_closure_requests(request_id), revoked_at INTEGER NOT NULL,
  PRIMARY KEY(resource_kind,resource_id));
+
+-- Stable author tombstones separate shared content from later accounts with
+-- the same QQ, without modifying immutable Wiki revisions.
+CREATE TABLE IF NOT EXISTS account_closed_content (
+ content_kind TEXT NOT NULL CHECK(content_kind IN ('forum_post','forum_comment','wiki_revision','forum_report')),
+ content_id INTEGER NOT NULL, closed_at INTEGER NOT NULL,
+ PRIMARY KEY(content_kind,content_id));

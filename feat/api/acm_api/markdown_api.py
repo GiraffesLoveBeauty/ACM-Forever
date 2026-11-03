@@ -7,6 +7,7 @@ import secrets
 import time
 from pathlib import Path
 from quart import Blueprint, Response, current_app, jsonify, request, send_file
+from .account_closure_service import closed_content_sql
 from .backend_api import _session_identity, get_db, member_required
 from .account_lifecycle_service import require_web_actor
 from .markdown_content import ContentError, asset_public
@@ -145,10 +146,10 @@ async def asset(asset_id):
         identity = await _session_identity() if not public else None
         forum_reference_access = False
         if identity and not identity["must_change_password"]:
-            forum_reference_access = bool(await one(db, """SELECT 1 FROM markdown_asset_references a
+            forum_reference_access = bool(await one(db, f"""SELECT 1 FROM markdown_asset_references a
  LEFT JOIN forum_posts p ON a.document_type='forum_post' AND p.id=a.document_id
  LEFT JOIN forum_drafts d ON a.document_type='forum_draft' AND d.id=a.document_id
- WHERE a.asset_id=? AND (p.author_qq_id=? OR d.author_qq_id=? OR (? AND p.status IN ('pending','published','rejected'))) LIMIT 1""",
+ WHERE a.asset_id=? AND ((p.author_qq_id=? AND NOT {closed_content_sql('forum_post', 'p')}) OR d.author_qq_id=? OR (? AND p.status IN ('pending','published','rejected'))) LIMIT 1""",
                 (asset_id, identity["qq_id"], identity["qq_id"], identity["role"] in {"admin", "root"})))
         if not public and (
             not identity

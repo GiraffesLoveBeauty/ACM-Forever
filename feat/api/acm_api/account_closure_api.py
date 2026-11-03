@@ -113,11 +113,14 @@ async def close():
         # A committed result is a secret-authenticated read-only replay. Normal
         # sessions and their CSRF token have already been revoked at this point.
         record = await service.receipt_record(db, request_id, token)
+        if not record["committed_at"] and (record["policy_version"] != service.POLICY_VERSION or data["policy_version"] != service.POLICY_VERSION):
+            raise AccountLifecycleError("POLICY_CHANGED", "注销规则已变化，请重新预览。")
         if record["intent_fingerprint"] != service.intent(data):
             raise AccountLifecycleError("IDEMPOTENCY_CONFLICT", "相同请求编号对应的注销意图不同。")
         if record["committed_at"]:
             # Do not clear a different account's newly established session.
-            if session.get("webui_qq_id") == record["user_qq_id"]:
+            if (session.get("webui_qq_id") == record["user_qq_id"]
+                    and session.get("webui_account_epoch", 1) == record["account_epoch"]):
                 session.clear()
             return jsonify(service.receipt_result(record))
         require_feature()

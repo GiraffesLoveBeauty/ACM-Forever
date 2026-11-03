@@ -18,7 +18,7 @@ const preview = {
   request_id: 'a'.repeat(32),
   receipt_token: 'b'.repeat(43),
   receipt_expires_at: Math.floor(Date.now() / 1000) + 3600,
-  policy_version: 'closure-v1',
+  policy_version: 'closure-v2',
   account_epoch: 1,
   can_close: true,
   blockers: [],
@@ -201,4 +201,17 @@ test('a previous receipt cannot log out a different currently authenticated acco
   assert(textOf(mounted.root).includes('账号已注销'));
   assert.equal(auth.authenticated, true);
   assert.equal(auth.qq_id, '87654321');
+});
+
+test('an older receipt in the same view cannot log out a new generation of the same QQ', async () => {
+  submitMode = 'lost';
+  await start();
+  await completeForm();
+  await submit();
+  setAuth({ ...auth, authenticated: true, account_epoch: 3, csrf_token: 'new-generation' }, true);
+  await button('用回执查询结果').props.onClick();
+  await settle();
+  assert(textOf(mounted.root).includes('账号已注销'));
+  assert.equal(auth.authenticated, true);
+  assert.equal(auth.account_epoch, 3);
 });

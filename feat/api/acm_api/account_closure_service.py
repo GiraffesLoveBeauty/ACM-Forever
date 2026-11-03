@@ -13,7 +13,7 @@ import uuid
 
 from .account_lifecycle_service import AccountLifecycleError, require_web_actor, web_account
 
-POLICY_VERSION = "closure-v1"
+POLICY_VERSION = "closure-v2"
 RECEIPT_SECONDS = 24 * 60 * 60
 AUDIT_DAYS = 180
 BACKUP_DAYS = 30
@@ -32,10 +32,10 @@ PRIVATE_TABLES = {
     "binding_rate_limits": "qq_id",
 }
 RETENTION_NOTICE = {
-    "immediate": True, "recovery_supported": False, "reopen_supported": False,
+    "immediate": True, "recovery_supported": False, "reopen_supported": True, "qq_reuse_supported": True,
     "audit_days": AUDIT_DAYS, "backup_days": BACKUP_DAYS,
     "audit_access": "root", "receipt_hours": 24,
-    "text": "注销即时生效且不可恢复，同一 QQ 不能重新开户。删除私有训练记录、源码、收藏、草稿与平台绑定；已发布的帖子、评论、Wiki 历史和公共引用图片继续保留，作者显示为已注销用户。保留禁止重开的最小账号墓碑及必要受限引用，审计保留 180 天，备份最长保留 30 天（由部署方执行）。不会删除外部 OJ 账号或退出 QQ 群。公共正文中自行填写的个人信息不自动识别，可通过社区已有举报渠道申请人工处理。",
+    "text": "注销即时生效且不可恢复，同一 QQ 可由管理员创建全新账号，新账号不会恢复或继承旧账号数据。删除私有训练记录、源码、收藏、草稿与平台绑定；已发布的帖子、评论、Wiki 历史和公共引用图片继续保留，作者显示为已注销用户。保留用于隔离旧账号代际的最小墓碑及必要受限引用，审计保留 180 天，备份最长保留 30 天（由部署方执行）。不会删除外部 OJ 账号或退出 QQ 群。公共正文中自行填写的个人信息不自动识别，可通过社区已有举报渠道申请人工处理。",
 }
 
 
@@ -67,13 +67,38 @@ def validate_body(data):
         raise AccountLifecycleError("INVALID_REQUEST", "注销请求只能指定当前本人。", 400)
     if data.get("confirm_text") != "注销账号":
         raise AccountLifecycleError("INVALID_CONFIRMATION", "请输入完整确认词：注销账号。", 400)
-    if data.get("policy_version") != POLICY_VERSION:
-        raise AccountLifecycleError("POLICY_CHANGED", "注销规则已变化，请重新阅读并预览。")
+    # Committed v1 receipts remain valid read-only capabilities after a policy
+    # upgrade. Check the current policy only for an uncommitted mutation.
+    if not isinstance(data.get("policy_version"), str) or len(data["policy_version"]) > 64:
+        raise AccountLifecycleError("INVALID_REQUEST", "注销规则版本无效。", 400)
     if type(data.get("expected_account_epoch")) is not int or data["expected_account_epoch"] < 1:
         raise AccountLifecycleError("INVALID_REQUEST", "账号版本无效。", 400)
     password = data.get("current_password")
     if not isinstance(password, str) or not 1 <= len(password) <= 256:
         raise AccountLifecycleError("INVALID_REQUEST", "请输入当前密码（最多 256 字符）。", 400)
+
+
+def closed_content_sql(kind, alias):
+    """SQL for a fixed, internal content kind and table alias; never user input."""
+    return ("EXISTS(SELECT 1 FROM account_closed_content cc WHERE "
+            f"cc.content_kind='{kind}' AND cc.content_id={alias}.id)")
+
+
+def closed_author_sql(kind, alias):
+    return f"(u.account_state='closed' OR {closed_content_sql(kind, alias)})"
+
+
+async def archive_authorship(db, qq_id, now):
+    for kind, table, owner in (
+        ("forum_post", "forum_posts", "author_qq_id"),
+        ("forum_comment", "forum_comments", "author_qq_id"),
+        ("wiki_revision", "wiki_revisions", "author"),
+        ("forum_report", "forum_reports", "reporter_qq_id"),
+    ):
+        await db.execute(
+            "INSERT OR IGNORE INTO account_closed_content(content_kind,content_id,closed_at) "
+            f"SELECT ?,id,? FROM {table} WHERE {owner}=?", (kind, now, qq_id),
+        )
 
 
 async def rate_limit(db, secret, action, subjects, *, now=None, window=900):
@@ -122,14 +147,14 @@ async def closure_plan(db, qq_id):
         deleted[table] = item["n"]
     # Only never-public posts can be physically removed. Shared history stays
     # attributable solely through its restricted tombstone reference.
-    posts = await rows(db, "SELECT id FROM forum_posts p WHERE author_qq_id=? AND status<>'published' AND NOT EXISTS(SELECT 1 FROM forum_post_history h WHERE h.post_id=p.id AND h.status='published')", (qq_id,))
+    posts = await rows(db, f"SELECT id FROM forum_posts p WHERE author_qq_id=? AND NOT {closed_content_sql('forum_post', 'p')} AND status<>'published' AND NOT EXISTS(SELECT 1 FROM forum_post_history h WHERE h.post_id=p.id AND h.status='published')", (qq_id,))
     deleted["unpublished_posts"] = len(posts)
-    deleted["unpublished_versions"] = (await one(db, "SELECT COUNT(*) n FROM forum_post_history h JOIN forum_posts p ON p.id=h.post_id WHERE p.author_qq_id=? AND h.status<>'published'", (qq_id,)))["n"]
+    deleted["unpublished_versions"] = (await one(db, f"SELECT COUNT(*) n FROM forum_post_history h JOIN forum_posts p ON p.id=h.post_id WHERE p.author_qq_id=? AND NOT {closed_content_sql('forum_post', 'p')} AND h.status<>'published'", (qq_id,)))["n"]
     retained = {}
     for label, query in {
-        "posts": "SELECT COUNT(*) n FROM forum_posts WHERE author_qq_id=?",
-        "comments": "SELECT COUNT(*) n FROM forum_comments WHERE author_qq_id=?",
-        "wiki_revisions": "SELECT COUNT(*) n FROM wiki_revisions WHERE author=?",
+        "posts": f"SELECT COUNT(*) n FROM forum_posts p WHERE author_qq_id=? AND NOT {closed_content_sql('forum_post', 'p')}",
+        "comments": f"SELECT COUNT(*) n FROM forum_comments cm WHERE author_qq_id=? AND NOT {closed_content_sql('forum_comment', 'cm')}",
+        "wiki_revisions": f"SELECT COUNT(*) n FROM wiki_revisions r WHERE author=? AND NOT {closed_content_sql('wiki_revision', 'r')}",
     }.items():
         retained[label] = (await one(db, query, (qq_id,)))["n"]
     retained["posts"] -= len(posts)
@@ -234,13 +259,13 @@ async def close_account(db, identity, request_id, token, data, verified_account)
     await db.execute("BEGIN IMMEDIATE")
     try:
         record = await receipt_record(db, request_id, token)
-        if record["policy_version"] != POLICY_VERSION or data["policy_version"] != POLICY_VERSION:
-            raise AccountLifecycleError("POLICY_CHANGED", "注销规则已变化，请重新预览。")
         if record["intent_fingerprint"] != intent(data):
             raise AccountLifecycleError("IDEMPOTENCY_CONFLICT", "相同请求编号不能用于不同的注销意图。")
         if record["committed_at"]:
             await db.rollback()
             return receipt_result(record)
+        if record["policy_version"] != POLICY_VERSION or data["policy_version"] != POLICY_VERSION:
+            raise AccountLifecycleError("POLICY_CHANGED", "注销规则已变化，请重新预览。")
         if record["user_qq_id"] != identity["qq_id"]:
             raise AccountLifecycleError("INVALID_REQUEST", "只能注销本人账号。", 403)
         await require_web_actor(db, identity)
@@ -266,8 +291,9 @@ async def close_account(db, identity, request_id, token, data, verified_account)
             await db.execute("DELETE FROM forum_drafts WHERE source_post_id=?", (post_id,))
             await db.execute("DELETE FROM forum_posts WHERE id=?", (post_id,))
         # An unpublished edit of a once-public post cannot remain approvable.
-        await db.execute("UPDATE forum_posts SET status='removed',title=COALESCE((SELECT title FROM forum_post_history h WHERE h.post_id=forum_posts.id AND h.status='published' ORDER BY content_version DESC LIMIT 1),title),body=COALESCE((SELECT body FROM forum_post_history h WHERE h.post_id=forum_posts.id AND h.status='published' ORDER BY content_version DESC LIMIT 1),body),cover_image_id=NULL,review_reason='',reviewed_by=NULL WHERE author_qq_id=? AND status<>'published'", (qq_id,))
-        await db.execute("DELETE FROM forum_post_history WHERE status<>'published' AND post_id IN (SELECT id FROM forum_posts WHERE author_qq_id=?)", (qq_id,))
+        await db.execute(f"UPDATE forum_posts SET status='removed',title=COALESCE((SELECT title FROM forum_post_history h WHERE h.post_id=forum_posts.id AND h.status='published' ORDER BY content_version DESC LIMIT 1),title),body=COALESCE((SELECT body FROM forum_post_history h WHERE h.post_id=forum_posts.id AND h.status='published' ORDER BY content_version DESC LIMIT 1),body),cover_image_id=NULL,review_reason='',reviewed_by=NULL WHERE author_qq_id=? AND NOT {closed_content_sql('forum_post', 'forum_posts')} AND status<>'published'", (qq_id,))
+        await db.execute(f"DELETE FROM forum_post_history WHERE status<>'published' AND post_id IN (SELECT id FROM forum_posts p WHERE author_qq_id=? AND NOT {closed_content_sql('forum_post', 'p')})", (qq_id,))
+        await archive_authorship(db, qq_id, now)
         await db.execute("UPDATE forum_notifications SET actor_qq_id=NULL WHERE actor_qq_id=?", (qq_id,))
         await redact_jobs(db, identifiers, qq_id, now)
         # Idempotent Wiki response snapshots may contain a former author's name.

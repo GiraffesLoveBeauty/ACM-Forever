@@ -355,6 +355,9 @@ onBeforeUnmount(() => {
       <h2>账号管理</h2>
       <details class="admin-create">
         <summary>单个创建账号</summary>
+        <p class="muted">
+          已注销的 QQ 可在这里创建全新账号，须填写新昵称和密码；旧资料、私有数据及权限不会继承。
+        </p>
         <form class="admin-create-body" @submit.prevent="create">
           <div class="admin-create-grid">
             <label
@@ -391,7 +394,7 @@ onBeforeUnmount(() => {
               >{{ row.role }} ·
               {{
                 row.account_state === 'closed'
-                  ? '已注销（不可重新启用）'
+                  ? '已注销（可通过创建账号重新开户）'
                   : row.is_active
                     ? '启用'
                     : '停用'

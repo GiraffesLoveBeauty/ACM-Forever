@@ -63,9 +63,278 @@ class ClosureTests(unittest.IsolatedAsyncioTestCase):
     async def close(self, preview, *, client=None, headers=None, **changes):
         return await (client or self.client).post("/api/me/account-closure", json=self.body(preview, **changes), headers={**(self.headers if headers is None else headers), "Idempotency-Key": preview["request_id"], "X-Closure-Receipt": preview["receipt_token"]})
 
+    async def admin_session(self):
+        if not await self.sql("SELECT 1 FROM users WHERE qq_id=?", (OTHER,)):
+            await self.other_user(role="root")
+        else:
+            await self.sql("UPDATE web_accounts SET role='root' WHERE qq_id=?", (OTHER,))
+        client = self.app.test_client()
+        response = await client.post("/api/auth/login", json={"qq_id": OTHER, "password": PASSWORD})
+        self.assertEqual(response.status_code, 200)
+        return client, {"X-CSRF-Token": (await response.get_json())["csrf_token"]}
+
+    async def new_account(self, *, change_password=True):
+        admin, headers = await self.admin_session()
+        response = await admin.post("/api/admin/web-accounts", json={
+            "qq_id": QQ, "name": "Fresh member", "initial_password": "Fresh-Password-83!",
+        }, headers=headers)
+        self.assertEqual(response.status_code, 201, await response.get_json())
+        self.assertTrue((await response.get_json())["new_generation"])
+        client = self.app.test_client()
+        login = await client.post("/api/auth/login", json={"qq_id": QQ, "password": "Fresh-Password-83!"})
+        self.assertEqual(login.status_code, 200, await login.get_json())
+        auth_headers = {"X-CSRF-Token": (await login.get_json())["csrf_token"]}
+        if change_password:
+            changed = await client.post("/api/auth/change-password", json={
+                "old_password": "Fresh-Password-83!", "new_password": PASSWORD,
+            }, headers=auth_headers)
+            self.assertEqual(changed.status_code, 200, await changed.get_json())
+        return client, auth_headers
+
     async def assert_active(self):
         user = (await self.sql("SELECT account_state,account_epoch FROM users WHERE qq_id=?", (QQ,)))[0]
         self.assertEqual(user, {"account_state": "active", "account_epoch": 1})
+
+    async def test_closed_qq_can_create_fresh_account_with_monotonic_versions(self):
+        await self.sql("UPDATE users SET real_name='Old name',cf_handle='OldHandle',school='Old school' WHERE qq_id=?", (QQ,))
+        await self.sql("INSERT INTO submissions(user_qq_id,platform,problem_id,submit_time) VALUES(?,'codeforces','1A',1)", (QQ,))
+        preview = await self.preview()
+        self.assertTrue(preview["retention_notice"]["qq_reuse_supported"])
+        self.assertTrue(preview["retention_notice"]["reopen_supported"])
+        self.assertEqual(preview["policy_version"], "closure-v2")
+        self.assertEqual((await self.close(preview)).status_code, 200)
+        versions = (await self.sql("SELECT cf_binding_version FROM users WHERE qq_id=?", (QQ,)))[0]
+        client, headers = await self.new_account(change_password=False)
+        account = (await self.sql("SELECT * FROM web_accounts WHERE qq_id=?", (QQ,)))[0]
+        self.assertEqual((account["role"], account["is_active"], account["must_change_password"], account["credential_version"]), ("member", 1, 1, 3))
+        user = (await self.sql("SELECT * FROM users WHERE qq_id=?", (QQ,)))[0]
+        self.assertEqual((user["account_state"], user["account_epoch"], user["closed_at"], user["name"]), ("active", 3, None, "Fresh member"))
+        self.assertEqual(user["cf_binding_version"], versions["cf_binding_version"])
+        for field in ("real_name", "avatar_url", "cf_handle", "luogu_id", "school"):
+            self.assertIsNone(user[field], field)
+        self.assertEqual(await self.sql("SELECT * FROM submissions WHERE user_qq_id=?", (QQ,)), [])
+        me = await (await client.get("/api/auth/me")).get_json()
+        self.assertEqual(me["account_epoch"], 3)
+        self.assertEqual((await client.get("/api/me/profile")).status_code, 428)
+        self.assertEqual((await client.get("/api/admin/web-accounts")).status_code, 428)
+        anon = self.app.test_client()
+        self.assertEqual((await anon.post("/api/auth/login", json={"qq_id": QQ, "password": PASSWORD})).status_code, 401)
+
+    async def test_re_registration_needs_a_new_name_and_keeps_active_duplicate_protected(self):
+        self.assertEqual((await self.close(await self.preview())).status_code, 200)
+        admin, headers = await self.admin_session()
+        missing = await admin.post("/api/admin/web-accounts", json={"qq_id": QQ, "initial_password": PASSWORD}, headers=headers)
+        self.assertEqual(missing.status_code, 400)
+        self.assertEqual((await self.sql("SELECT account_state FROM users WHERE qq_id=?", (QQ,)))[0]["account_state"], "closed")
+        self.assertEqual(await self.sql("SELECT * FROM account_registrations"), [])
+        await self.new_account()
+        before = await self.sql("SELECT * FROM web_accounts WHERE qq_id=?", (QQ,))
+        duplicate = await admin.post("/api/admin/web-accounts", json={"qq_id": QQ, "name": "Overwrite", "initial_password": PASSWORD}, headers=headers)
+        self.assertEqual(duplicate.status_code, 409)
+        self.assertEqual(await self.sql("SELECT * FROM web_accounts WHERE qq_id=?", (QQ,)), before)
+
+    async def test_old_session_and_old_receipt_cannot_affect_new_account(self):
+        stale = self.app.test_client()
+        login = await stale.post("/api/auth/login", json={"qq_id": QQ, "password": PASSWORD})
+        stale_headers = {"X-CSRF-Token": (await login.get_json())["csrf_token"]}
+        preview = await self.preview()
+        self.assertEqual((await self.close(preview)).status_code, 200)
+        client, headers = await self.new_account()
+        self.assertEqual((await stale.put("/api/me/profile", json={"name": "Old session"}, headers=stale_headers)).status_code, 401)
+        replay = await self.close(preview, client=client, headers=headers)
+        self.assertEqual(replay.status_code, 200, await replay.get_json())
+        self.assertTrue((await (await client.get("/api/auth/me")).get_json())["authenticated"])
+        self.assertEqual((await client.get("/api/me/profile")).status_code, 200)
+        self.assertEqual((await self.sql("SELECT account_epoch,name FROM users WHERE qq_id=?", (QQ,)))[0], {"account_epoch": 3, "name": "Fresh member"})
+
+    async def test_committed_v1_receipt_still_replays_after_policy_upgrade(self):
+        preview = await self.preview()
+        self.assertEqual((await self.close(preview)).status_code, 200)
+        legacy = {**preview, "policy_version": "closure-v1"}
+        await self.sql("UPDATE account_closure_requests SET policy_version=?,intent_fingerprint=? WHERE request_id=?", ("closure-v1", service.intent(self.body(legacy)), preview["request_id"]))
+        client, headers = await self.new_account()
+        self.app.config["ACCOUNT_CLOSURE_ENABLED"] = False
+        replay = await self.close(legacy, client=client, headers=headers)
+        self.assertEqual(replay.status_code, 200, await replay.get_json())
+        self.assertEqual((await replay.get_json())["policy_version"], "closure-v1")
+        self.assertTrue((await (await client.get("/api/auth/me")).get_json())["authenticated"])
+        result = await client.get("/api/account-closures/" + preview["request_id"], headers={"X-Closure-Receipt": preview["receipt_token"]})
+        self.assertEqual((await result.get_json())["status"], "closed")
+
+    async def test_shared_old_content_stays_anonymous_and_is_not_owned_by_new_account(self):
+        post = await self.seed_post()
+        await self.seed_wiki()
+        await self.sql("INSERT INTO forum_comments(post_id,author_qq_id,body,created_at) VALUES(?,?,'Old comment',1)", (post, QQ))
+        await self.sql("INSERT INTO forum_reports(post_id,reporter_qq_id,reason,created_at) VALUES(?,?,'Old report',1)", (post, QQ))
+        self.assertEqual((await self.close(await self.preview())).status_code, 200)
+        client, headers = await self.new_account()
+        public = await (await client.get(f"/api/forum/posts/{post}")).get_json()
+        self.assertEqual(public["author_name"], "已注销用户")
+        self.assertTrue(public["author_closed"])
+        self.assertFalse(public["viewer_is_author"])
+        self.assertEqual(public["comments"][0]["author_name"], "已注销用户")
+        listing = await (await client.get("/api/forum/posts")).get_json()
+        self.assertEqual(listing["rows"][0]["author_name"], "已注销用户")
+        wiki = await (await client.get("/api/wiki/pages/closure-test")).get_json()
+        self.assertEqual(wiki["maintainer"], "已注销用户")
+        self.assertTrue(wiki["author_closed"])
+        self.assertEqual((await self.sql("SELECT author FROM wiki_revisions"))[0]["author"], QQ)
+        self.assertEqual(await (await client.get("/api/forum/mine/posts")).get_json(), [])
+        self.assertEqual((await client.get(f"/api/forum/mine/posts/{post}")).status_code, 404)
+        self.assertEqual((await client.post(f"/api/forum/mine/posts/{post}/edit", json={}, headers=headers)).status_code, 404)
+        self.assertEqual((await client.delete(f"/api/forum/posts/{post}", headers=headers)).status_code, 403)
+        admin, admin_headers = await self.admin_session()
+        reports = await (await admin.get("/api/forum/moderation/reports")).get_json()
+        self.assertEqual(reports[0]["reporter_name"], "已注销用户")
+        # New posts do belong to the new account and use its new display name.
+        new_post = await self.seed_post(title="New generation post")
+        new_public = await (await client.get(f"/api/forum/posts/{new_post}")).get_json()
+        self.assertEqual(new_public["author_name"], "Fresh member")
+        self.assertTrue(new_public["viewer_is_author"])
+        self.assertEqual((await client.post(f"/api/forum/mine/posts/{new_post}/edit", json={}, headers=headers)).status_code, 201)
+
+    async def test_replies_to_old_content_do_not_notify_re_registered_qq(self):
+        post = await self.seed_post()
+        comment = (await self.sql("INSERT INTO forum_comments(post_id,author_qq_id,body,created_at) VALUES(?,?,'Old comment',1) RETURNING id", (post, QQ)))[0]["id"]
+        self.assertEqual((await self.close(await self.preview())).status_code, 200)
+        client, headers = await self.new_account()
+        admin, admin_headers = await self.admin_session()
+        response = await admin.post(f"/api/forum/posts/{post}/comments", json={"body": "Reply after registration", "parent_id": comment}, headers=admin_headers)
+        self.assertEqual(response.status_code, 201, await response.get_json())
+        self.assertEqual(await self.sql("SELECT * FROM forum_notifications WHERE recipient_qq_id=?", (QQ,)), [])
+        new_post = await self.seed_post(title="Fresh content")
+        self.assertEqual((await admin.post(f"/api/forum/posts/{new_post}/comments", json={"body": "New author notification"}, headers=admin_headers)).status_code, 201)
+        self.assertEqual(len(await self.sql("SELECT * FROM forum_notifications WHERE recipient_qq_id=?", (QQ,))), 1)
+
+    async def test_repeated_close_and_registration_keep_generations_and_plans_separate(self):
+        old = await self.seed_post()
+        await self.seed_wiki()
+        self.assertEqual((await self.close(await self.preview())).status_code, 200)
+        client, headers = await self.new_account()
+        new = await self.seed_post(title="Second generation")
+        preview = await self.preview(client)
+        self.assertEqual(preview["retain_counts"], {"posts": 1, "comments": 0, "wiki_revisions": 0, "public_resources": 0})
+        self.assertEqual((await self.close(preview, client=client, headers=headers)).status_code, 200)
+        client, _ = await self.new_account()
+        self.assertEqual((await self.sql("SELECT account_epoch FROM users WHERE qq_id=?", (QQ,)))[0]["account_epoch"], 5)
+        self.assertEqual(await self.sql("SELECT closed_epoch,new_epoch FROM account_registrations ORDER BY closed_epoch"), [{"closed_epoch": 2, "new_epoch": 3}, {"closed_epoch": 4, "new_epoch": 5}])
+        for post in (old, new):
+            public = await (await client.get(f"/api/forum/posts/{post}")).get_json()
+            self.assertEqual(public["author_name"], "已注销用户")
+            self.assertFalse(public["viewer_is_author"])
+
+    async def test_concurrent_registration_creates_only_one_new_generation(self):
+        self.assertEqual((await self.close(await self.preview())).status_code, 200)
+        admin, headers = await self.admin_session()
+        body = {"qq_id": QQ, "name": "New account", "initial_password": PASSWORD}
+        results = await asyncio.gather(*[admin.post("/api/admin/web-accounts", json=body, headers=headers) for _ in range(2)])
+        self.assertEqual(sorted(r.status_code for r in results), [201, 409])
+        self.assertEqual(len(await self.sql("SELECT * FROM account_registrations")), 1)
+        self.assertEqual((await self.sql("SELECT account_epoch FROM users WHERE qq_id=?", (QQ,)))[0]["account_epoch"], 3)
+
+    async def test_failed_registration_rolls_back_generation_and_credentials(self):
+        self.assertEqual((await self.close(await self.preview())).status_code, 200)
+        admin, headers = await self.admin_session()
+        before = await self.sql("SELECT * FROM web_accounts WHERE qq_id=?", (QQ,))
+        await self.sql("CREATE TRIGGER fail_registration BEFORE UPDATE ON web_accounts WHEN NEW.qq_id='12345678' AND NEW.is_active=1 BEGIN SELECT RAISE(ABORT,'synthetic registration failure'); END")
+        response = await admin.post("/api/admin/web-accounts", json={"qq_id": QQ, "name": "New", "initial_password": PASSWORD}, headers=headers)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual((await self.sql("SELECT account_state FROM users WHERE qq_id=?", (QQ,)))[0]["account_state"], "closed")
+        self.assertEqual(await self.sql("SELECT * FROM web_accounts WHERE qq_id=?", (QQ,)), before)
+        self.assertEqual(await self.sql("SELECT * FROM account_registrations"), [])
+
+    async def test_old_sync_task_and_cf_member_cannot_reacquire_re_registered_qq(self):
+        await self.seed_jobs()
+        from feat.api.service_runtime import WebTaskManager
+        manager = WebTaskManager(self.app.sync_engine)
+        started, release = asyncio.Event(), asyncio.Event()
+        original = self.app.sync_engine.sync_account
+        async def paused(*args, **kwargs):
+            started.set()
+            await release.wait()
+            return await original(*args, **kwargs)
+        with patch.object(self.app.sync_engine, "sync_account", side_effect=paused), patch.object(self.app.sync_engine, "sync_single_platform_for_days", new=AsyncMock()) as fetch:
+            task = await manager.submit_account_sync(QQ, ["codeforces"])
+            await started.wait()
+            try:
+                self.assertEqual((await self.close(await self.preview())).status_code, 200)
+                await self.new_account()
+                public = await manager.public_snapshots()
+                self.assertIsNone(public[0]["qq_id"])
+                self.assertNotIn("SecretHandle", json.dumps(public))
+                await self.sql("UPDATE users SET cf_handle='SecretHandle' WHERE qq_id=?", (QQ,))
+            finally:
+                release.set()
+            await manager.tasks[task["id"]]["_task"]
+            fetch.assert_not_awaited()
+        self.assertEqual(manager.tasks[task["id"]]["status"], "cancelled")
+        jobs = self.app.config["CF_PRACTICE_JOBS"]
+        self.assertFalse(await jobs._member_update("sync-job", QQ, "completed"))
+        public = await jobs.get("sync-job")
+        self.assertFalse(any(member["qq_id"] == QQ for member in public["members"]))
+
+    async def test_v1_tombstone_is_backfilled_and_old_private_post_assets_are_not_owned(self):
+        post = await self.seed_post()
+        await self.seed_wiki()
+        image, asset = "a" * 32, "b" * 32
+        await self.sql("INSERT INTO forum_images VALUES(?,?,1,1,10,1)", (image, QQ))
+        await self.sql("INSERT INTO forum_image_links(image_id,post_id) VALUES(?,?)", (image, post))
+        await self.sql("INSERT INTO markdown_assets VALUES(?,?,'image/png',10,1,1,?,'forum_draft',1,1)", (asset, asset + ".png", QQ))
+        await self.sql("INSERT INTO markdown_asset_references VALUES(?,'forum_post',?,0)", (asset, post))
+        self.assertEqual((await self.close(await self.preview())).status_code, 200)
+        # Simulate a v1 database whose content ledger did not exist at closure.
+        await self.sql("DELETE FROM account_closed_content")
+        client, headers = await self.new_account()
+        self.assertTrue((await (await client.get("/api/wiki/pages/closure-test")).get_json())["author_closed"])
+        admin, admin_headers = await self.admin_session()
+        self.assertEqual((await admin.delete(f"/api/forum/posts/{post}", headers=admin_headers)).status_code, 200)
+        for path in ("/api/forum/images/" + image, "/api/markdown/assets/" + asset):
+            self.assertEqual((await client.get(path)).status_code, 404)
+        from feat.api.acm_api.forum_images import sync_image_links
+        from feat.api.acm_api.markdown_content import record_assets, ContentError
+        db = await open_db(self.db_path)
+        try:
+            async with self.app.test_request_context("/"):
+                with self.assertRaises(ValueError):
+                    await sync_image_links(db, QQ, "![image](/api/forum/images/" + image + ")", None, post_id=post)
+            with self.assertRaises(ContentError):
+                await record_assets(db, "![asset](/api/markdown/assets/" + asset + ")", "forum_draft", 1, 0, QQ)
+        finally:
+            await db.close()
+
+    async def test_all_account_sync_captures_generations_before_queue_execution(self):
+        from feat.api.service_runtime import WebTaskManager
+        await self.sql("UPDATE users SET cf_handle='SameHandle' WHERE qq_id=?", (QQ,))
+        manager = WebTaskManager(self.app.sync_engine)
+        started, release = asyncio.Event(), asyncio.Event()
+        original = self.app.sync_engine.sync_all_accounts
+        async def paused(*args, **kwargs):
+            started.set()
+            await release.wait()
+            return await original(*args, **kwargs)
+        with patch.object(self.app.sync_engine, "sync_all_accounts", side_effect=paused), patch.object(self.app.sync_engine, "_fetch_platform_with_limit", new=AsyncMock(return_value=0)) as fetch:
+            task = await manager.submit_all_accounts_sync()
+            await started.wait()
+            try:
+                self.assertEqual((await self.close(await self.preview())).status_code, 200)
+                await self.new_account()
+                await self.sql("UPDATE users SET cf_handle='SameHandle' WHERE qq_id=?", (QQ,))
+            finally:
+                release.set()
+            await manager.tasks[task["id"]]["_task"]
+            fetch.assert_not_awaited()
+        public = await manager.public_snapshots()
+        self.assertNotIn(QQ, json.dumps(public))
+
+    async def test_active_upsert_preserves_new_generation_but_replace_cannot_reset_it(self):
+        self.assertEqual((await self.close(await self.preview())).status_code, 200)
+        await self.new_account()
+        await self.sql("INSERT INTO users(qq_id,name) VALUES(?,'Updated fresh member') ON CONFLICT(qq_id) DO UPDATE SET name=excluded.name", (QQ,))
+        before = await self.sql("SELECT * FROM web_accounts WHERE qq_id=?", (QQ,))
+        with self.assertRaises(sqlite3.IntegrityError):
+            await self.sql("INSERT OR REPLACE INTO users(qq_id,name) VALUES(?,'Old generation')", (QQ,))
+        self.assertEqual((await self.sql("SELECT account_epoch,name FROM users WHERE qq_id=?", (QQ,)))[0], {"account_epoch": 3, "name": "Updated fresh member"})
+        self.assertEqual(await self.sql("SELECT * FROM web_accounts WHERE qq_id=?", (QQ,)), before)
 
     async def test_intake_off_by_default_does_not_create_intents(self):
         self.app.config["ACCOUNT_CLOSURE_ENABLED"] = False

@@ -8,6 +8,7 @@ import time
 import unicodedata
 from urllib.parse import urlsplit
 
+from .account_closure_service import closed_author_sql
 from .markdown_content import record_assets, source_fields
 
 
@@ -478,13 +479,13 @@ async def page_record(db, page_id):
 async def revision(db, revision_id, public=False):
     result = await one(
         db,
-        "SELECT r.*,u.name maintainer,u.account_state FROM wiki_revisions r LEFT JOIN users u ON u.qq_id=r.author WHERE r.id=?",
+        f"SELECT r.*,u.name maintainer,{closed_author_sql('wiki_revision', 'r')} AS author_closed FROM wiki_revisions r LEFT JOIN users u ON u.qq_id=r.author WHERE r.id=?",
         (revision_id,),
     )
     if not result or public and (result["published_at"] is None or result["hidden"]):
         raise WikiError("文章版本不存在或不可访问。", "not_found", 404)
     result.update(json.loads(result.pop("metadata")))
-    result["author_closed"] = result.pop("account_state", None) == "closed"
+    result["author_closed"] = bool(result["author_closed"])
     if result["author_closed"]:
         result["maintainer"] = "已注销用户"
         result.pop("author", None)

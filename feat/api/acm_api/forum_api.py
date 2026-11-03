@@ -15,6 +15,7 @@ from .backend_api import (
 from .forum_images import IMAGE_ID, image_url, sync_image_links
 from .forum_notifications import add_notification
 from .account_lifecycle_service import require_web_actor
+from .account_closure_service import closed_author_sql, closed_content_sql
 
 forum_api = Blueprint("forum_api", __name__)
 
@@ -109,7 +110,7 @@ async def posts():
         sql = (
             "SELECT p.id,p.title,substr(p.body,1,420) AS excerpt,p.created_at,p.updated_at,p.is_pinned,p.views_count,"
             "'/api/forum/images/' || p.cover_image_id AS cover_url,"
-            "c.slug AS category_slug,c.name AS category_name,CASE WHEN u.account_state='closed' THEN '已注销用户' WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,CASE WHEN u.account_state='closed' THEN NULL ELSE u.avatar_url END AS author_avatar_url,u.account_state='closed' AS author_closed,"
+            f"c.slug AS category_slug,c.name AS category_name,CASE WHEN {closed_author_sql('forum_post', 'p')} THEN '已注销用户' WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,CASE WHEN {closed_author_sql('forum_post', 'p')} THEN NULL ELSE u.avatar_url END AS author_avatar_url,{closed_author_sql('forum_post', 'p')} AS author_closed,"
             "(SELECT COUNT(*) FROM forum_post_likes l WHERE l.post_id=p.id) AS likes_count,"
             "(SELECT COUNT(*) FROM forum_comments cm WHERE cm.post_id=p.id AND cm.status='published') AS comments_count,"
             "EXISTS(SELECT 1 FROM forum_post_likes vl WHERE vl.post_id=p.id AND vl.qq_id=?) AS viewer_liked,"
@@ -139,11 +140,11 @@ async def post_detail(post_id):
         async with db.execute(
             "SELECT p.id,p.title,p.body,p.created_at,p.updated_at,p.views_count,p.is_pinned,"
             "'/api/forum/images/' || p.cover_image_id AS cover_url,"
-            "c.slug AS category_slug,c.name AS category_name,CASE WHEN u.account_state='closed' THEN '已注销用户' WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,CASE WHEN u.account_state='closed' THEN NULL ELSE u.avatar_url END AS author_avatar_url,u.account_state='closed' AS author_closed,"
+            f"c.slug AS category_slug,c.name AS category_name,CASE WHEN {closed_author_sql('forum_post', 'p')} THEN '已注销用户' WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,CASE WHEN {closed_author_sql('forum_post', 'p')} THEN NULL ELSE u.avatar_url END AS author_avatar_url,{closed_author_sql('forum_post', 'p')} AS author_closed,"
             "(SELECT COUNT(*) FROM forum_post_likes l WHERE l.post_id=p.id) AS likes_count,"
             "EXISTS(SELECT 1 FROM forum_post_likes vl WHERE vl.post_id=p.id AND vl.qq_id=?) AS viewer_liked,"
             "EXISTS(SELECT 1 FROM forum_bookmarks vb WHERE vb.post_id=p.id AND vb.qq_id=?) AS viewer_bookmarked,"
-            "CASE WHEN p.author_qq_id=? AND ?<>'' THEN 1 ELSE 0 END AS viewer_is_author "
+            f"CASE WHEN p.author_qq_id=? AND ?<>'' AND NOT {closed_content_sql('forum_post', 'p')} THEN 1 ELSE 0 END AS viewer_is_author "
             "FROM forum_posts p JOIN users u ON u.qq_id=p.author_qq_id "
             "JOIN forum_categories c ON c.id=p.category_id WHERE p.id=? AND p.status='published'",
             (viewer, viewer, viewer, viewer, post_id),
@@ -155,7 +156,7 @@ async def post_detail(post_id):
         await db.commit()
         async with db.execute(
             "SELECT cm.id,cm.parent_id,cm.body,cm.created_at,"
-            "CASE WHEN u.account_state='closed' THEN '已注销用户' WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,CASE WHEN u.account_state='closed' THEN NULL ELSE u.avatar_url END AS author_avatar_url,u.account_state='closed' AS author_closed "
+            f"CASE WHEN {closed_author_sql('forum_comment', 'cm')} THEN '已注销用户' WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,CASE WHEN {closed_author_sql('forum_comment', 'cm')} THEN NULL ELSE u.avatar_url END AS author_avatar_url,{closed_author_sql('forum_comment', 'cm')} AS author_closed "
             "FROM forum_comments cm JOIN users u ON u.qq_id=cm.author_qq_id "
             "WHERE cm.post_id=? AND cm.status='published' ORDER BY cm.created_at,cm.id LIMIT 500",
             (post_id,),
@@ -165,7 +166,7 @@ async def post_detail(post_id):
             # Keep notification links usable beyond the first 500 comments.
             async with db.execute(
                 "SELECT cm.id,cm.parent_id,cm.body,cm.created_at,"
-                "CASE WHEN u.account_state='closed' THEN '已注销用户' WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,CASE WHEN u.account_state='closed' THEN NULL ELSE u.avatar_url END AS author_avatar_url,u.account_state='closed' AS author_closed "
+                f"CASE WHEN {closed_author_sql('forum_comment', 'cm')} THEN '已注销用户' WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,CASE WHEN {closed_author_sql('forum_comment', 'cm')} THEN NULL ELSE u.avatar_url END AS author_avatar_url,{closed_author_sql('forum_comment', 'cm')} AS author_closed "
                 "FROM forum_comments cm JOIN users u ON u.qq_id=cm.author_qq_id WHERE cm.post_id=? AND cm.status='published' "
                 "AND cm.id IN (?,(SELECT parent_id FROM forum_comments WHERE id=? AND post_id=? AND status='published')) "
                 "AND (cm.parent_id IS NULL OR EXISTS(SELECT 1 FROM forum_comments parent WHERE parent.id=cm.parent_id AND parent.status='published'))",
@@ -191,7 +192,7 @@ async def my_posts():
         async with db.execute(
             "SELECT p.id,p.title,p.status,p.created_at,p.updated_at,p.reviewed_at,p.review_reason,c.name AS category_name "
             "FROM forum_posts p JOIN forum_categories c ON c.id=p.category_id "
-            "WHERE p.author_qq_id=? AND p.status<>'removed' ORDER BY p.created_at DESC LIMIT 100",
+            f"WHERE p.author_qq_id=? AND NOT {closed_content_sql('forum_post', 'p')} AND p.status<>'removed' ORDER BY p.created_at DESC LIMIT 100",
             (qq_id,),
         ) as cursor:
             return jsonify([dict(row) for row in await cursor.fetchall()])
@@ -207,7 +208,7 @@ async def my_post(post_id):
         async with db.execute(
             "SELECT p.id,p.title,p.body,p.status,p.content_version,p.created_at,p.updated_at,p.reviewed_at,p.review_reason,"
             "'/api/forum/images/' || p.cover_image_id AS cover_url,c.name AS category_name "
-            "FROM forum_posts p JOIN forum_categories c ON c.id=p.category_id WHERE p.id=? AND p.author_qq_id=?",
+            f"FROM forum_posts p JOIN forum_categories c ON c.id=p.category_id WHERE p.id=? AND p.author_qq_id=? AND NOT {closed_content_sql('forum_post', 'p')}",
             (post_id, request.web_identity["qq_id"]),
         ) as cursor:
             row = await cursor.fetchone()
@@ -403,7 +404,7 @@ async def submit_forum_draft(draft_id):
         now = int(time.time())
         post_id = draft["source_post_id"]
         if post_id:
-            async with db.execute("SELECT * FROM forum_posts WHERE id=? AND author_qq_id=?", (post_id, qq_id)) as cursor:
+            async with db.execute(f"SELECT * FROM forum_posts p WHERE id=? AND author_qq_id=? AND NOT {closed_content_sql('forum_post', 'p')}", (post_id, qq_id)) as cursor:
                 original = await cursor.fetchone()
             if not original or original["status"] == "removed":
                 return jsonify({"message": "原帖已删除，不能重新提交。"}), 409
@@ -439,7 +440,7 @@ async def edit_own_post(post_id):
     try:
         await db.execute("BEGIN IMMEDIATE")
         await require_web_actor(db, request.web_identity)
-        async with db.execute("SELECT * FROM forum_posts WHERE id=? AND author_qq_id=? AND status<>'removed'", (post_id, owner)) as cursor:
+        async with db.execute(f"SELECT * FROM forum_posts p WHERE id=? AND author_qq_id=? AND NOT {closed_content_sql('forum_post', 'p')} AND status<>'removed'", (post_id, owner)) as cursor:
             original = await cursor.fetchone()
         if not original:
             return jsonify({"message": "投稿不存在或已删除。"}), 404
@@ -509,20 +510,21 @@ async def create_comment(post_id):
     try:
         await db.execute("BEGIN IMMEDIATE")
         await require_web_actor(db, request.web_identity)
-        async with db.execute("SELECT author_qq_id FROM forum_posts WHERE id=? AND status='published'", (post_id,)) as cursor:
+        async with db.execute(f"SELECT author_qq_id,NOT {closed_content_sql('forum_post', 'p')} AS author_current FROM forum_posts p WHERE id=? AND status='published'", (post_id,)) as cursor:
             post = await cursor.fetchone()
             if not post:
                 return jsonify({"message": "帖子不存在。"}), 404
-        recipients = {post["author_qq_id"]: "comment"}
+        recipients = {post["author_qq_id"]: "comment"} if post["author_current"] else {}
         if parent_id:
             async with db.execute(
-                "SELECT author_qq_id FROM forum_comments WHERE id=? AND post_id=? AND parent_id IS NULL AND status='published'",
+                f"SELECT author_qq_id,NOT {closed_content_sql('forum_comment', 'cm')} AS author_current FROM forum_comments cm WHERE id=? AND post_id=? AND parent_id IS NULL AND status='published'",
                 (parent_id, post_id),
             ) as cursor:
                 parent = await cursor.fetchone()
                 if not parent:
                     return jsonify({"message": "回复目标不存在。"}), 404
-                recipients[parent["author_qq_id"]] = "reply"
+                if parent["author_current"]:
+                    recipients[parent["author_qq_id"]] = "reply"
         cursor = await db.execute(
             "INSERT INTO forum_comments(post_id,parent_id,author_qq_id,body,created_at) VALUES(?,?,?,?,?)",
             (post_id, parent_id or None, request.web_identity["qq_id"], body, int(time.time())),
@@ -586,7 +588,7 @@ async def my_bookmarks():
     try:
         async with db.execute(
             "SELECT p.id,p.title,p.created_at,c.name AS category_name,"
-            "CASE WHEN u.account_state='closed' THEN '已注销用户' WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,CASE WHEN u.account_state='closed' THEN NULL ELSE u.avatar_url END AS author_avatar_url,u.account_state='closed' AS author_closed "
+            f"CASE WHEN {closed_author_sql('forum_post', 'p')} THEN '已注销用户' WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS author_name,CASE WHEN {closed_author_sql('forum_post', 'p')} THEN NULL ELSE u.avatar_url END AS author_avatar_url,{closed_author_sql('forum_post', 'p')} AS author_closed "
             "FROM forum_bookmarks b JOIN forum_posts p ON p.id=b.post_id "
             "JOIN forum_categories c ON c.id=p.category_id JOIN users u ON u.qq_id=p.author_qq_id "
             "WHERE b.qq_id=? AND p.status='published' ORDER BY b.created_at DESC LIMIT 100",
@@ -629,11 +631,11 @@ async def remove_post(post_id):
     try:
         await db.execute("BEGIN IMMEDIATE")
         await require_web_actor(db, request.web_identity)
-        async with db.execute("SELECT author_qq_id FROM forum_posts WHERE id=?", (post_id,)) as cursor:
+        async with db.execute(f"SELECT author_qq_id,NOT {closed_content_sql('forum_post', 'p')} AS author_current FROM forum_posts p WHERE id=?", (post_id,)) as cursor:
             post = await cursor.fetchone()
         if not post:
             return jsonify({"message": "帖子不存在。"}), 404
-        if post["author_qq_id"] != identity["qq_id"] and identity["role"] not in {"admin", "root"}:
+        if (post["author_qq_id"] != identity["qq_id"] or not post["author_current"]) and identity["role"] not in {"admin", "root"}:
             return jsonify({"message": "无权删除这篇帖子。"}), 403
         await db.execute("UPDATE forum_posts SET status='removed',updated_at=? WHERE id=?", (int(time.time()), post_id))
         await db.commit()
@@ -705,7 +707,7 @@ async def moderation_reports():
         async with db.execute(
             "SELECT r.id,r.post_id,r.reason,r.created_at,p.title,p.body,p.status AS post_status,"
             "'/api/forum/images/' || p.cover_image_id AS cover_url,"
-            "CASE WHEN u.account_state='closed' THEN '已注销用户' WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS reporter_name "
+            f"CASE WHEN {closed_author_sql('forum_report', 'r')} THEN '已注销用户' WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS reporter_name "
             "FROM forum_reports r JOIN forum_posts p ON p.id=r.post_id "
             "JOIN users u ON u.qq_id=r.reporter_qq_id WHERE r.status='pending' ORDER BY r.created_at LIMIT 200"
         ) as cursor:

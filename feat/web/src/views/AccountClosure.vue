@@ -36,7 +36,13 @@ function applyResult(data) {
   confirmation.value = '';
   // A receipt from an earlier visit must not log out a different account that
   // signed in later. The original owner is held only in this view's memory.
-  if (!auth.authenticated || (previewOwner && auth.qq_id === previewOwner)) finishAccountClosure();
+  if (
+    !auth.authenticated ||
+    (previewOwner &&
+      auth.qq_id === previewOwner.qq_id &&
+      (auth.account_epoch ?? 1) === previewOwner.account_epoch)
+  )
+    finishAccountClosure();
 }
 async function loadPreview() {
   if (busy.value) return;
@@ -44,7 +50,7 @@ async function loadPreview() {
   message.value = '';
   try {
     preview.value = await api('/me/account-closure/preview', { signal: controller.signal });
-    previewOwner = auth.qq_id;
+    previewOwner = { qq_id: auth.qq_id, account_epoch: preview.value.account_epoch };
     rememberClosure(preview.value);
     phase.value = 'ready';
   } catch (error) {
@@ -164,7 +170,10 @@ onBeforeUnmount(() => {
       <p v-if="phase === 'loading'" role="status">正在读取账号状态与数据影响…</p>
       <template v-else-if="phase === 'closed'">
         <p role="status">服务端已确认注销成功，旧登录、绑定和私有数据已撤销。</p>
-        <p>公共内容保留，作者统一显示为“已注销用户”。同一 QQ 无法重新开户。</p>
+        <p>
+          公共内容保留，作者统一显示为“已注销用户”。同一 QQ
+          可由管理员创建全新账号，旧数据不会恢复或继承。
+        </p>
         <p>
           资源清理：{{
             {
@@ -235,7 +244,8 @@ onBeforeUnmount(() => {
             /></label>
             <label class="closure-check"
               ><input v-model="acknowledged" type="checkbox" :disabled="busy" /><span
-                >我已了解删除及保留范围，确认操作不可恢复，同一 QQ 不能重新开户。</span
+                >我已了解删除及保留范围，确认操作不可恢复，同一 QQ
+                可重新开户，新账号不继承旧数据。</span
               ></label
             >
             <label

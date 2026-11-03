@@ -167,7 +167,7 @@ class PracticeJobs:
             if not current or current["account_state"] != "active" or current["account_epoch"] != member["captured_epoch"] or binding_key(current) != member["captured_binding"]:
                 await self._member_update(job_id, qq_id, "failed", "binding_changed", "CF 绑定已变化，请重新选择范围")
                 continue
-            task = {}
+            task = {"account_epoch": member["captured_epoch"]}
             await self.engine.sync_account(qq_id, ["codeforces"], task, days=0, incremental=True)
             if task.get("status") == "completed":
                 if await self._member_update(job_id, qq_id, "completed"):
@@ -292,7 +292,7 @@ class PracticeJobs:
                     warnings = json.loads(item["result"]).get("metadata_warnings")
                     if warnings:
                         result["metadata_warnings"] = warnings
-            async with db.execute("SELECT CASE WHEN u.account_state='closed' THEN NULL ELSE m.qq_id END qq_id,m.handle,m.status,m.error_code,m.error_message,m.finished_at FROM cf_practice_job_members m LEFT JOIN users u ON u.qq_id=m.qq_id WHERE job_id=? ORDER BY m.qq_id", (job_id,)) as cursor:
+            async with db.execute("SELECT CASE WHEN u.account_state<>'active' OR u.account_epoch<>m.account_epoch THEN NULL ELSE m.qq_id END qq_id,m.handle,m.status,m.error_code,m.error_message,m.finished_at FROM cf_practice_job_members m LEFT JOIN users u ON u.qq_id=m.qq_id WHERE job_id=? ORDER BY m.qq_id", (job_id,)) as cursor:
                 members = [dict(row) for row in await cursor.fetchall()]
             for member in members:
                 member["finished_at"] = iso(member["finished_at"])

@@ -36,8 +36,9 @@ from .problem_tracker import attempt_problem_metadata, contest_tracker, problem_
 from .database import connect_db
 from .account_lifecycle_service import (
     AccountLifecycleError, require_active_user, require_web_actor,
-    protect_last_root, web_account, web_account_available,
+    protect_last_root, web_account, web_account_available, user_lifecycle,
 )
+from .account_registration_service import register_again
 from . import binding_service
 from .binding_service import clear_platform_records as _clear_platform_records
 
@@ -479,7 +480,7 @@ async def api_auth_me():
             avatar_url = user["avatar_url"] if user else None
         finally:
             await db.close()
-    return jsonify({"authenticated": True, "csrf_token": session.get("webui_csrf"), "root": identity["role"] == "root", "role": identity["role"], "qq_id": identity["qq_id"], "must_change_password": identity["must_change_password"], "avatar_url": avatar_url, "account_closure_enabled": current_app.config.get("ACCOUNT_CLOSURE_ENABLED", False)})
+    return jsonify({"authenticated": True, "csrf_token": session.get("webui_csrf"), "root": identity["role"] == "root", "role": identity["role"], "qq_id": identity["qq_id"], "must_change_password": identity["must_change_password"], "avatar_url": avatar_url, "account_epoch": identity.get("account_epoch"), "account_closure_enabled": current_app.config.get("ACCOUNT_CLOSURE_ENABLED", False)})
 
 
 @api.route("/auth/change-password", methods=["POST"])
@@ -578,10 +579,25 @@ async def api_web_accounts():
         if (error := validate_password(initial_password)):
             return jsonify({"success": False, "message": error}), 400
         now = int(time.time())
+        creation_snapshot = await user_lifecycle(db, qq_id)
         password_hash = hash_password(initial_password)
         temporary_password_expires_at = _temporary_password_expiry(now) if role == "member" else None
         await db.execute("BEGIN IMMEDIATE")
         actor = await require_web_actor(db, request.web_identity, roles={"root"} if role != "member" else {"admin", "root"})
+        current = await user_lifecycle(db, qq_id)
+        if (dict(current) if current else None) != (dict(creation_snapshot) if creation_snapshot else None):
+            raise AccountLifecycleError("ACCOUNT_CHANGED", "账号状态已变化，请重新创建。")
+        if current and current["account_state"] == "closed":
+            await register_again(
+                db, qq_id, creation_snapshot, name=name, status=status, school=school,
+                password_hash=password_hash, role=role, now=now,
+                temporary_password_expires_at=temporary_password_expires_at,
+            )
+            await db.commit()
+            _clear_login_failures((f"account:{qq_id}",))
+            return jsonify({"success": True, "qq_id": qq_id, "role": role,
+                            "must_change_password": True, "new_generation": True,
+                            "message": "已用该 QQ 创建全新账号；旧账号的数据及权限不会继承。"}), 201
         await require_active_user(db, qq_id, allow_missing=True)
         async with db.execute("SELECT qq_id FROM users WHERE qq_id=?", (qq_id,)) as cursor:
             member = await cursor.fetchone()
@@ -1036,6 +1052,8 @@ async def api_register_user():
         if sync_platforms:
             submitter = current_app.config.get("PLUGIN_CONFIG", {}).get("_account_sync_submitter")
             task = submitter(qq_id_str, sync_platforms) if callable(submitter) else None
+            if inspect.isawaitable(task):
+                task = await task
             if task:
                 task_id = task["id"]
                 status_code = 202
@@ -1316,6 +1334,8 @@ async def api_update_user():
         if sync_platforms:
             submitter = current_app.config.get("PLUGIN_CONFIG", {}).get("_account_sync_submitter")
             task = submitter(qq_id, sync_platforms) if callable(submitter) else None
+            if inspect.isawaitable(task):
+                task = await task
             if task:
                 task_id = task["id"]
                 message += " 已清理旧做题记录，并创建对应平台的全量同步任务。"
@@ -2477,6 +2497,8 @@ async def _member_binding_operation(platform, action):
             submitter = current_app.config.get("PLUGIN_CONFIG", {}).get("_account_sync_submitter")
             try:
                 task = submitter(qq_id, [canonical]) if callable(submitter) else None
+                if inspect.isawaitable(task):
+                    task = await task
             except Exception:
                 LOG.exception("绑定已保存，但同步调度失败")
                 task = None

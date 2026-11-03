@@ -1442,6 +1442,8 @@ async def submit_account_sync(qq_id):
     if not submit:
         return jsonify({"success": False, "message": "Account sync is unavailable."}), 503
     result = submit(qq_id, platforms, days=days)
+    if inspect.isawaitable(result):
+        result = await result
     if not result:
         return jsonify({"success": False, "message": "No supported platforms were selected."}), 400
     return jsonify({"success": True, **result}), 202
@@ -1459,6 +1461,8 @@ async def submit_all_account_sync():
     except (TypeError, ValueError):
         return jsonify({"success": False, "message": "days must be an integer."}), 400
     result = submit(days=days)
+    if inspect.isawaitable(result):
+        result = await result
     if not result:
         return jsonify({"success": False, "message": "An account sync is already running."}), 409
     return jsonify({"success": True, **result}), 202
