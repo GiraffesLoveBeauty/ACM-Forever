@@ -6,6 +6,7 @@ import time
 from .cf_client import CFUnavailable, binding_key, cf_request, problem_url
 from .cf_practice import PracticeError, normalize_problem
 from .database import isolated_connection
+from .account_lifecycle_service import AccountLifecycleError, require_snapshot
 
 
 async def fetch_history(session, user, start_timestamp, db, config):
@@ -20,6 +21,10 @@ async def _fetch_history(session, user, start_timestamp, db, config):
 
     qq_id, handle = str(user["qq_id"]), user["cf_handle"]
     expected_binding = binding_key(user)
+    try:
+        await require_snapshot(db, user)
+    except AccountLifecycleError as error:
+        raise CFUnavailable(str(error)) from None
     coverage_at = int(time.time())
     async with db.execute(
         "SELECT binding_key,full_history_at FROM user_platform_sync_state "
@@ -62,7 +67,7 @@ async def _fetch_history(session, user, start_timestamp, db, config):
             try:
                 async with db.execute("SELECT * FROM users WHERE qq_id=?", (qq_id,)) as cursor:
                     current = await cursor.fetchone()
-                if not current or binding_key(current) != expected_binding:
+                if not current or current['account_state'] != 'active' or current['account_epoch'] != user['account_epoch'] or binding_key(current) != expected_binding:
                     raise CFUnavailable("同步期间 CF 绑定已变化，请重新同步")
                 await _store_cf_attempts(db, qq_id, page, commit=False)
                 for submission in page:
@@ -133,7 +138,7 @@ async def _fetch_history(session, user, start_timestamp, db, config):
         await db.execute("BEGIN IMMEDIATE")
         async with db.execute("SELECT * FROM users WHERE qq_id=?", (qq_id,)) as cursor:
             current = await cursor.fetchone()
-        if not current or binding_key(current) != expected_binding:
+        if not current or current['account_state'] != 'active' or current['account_epoch'] != user['account_epoch'] or binding_key(current) != expected_binding:
             raise CFUnavailable("同步期间 CF 绑定已变化，请重新同步")
         await db.execute(
             "INSERT INTO user_platform_sync_state(user_qq_id,platform,binding_key,full_history_at,coverage_through_at) "

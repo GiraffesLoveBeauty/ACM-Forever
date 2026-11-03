@@ -4,11 +4,15 @@ import time
 from quart import Blueprint, jsonify, request
 
 from .backend_api import get_db, member_required
+from .account_lifecycle_service import require_web_actor
 
 forum_notification_api = Blueprint("forum_notification_api", __name__)
 
 
 async def add_notification(db, recipient, actor, kind, post_id, *, comment_id=None):
+    async with db.execute("SELECT 1 FROM users WHERE qq_id=? AND account_state='active'", (recipient,)) as cursor:
+        if not await cursor.fetchone():
+            return
     await db.execute(
         "INSERT INTO forum_notifications(recipient_qq_id,actor_qq_id,kind,post_id,comment_id,created_at) "
         "VALUES(?,?,?,?,?,?)",
@@ -92,6 +96,8 @@ async def notifications():
 async def read_notification(notification_id):
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity)
         cursor = await db.execute(
             "UPDATE forum_notifications SET read_at=COALESCE(read_at,?) WHERE id=? AND recipient_qq_id=?",
             (int(time.time()), notification_id, request.web_identity["qq_id"]),
@@ -113,6 +119,8 @@ async def read_all_notifications():
         return jsonify({"message": "请先刷新通知列表。"}), 400
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity)
         await db.execute(
             "UPDATE forum_notifications SET read_at=? WHERE recipient_qq_id=? AND read_at IS NULL AND id<=?",
             (int(time.time()), request.web_identity["qq_id"], through_id),

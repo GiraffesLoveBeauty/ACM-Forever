@@ -388,26 +388,41 @@ onBeforeUnmount(() => {
           <span
             ><b>{{ row.name }} · QQ {{ row.qq_id }}</b
             ><br /><small
-              >{{ row.role }} · {{ row.is_active ? '启用' : '停用' }} ·
-              {{ row.must_change_password ? '待改密' : '已完成改密' }} · 最近登录
+              >{{ row.role }} ·
+              {{
+                row.account_state === 'closed'
+                  ? '已注销（不可重新启用）'
+                  : row.is_active
+                    ? '启用'
+                    : '停用'
+              }}
+              · {{ row.must_change_password ? '待改密' : '已完成改密' }} · 最近登录
               {{ date(row.last_login_at) }}</small
             ></span
           ><span class="chips"
             ><button
               v-if="row.role === 'member' && row.must_change_password && row.is_active"
               class="btn"
-              :disabled="busy"
+              :disabled="busy || row.account_state === 'closed'"
               @click="action(row, 'temporary')"
             >
               重发临时密码</button
-            ><button class="btn" :disabled="busy" @click="action(row, 'password')">
+            ><button
+              class="btn"
+              :disabled="busy || row.account_state === 'closed'"
+              @click="action(row, 'password')"
+            >
               设置初始密码</button
-            ><button class="btn" :disabled="busy" @click="action(row, 'active')">
+            ><button
+              class="btn"
+              :disabled="busy || row.account_state === 'closed'"
+              @click="action(row, 'active')"
+            >
               {{ row.is_active ? '停用' : '启用' }}</button
             ><select
               v-if="auth.role === 'root'"
               :value="row.role"
-              :disabled="busy"
+              :disabled="busy || row.account_state === 'closed'"
               @change="changeRole(row, $event)"
             >
               <option value="member">成员</option>

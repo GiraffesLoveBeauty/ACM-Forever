@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 import aiosqlite
 
 from .problem_bank import initialize_problem_bank
+from .account_lifecycle_service import migrate_account_lifecycle
 
 
 @asynccontextmanager
@@ -46,6 +47,7 @@ async def connect_db(db_path):
     await db.execute(
         "CREATE TABLE IF NOT EXISTS users (qq_id TEXT PRIMARY KEY, name TEXT NOT NULL, cf_handle TEXT, luogu_id TEXT, nowcoder_id TEXT, atcoder_handle TEXT, status TEXT, school TEXT, last_sync_timestamp INTEGER DEFAULT 0);"
     )
+    await migrate_account_lifecycle(db)
     await db.execute(
         "CREATE TABLE IF NOT EXISTS web_accounts ("
         "qq_id TEXT PRIMARY KEY REFERENCES users(qq_id) ON DELETE CASCADE, "
@@ -347,10 +349,10 @@ async def connect_db(db_path):
             "(user_qq_id, platform, cursor_timestamp, last_success_at, last_status, updated_at) "
             f"SELECT qq_id, ?, COALESCE(last_sync_timestamp, 0), COALESCE(last_sync_timestamp, 0), "
             "CASE WHEN COALESCE(last_sync_timestamp, 0) > 0 THEN 'migrated' ELSE 'never' END, "
-            "? FROM users WHERE " + field + " IS NOT NULL AND TRIM(" + field + ") <> ''",
+            "? FROM users WHERE account_state='active' AND " + field + " IS NOT NULL AND TRIM(" + field + ") <> ''",
             (platform, int(time.time())),
         )
-    await db.execute("UPDATE users SET name = cf_handle WHERE cf_handle IS NOT NULL AND TRIM(cf_handle) <> '' AND (name IS NULL OR TRIM(name) = '' OR name = qq_id)")
+    await db.execute("UPDATE users SET name = cf_handle WHERE account_state='active' AND cf_handle IS NOT NULL AND TRIM(cf_handle) <> '' AND (name IS NULL OR TRIM(name) = '' OR name = qq_id)")
     await db.executescript(Path(__file__).with_name("wiki.sql").read_text(encoding="utf-8"))
     await db.commit()
     return db

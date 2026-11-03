@@ -13,6 +13,7 @@ from quart import Quart, abort, jsonify, redirect, request, send_from_directory
 from .acm_api.backend_api import api
 from .acm_api.bot_api import bot_api
 from .acm_api.auth_service import hash_password, validate_password
+from .acm_api.account_lifecycle_service import AccountLifecycleError, bootstrap_root, user_lifecycle
 from .acm_api.database import connect_db
 from .acm_api.forum_api import forum_api
 from .acm_api.forum_notifications import forum_notification_api
@@ -83,6 +84,11 @@ def _write_admins(db_path, root_ids, admins):
 
 def create_app():
     app = Quart(__name__, static_folder=None)
+
+    @app.errorhandler(AccountLifecycleError)
+    async def lifecycle_error_response(error):
+        return jsonify({"success": False, "code": error.code, "message": str(error)}), error.status
+
     db_path = Path(os.getenv("ACM_DATABASE_PATH", "./data/acm_forever.db")).expanduser()
     secret_key = os.getenv("ACM_WEBUI_SECRET_KEY", "").strip()
     app.secret_key = secret_key
@@ -174,25 +180,16 @@ def create_app():
             if bootstrap_qq and bootstrap_password:
                 async with db.execute("SELECT COUNT(*) AS n FROM web_accounts") as cursor:
                     account_count = int((await cursor.fetchone())["n"])
-                if account_count == 0:
+                lifecycle = await user_lifecycle(db, bootstrap_qq)
+                if account_count == 0 and (not lifecycle or lifecycle["account_state"] == "active"):
                     error = validate_password(bootstrap_password)
                     if error:
                         raise RuntimeError("ACM_BOOTSTRAP_ROOT_PASSWORD: " + error)
                     if not bootstrap_qq.isdigit() or not 4 <= len(bootstrap_qq) <= 12:
                         raise RuntimeError("ACM_BOOTSTRAP_ROOT_QQ_ID must be 4-12 digits.")
                     now = int(__import__("time").time())
-                    await db.execute(
-                        "INSERT OR IGNORE INTO users(qq_id,name) VALUES(?,?)",
-                        (bootstrap_qq, bootstrap_qq),
-                    )
-                    await db.execute(
-                        "INSERT OR IGNORE INTO web_accounts"
-                        "(qq_id,password_hash,role,must_change_password,is_active,"
-                        "credential_version,created_at,updated_at) "
-                        "VALUES(?,?,'root',0,1,1,?,?)",
-                        (bootstrap_qq, hash_password(bootstrap_password), now, now),
-                    )
-                    await db.commit()
+                    bootstrap_hash = hash_password(bootstrap_password)
+                    await bootstrap_root(db, bootstrap_qq, bootstrap_hash, now)
         finally:
             await db.close()
         await sync_engine.start()

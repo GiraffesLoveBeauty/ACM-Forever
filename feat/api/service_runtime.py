@@ -54,13 +54,13 @@ class SyncEngine(SyncMixin):
         results = {}
         try:
             async with isolated_connection(self.db) as connection:
-                async with connection.execute("SELECT * FROM users WHERE qq_id=?", (str(qq_id),)) as cursor:
+                async with connection.execute("SELECT * FROM users WHERE account_state='active' AND qq_id=?", (str(qq_id),)) as cursor:
                     user = await cursor.fetchone()
             task["bindings"] = {}
             if user:
                 for platform in platforms:
                     _, field, version = platform_spec(platform)
-                    task["bindings"][platform] = {"account": user[field] or "", "version": int(user[version])}
+                    task["bindings"][platform] = {"account": user[field] or "", "version": int(user[version]), "account_epoch": user["account_epoch"]}
             async with self._sync_cycle_lock:
                 for platform in platforms:
                     try:
@@ -97,8 +97,8 @@ class SyncEngine(SyncMixin):
         try:
             async with self._sync_cycle_lock:
                 async with self.db.execute(
-                    "SELECT qq_id FROM users WHERE cf_handle IS NOT NULL OR luogu_id IS NOT NULL "
-                    "OR nowcoder_id IS NOT NULL OR atcoder_handle IS NOT NULL OR cjlu_username IS NOT NULL "
+                    "SELECT qq_id FROM users WHERE account_state='active' AND (cf_handle IS NOT NULL OR luogu_id IS NOT NULL "
+                    "OR nowcoder_id IS NOT NULL OR atcoder_handle IS NOT NULL OR cjlu_username IS NOT NULL) "
                     "ORDER BY qq_id"
                 ) as cursor:
                     qq_ids = [row["qq_id"] for row in await cursor.fetchall()]

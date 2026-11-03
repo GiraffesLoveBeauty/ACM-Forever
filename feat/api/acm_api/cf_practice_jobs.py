@@ -145,7 +145,7 @@ class PracticeJobs:
                     current = await cursor.fetchone()
             finally:
                 await db.close()
-            if not current or binding_key(current) != binding_key(member):
+            if not current or current["account_state"] != "active" or current["account_epoch"] != member["account_epoch"] or binding_key(current) != binding_key(member):
                 await self._member_update(job_id, qq_id, "failed", "binding_changed", "CF 绑定已变化，请重新选择范围")
                 continue
             task = {}

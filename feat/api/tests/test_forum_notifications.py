@@ -259,8 +259,11 @@ class ForumNotificationTests(unittest.IsolatedAsyncioTestCase):
                 await db.close()
         self.assertEqual((await self.inbox())["total"], 0)
 
-    async def test_deleting_moderator_preserves_notification_without_new_user_delete_blocker(self):
+    async def test_deleting_legacy_bot_only_moderator_preserves_notification(self):
         await self.post()
+        # Historical moderator reference after the old Web login was removed.
+        # Modern Web accounts cannot be deleted through this Bot API.
+        await self.sql("DELETE FROM web_accounts WHERE qq_id='10000003'")
         response = await self.public.delete("/internal/v1/users/10000003", headers={"Authorization": "Bearer notification-bot-tests-only"})
         self.assertEqual(response.status_code, 200)
         rows = await self.sql("SELECT actor_qq_id FROM forum_notifications")

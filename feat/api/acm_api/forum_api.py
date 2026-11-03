@@ -14,6 +14,7 @@ from .backend_api import (
 )
 from .forum_images import IMAGE_ID, image_url, sync_image_links
 from .forum_notifications import add_notification
+from .account_lifecycle_service import require_web_actor
 
 forum_api = Blueprint("forum_api", __name__)
 
@@ -266,6 +267,8 @@ async def create_forum_draft():
         return jsonify({"message": error}), 400
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity)
         if data["category_id"] is not None:
             async with db.execute("SELECT 1 FROM forum_categories WHERE id=?", (data["category_id"],)) as cursor:
                 if not await cursor.fetchone():
@@ -314,6 +317,8 @@ async def update_forum_draft(draft_id):
         return jsonify({"message": error}), 400
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity)
         if data["category_id"] is not None:
             async with db.execute("SELECT 1 FROM forum_categories WHERE id=?", (data["category_id"],)) as cursor:
                 if not await cursor.fetchone():
@@ -342,6 +347,8 @@ async def update_forum_draft(draft_id):
 async def delete_forum_draft(draft_id):
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity)
         cursor = await db.execute(
             "DELETE FROM forum_drafts WHERE id=? AND author_qq_id=?",
             (draft_id, request.web_identity["qq_id"]),
@@ -360,6 +367,8 @@ async def submit_forum_draft(draft_id):
     qq_id = request.web_identity["qq_id"]
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity)
         async with db.execute(
             "SELECT id,category_id,title,body,cover_image_id FROM forum_drafts WHERE id=? AND author_qq_id=?",
             (draft_id, qq_id),
@@ -410,6 +419,8 @@ async def create_post():
         return jsonify({"message": "正文长度需要在 5 到 20000 个字符之间。"}), 400
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity)
         async with db.execute("SELECT 1 FROM forum_categories WHERE id=?", (category_id,)) as cursor:
             if not await cursor.fetchone():
                 return jsonify({"message": "请选择有效的帖子分类。"}), 400
@@ -445,6 +456,7 @@ async def create_comment(post_id):
     db = await get_db()
     try:
         await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity)
         async with db.execute("SELECT author_qq_id FROM forum_posts WHERE id=? AND status='published'", (post_id,)) as cursor:
             post = await cursor.fetchone()
             if not post:
@@ -478,6 +490,8 @@ async def _toggle_post_relation(table, post_id, qq_id):
         raise ValueError("Unsupported forum relation")
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity)
         async with db.execute("SELECT 1 FROM forum_posts WHERE id=? AND status='published'", (post_id,)) as cursor:
             if not await cursor.fetchone():
                 return None
@@ -540,6 +554,8 @@ async def report_post(post_id):
         return jsonify({"message": "请简单说明举报原因。"}), 400
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity)
         async with db.execute("SELECT 1 FROM forum_posts WHERE id=? AND status='published'", (post_id,)) as cursor:
             if not await cursor.fetchone():
                 return jsonify({"message": "帖子不存在。"}), 404
@@ -559,6 +575,8 @@ async def remove_post(post_id):
     identity = request.web_identity
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity)
         async with db.execute("SELECT author_qq_id FROM forum_posts WHERE id=?", (post_id,)) as cursor:
             post = await cursor.fetchone()
         if not post:
@@ -606,6 +624,7 @@ async def moderate_post(post_id):
     db = await get_db()
     try:
         await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity, roles={"admin", "root"})
         async with db.execute("SELECT author_qq_id FROM forum_posts WHERE id=? AND status='pending'", (post_id,)) as cursor:
             post = await cursor.fetchone()
         if not post:
@@ -652,6 +671,8 @@ async def moderate_report(report_id):
     status = "resolved" if decision == "resolve" else "dismissed"
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity, roles={"admin", "root"})
         cursor = await db.execute(
             "UPDATE forum_reports SET status=?,resolved_at=?,resolved_by=? WHERE id=? AND status='pending'",
             (status, int(time.time()), identity.get("qq_id"), report_id),

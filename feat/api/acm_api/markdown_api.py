@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from quart import Blueprint, Response, current_app, jsonify, request, send_file
 from .backend_api import _session_identity, get_db, member_required
+from .account_lifecycle_service import require_web_actor
 from .markdown_content import ContentError, asset_public
 from .wiki_api import attachment, endpoint
 from .wiki_service import WikiError, integer, one
@@ -89,6 +90,8 @@ async def upload():
         destination = folder / name
         with destination.open("xb") as stream:
             stream.write(content)
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity)
         await db.execute(
             "INSERT INTO markdown_assets VALUES(?,?,?,?,?,?,?,?,?,?)",
             (

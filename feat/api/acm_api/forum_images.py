@@ -14,6 +14,7 @@ import mistune
 from quart import Blueprint, abort, current_app, jsonify, request, send_from_directory
 
 from .backend_api import _session_identity, get_db, member_required
+from .account_lifecycle_service import require_web_actor
 
 forum_image_api = Blueprint("forum_image_api", __name__)
 IMAGE_ID = re.compile(r"[a-f0-9]{32}")
@@ -158,6 +159,7 @@ async def upload_forum_image():
     written = False
     try:
         await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity)
         async with db.execute(
             "SELECT COALESCE(SUM(size_bytes),0) AS bytes,COUNT(*) AS count FROM forum_images WHERE owner_qq_id=?", (owner,),
         ) as cursor:

@@ -1,5 +1,6 @@
 """Guard non-CF crawler batches against changes to their captured binding generation."""
 from .binding_service import platform_spec, row
+from .account_lifecycle_service import AccountLifecycleError, snapshot_epoch
 
 
 class BindingChanged(RuntimeError):
@@ -8,6 +9,10 @@ class BindingChanged(RuntimeError):
 
 class BindingGuard:
     def __init__(self, connection, user, platform):
+        try:
+            self.epoch = snapshot_epoch(user)
+        except AccountLifecycleError as error:
+            raise BindingChanged(str(error)) from None
         self.connection = connection
         self.platform, self.field, self.version_field = platform_spec(platform)
         self.qq_id = str(user["qq_id"])
@@ -18,7 +23,7 @@ class BindingGuard:
         return getattr(self.connection, key)
 
     async def check(self):
-        current = await row(self.connection, f"SELECT {self.field} AS account,{self.version_field} AS version FROM users WHERE qq_id=?", (self.qq_id,))
+        current = await row(self.connection, f"SELECT {self.field} AS account,{self.version_field} AS version FROM users WHERE account_state='active' AND account_epoch=? AND qq_id=?", (self.epoch, self.qq_id,))
         if not current or str(current["account"] or "").strip().casefold() != self.account or int(current["version"]) != self.version:
             raise BindingChanged("绑定已变化，旧账号同步结果已丢弃")
 
