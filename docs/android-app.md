@@ -28,6 +28,8 @@ PR 复用主线 Web 会话、CSRF 和业务 API，仅为公开成员身份/资�
 
 选择 Markdown 的账号与草稿代次单独写入 Activity 实例状态，并仅在会话一致时恢复，不放入页面返回栈。正常 Activity 重建可继续导入，真正的账号或草稿切换仍拒绝迟到文件结果。Wiki 的 `/problem.html?platform=…&problem_id=…` 相对关联练习直接进入原生题面与样例，返回原文章；只匹配无 scheme、无 authority 的确切路径，缺少查询参数时提示错误，其他外链继续要求 HTTPS。
 
+服务地址由 Application 在进程启动时配置一次，非法保存值也在此清理；MainActivity 创建和重建仅复用共享客户端，不重复调用持请求锁的 `setBaseUrl()`。慢请求或云端自动保存期间重建页面无需等待网络返回，账号和草稿的串行保护继续保留。
+
 缺少接口、无网络、服务器错误、未登录和暂无内容独立处理。已成功请求的页面先显示缓存再后台刷新；持续失败可关闭红色提示，重连成功绿色提示 3 秒关闭。没有缓存时显示真实错误，不伪造业务数据。测试通过不代表生产接口已经部署。
 
 ## 更新渠道与说明
@@ -56,9 +58,9 @@ cd Android_APP/app
 ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
 ```
 
-Windows 现有离线工具链可运行 `Android_APP/tools/build-local-v0213.ps1`、`verify-local-v0213.ps1` 和 `package-local-v0213.ps1`，分别构建、运行十一组模拟器检查及核验实际包。脚本使用 `%TEMP%/acmforever-build-v0.2.0` 下已安装的工具和模拟器，不能视为从零安装脚本。调试密钥放 `Android_APP/dist/signing/debug.keystore`；缺少原密钥的机器会生成不同调试签名，不能覆盖已有包。
+Windows 现有离线工具链可运行 `Android_APP/tools/build-local-v0213.ps1`、`verify-local-v0213.ps1` 和 `package-local-v0213.ps1`，分别构建、运行十二组模拟器检查及核验实际包。脚本使用 `%TEMP%/acmforever-build-v0.2.0` 下已安装的工具和模拟器，不能视为从零安装脚本。调试密钥放 `Android_APP/dist/signing/debug.keystore`；缺少原密钥的机器会生成不同调试签名，不能覆盖已有包。
 
-`android-ci.yml` 在 App/相关工作流的 PR 变更时执行发布清单 Python 测试和 Android JVM/Lint/构建。`api-tests.yml` 执行 Vue 构建、后端合同和 Web 单测。模拟器十一组测试目前是本机验收，不谎称已加入 Actions。
+`android-ci.yml` 在 App/相关工作流的 PR 变更时执行发布清单 Python 测试和 Android JVM/Lint/构建。`api-tests.yml` 执行 Vue 构建、后端合同和 Web 单测。模拟器十二组测试目前是本机验收，不谎称已加入 Actions。
 
 ## 正式发布操作（本轮不执行）
 
@@ -85,9 +87,10 @@ Windows 现有离线工具链可运行 `Android_APP/tools/build-local-v0213.ps1`
 | [评论 6628388380](https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6628388380) 的恢复编辑页草稿串写 P1 | 源码修复为 44b90e7，c4407b1 是文档；恢复时完整同步草稿及控件，CloudDrafts 拒绝旧代次写入/flush。4 项单测及三 Activity 回归先失败后通过，本轮再次通过，旧 A 输入回调不能写入 B |
 | [review 5767651654 的 Wiki P2](https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#discussion_r4467001493) | 先识别站内题面路由再校验外链；实际验证 Wiki → 原生题面/样例 → 原文章，HTTPS 外链保持外部 Intent，不完整参数报错；旧代码失败、修复后通过 |
 | [review 5767651654 的 Markdown P2](https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#discussion_r4467001498) | 同会话恢复导入归属；实际 recreate 后使用模拟文件选择器结果导入/自动保存，切换账号和草稿仍拒绝且不写入；旧代码失败、修复后通过 |
+| [review 5768177626 的网络锁 P2](https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#discussion_r4467398917) | 删除 MainActivity 重复 setBaseUrl，启动配置/非法偏好清理由 Application 统一完成；旧代码在 GET 挂起时重建失败，修复后 GET 和自动保存挂起期间均完成真实 Activity 重建及主线程心跳，保留会话/草稿和保存结果；另增 2 项配置单测 |
 
 ## 验证记录
 
 debug 与 release 构建分支均完成单测/Lint/打包及实际清单生成检查；release 分支仅借本机调试密钥验证签名配置，没有正式签名制品发布。最终本机结果见 [安装说明-v0.2.13.md（实际 APK 与回归结果）](../Android_APP/docs/安装说明-v0.2.13.md)。生产更新源、正式私钥构建、远端 APK 下载与真机安装仍需发布验收，本机模拟响应不作为这些流程已通过的证据。
 
-本轮修复前的 `977a5b062d6f41b0f7f1282d6395d3c7e4981d7a`，API、Android、browser 三项 CI 均已成功。本轮两条 P2 修复后，debug/release 各 65 项单测、十一组界面回归及实际 APK 清单核验通过；旧 P1、论坛作者主页与 Activity 重建会话再次通过。新提交的远端检查需按其 head 另行核对，本轮未修改后端或网页。
+网络锁修复前的 `b041a471db892c9f704e2be6048bdaaf8fe1a6ca`，API、Android、browser 三项 CI 均已成功，属于旧 head 结果。本轮修复后，debug/release 各 67 项单测、十二组界面回归、9 项发布清单测试及实际 APK 清单核验通过；上轮 Wiki/Markdown、旧 P1、论坛作者主页与 Activity 重建会话再次通过。新增回归先在旧代码失败，后在修复后通过；证据路径见安装说明。新提交的远端检查按其 head 另行核对，本轮未修改后端或网页。
