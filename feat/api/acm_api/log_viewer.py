@@ -27,6 +27,7 @@ def safe_diagnostic(value):
     text = re.sub(r'(?i)(authorization|cookie|password|csrf[_-]?token|api[_-]?key|secret|token)([\s"\x27:=]+)(?:bearer\s+)?[^\s,;]+',
                   r'\1\2[已隐藏]', text)
     text = re.sub(r'((?:GET|POST|PUT|PATCH|DELETE|HEAD)\s+[^ ?"]+)\?[^\s"]*', r'\1?[查询参数已隐藏]', text)
+    text = re.sub(r'(https?://[^\s?"\x27]+)\?[^\s"\x27]*', r'\1?[查询参数已隐藏]', text)
     return text
 
 
@@ -50,10 +51,15 @@ def journal_event(item):
         level = "error" if status >= 500 else "warning" if status >= 400 else "info"
     elif re.search(r'\b(?:ERROR|CRITICAL|Traceback)\b|\b\w*(?:Error|Exception):', message):
         level = "error"
-    elif re.search(r'\bWARNING\b', message):
+    elif re.search(r'\bWARNING\b|时出错|请求失败|抓取失败|同步失败|验证失败|未授权|Unauthorized|Forbidden|超时', message):
         level = "warning"
-    return {"event": "diagnostic", "level": level,
-            "message": "程序诊断：" + safe_diagnostic(message), "journal_time": item.get("__REALTIME_TIMESTAMP")}
+    item_event = {"event": "diagnostic", "level": level,
+                  "message": "程序诊断：" + safe_diagnostic(message), "journal_time": item.get("__REALTIME_TIMESTAMP")}
+    if not access and "401" in message and "Unauthorized" in message:
+        platform = next((p for p in ["洛谷", "Codeforces", "AtCoder", "牛客", "校 OJ"] if p in message), "外部平台")
+        item_event.update(message=platform + "同步请求未获授权（HTTP 401）：平台凭据可能失效或访问受限",
+                          detail=safe_diagnostic(message))
+    return item_event
 
 
 def visible(event, minimum="info", show_all=False):
@@ -100,6 +106,8 @@ def render(event, color=False, explain=False):
             details.append(title + "=" + clean(event[field]) + suffix)
     if details:
         line += "\n  " + " ｜ ".join(details)
+    if event.get("detail"):
+        line += "\n  原始信息：" + safe_diagnostic(event["detail"])
     if event.get("hint"):
         line += "\n  排查建议：" + clean(event["hint"])
     if explain and "request_id" in event:
