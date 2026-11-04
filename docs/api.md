@@ -584,7 +584,7 @@ CF 持久 job 成员捕获 epoch，closed 分项不能被晚到成功覆盖；�
 }
 ```
 
-有新 OJ 写入时必须确认对应关系。所选行只能来自该批次且可执行，已有成员只补开户；错误、占用、已有/停用/注销账号不覆盖。确认时重新检查成员快照、绑定占用和管理员权限。
+有新 OJ 写入时必须确认对应关系。所选行只能来自该批次且可执行，已有成员只补开户，已有/停用/注销账号不覆盖。OJ 可留空；OJ 格式/类型错误、同表重复、预检或执行时已占用均仅跳过该平台绑定，写入逐行 `warnings`，不阻止合法 QQ 开户。QQ 必须为 4–12 位非零开头数字且同表不重复；其他安全与生命周期限制不变。确认时重新检查成员快照、绑定占用和管理员权限。
 
 继续请求只接受：
 
@@ -601,9 +601,9 @@ CF 持久 job 成员捕获 epoch，closed 分项不能被晚到成功覆盖；�
 
 同幂等键同请求正在处理返回 202；结束后重放返回无密码结果；同键不同内容返回 409。换幂等键不能绕过处理段互斥或冻结范围。刷新恢复不自动继续写入。
 
-创建响应的 `credentials` 只含本请求新创建账号的 `row_id/qq_id/name/temporary_password/expires_at`。`credentials_replayed=false`；摘要、行、报告和重放均不提供明文。服务器不持久保存可恢复密码，也不能保证客户端收到原始响应。响应丢失后先查成功名单，再走已有受控重新发放入口，不能盲目重置。
+创建响应的 `credentials` 只含本请求新创建账号的 `row_id/qq_id/name/real_name/username/temporary_password/expires_at`。`real_name` 为新成员的导入姓名或已有成员档案姓名（可空），`name` 仍为昵称，`username` 为 Web 登录账号（当前等于 QQ）。`credentials_replayed=false`；摘要、行、报告和重放均不提供明文。服务器不持久保存可恢复密码，也不能保证客户端收到原始响应。响应丢失后先查成功名单，再走已有受控重新发放入口，不能盲目重置。
 
-所有导入响应 `Cache-Control: no-store`，下载设置 Excel MIME、固定文件名和 `nosniff`。表格报告不含密码、公式或外链；凭据文本仅在当前浏览器内存生成。
+所有导入响应 `Cache-Control: no-store`，下载设置 Excel MIME、固定文件名和 `nosniff`。表格报告不含密码、公式或外链；凭据文本及 `account-import-credentials.xlsx` 仅在当前浏览器内存生成；Excel 包含 `QQ号/姓名/账号/初始密码` 四个文本列，汇总本页实际领取的成功凭据，不新增可再次下载明文的服务端接口。
 
 关键错误码：`named_admin_required/actor_changed`（403）、`batch_not_found`（404）、`idempotency_conflict/batch_busy/selection_changed/account_changed`（409）、`batch_expired/report_expired`（410）、`file_size`（413）、`invalid_workbook/unsafe_content/resource_limit/parse_timeout`（422）、`parse_busy/hash_busy/capacity_limit`（429）、`import_disabled`（503）。字段或选择格式错误返回 400。行级冲突放入对应行结果，不将其他已创建行回滚。
 

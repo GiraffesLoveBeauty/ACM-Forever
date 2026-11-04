@@ -56,6 +56,7 @@ def template_bytes():
         "昵称可留空，新成员默认用QQ展示；姓名不会自动成为公开昵称。",
         "身份与Web权限无关；导入只创建普通成员。",
         "已有成员只补开户，表内其他资料全部忽略；已有/停用/注销账号不导入。",
+        "OJ账号可留空；格式错误、重复或已占用时跳过绑定，不阻止合法QQ开户。",
         "五个平台都只填账号标识，不填网址、OJ密码、Cookie或Token。",
         "OJ录入需要管理员确认，不代表已通过本人归属验证；不会自动同步。",
         "新账号逐人生成随机初始密码，限时有效，首次登录必须修改。",
@@ -86,10 +87,11 @@ def _inspect_zip(content):
         if len(infos) > 256:
             raise ExcelError("工作簿ZIP条目过多。", "resource_limit")
         seen, documents, unpacked = set(), {}, 0
-        allowed = re.compile(r"(?:\[Content_Types\]\.xml|_rels/\.rels|docProps/(?:app|core)\.xml|xl/(?:workbook\.xml|styles\.xml|sharedStrings\.xml|_rels/workbook\.xml\.rels|theme/theme1\.xml|worksheets/sheet[1-3]\.xml))")
+        allowed = re.compile(r"(?:\[Content_Types\]\.xml|_rels/\.rels|docProps/(?:app|core|custom)\.xml|xl/(?:workbook\.xml|styles\.xml|sharedStrings\.xml|_rels/workbook\.xml\.rels|theme/theme1\.xml|worksheets/sheet[1-3]\.xml))")
+        directories = {"_rels/", "docProps/", "xl/", "xl/_rels/", "xl/theme/", "xl/worksheets/"}
         for info in infos:
             name = info.filename
-            if (name in seen or "\\" in name or PurePosixPath(name).is_absolute() or ".." in PurePosixPath(name).parts or not allowed.fullmatch(name) or info.flag_bits & 1):
+            if (name in seen or "\\" in name or PurePosixPath(name).is_absolute() or ".." in PurePosixPath(name).parts or (not allowed.fullmatch(name) and name not in directories) or info.flag_bits & 1):
                 raise ExcelError("工作簿包含模板以外、重复或不安全的文件。")
             seen.add(name)
             with archive.open(info) as stream:
@@ -99,7 +101,21 @@ def _inspect_zip(content):
                 unpacked += len(raw)
                 if unpacked > MAX_UNPACKED:
                     raise ExcelError("解压后的内容超过32MiB。", "resource_limit")
+            if name in directories:
+                if raw:
+                    raise ExcelError("工作簿目录不能包含文件内容。")
+                continue
             tree = fromstring(raw, forbid_dtd=True, forbid_entities=True, forbid_external=True)
+            if name == "docProps/custom.xml":
+                # Office/WPS bookkeeping is inert metadata, not executable workbook content.
+                props_ns = "{http://schemas.openxmlformats.org/officeDocument/2006/custom-properties}"
+                value_ns = "{http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes}"
+                primitives = {"lpwstr", "lpstr", "bstr", "i1", "i2", "i4", "i8", "int", "ui1", "ui2", "ui4", "ui8", "uint", "r4", "r8", "decimal", "bool", "filetime", "date"}
+                if tree.tag != props_ns + "Properties":
+                    raise ExcelError("自定义属性格式不支持。", "unsafe_content")
+                for prop in tree:
+                    if (prop.tag != props_ns + "property" or len(prop) != 1 or prop[0].tag not in {value_ns + kind for kind in primitives} or len(prop[0]) or "linkTarget" in prop.attrib):
+                        raise ExcelError("只接受纯文本或数值的自定义属性。", "unsafe_content")
             count = 0
             for element in tree.iter():
                 count += 1
@@ -111,7 +127,8 @@ def _inspect_zip(content):
                 if tag == "Relationship":
                     target = element.attrib.get("Target", "")
                     reltype = element.attrib.get("Type", "").rsplit("/", 1)[-1]
-                    if element.attrib.get("TargetMode", "").lower() == "external" or reltype not in {"officeDocument", "metadata/core-properties", "core-properties", "extended-properties", "worksheet", "styles", "theme", "sharedStrings"} or ":" in target or "\\" in target or ".." in PurePosixPath(target).parts:
+                    custom = name == "_rels/.rels" and element.attrib.get("Type") == "http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties" and target == "docProps/custom.xml"
+                    if element.attrib.get("TargetMode", "").lower() == "external" or (reltype not in {"officeDocument", "metadata/core-properties", "core-properties", "extended-properties", "worksheet", "styles", "theme", "sharedStrings"} and not custom) or ":" in target or "\\" in target or ".." in PurePosixPath(target).parts:
                         raise ExcelError("模板不接受外链或额外关系。", "unsafe_content")
                 if tag == "Override" and ("macro" in element.attrib.get("ContentType", "").lower() or "vba" in element.attrib.get("ContentType", "").lower()):
                     raise ExcelError("不接受宏工作簿。", "unsafe_content")
@@ -199,7 +216,11 @@ def parse_workbook(content):
                         warnings.append(warning)
                 except ValueError as exc:
                     payload[field] = ""
-                    errors.append(f"{dict((key, label) for label, key, _ in COLUMNS)[field]}：{exc}")
+                    label = dict((key, label) for label, key, _ in COLUMNS)[field]
+                    if field in {key for _, key, _ in COLUMNS[5:]}:
+                        warnings.append(f"{label}：已跳过绑定（{exc}）")
+                    else:
+                        errors.append(f"{label}：{exc}")
             result.append({"excel_row_number": number, "payload": payload, "errors": errors, "warnings": warnings})
         if not result:
             raise ExcelError("导入数据为空，请从第二行填写成员。", "empty_workbook")

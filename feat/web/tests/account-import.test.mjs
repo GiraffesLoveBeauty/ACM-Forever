@@ -4,6 +4,7 @@ import { JSDOM } from 'jsdom';
 import { h } from 'vue';
 import { RouterView } from 'vue-router';
 import { api, setAuth } from '../src/lib/api.js';
+import { readStoredWorkbook } from './helpers/xlsx.mjs';
 import { cleanupCompiled, find, loadSfc, mount, settle, textOf } from './helpers/vue-harness.mjs';
 const Import = (await import(await loadSfc('src/admin/AccountImport.vue'))).default;
 const Preview = (
@@ -30,6 +31,8 @@ const credential = {
   row_id: 'row-0',
   qq_id: '10000084',
   name: '合成成员',
+  real_name: '合成姓名',
+  username: '10000084',
   temporary_password: 'Synthetic-secret!84',
   expires_at: 1900000000,
 };
@@ -279,6 +282,36 @@ test('credentials remain text and failed clipboard copy has a manual fallback', 
   const textarea = find(mounted.root, (n) => n.type === 'textarea')[0];
   assert.match(textarea.props.value, /Synthetic-secret!84/);
   assert.equal(find(mounted.root, (n) => n.type === 'input')[0].props.type, 'password');
+});
+test('Excel export uses only received credentials locally without a server request', async (t) => {
+  let blob, anchor;
+  t.mock.method(URL, 'createObjectURL', (value) => {
+    blob = value;
+    return 'blob:synthetic';
+  });
+  const create = document.createElement.bind(document);
+  t.mock.method(document, 'createElement', (tag, ...args) => {
+    if (tag === 'a') return (anchor = { click() {} });
+    return create(tag, ...args);
+  });
+  const Component = { render: () => h(Results, { credentials: [credential], missing: 1 }) };
+  await open(Component, '/admin.html');
+  const before = calls.length;
+  await click(buttons('导出开户 Excel')[0]);
+  assert.equal(anchor.download, 'account-import-credentials.xlsx');
+  assert.equal(calls.length, before);
+  const { rows } = await readStoredWorkbook(blob);
+  assert.deepEqual(rows, [
+    ['QQ号', '姓名', '账号', '初始密码'],
+    ['10000084', '合成姓名', '10000084', credential.temporary_password],
+  ]);
+  assert.match(textOf(mounted.root), /本页未领取其初始密码/);
+});
+test('restored results with missing passwords cannot export fabricated credentials', async () => {
+  const Component = { render: () => h(Results, { credentials: [], missing: 2 }) };
+  await open(Component, '/admin.html');
+  assert.equal(buttons('导出开户 Excel').length, 0);
+  assert.match(textOf(mounted.root), /服务端不重放密码/);
 });
 test('blob downloads use the same API session and CSRF handling', async () => {
   const data = await api('/admin/account-imports/template', { responseType: 'blob' });
