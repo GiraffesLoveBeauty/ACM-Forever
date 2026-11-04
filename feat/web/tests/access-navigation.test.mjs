@@ -171,6 +171,39 @@ test('legacy administration links and corrected filters retain their anchors', a
   assert.equal(router.currentRoute.value.fullPath, '/admin.html#dashboard');
 });
 
+for (const role of ['member', 'admin', 'root']) {
+  test(`${role} opens personal training and contest review without an admin redirect`, async () => {
+    globalThis.fetch = async (url) =>
+      response(
+        url === '/api/auth/me' ? { authenticated: true, role, qq_id: '12345678' } : {},
+      );
+    await actualGuard();
+    for (const path of ['/challenge.html', '/contest-review.html']) {
+      await router.push(`${path}?contest_id=1234&qq_id=99999999&owner_qq_id=99999999#activity`);
+      assert.equal(router.currentRoute.value.fullPath, `${path}?contest_id=1234#activity`);
+      assert.equal(Boolean(router.currentRoute.value.meta.admin), false);
+    }
+    await router.push('/admin.html?section=training');
+    assert.equal(
+      router.currentRoute.value.path,
+      role === 'member' ? '/forbidden.html' : '/admin.html',
+    );
+  });
+}
+
+test('personal training keeps the full return target through login and first password change', async () => {
+  globalThis.fetch = async () => response({ authenticated: false });
+  const session = await actualGuard();
+  const target = '/contest-review.html?contest_id=1234#activity';
+  await router.push(target);
+  assert.equal(router.currentRoute.value.path, '/login.html');
+  assert.equal(router.currentRoute.value.query.next, target);
+  session.setAuth({ authenticated: true, role: 'member', qq_id: '12345678', must_change_password: true });
+  await router.push(target);
+  assert.equal(router.currentRoute.value.path, '/change-password.html');
+  assert.equal(router.currentRoute.value.query.next, target);
+});
+
 test('header login returns to the current post and anchor', async () => {
   mounted = await mount(
     Header,

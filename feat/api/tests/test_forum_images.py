@@ -263,12 +263,20 @@ class ForumImageTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await db.close()
 
-    async def test_delete_uploader_with_unused_images_and_drafts(self):
+    async def test_delete_legacy_bot_only_uploader_with_unused_images_and_drafts(self):
         unused = await (await self.upload()).get_json()
         image = await (await self.upload()).get_json()
         fields = {"title": "仅保存在草稿中的图片", "body": f"![草稿图片]({image['url']})", "category_id": 1, "cover_image_id": image["id"]}
         response = await self.owner.post("/api/forum/drafts", json=fields, headers=self.headers[0])
         self.assertEqual(response.status_code, 201)
+        # Model an archived Bot-only member with images from the old WebUI.
+        # A currently linked Web account is protected by lifecycle API tests.
+        db = await connect_db(self.path)
+        try:
+            await db.execute("DELETE FROM web_accounts WHERE qq_id='10000001'")
+            await db.commit()
+        finally:
+            await db.close()
         response = await self.public.delete(
             "/internal/v1/users/10000001", headers={"Authorization": "Bearer forum-image-bot-test-only"},
         )
@@ -304,7 +312,7 @@ class ForumImageTests(unittest.IsolatedAsyncioTestCase):
             for client in [self.owner, self.other, self.admin, legacy_admin, self.public]:
                 self.assertEqual((await client.get(uploaded["url"])).status_code, 404)
 
-    async def test_delete_uploader_preserves_shared_post_and_draft_images(self):
+    async def test_delete_legacy_bot_only_uploader_preserves_shared_post_and_draft_images(self):
         image = await (await self.upload()).get_json()
         fields = {"title": "其他成员继续使用图片", "body": f"![共享图片]({image['url']})", "category_id": 1, "cover_image_id": image["id"]}
         response = await self.owner.post("/api/forum/posts", json=fields, headers=self.headers[0])
@@ -322,6 +330,14 @@ class ForumImageTests(unittest.IsolatedAsyncioTestCase):
             # Existing post-author foreign keys require the original content to be
             # purged before its author can be deleted; shared references remain.
             await db.execute("DELETE FROM forum_posts WHERE id=?", (original_id,))
+            await db.commit()
+        finally:
+            await db.close()
+        # Model an archived Bot-only member with images from the old WebUI.
+        # A currently linked Web account is protected by lifecycle API tests.
+        db = await connect_db(self.path)
+        try:
+            await db.execute("DELETE FROM web_accounts WHERE qq_id='10000001'")
             await db.commit()
         finally:
             await db.close()

@@ -111,7 +111,7 @@ function clearLabels() {
 watch(() => route.fullPath, load, { immediate: true });
 </script>
 <template>
-  <main class="community-main member-problems">
+  <main class="community-main member-problems" :class="{ 'member-problems-tracker': isTracker }">
     <RouterLink class="forum-back-link" to="/home.html">← 返回个人中心</RouterLink>
     <h1>题库</h1>
     <p>按算法标签寻找练习题，或查看本人已 AC 的题目。人工修正后的有效标签会立即用于筛选。</p>
@@ -504,6 +504,14 @@ watch(() => route.fullPath, load, { immediate: true });
     padding: 15px;
   }
 }
+.community-main.member-problems-tracker {
+  width: min(1920px, calc(100% - 32px));
+  padding-inline: 0;
+}
+.member-problems-tracker > .card {
+  min-width: 0;
+  padding: 16px;
+}
 .member-problem-scopes {
   gap: 12px;
   margin: 24px 0;
@@ -552,6 +560,12 @@ form.member-problem-filters {
   white-space: nowrap;
 }
 @media (max-width: 640px) {
+  .community-main.member-problems-tracker {
+    width: calc(100% - 24px);
+  }
+  .member-problems-tracker > .card {
+    padding: 12px;
+  }
   .member-problem-filters > label,
   .member-problem-filters > .member-problem-search {
     flex-basis: 100%;

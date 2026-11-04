@@ -1,14 +1,20 @@
 """Private, durable forum feedback; event writes share the content transaction."""
+
 import time
 
 from quart import Blueprint, jsonify, request
 
+from .account_closure_service import closed_content_sql
 from .backend_api import get_db, member_required
+from .account_lifecycle_service import require_web_actor
 
 forum_notification_api = Blueprint("forum_notification_api", __name__)
 
 
 async def add_notification(db, recipient, actor, kind, post_id, *, comment_id=None):
+    async with db.execute("SELECT 1 FROM users WHERE qq_id=? AND account_state='active'", (recipient,)) as cursor:
+        if not await cursor.fetchone():
+            return
     await db.execute(
         "INSERT INTO forum_notifications(recipient_qq_id,actor_qq_id,kind,post_id,comment_id,created_at) "
         "VALUES(?,?,?,?,?,?)",
@@ -61,10 +67,10 @@ async def notifications():
             total = (await cursor.fetchone())[0]
         async with db.execute(
             "SELECT n.id,n.kind,n.post_id,n.comment_id,n.created_at,n.read_at,p.status AS post_status,"
-            "CASE WHEN p.status='published' OR p.author_qq_id=? THEN p.title ELSE '原话题已不可访问' END AS post_title,"
-            "CASE WHEN p.author_qq_id=? AND n.kind='rejected' THEN p.review_reason ELSE '' END AS review_reason,"
-            "CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS actor_name,"
-            "p.author_qq_id=? AS own_post,cm.status='published' AND (cm.parent_id IS NULL OR parent.status='published') AS comment_available "
+            f"CASE WHEN p.status='published' OR (p.author_qq_id=? AND NOT {closed_content_sql('forum_post', 'p')}) THEN p.title ELSE '原话题已不可访问' END AS post_title,"
+            f"CASE WHEN p.author_qq_id=? AND NOT {closed_content_sql('forum_post', 'p')} AND n.kind='rejected' THEN p.review_reason ELSE '' END AS review_reason,"
+            "CASE WHEN n.actor_qq_id IS NULL OR u.account_state='closed' THEN '已注销用户' WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS actor_name,"
+            f"(p.author_qq_id=? AND NOT {closed_content_sql('forum_post', 'p')}) AS own_post,cm.status='published' AND (cm.parent_id IS NULL OR parent.status='published') AS comment_available "
             "FROM forum_notifications n JOIN forum_posts p ON p.id=n.post_id "
             "LEFT JOIN users u ON u.qq_id=n.actor_qq_id LEFT JOIN forum_comments cm ON cm.id=n.comment_id "
             "LEFT JOIN forum_comments parent ON parent.id=cm.parent_id WHERE " + where +
@@ -92,6 +98,8 @@ async def notifications():
 async def read_notification(notification_id):
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity)
         cursor = await db.execute(
             "UPDATE forum_notifications SET read_at=COALESCE(read_at,?) WHERE id=? AND recipient_qq_id=?",
             (int(time.time()), notification_id, request.web_identity["qq_id"]),
@@ -113,6 +121,8 @@ async def read_all_notifications():
         return jsonify({"message": "请先刷新通知列表。"}), 400
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity)
         await db.execute(
             "UPDATE forum_notifications SET read_at=? WHERE recipient_qq_id=? AND read_at IS NULL AND id<=?",
             (int(time.time()), request.web_identity["qq_id"], through_id),

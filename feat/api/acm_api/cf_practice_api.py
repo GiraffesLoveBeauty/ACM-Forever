@@ -58,7 +58,7 @@ async def cf_check():
     data = await payload()
     result, pending = await snapshot(current_app.config["CF_PRACTICE_QUERY"].check, data)
     if pending:
-        job_id = await current_app.config["CF_PRACTICE_JOBS"].submit("check", data)
+        job_id = await current_app.config["CF_PRACTICE_JOBS"].submit("check", data, identity=request.web_identity)
         return jsonify({"status": "queued", "job_id": job_id, "scope": result["scope"], "preview": result}), 202
     return jsonify(result)
 
@@ -67,7 +67,7 @@ async def cf_check():
 @admin_required
 async def cf_sync():
     data = await payload()
-    job_id = await current_app.config["CF_PRACTICE_JOBS"].submit("sync", data)
+    job_id = await current_app.config["CF_PRACTICE_JOBS"].submit("sync", data, identity=request.web_identity)
     return jsonify({"status": "queued", "job_id": job_id}), 202
 
 

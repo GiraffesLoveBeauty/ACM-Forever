@@ -21,8 +21,21 @@ def hash_password(password: str) -> str:
     return f"{PASSWORD_SCHEME}${PASSWORD_ITERATIONS}${salt}${digest}"
 
 
+def password_hash_usable(encoded: str) -> bool:
+    """Reject revoked markers and malformed hashes without performing PBKDF2."""
+    if not isinstance(encoded, str):
+        return False
+    try:
+        scheme, rounds, salt, digest = encoded.split("$", 3)
+        salt.encode("ascii")
+        return (scheme == PASSWORD_SCHEME and 100_000 <= int(rounds) <= 2_000_000
+                and bool(re.fullmatch(r"[0-9a-f]{64}", digest)))
+    except (ValueError, UnicodeError):
+        return False
+
+
 def verify_password(password: str, encoded: str) -> bool:
-    if not isinstance(password, str) or not isinstance(encoded, str):
+    if not isinstance(password, str) or not password_hash_usable(encoded):
         return False
     try:
         scheme, rounds, salt, expected = encoded.split("$", 3)

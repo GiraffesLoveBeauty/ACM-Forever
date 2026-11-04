@@ -57,12 +57,12 @@ pnpm build
 
 生成 `dist/`，Quart 在 `8088` 上提供构建后的页面与资源。未构建时页面返回 `503` 并提示构建；API 仍可单独使用。`pnpm preview` 仅预览静态制品，业务联调使用 Vite 开发代理或 Quart。
 
-保留 `/index.html`、`/post.html?id=...`、`/compose.html?draft_id=...`、`/home.html`、`/leaderboard.html`、登录与改密路径，后台仍是 `/admin.html?section=...&tab=...`。新增受保护的个人题库 `/my-problems.html`，供所有登录角色查看本人 AC。旧管理入口与普通成员的训练、题库、赛事复盘链接也保留。
+保留 `/index.html`、`/post.html?id=...`、`/compose.html?draft_id=...`、`/home.html`、`/leaderboard.html`、登录与改密路径，后台仍是 `/admin.html?section=...&tab=...`。个人题库 `/my-problems.html`、今日训练 `/challenge.html` 和赛事复盘 `/contest-review.html` 对所有登录角色提供独立前台页面，固定当前账号本人，不再因管理员身份跳转后台。
 
 ## 目录
 
 - `src/views/`：社区与账户页面、后台壳及旧入口。
-- `src/admin/`：成员账号、成员资料、训练、题库、CF 选题、赛事复盘、同步任务、审核、设置。
+- `src/admin/`：成员账号、成员资料、训练管理、题库管理、CF 选题、复盘管理、同步任务、审核、设置，仅管理员与 Root 可访问。
 - `src/components/`：导航、主题编辑器、图谱、插图、话题卡片和分页。
 - `src/lib/`：请求与会话、Markdown 消毒、主题色算法、头像压缩、后台状态。
 - `vite.config.js`：开发代理、生产媒体复制与构建配置。
@@ -161,3 +161,14 @@ CI 先构建 Vue，再运行 API 合约、Vue 组件回归及原有脚本用例�
 `MarkdownEditor/MarkdownView` 复用源文本、净化与公式能力；论坛 Compose 保留原草稿恢复和审核流程，并接入帖子封面、双栏预览和论坛图片压缩上传（Wiki 仍使用共享图片接口）。共享编辑器支持 UTF-8 MD 导入、图片选择/拖拽/粘贴及失败重试；受控图片只加载本站资源。Wiki 草稿使用串行保存、离开保护、账号/文章隔离的本地恢复；409 保留输入并显式合并。`wiki.css` 沿用原有设计、相变信号、天使之城三套模板的主题变量，窄屏分类与目录可展开。
 
 `tests/wiki.test.mjs` 在 jsdom 中挂载实际组件和路由，包含导入/渲染、上传取消、迟到搜索响应、保存期间继续编辑、冲突保留及离开新草稿后目标地址不丢失等回归。Cookie、真实文件下载和布局另用外部合成数据预览验收。API、图片持久化、运维与备份见 [Wiki 文档](../../docs/wiki.md)。
+
+
+## Excel 导入
+
+`/admin.html?section=accounts&tab=import` 为成员账号内的独立页签；`import_id` 只存不透明批次标识。`AccountsList.vue` 保留既有发放与账号管理，`AccountImport.vue` 负责专用流程，预览和结果组件在 `components/account-import/`。
+
+页面顶部提供带 `role="switch"` 和 `aria-checked` 的 Excel 导入开关，默认开启；通过 `PATCH /admin/account-imports/settings` 保存全站设置，刷新及重启后仍保留。关闭前确认影响范围；保存时锁定切换与上传、创建操作，失败保留原状态，不自动重试。关闭时开关仍显示，允许管理员重新开启；不清除已领取凭据或既有批次，不自动继续创建。
+
+普通下载复用 API 的 `responseType: 'blob'`，仍执行登录、CSRF、会话代次、取消和超时处理。密码只留在当前导入组件内存中，切换页签、整页离开、注销或会话变化时清除，离开前提示复制/下载。恢复页面只查询无密码状态，明确继续后才提交；超时不自动重试写操作。
+
+正式回归 `tests/account-import.test.mjs` 覆盖选择范围、结果不确定、恢复与继续、离页、会话隔离、旧响应隔离、凭据、下载和开关保存、失败、重复点击。`e2e/account-import-settings.spec.js` 通过真实 API 验证开关及刷新后状态，在桌面和移动端执行。测试数据库、体验服务、容量报告与截图均须放项目外。操作说明见 [admin-account-import.md](../../docs/admin-account-import.md)。
