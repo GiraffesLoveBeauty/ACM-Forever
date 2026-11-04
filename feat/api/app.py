@@ -18,6 +18,7 @@ from .acm_api.auth_service import hash_password, validate_password
 from .acm_api.account_lifecycle_service import AccountLifecycleError, bootstrap_root, user_lifecycle
 from .acm_api.database import connect_db
 from .acm_api.forum_api import forum_api
+from .acm_api.mobile_api import mobile_api
 from .acm_api.forum_notifications import forum_notification_api
 from .acm_api.wiki_api import wiki_api
 from .acm_api.wiki_cache import WikiResponseCache
@@ -375,6 +376,7 @@ def create_app():
     app.register_blueprint(account_closure_api, url_prefix="/api")
     app.register_blueprint(bot_api, url_prefix="/internal/v1")
     app.register_blueprint(forum_api, url_prefix="/api")
+    app.register_blueprint(mobile_api, url_prefix="/api/mobile/v1")
     app.register_blueprint(forum_notification_api, url_prefix="/api")
     app.register_blueprint(wiki_api, url_prefix="/api")
     app.register_blueprint(markdown_api, url_prefix="/api")

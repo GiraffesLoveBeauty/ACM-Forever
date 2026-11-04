@@ -2368,9 +2368,13 @@ def _leaderboard_user_filter(search):
     )
 
 
-async def _fetch_leaderboard(db, days, page, page_size, sort_key, search, platforms, paginate=True):
-    cutoff = int(time.time()) - days * 24 * 60 * 60 if days is not None else None
+async def _fetch_leaderboard(db, days, page, page_size, sort_key, search, platforms, paginate=True, start_time=None, end_time=None):
+    cutoff = start_time if start_time is not None else int(time.time()) - days * 24 * 60 * 60 if days is not None else None
     time_sql = " AND s.submit_time >= ?" if cutoff is not None else ""
+    time_values = [cutoff] if cutoff is not None else []
+    if end_time is not None:
+        time_sql += " AND s.submit_time < ?"
+        time_values.append(end_time)
     select_params = []
     platform_counts = []
     for platform, alias in (
@@ -2383,12 +2387,10 @@ async def _fetch_leaderboard(db, days, page, page_size, sort_key, search, platfo
         platform_counts.append(
             f"COUNT(DISTINCT CASE WHEN s.platform = '{platform}'{time_sql} THEN s.problem_id END) AS {alias}"
         )
-        if cutoff is not None:
-            select_params.append(cutoff)
+        select_params.extend(time_values)
     platform_sql = ", ".join(f"'{platform}'" for platform in platforms)
     total_sql = f"COUNT(DISTINCT CASE WHEN s.platform IN ({platform_sql})" + time_sql + " THEN s.platform || ':' || s.problem_id END) AS total_count"
-    if cutoff is not None:
-        select_params.append(cutoff)
+    select_params.extend(time_values)
     where_sql, where_params = _leaderboard_user_filter(search)
     query = (
         "SELECT u.qq_id, COALESCE(NULLIF(u.cf_handle, ''), u.name, u.qq_id) AS name, "

@@ -27,8 +27,12 @@ test('comments and replies preview Markdown, math and copyable code safely', asy
     (r) => r.url().endsWith('/posts/29/comments') && r.request().method() === 'POST',
   );
   await page.getByRole('button', { name: '发布评论', exact: true }).click();
-  expect((await posted).status()).toBe(201);
-  const comment = page.locator('.forum-comment').filter({ hasText: '思路说明' }).last();
+  const response = await posted;
+  expect(response.status()).toBe(201);
+  // Both viewport projects share the fixture database; wait for this new comment,
+  // rather than matching an identical body left by the preceding project.
+  const { id } = await response.json();
+  const comment = page.locator(`#comment-${id}`);
   await expect(comment.locator('strong')).toHaveText('思路说明');
   await expect(comment.locator('.katex').first()).toBeVisible();
   await comment.getByRole('button', { name: '回复', exact: true }).click();
