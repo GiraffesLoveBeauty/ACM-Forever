@@ -190,6 +190,7 @@ jobs:
 
             service_source="$target/api/deploy/acm-forever-webui.service"
             install -m 0644 "$service_source" "$service_dir/acm-forever-webui.service"
+            install -m 0755 "$target/api/deploy/acm-logs" /usr/local/bin/acm-logs
             systemctl daemon-reload
             if [ "$start_service" = false ]; then
               echo "Code, dependencies and systemd unit installed. Service startup was explicitly disabled."

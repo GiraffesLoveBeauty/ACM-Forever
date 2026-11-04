@@ -21,6 +21,7 @@ from quart import Blueprint, Response, current_app, jsonify, request, session
 import logging
 
 from .web_account_service import prepare_password, insert_web_account, creation_state, AccountCreationError
+from .event_log import remember_identity
 from .auth_service import (
     generate_temporary_password,
     hash_password,
@@ -257,7 +258,7 @@ async def _session_identity():
     """Resolve the current identity from the database on every protected request."""
     if session.get("webui_legacy"):
         if _legacy_login_enabled() and _admin_configured():
-            return {"qq_id": None, "role": "root", "must_change_password": False, "legacy": True}
+            return remember_identity({"qq_id": None, "role": "root", "must_change_password": False, "legacy": True})
         session.clear()
         return None
     if not session.get("webui_authenticated"):
@@ -280,14 +281,14 @@ async def _session_identity():
             or account["account_epoch"] != session.get("webui_account_epoch", 1)):
         session.clear()
         return None
-    return {
+    return remember_identity({
         "qq_id": qq_id,
         "role": account["role"],
         "must_change_password": bool(account["must_change_password"]),
         "credential_version": int(account["credential_version"]),
         "account_epoch": int(account["account_epoch"]),
         "legacy": False,
-    }
+    })
 
 
 async def _login_required_response(allow_password_change=False):
@@ -396,6 +397,7 @@ async def api_auth_login():
     if _login_rate_limited(rate_keys, now):
         return jsonify({"success": False, "message": "登录尝试过于频繁，请稍后再试。"}), 429
     account = None
+    login_name = ""
     temporary_password_expired = False
     if _valid_qq(qq_id):
         db = await get_db()
@@ -418,6 +420,9 @@ async def api_auth_login():
                     await db.rollback()
                     account = None
                 else:
+                    async with db.execute("SELECT name FROM users WHERE qq_id=?", (qq_id,)) as cursor:
+                        member = await cursor.fetchone()
+                        login_name = member["name"] if member else ""
                     await db.execute("UPDATE web_accounts SET last_login_at=?,updated_at=? WHERE qq_id=?", (int(time.time()), int(time.time()), qq_id))
                     await db.commit()
                     account = current
@@ -434,7 +439,6 @@ async def api_auth_login():
     )
     if not account and not legacy_login:
         _record_login_failure(rate_keys, now)
-        LOG.warning("WebUI 登录失败，来源=%s", _client_key())
         message = "临时密码已过期，请联系管理员重新发放。" if temporary_password_expired else "QQ号或密码错误。"
         return jsonify({"success": False, "message": message}), 401
     _clear_login_failures(rate_keys)
@@ -455,6 +459,7 @@ async def api_auth_login():
         must_change_password = bool(account["must_change_password"])
     session["webui_csrf"] = secrets.token_urlsafe(32)
     session.permanent = True
+    remember_identity({"qq_id": None if legacy_login else qq_id, "role": role, "legacy": legacy_login}, login_name)
     return jsonify({"success": True, "csrf_token": session["webui_csrf"], "root": role == "root", "role": role, "qq_id": qq_id or None, "must_change_password": must_change_password})
 
 
