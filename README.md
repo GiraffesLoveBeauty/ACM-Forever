@@ -2,6 +2,8 @@
 
 面向本校 ACM 学习与交流平台的工程代码仓库。
 
+算法标签、翻译及本地题库验收的范围、启动与限制见 [题目二次处理交付说明](docs/algorithm-tagging-delivery.md)。
+
 项目讨论、会议纪要和需求文档保存在 [CJLUACM-DLC 文档仓库](https://github.com/GiraffesLoveBeauty/CJLUACM-DLC)。
 
 ## 目录与部署

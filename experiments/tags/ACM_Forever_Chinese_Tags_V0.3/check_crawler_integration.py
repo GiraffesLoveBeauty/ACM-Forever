@@ -97,6 +97,8 @@ def audit_files(paths, *, limit_per_file=3, root=None, cache_roots=None, manifes
                                 "characters": len(item["original_statement"]),
                                 "sample_count": len(item.get("samples", [])),
                                 "omitted_outputs": sum(s["output"] is None for s in item.get("samples", [])),
+                                "unavailable_inputs": sum(s["input"] is None for s in item.get("samples", [])),
+                                "sample_attachment_count": sum(len(s.get("attachments", [])) for s in item.get("samples", [])),
                                 "samples_embedded_in_markdown": bool(markdown and "```" in markdown),
                                 "source_links": item["source_links"], "raw_tags": item["raw_tags"],
                                 "source_statement_sha256": item["source_statement_sha256"],
