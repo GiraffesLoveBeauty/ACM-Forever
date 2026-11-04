@@ -7,6 +7,7 @@ from pathlib import Path
 
 import aiosqlite
 
+from .account_lifecycle_service import require_web_actor
 from .cf_client import CFUnavailable, binding_key, cf_request
 from .cf_practice import PracticeError, iso, metadata, normalize_problem, resolve_scope
 
@@ -43,10 +44,12 @@ class PracticeJobs:
         if active:
             await asyncio.gather(*active, return_exceptions=True)
 
-    async def submit(self, kind, payload):
+    async def submit(self, kind, payload, *, identity=None):
         db = await open_db(self.db_path)
         try:
             await db.execute("BEGIN IMMEDIATE")
+            if identity is not None:
+                await require_web_actor(db, identity, roles={"admin", "root"})
             scope, members = await resolve_scope(db, payload, self.query.data_ttl)
             if not members:
                 raise PracticeError("参与范围为空，无法创建任务", "empty_scope")
@@ -62,7 +65,7 @@ class PracticeJobs:
             job_id = uuid.uuid4().hex
             await db.execute("INSERT INTO cf_practice_jobs(id,kind,status,payload,scope_fingerprint,created_at) VALUES(?,?,'queued',?,?,?)", (job_id, kind, serialized, scope["fingerprint"], int(time.time())))
             if kind == "sync":
-                await db.executemany("INSERT INTO cf_practice_job_members(job_id,qq_id,handle,binding_key,status) VALUES(?,?,?,?,'queued')", [(job_id, member["qq_id"], member["cf_handle"], binding_key(member)) for member in members])
+                await db.executemany("INSERT INTO cf_practice_job_members(job_id,qq_id,handle,binding_key,account_epoch,status) VALUES(?,?,?,?,?,'queued')", [(job_id, member["qq_id"], member["cf_handle"], binding_key(member), member["account_epoch"]) for member in members])
             await db.commit()
         finally:
             await db.close()
@@ -74,7 +77,16 @@ class PracticeJobs:
     async def _update(self, job_id, status, *, result=None, error_code=None, error_message=None):
         db = await open_db(self.db_path)
         try:
+            await db.execute("BEGIN IMMEDIATE")
             now = int(time.time())
+            async with db.execute("SELECT kind,privacy_revision FROM cf_practice_jobs WHERE id=?", (job_id,)) as cursor:
+                job = await cursor.fetchone()
+            if job and job["privacy_revision"]:
+                if job["kind"] != "sync":
+                    status, result, error_code, error_message = "failed", None, "scope_changed", "成员范围已变化，请重新核验"
+                elif isinstance(result, dict):
+                    # Only aggregates from a pre-closure snapshot may survive.
+                    result = {key: value for key, value in result.items() if key in {"scope_fingerprint", "member_count", "success_count", "failed_count"}}
             await db.execute("UPDATE cf_practice_jobs SET status=?,started_at=COALESCE(started_at,?),finished_at=?,result=?,error_code=?,error_message=? WHERE id=?", (status, now, None if status == "running" else now, json.dumps(result, ensure_ascii=False) if result is not None else None, error_code, error_message, job_id))
             await db.commit()
         finally:
@@ -83,8 +95,10 @@ class PracticeJobs:
     async def _member_update(self, job_id, qq_id, status, code=None, message=None):
         db = await open_db(self.db_path)
         try:
-            await db.execute("UPDATE cf_practice_job_members SET status=?,error_code=?,error_message=?,finished_at=? WHERE job_id=? AND qq_id=?", (status, code, message, None if status == "running" else int(time.time()), job_id, qq_id))
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute("UPDATE cf_practice_job_members SET status=?,error_code=?,error_message=?,finished_at=? WHERE job_id=? AND qq_id=? AND status<>'cancelled' AND account_epoch>0 AND EXISTS(SELECT 1 FROM users u WHERE u.qq_id=cf_practice_job_members.qq_id AND u.account_state='active' AND u.account_epoch=cf_practice_job_members.account_epoch)", (status, code, message, None if status == "running" else int(time.time()), job_id, qq_id))
             await db.commit()
+            return cursor.rowcount == 1
         finally:
             await db.close()
 
@@ -129,30 +143,35 @@ class PracticeJobs:
             await self._finish_members(job_id, "failed", "internal_error", "后台任务失败，请重试")
 
     async def _run_sync(self, job_id, payload):
-        async def scope_operation(db, data):
-            return await resolve_scope(db, data, self.query.data_ttl)
-        scope, members = await self._snapshot(payload, scope_operation)
+        db = await open_db(self.db_path)
+        try:
+            async with db.execute("SELECT u.*,m.account_epoch captured_epoch,m.binding_key captured_binding,m.handle captured_handle FROM cf_practice_job_members m JOIN users u ON u.qq_id=m.qq_id WHERE m.job_id=? ORDER BY m.qq_id", (job_id,)) as cursor:
+                members = [dict(row) for row in await cursor.fetchall()]
+        finally:
+            await db.close()
+        scope = {"fingerprint": payload.get("expected_scope_fingerprint")}
         successes = 0
         for member in members:
             qq_id = member["qq_id"]
             if not (member["cf_handle"] or "").strip():
                 await self._member_update(job_id, qq_id, "failed", "unbound", "未绑定 CF，请先处理账号绑定")
                 continue
-            await self._member_update(job_id, qq_id, "running")
+            if not await self._member_update(job_id, qq_id, "running"):
+                continue
             db = await open_db(self.db_path)
             try:
                 async with db.execute("SELECT * FROM users WHERE qq_id=?", (qq_id,)) as cursor:
                     current = await cursor.fetchone()
             finally:
                 await db.close()
-            if not current or binding_key(current) != binding_key(member):
+            if not current or current["account_state"] != "active" or current["account_epoch"] != member["captured_epoch"] or binding_key(current) != member["captured_binding"]:
                 await self._member_update(job_id, qq_id, "failed", "binding_changed", "CF 绑定已变化，请重新选择范围")
                 continue
-            task = {}
+            task = {"account_epoch": member["captured_epoch"]}
             await self.engine.sync_account(qq_id, ["codeforces"], task, days=0, incremental=True)
             if task.get("status") == "completed":
-                successes += 1
-                await self._member_update(job_id, qq_id, "completed")
+                if await self._member_update(job_id, qq_id, "completed"):
+                    successes += 1
             else:
                 await self._member_update(job_id, qq_id, "failed", "sync_failed", "CF 历史同步未完成，数据不能判为可用")
         warnings = await self.refresh_metadata({"catalog": True, "contests": []})
@@ -263,7 +282,8 @@ class PracticeJobs:
                 raise PracticeError("任务不存在", "job_not_found", 404)
             item = dict(item)
             payload = json.loads(item["payload"])
-            await resolve_scope(db, payload, self.query.data_ttl)
+            if not item["privacy_revision"]:
+                await resolve_scope(db, payload, self.query.data_ttl)
             result = json.loads(item["result"]) if item["result"] else None
             if item["kind"] == "check" and item["status"] in {"completed", "partial"}:
                 # Revalidate both scope and evidence at collection time, not only at job creation.
@@ -272,7 +292,7 @@ class PracticeJobs:
                     warnings = json.loads(item["result"]).get("metadata_warnings")
                     if warnings:
                         result["metadata_warnings"] = warnings
-            async with db.execute("SELECT qq_id,handle,status,error_code,error_message,finished_at FROM cf_practice_job_members WHERE job_id=? ORDER BY qq_id", (job_id,)) as cursor:
+            async with db.execute("SELECT CASE WHEN u.account_state<>'active' OR u.account_epoch<>m.account_epoch THEN NULL ELSE m.qq_id END qq_id,m.handle,m.status,m.error_code,m.error_message,m.finished_at FROM cf_practice_job_members m LEFT JOIN users u ON u.qq_id=m.qq_id WHERE job_id=? ORDER BY m.qq_id", (job_id,)) as cursor:
                 members = [dict(row) for row in await cursor.fetchall()]
             for member in members:
                 member["finished_at"] = iso(member["finished_at"])

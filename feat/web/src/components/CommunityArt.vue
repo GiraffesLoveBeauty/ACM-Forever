@@ -1,13 +1,29 @@
 <script setup>
+import { computed, inject } from 'vue';
+import MinecraftPodium from './MinecraftPodium.vue';
+import MinecraftJourney from './MinecraftJourney.vue';
+const getDesignTemplate = inject('getDesignTemplate', () => 'original');
+const isMinecraft = computed(() => getDesignTemplate() === 'minecraft');
 defineProps({ scene: { type: String, default: 'podium' } });
 </script>
 <template>
   <figure
     class="community-header-art"
-    :aria-label="scene === 'podium' ? '立体 AC 阶梯' : '解题轨迹'"
+    :aria-label="
+      scene === 'podium'
+        ? isMinecraft
+          ? '草地方块领奖台'
+          : '立体 AC 阶梯'
+        : isMinecraft
+          ? '方块工坊探索小径'
+          : '解题轨迹'
+    "
   >
     <div class="header-art-layer">
+      <MinecraftPodium v-if="isMinecraft && scene === 'podium'" />
+      <MinecraftJourney v-else-if="isMinecraft && scene === 'journey'" />
       <svg
+        v-else
         class="header-art-scene"
         viewBox="0 0 320 190"
         role="img"
@@ -55,7 +71,9 @@ defineProps({ scene: { type: String, default: 'podium' } });
           </g>
           <text x="205" y="166" class="header-art-note">one step at a time</text>
         </template></svg
-      ><span class="header-art-caption" aria-hidden="true">AC · keep climbing</span>
+      ><span v-if="!isMinecraft" class="header-art-caption" aria-hidden="true"
+        >AC · keep climbing</span
+      >
     </div>
   </figure>
 </template>

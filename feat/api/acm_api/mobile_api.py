@@ -6,6 +6,8 @@ from quart import Blueprint, jsonify, request
 from .backend_api import get_db, member_required
 from .forum_api import public_leaderboard, public_posts, post_detail as web_post_detail
 from .mobile_profiles import prepare_public_profiles
+from .account_closure_service import closed_author_sql
+from .account_lifecycle_service import require_web_actor
 
 mobile_api = Blueprint("mobile_api", __name__)
 PLATFORMS = (
@@ -41,7 +43,9 @@ async def with_public_authors(response, detail=False):
         async with db.execute(
             "SELECT p.id,mp.public_member_id FROM forum_posts p "
             "JOIN mobile_public_profiles mp ON mp.qq_id=p.author_qq_id "
-            f"WHERE p.id IN ({placeholders})", tuple(row["id"] for row in rows),
+            "JOIN users u ON u.qq_id=p.author_qq_id "
+            f"WHERE NOT {closed_author_sql('forum_post', 'p')} AND mp.account_epoch=u.account_epoch "
+            f"AND p.id IN ({placeholders})", tuple(row["id"] for row in rows),
         ) as cursor:
             authors = {row["id"]: row["public_member_id"] for row in await cursor.fetchall()}
         for row in rows:
@@ -52,7 +56,9 @@ async def with_public_authors(response, detail=False):
             async with db.execute(
                 "SELECT cm.id,mp.public_member_id FROM forum_comments cm "
                 "JOIN mobile_public_profiles mp ON mp.qq_id=cm.author_qq_id "
-                f"WHERE cm.id IN ({placeholders})", tuple(row["id"] for row in comments),
+                "JOIN users u ON u.qq_id=cm.author_qq_id "
+                f"WHERE NOT {closed_author_sql('forum_comment', 'cm')} AND mp.account_epoch=u.account_epoch "
+                f"AND cm.id IN ({placeholders})", tuple(row["id"] for row in comments),
             ) as cursor:
                 authors = {row["id"]: row["public_member_id"] for row in await cursor.fetchall()}
             for comment in comments:
@@ -83,7 +89,7 @@ async def public_profile(db, *, public_id=None, qq_id=None):
         "CASE WHEN NULLIF(u.name,'') IS NULL OR u.name=u.qq_id THEN 'ACM 成员' ELSE u.name END AS name,"
         + counts + " FROM users u JOIN mobile_public_profiles mp ON mp.qq_id=u.qq_id "
         "LEFT JOIN submissions s ON s.user_qq_id=u.qq_id "
-        f"WHERE {field}=? GROUP BY u.qq_id", (value,),
+        f"WHERE {field}=? AND u.account_state='active' AND mp.account_epoch=u.account_epoch GROUP BY u.qq_id", (value,),
     ) as cursor:
         row = await cursor.fetchone()
     if row is None:
@@ -110,7 +116,8 @@ async def member_profile(public_member_id):
 async def member_posts(public_member_id):
     db = await get_db()
     try:
-        async with db.execute("SELECT qq_id FROM mobile_public_profiles WHERE public_member_id=?", (public_member_id,)) as cursor:
+        async with db.execute("SELECT mp.qq_id FROM mobile_public_profiles mp JOIN users u ON u.qq_id=mp.qq_id "
+                              "WHERE mp.public_member_id=? AND u.account_state='active' AND mp.account_epoch=u.account_epoch", (public_member_id,)) as cursor:
             member = await cursor.fetchone()
         if member is None:
             return jsonify({"message": "公开成员不存在。"}), 404
@@ -135,6 +142,8 @@ async def own_public_profile():
     try:
         await prepare_public_profiles(db)
         if motto is not None:
+            await db.execute("BEGIN IMMEDIATE")
+            await require_web_actor(db, request.web_identity)
             await db.execute("UPDATE mobile_public_profiles SET motto=?,updated_at=? WHERE qq_id=?", (motto, int(time.time()), qq_id))
             await db.commit()
         result = await public_profile(db, qq_id=qq_id)

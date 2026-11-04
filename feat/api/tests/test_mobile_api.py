@@ -10,6 +10,7 @@ from unittest.mock import patch
 from feat.api.app import create_app
 from feat.api.acm_api.auth_service import hash_password
 from feat.api.acm_api.database import connect_db
+from feat.api.acm_api.mobile_profiles import initialize_mobile_profiles
 
 
 class MobileApiTests(unittest.IsolatedAsyncioTestCase):
@@ -147,6 +148,7 @@ class MobileApiTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
         finally:
             await db.close()
+
         db = await connect_db(self.db_path)
         try:
             async with db.execute("SELECT qq_id,public_member_id FROM mobile_public_profiles") as cursor:
@@ -171,3 +173,62 @@ class MobileApiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await cursor.fetchone())[0], 5)
         finally:
             await db.close()
+
+    async def test_old_mobile_table_upgrades_without_linking_recreated_accounts(self):
+        db = await connect_db(self.db_path)
+        try:
+            await db.execute("DROP TABLE mobile_public_profiles")
+            await db.execute("CREATE TABLE mobile_public_profiles (qq_id TEXT PRIMARY KEY, public_member_id TEXT NOT NULL UNIQUE, motto TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL DEFAULT 0)")
+            await db.executemany("INSERT INTO mobile_public_profiles(qq_id,public_member_id,motto) VALUES(?,?,?)", [
+                ("900001", "first-identity", "保留"), ("900002", "retired-identity", "不继承"),
+            ])
+            await db.execute("UPDATE users SET account_epoch=2 WHERE qq_id='900002'")
+            await initialize_mobile_profiles(db)
+            await db.commit()
+            async with db.execute("SELECT qq_id,public_member_id,motto,account_epoch FROM mobile_public_profiles") as cursor:
+                first = {row["qq_id"]: dict(row) for row in await cursor.fetchall()}
+            self.assertEqual((first["900001"]["public_member_id"], first["900001"]["motto"], first["900001"]["account_epoch"]), ("first-identity", "保留", 1))
+            self.assertNotEqual(first["900002"]["public_member_id"], "retired-identity")
+            self.assertEqual((first["900002"]["motto"], first["900002"]["account_epoch"]), ("", 2))
+            await initialize_mobile_profiles(db)
+            await db.commit()
+            async with db.execute("SELECT qq_id,public_member_id,motto,account_epoch FROM mobile_public_profiles") as cursor:
+                self.assertEqual({row["qq_id"]: dict(row) for row in await cursor.fetchall()}, first)
+        finally:
+            await db.close()
+
+    async def test_closure_and_same_qq_registration_never_reuse_public_identity(self):
+        self.app.config["ACCOUNT_CLOSURE_ENABLED"] = True
+        headers = await self.login()
+        own = await self.json_get("/api/mobile/v1/me/public-profile")
+        old_id = own["public_member_id"]
+        db = await connect_db(self.db_path)
+        try:
+            await db.execute("UPDATE web_accounts SET role='root' WHERE qq_id='900002'")
+            await db.commit()
+        finally:
+            await db.close()
+        admin = self.app.test_client()
+        admin_headers = await self.login("900002", admin)
+        preview = await self.json_get("/api/me/account-closure/preview")
+        response = await self.client.post("/api/me/account-closure", json={
+            "current_password": "Test-Password-123!", "confirm_text": "注销账号",
+            "policy_version": preview["policy_version"], "expected_account_epoch": preview["account_epoch"],
+        }, headers={**headers, "Idempotency-Key": preview["request_id"], "X-Closure-Receipt": preview["receipt_token"]})
+        self.assertEqual(response.status_code, 200, await response.get_json())
+        for suffix in ("", "/posts"):
+            self.assertEqual((await self.client.get("/api/mobile/v1/members/" + old_id + suffix)).status_code, 404)
+        detail = await self.json_get("/api/mobile/v1/forum/posts/" + str(self.posts["published"]))
+        self.assertTrue(detail["author_closed"])
+        self.assertIsNone(detail["author_public_member_id"])
+        created = await admin.post("/api/admin/web-accounts", json={"qq_id": "900001", "name": "新身份", "initial_password": "Fresh-Password-456!"}, headers=admin_headers)
+        self.assertEqual(created.status_code, 201, await created.get_json())
+        self.assertEqual((await self.client.get("/api/mobile/v1/members/" + old_id)).status_code, 404)
+        ranks = await self.json_get("/api/mobile/v1/leaderboard?days=all")
+        new_id = next(row["public_member_id"] for row in ranks["rows"] if row["name"] == "新身份")
+        self.assertNotEqual(new_id, old_id)
+        profile = await self.json_get("/api/mobile/v1/members/" + new_id)
+        self.assertEqual((profile["total_count"], profile["motto"]), (0, ""))
+        self.assertEqual((await self.json_get("/api/mobile/v1/members/" + new_id + "/posts"))["total"], 0)
+        detail = await self.json_get("/api/mobile/v1/forum/posts/" + str(self.posts["published"]))
+        self.assertIsNone(detail["author_public_member_id"])

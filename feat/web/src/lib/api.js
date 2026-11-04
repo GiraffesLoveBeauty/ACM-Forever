@@ -5,16 +5,19 @@ const anonymousAuth = () => ({
   authenticated: false,
   role: null,
   qq_id: null,
+  account_epoch: null,
   csrf_token: '',
   avatar_url: null,
   must_change_password: false,
+  account_closure_enabled: false,
 });
 export const auth = reactive(anonymousAuth());
 export function setAuth(data, newSession = false) {
   if (
     newSession ||
     Boolean(data.authenticated) !== auth.authenticated ||
-    (data.qq_id ?? null) !== auth.qq_id
+    (data.qq_id ?? null) !== auth.qq_id ||
+    (data.account_epoch ?? null) !== auth.account_epoch
   )
     resetAdminSession();
   for (const key of Object.keys(auth)) delete auth[key];
@@ -29,6 +32,7 @@ export async function logoutSession() {
   setAuth(anonymousAuth(), true);
 }
 export const notification = ref('');
+export const pageLoadError = ref(null);
 let noticeTimer;
 export function notify(message) {
   notification.value = String(message || '');
@@ -37,13 +41,27 @@ export function notify(message) {
     notification.value = '';
   }, 5000);
 }
-export function safeNext(value, fallback = '/index.html') {
-  return typeof value === 'string' &&
-    value.startsWith('/') &&
-    !value.startsWith('//') &&
-    !/[\\\x00-\x1f]/.test(value)
-    ? value
-    : fallback;
+export function safeNext(value, fallback = '/index.html', exclude = []) {
+  if (
+    typeof value !== 'string' ||
+    !value.startsWith('/') ||
+    value.startsWith('//') ||
+    /[\\\x00-\x1f\x7f]/.test(value)
+  )
+    return fallback;
+  try {
+    const url = new URL(value, 'https://acm.invalid');
+    const path = decodeURIComponent(url.pathname).toLowerCase();
+    if (
+      path.startsWith('//') ||
+      /[\\\x00-\x1f\x7f]/.test(path) ||
+      ['/login.html', '/auth-unavailable.html', '/forbidden.html', ...exclude].includes(path)
+    )
+      return fallback;
+    return value;
+  } catch {
+    return fallback;
+  }
 }
 export function avatar(value) {
   return /^\/uploads\/avatars\/[a-f0-9]{32}\.(png|jpg|webp)$/.test(value || '')
@@ -92,7 +110,9 @@ export async function api(path, options = {}) {
       delete body.owner_qq_id;
     }
   }
-  const { timeoutMs = 15000, signal, ...rest } = options;
+  const closureRequest =
+    path === '/me/account-closure' || /^\/account-closures\/[a-f0-9]{32}$/.test(path);
+  const { timeoutMs = 15000, signal, responseType, ...rest } = options;
   const controller = new AbortController();
   const abort = () => controller.abort();
   if (signal?.aborted) abort();
@@ -114,7 +134,10 @@ export async function api(path, options = {}) {
         ...rest.headers,
       },
     });
-    const data = await response.json().catch(() => ({}));
+    const data =
+      response.ok && responseType === 'blob'
+        ? await response.blob()
+        : await response.json().catch(() => ({}));
     if (sessionVersion !== adminSessionVersion())
       throw new DOMException('登录会话已改变', 'AbortError');
     if (
@@ -122,14 +145,16 @@ export async function api(path, options = {}) {
       (!path.startsWith('/auth/') || ['/auth/me', '/auth/logout'].includes(path))
     ) {
       setAuth(anonymousAuth(), true);
-      if (!path.startsWith('/auth/'))
+      if (!closureRequest && !path.startsWith('/auth/'))
         location.assign(
-          '/login.html?next=' + encodeURIComponent(location.pathname + location.search),
+          '/login.html?next=' +
+            encodeURIComponent(location.pathname + location.search + (location.hash || '')),
         );
     }
     if (response.status === 428 && location.pathname !== '/change-password.html')
       location.assign(
-        '/change-password.html?next=' + encodeURIComponent(location.pathname + location.search),
+        '/change-password.html?next=' +
+          encodeURIComponent(location.pathname + location.search + (location.hash || '')),
       );
     if (!response.ok)
       throw Object.assign(Error(data.message || data.error || `HTTP ${response.status}`), {
@@ -191,4 +216,31 @@ export function useRequests() {
 }
 export function showError(error) {
   if (error.name !== 'AbortError') notify(error.message);
+}
+
+// Only an invalidation signal is shared. Receipt capabilities stay in this tab.
+export function finishAccountClosure() {
+  setAuth(anonymousAuth(), true);
+  initialization = null;
+  try {
+    localStorage.setItem('acm-account-closed', String(Date.now()) + ':' + Math.random());
+  } catch {
+    /* Server-side epoch checks still revoke every old session. */
+  }
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', async (event) => {
+    if (event.key !== 'acm-account-closed' || !event.newValue) return;
+    initialization = null;
+    try {
+      // Another tab may already have logged into a fresh account generation.
+      // Revalidate the shared cookie before discarding that new login.
+      const current = await api('/auth/me');
+      setAuth(current);
+      if (current.authenticated) return;
+    } catch {
+      setAuth(anonymousAuth(), true);
+    }
+    location.replace('/index.html');
+  });
 }

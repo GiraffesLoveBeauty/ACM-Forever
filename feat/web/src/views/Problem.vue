@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router';
 import { auth, date, useRequests } from '../lib/api.js';
 import { originalProblemUrl, renderProblemContent } from '../lib/problem-content.js';
 import PdfPreview from '../components/PdfPreview.vue';
+import { problemReturn } from '../lib/member-problems.js';
 
 const route = useRoute(),
   request = useRequests();
@@ -11,11 +12,40 @@ const detail = ref(null),
   busy = ref(false),
   error = ref(''),
   copyMessage = ref('');
-const back = computed(() =>
-  ['admin', 'root'].includes(auth.role) ? '/admin.html?section=problems' : '/problem-bank.html',
-);
+const back = computed(() => problemReturn(route.query.from, ['admin', 'root'].includes(auth.role)));
 const original = computed(() => originalProblemUrl(detail.value?.problem_url));
 const samples = computed(() => (Array.isArray(detail.value?.samples) ? detail.value.samples : []));
+const sampleFiles = computed(() =>
+  samples.value.map((sample) => {
+    if (!Array.isArray(sample?.attachments)) return [];
+    return sample.attachments.flatMap((attachment) => {
+      if (typeof attachment?.url !== 'string') return [];
+      try {
+        const url = new URL(attachment.url);
+        if (
+          url.protocol !== 'https:' ||
+          url.hostname !== 'img.atcoder.jp' ||
+          url.username ||
+          url.password ||
+          url.port ||
+          !url.pathname.toLowerCase().endsWith('.zip')
+        )
+          return [];
+        return [
+          {
+            url: url.href,
+            name:
+              typeof attachment.name === 'string' && attachment.name.trim()
+                ? attachment.name
+                : '官方样例 ZIP',
+          },
+        ];
+      } catch {
+        return [];
+      }
+    });
+  }),
+);
 const pdf = computed(() => detail.value?.statement_format === 'pdf');
 const pdfUrl = computed(() =>
   detail.value
@@ -54,7 +84,11 @@ async function load() {
   }
 }
 async function copySample(index, kind, button) {
-  if (!['input', 'output'].includes(kind) || !Number.isInteger(index) || !samples.value[index])
+  if (
+    !['input', 'output'].includes(kind) ||
+    !Number.isInteger(index) ||
+    typeof samples.value[index]?.[kind] !== 'string'
+  )
     return;
   const current = revision;
   try {
@@ -75,7 +109,9 @@ watch(() => [route.query.platform, route.query.problem_id], load, { immediate: t
 </script>
 <template>
   <main class="community-main problem-page">
-    <RouterLink class="forum-back-link" :to="back">← 返回题库</RouterLink>
+    <RouterLink class="forum-back-link" :to="back"
+      >← {{ back === '/home.html' ? '返回个人中心' : '返回题库' }}</RouterLink
+    >
     <h1>{{ detail?.problem_name || route.query.problem_id || '题目详情' }}</h1>
     <div v-if="detail" class="problem-overview">
       <div id="problem-meta" class="chips">
@@ -152,11 +188,27 @@ watch(() => [route.query.platform, route.query.problem_id], load, { immediate: t
         <h2>样例</h2>
         <div v-for="(sample, index) in samples" :key="index" class="problem-sample-grid">
           <div v-for="kind in ['input', 'output']" :key="kind">
-            <h3>样例 {{ index + 1 }} · {{ kind === 'input' ? '输入' : '输出' }}</h3>
-            <pre>{{ sample[kind] }}</pre>
-            <button class="btn problem-copy" @click="copySample(index, kind)">
-              复制样例 {{ index + 1 }} {{ kind === 'input' ? '输入' : '输出' }}
-            </button>
+            <template v-if="sample[kind] === null && sample[kind + '_note']">
+              <h3>样例 {{ index + 1 }} · {{ kind === 'input' ? '输入' : '输出' }}说明</h3>
+              <p>{{ sample[kind + '_note'] }}</p>
+            </template>
+            <template v-else>
+              <h3>样例 {{ index + 1 }} · {{ kind === 'input' ? '输入' : '输出' }}</h3>
+              <pre>{{ sample[kind] }}</pre>
+              <button class="btn problem-copy" @click="copySample(index, kind)">
+                复制样例 {{ index + 1 }} {{ kind === 'input' ? '输入' : '输出' }}
+              </button>
+            </template>
+          </div>
+          <div v-if="sampleFiles[index].length" class="problem-sample-attachments">
+            <h3>样例附件</h3>
+            <ul>
+              <li v-for="attachment in sampleFiles[index]" :key="attachment.url">
+                <a :href="attachment.url" target="_blank" rel="noopener noreferrer">{{
+                  attachment.name
+                }}</a>
+              </li>
+            </ul>
           </div>
         </div>
       </section>

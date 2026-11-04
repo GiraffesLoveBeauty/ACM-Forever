@@ -51,17 +51,19 @@ async function api(path,opt={}){
   }finally{if(timer)clearTimeout(timer);if(controller)externalSignal?.removeEventListener('abort',abort)}
 }
 
+function canManage(){return AUTH.authenticated&&['admin','root'].includes(AUTH.role)}
+
 function navItems(){
   const common=[['forum','⌂ 论坛','/index.html'],['leaderboard','♛ 排行榜','/leaderboard.html'],['home','◉ 个人中心','/home.html']];
   if(!AUTH.authenticated)return [...common.slice(0,2),['login','登录','/login.html']];
-  if(AUTH.role==='member')return common;
+  if(!canManage())return common;
   return [...common,['admin','⚙ 管理后台','/admin.html']];
 }
 
 async function renderNav(){
   const items=navItems();
   let order=items.map(item=>item[0]),hidden=new Set();
-  if(AUTH.role==='admin'||AUTH.role==='root'){
+  if(canManage()){
     try{const preferences=await api('/ui/preferences');if(preferences.font_scale)document.documentElement.style.setProperty('--font-scale',preferences.font_scale)}catch{}
     if(!order.includes('admin'))order.push('admin');
   }

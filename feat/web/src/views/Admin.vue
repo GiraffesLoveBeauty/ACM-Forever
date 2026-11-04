@@ -1,12 +1,9 @@
 <script setup>
-import { computed, provide, inject, defineAsyncComponent, onMounted } from 'vue';
-import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
+import { computed, provide, defineAsyncComponent, onMounted } from 'vue';
+import { useRoute, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 import { sections } from '../router.js';
-import { api, logoutSession, showError } from '../lib/api.js';
-const route = useRoute(),
-  router = useRouter(),
-  openTheme = inject('openTheme');
-const toggleTheme = inject('toggleTheme');
+import { api, showError } from '../lib/api.js';
+const route = useRoute();
 const modules = {
   accounts: defineAsyncComponent(() => import('../admin/Accounts.vue')),
   members: defineAsyncComponent(() => import('../admin/Members.vue')),
@@ -17,6 +14,7 @@ const modules = {
   tasks: defineAsyncComponent(() => import('../admin/Tasks.vue')),
   moderation: defineAsyncComponent(() => import('../admin/Moderation.vue')),
   settings: defineAsyncComponent(() => import('../admin/Settings.vue')),
+  wiki: defineAsyncComponent(() => import('../admin/Wiki.vue')),
 };
 const section = computed(() =>
   Object.hasOwn(sections, route.query.section) ? route.query.section : 'accounts',
@@ -28,20 +26,15 @@ provide('registerLeaveGuard', (handler) => {
     if (leaveGuard === handler) leaveGuard = () => true;
   };
 });
-onBeforeRouteLeave(() => leaveGuard());
+onBeforeRouteLeave((to) => leaveGuard(to));
 onBeforeRouteUpdate((to) => {
-  if ((to.query.section || 'accounts') !== section.value) return leaveGuard();
+  if (
+    (to.query.section || 'accounts') !== section.value ||
+    (section.value === 'accounts' &&
+      (to.query.tab !== route.query.tab || to.query.import_id !== route.query.import_id))
+  )
+    return leaveGuard(to);
 });
-async function logout() {
-  if (!(await leaveGuard())) return;
-  try {
-    await logoutSession();
-    leaveGuard = () => true;
-    await router.push('/index.html');
-  } catch (e) {
-    showError(e);
-  }
-}
 onMounted(async () => {
   try {
     const preferences = await api('/ui/preferences');
@@ -52,65 +45,59 @@ onMounted(async () => {
 });
 </script>
 <template>
-  <div class="admin-shell">
-    <aside class="admin-rail" aria-label="管理后台导航">
-      <RouterLink class="admin-brand" to="/admin.html"
-        ><span class="admin-brand-mark">A<span>C</span></span
-        ><span><b>ACM Forever</b><small>管理后台</small></span></RouterLink
-      >
-      <nav class="admin-nav" aria-label="功能模块">
-        <template v-for="(label, key) in sections" :key="key"
-          ><div
-            v-if="['accounts', 'training', 'moderation'].includes(key)"
-            class="admin-rail-label"
-          >
-            {{ { accounts: '账户与成员', training: '训练与题目', moderation: '社区与系统' }[key] }}
-          </div>
-          <RouterLink
-            :to="key === 'accounts' ? '/admin.html' : `/admin.html?section=${key}`"
-            :class="{ active: section === key }"
-            ><span class="admin-nav-icon">{{
-              {
-                accounts: '▤',
-                members: '◉',
-                training: '◎',
-                problems: '▦',
-                'cf-practice': '⌘',
-                contests: '◈',
-                tasks: '↻',
-                moderation: '☷',
-                settings: '⚙',
-              }[key]
-            }}</span
-            >{{ label }}</RouterLink
-          ></template
-        >
-      </nav>
-      <div class="admin-rail-foot">
-        <RouterLink class="admin-return" to="/index.html">← 返回社区</RouterLink
-        ><span class="admin-rail-status"
-          ><span class="admin-status-dot"></span> 管理操作即时生效</span
-        >
+  <main class="admin-home-layout" :class="{ 'wiki-workspace': section === 'wiki' }">
+    <header class="forum-welcome admin-welcome">
+      <div class="industrial-hero-dots" aria-hidden="true"></div>
+      <div class="industrial-hero-copy">
+        <span class="forum-kicker">ACM FOREVER / 管理工作台</span>
+        <h1>{{ sections[section] }}</h1>
+        <p>维护成员、训练与社区，让每一项管理工作都清楚、有序。</p>
+      </div>
+      <div class="industrial-hero-bottom" aria-hidden="true">
+        <span>管理工作台</span><span>学习 / 训练 / 社区</span>
+      </div>
+    </header>
+    <aside class="admin-module-sidebar" aria-label="管理后台导航">
+      <div class="forum-rail-card admin-module-card">
+        <p class="admin-module-title">管理功能</p>
+        <nav class="admin-module-nav" aria-label="功能模块">
+          <template v-for="(label, key) in sections" :key="key">
+            <div
+              v-if="['accounts', 'training', 'moderation'].includes(key)"
+              class="admin-module-group"
+            >
+              {{
+                { accounts: '账户与成员', training: '训练与题目', moderation: '社区与系统' }[key]
+              }}
+            </div>
+            <RouterLink
+              :to="key === 'accounts' ? '/admin.html' : `/admin.html?section=${key}`"
+              :class="{ active: section === key }"
+              ><span class="admin-module-nav-icon">{{
+                {
+                  accounts: '▤',
+                  members: '◉',
+                  training: '◎',
+                  problems: '▦',
+                  'cf-practice': '⌘',
+                  contests: '◈',
+                  tasks: '↻',
+                  moderation: '☷',
+                  settings: '⚙',
+                  wiki: '▧',
+                }[key]
+              }}</span
+              >{{ label }}</RouterLink
+            >
+          </template>
+        </nav>
+        <p class="admin-module-note"><span aria-hidden="true">●</span> 管理操作即时生效</p>
       </div>
     </aside>
-    <main class="admin-main">
-      <header class="admin-topbar">
-        <div>
-          <p class="admin-page-path">管理后台 <span>/</span> {{ sections[section] }}</p>
-          <h1>{{ sections[section] }}</h1>
-          <p class="admin-lede">维护成员、训练和社区。</p>
-        </div>
-        <div class="admin-actions">
-          <RouterLink class="admin-action-link" to="/change-password.html?next=/admin.html"
-            >修改密码</RouterLink
-          ><button class="admin-icon-button" aria-label="切换主题" @click="toggleTheme">◐</button>
-          <button class="admin-action-link" @click="openTheme">自助调色</button
-          ><button class="admin-logout" @click="logout">退出</button>
-        </div>
-      </header>
-      <div class="admin-workspace admin-module">
+    <section class="admin-workspace">
+      <div class="admin-module">
         <component :is="modules[section]" :key="section" />
       </div>
-    </main>
-  </div>
+    </section>
+  </main>
 </template>

@@ -20,6 +20,7 @@ from quart import Blueprint, Response, current_app, jsonify, request, session
 
 import logging
 
+from .web_account_service import prepare_password, insert_web_account, creation_state, AccountCreationError
 from .auth_service import (
     generate_temporary_password,
     hash_password,
@@ -32,10 +33,24 @@ from .reporting import valid_contest_report_time
 from .cf_client import cf_request
 from .problem_sync import sync_options
 from .problem_bank import problem_bank_status
+from .problem_tracker import attempt_problem_metadata, contest_tracker, problem_id_aliases, tracker_options
 from .database import connect_db
+from .account_lifecycle_service import (
+    AccountLifecycleError, require_active_user, require_web_actor,
+    protect_last_root, web_account, web_account_available, user_lifecycle,
+)
+from .account_registration_service import register_again
+from . import binding_service
+from .binding_service import clear_platform_records as _clear_platform_records
 
 LOG = logging.getLogger("acm_api")
 api = Blueprint("api", __name__)
+
+
+@api.errorhandler(AccountLifecycleError)
+async def lifecycle_error_response(error):
+    return jsonify({"success": False, "code": error.code, "message": str(error)}), error.status
+
 
 _LOGIN_ATTEMPTS = defaultdict(deque)
 _LOGIN_WINDOW_SECONDS = 300
@@ -203,25 +218,20 @@ def _changed_account_platforms(account_values, existing=None):
     return changed
 
 
-async def _clear_platform_records(db, qq_id, platform):
-    """清理旧账号证据和同步游标，历史学习资料保留存档。"""
-    tables = [
-        ("submissions", "user_qq_id"),
-        ("submission_attempts", "owner_qq_id"),
-    ]
-    for table, owner_field in tables:
-        await db.execute(
-            f"DELETE FROM {table} WHERE {owner_field}=? AND platform=?", (qq_id, platform)
-        )
-    await db.execute(
-        "UPDATE random_challenges SET status='abandoned' "
-        "WHERE qq_id=? AND platform=? AND status='active'",
-        (qq_id, platform),
-    )
-    await db.execute(
-        "DELETE FROM user_platform_sync_state WHERE user_qq_id=? AND platform=?",
-        (qq_id, platform),
-    )
+def _admin_binding_confirmation(data, existing, changed):
+    if not changed:
+        return None
+    expected = data.get("expected_bindings")
+    versions = data.get("binding_versions")
+    if data.get("confirm_bindings") is not True or not isinstance(expected, dict) or not isinstance(versions, dict):
+        return jsonify({"success": False, "code": "confirmation_required", "message": "修改 OJ 绑定前请确认数据清理影响，并提交当前绑定及版本。"}), 400
+    for platform, _, _ in changed:
+        _, field, version = binding_service.platform_spec(platform)
+        original = (existing[field] or "").strip() if existing else ""
+        generation = int(existing[version]) if existing else 0
+        if expected.get(field) != original or type(versions.get(platform)) is not int or versions[platform] != generation:
+            return jsonify({"success": False, "code": "binding_changed", "message": "成员绑定已变化，请刷新资料后重新确认。"}), 409
+    return None
 
 
 async def get_db():
@@ -259,22 +269,15 @@ async def _session_identity():
     try:
         db = await get_db()
         try:
-            async with db.execute(
-                "SELECT role,must_change_password,is_active,credential_version,temporary_password_expires_at "
-                "FROM web_accounts WHERE qq_id=?", (qq_id,)
-            ) as cursor:
-                account = await cursor.fetchone()
+            account = await web_account(db, qq_id)
         finally:
             await db.close()
     except Exception:
         LOG.exception("验证 Web 会话时读取账号失败。")
         return None
-    if (not account or not account["is_active"]
-            or int(account["credential_version"]) != int(session.get("webui_credential_version", -1))):
-        session.clear()
-        return None
-    if (account["must_change_password"] and account["temporary_password_expires_at"]
-            and int(account["temporary_password_expires_at"]) <= int(time.time())):
+    if (not web_account_available(account)
+            or account["credential_version"] != session.get("webui_credential_version")
+            or account["account_epoch"] != session.get("webui_account_epoch", 1)):
         session.clear()
         return None
     return {
@@ -282,6 +285,7 @@ async def _session_identity():
         "role": account["role"],
         "must_change_password": bool(account["must_change_password"]),
         "credential_version": int(account["credential_version"]),
+        "account_epoch": int(account["account_epoch"]),
         "legacy": False,
     }
 
@@ -334,6 +338,7 @@ def admin_required(func):
             return jsonify({"success": False, "message": "此操作仅限 Web 管理员。"}), 403
         if request.method in {"POST", "PUT", "PATCH", "DELETE"} and not _csrf_valid():
             return jsonify({"success": False, "message": "CSRF 校验失败。"}), 403
+        request.web_identity = identity
         return await func(*args, **kwargs)
     return wrapper
 
@@ -395,19 +400,27 @@ async def api_auth_login():
     if _valid_qq(qq_id):
         db = await get_db()
         try:
-            async with db.execute(
-                "SELECT password_hash,role,must_change_password,is_active,credential_version,temporary_password_expires_at "
-                "FROM web_accounts WHERE qq_id=?", (qq_id,)
-            ) as cursor:
-                account = await cursor.fetchone()
+            account = await web_account(db, qq_id)
             if (account and account["is_active"] and account["must_change_password"]
                     and account["temporary_password_expires_at"]
                     and int(account["temporary_password_expires_at"]) <= now_epoch):
                 temporary_password_expired = True
                 account = None
-            elif account and account["is_active"] and verify_password(password, account["password_hash"]):
-                await db.execute("UPDATE web_accounts SET last_login_at=?,updated_at=? WHERE qq_id=?", (int(time.time()), int(time.time()), qq_id))
-                await db.commit()
+            elif web_account_available(account, now_epoch) and verify_password(password, account["password_hash"]):
+                # PBKDF2 runs before the lock. A reset/closure while it runs must
+                # not mint a session or update last_login_at for the old identity.
+                await db.execute("BEGIN IMMEDIATE")
+                current = await web_account(db, qq_id)
+                if (not web_account_available(current)
+                        or current["password_hash"] != account["password_hash"]
+                        or current["credential_version"] != account["credential_version"]
+                        or current["account_epoch"] != account["account_epoch"]):
+                    await db.rollback()
+                    account = None
+                else:
+                    await db.execute("UPDATE web_accounts SET last_login_at=?,updated_at=? WHERE qq_id=?", (int(time.time()), int(time.time()), qq_id))
+                    await db.commit()
+                    account = current
             else:
                 account = None
         finally:
@@ -437,6 +450,7 @@ async def api_auth_login():
         session["webui_qq_id"] = qq_id
         session["webui_role"] = account["role"]
         session["webui_credential_version"] = int(account["credential_version"])
+        session["webui_account_epoch"] = int(account["account_epoch"])
         role = account["role"]
         must_change_password = bool(account["must_change_password"])
     session["webui_csrf"] = secrets.token_urlsafe(32)
@@ -467,7 +481,7 @@ async def api_auth_me():
             avatar_url = user["avatar_url"] if user else None
         finally:
             await db.close()
-    return jsonify({"authenticated": True, "csrf_token": session.get("webui_csrf"), "root": identity["role"] == "root", "role": identity["role"], "qq_id": identity["qq_id"], "must_change_password": identity["must_change_password"], "avatar_url": avatar_url})
+    return jsonify({"authenticated": True, "csrf_token": session.get("webui_csrf"), "root": identity["role"] == "root", "role": identity["role"], "qq_id": identity["qq_id"], "must_change_password": identity["must_change_password"], "avatar_url": avatar_url, "account_epoch": identity.get("account_epoch"), "account_closure_enabled": current_app.config.get("ACCOUNT_CLOSURE_ENABLED", False)})
 
 
 @api.route("/auth/change-password", methods=["POST"])
@@ -491,25 +505,33 @@ async def api_auth_change_password():
         return jsonify({"success": False, "message": validation_error}), 400
     db = await get_db()
     try:
+        candidate = await web_account(db, identity["qq_id"])
+        if not web_account_available(candidate) or not verify_password(old_password, candidate["password_hash"]):
+            return jsonify({"success": False, "message": "当前密码错误。"}), 400
+        password_hash = hash_password(new_password)
         await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, identity)
         async with db.execute(
             "SELECT password_hash,credential_version,is_active FROM web_accounts WHERE qq_id=?",
             (identity["qq_id"],),
         ) as cursor:
             account = await cursor.fetchone()
-        if not account or not account["is_active"] or not verify_password(old_password, account["password_hash"]):
+        if not account or not account["is_active"] or account["password_hash"] != candidate["password_hash"]:
             await db.rollback()
             return jsonify({"success": False, "message": "当前密码错误。"}), 400
         new_version = int(account["credential_version"]) + 1
         now = int(time.time())
         await db.execute(
             "UPDATE web_accounts SET password_hash=?,must_change_password=0,temporary_password_expires_at=NULL,credential_version=?,updated_at=? WHERE qq_id=?",
-            (hash_password(new_password), new_version, now, identity["qq_id"]),
+            (password_hash, new_version, now, identity["qq_id"]),
         )
         await db.commit()
         session["webui_credential_version"] = new_version
         session["webui_role"] = identity["role"]
         return jsonify({"success": True, "must_change_password": False})
+    except AccountLifecycleError:
+        await db.rollback()
+        raise
     except Exception:
         await db.rollback()
         LOG.exception("修改 Web 账号密码失败，QQ=%s", identity["qq_id"])
@@ -526,10 +548,18 @@ async def api_web_accounts():
         if request.method == "GET":
             async with db.execute(
                 "SELECT a.qq_id,a.role,a.must_change_password,a.is_active,a.created_at,a.updated_at,a.last_login_at,"
-                "a.temporary_password_expires_at,u.name,u.status,u.school "
+                "a.temporary_password_expires_at,u.name,u.status,u.school,u.account_state,u.closed_at "
                 "FROM web_accounts a JOIN users u ON u.qq_id=a.qq_id ORDER BY a.created_at DESC"
             ) as cursor:
-                return jsonify([dict(row) for row in await cursor.fetchall()])
+                items = [dict(row) for row in await cursor.fetchall()]
+            for item in items:
+                if item["account_state"] == "closed":
+                    qq_id = item["qq_id"]
+                    item["account_key"] = hmac.new(str(current_app.secret_key).encode(), ("closed:" + qq_id).encode(), hashlib.sha256).hexdigest()[:24]
+                    edge = 1 if len(qq_id) < 6 else 2
+                    item["display_qq_id"] = qq_id[:edge] + "****" + qq_id[-edge:]
+                    item["qq_id"] = None
+            return jsonify(items)
 
         data = await request.get_json(silent=True) or {}
         if not isinstance(data, dict):
@@ -550,9 +580,26 @@ async def api_web_accounts():
         if (error := validate_password(initial_password)):
             return jsonify({"success": False, "message": error}), 400
         now = int(time.time())
-        password_hash = hash_password(initial_password)
+        creation_snapshot = await user_lifecycle(db, qq_id)
+        password_hash = await prepare_password(initial_password)
         temporary_password_expires_at = _temporary_password_expiry(now) if role == "member" else None
         await db.execute("BEGIN IMMEDIATE")
+        actor = await require_web_actor(db, request.web_identity, roles={"root"} if role != "member" else {"admin", "root"})
+        current = await user_lifecycle(db, qq_id)
+        if (dict(current) if current else None) != (dict(creation_snapshot) if creation_snapshot else None):
+            raise AccountLifecycleError("ACCOUNT_CHANGED", "账号状态已变化，请重新创建。")
+        if current and current["account_state"] == "closed":
+            await register_again(
+                db, qq_id, creation_snapshot, name=name, status=status, school=school,
+                password_hash=password_hash, role=role, now=now,
+                temporary_password_expires_at=temporary_password_expires_at,
+            )
+            await db.commit()
+            _clear_login_failures((f"account:{qq_id}",))
+            return jsonify({"success": True, "qq_id": qq_id, "role": role,
+                            "must_change_password": True, "new_generation": True,
+                            "message": "已用该 QQ 创建全新账号；旧账号的数据及权限不会继承。"}), 201
+        await require_active_user(db, qq_id, allow_missing=True)
         async with db.execute("SELECT qq_id FROM users WHERE qq_id=?", (qq_id,)) as cursor:
             member = await cursor.fetchone()
         if not member and not name:
@@ -568,18 +615,20 @@ async def api_web_accounts():
                 "INSERT INTO users(qq_id,name,status,school) VALUES(?,?,?,?)",
                 (qq_id, name, status, school),
             )
-        await db.execute(
-            "INSERT INTO web_accounts(qq_id,password_hash,role,must_change_password,is_active,credential_version,created_at,updated_at,temporary_password_expires_at) "
-            "VALUES(?,?,?,1,1,1,?,?,?)",
-            (qq_id, password_hash, role, now, now, temporary_password_expires_at),
-        )
+        await insert_web_account(db, qq_id, password_hash, role=role, now=now, expires_at=temporary_password_expires_at)
         await db.commit()
         _clear_login_failures((f"account:{qq_id}",))
         message = "成员资料与 Web 账号已创建。" if not member else "Web 账号已绑定到现有成员资料。"
         return jsonify({"success": True, "qq_id": qq_id, "role": role, "must_change_password": True, "message": message}), 201
+    except AccountCreationError as exc:
+        await db.rollback()
+        return jsonify({"success": False, "code": exc.code, "message": str(exc)}), exc.status
     except sqlite3.IntegrityError:
         await db.rollback()
         return jsonify({"success": False, "message": "账号创建冲突，请确认成员 QQ 号唯一。"}), 409
+    except AccountLifecycleError:
+        await db.rollback()
+        raise
     except Exception:
         await db.rollback()
         LOG.exception("创建 Web 账号失败。")
@@ -602,7 +651,7 @@ async def api_web_account_candidates():
     except (TypeError, ValueError):
         page_size = 20
 
-    conditions = []
+    conditions = ["u.account_state='active'"]
     params = []
     if not include_issued:
         conditions.append("a.qq_id IS NULL")
@@ -671,13 +720,15 @@ async def api_batch_create_web_accounts():
     try:
         for qq_id in unique_ids:
             async with db.execute(
-                "SELECT u.qq_id,u.name,a.qq_id AS account_qq_id FROM users u "
+                "SELECT u.qq_id,u.name,u.account_state,a.qq_id AS account_qq_id FROM users u "
                 "LEFT JOIN web_accounts a ON a.qq_id=u.qq_id WHERE u.qq_id=?",
                 (qq_id,),
             ) as cursor:
                 row = await cursor.fetchone()
             if not row:
                 skipped.append({"qq_id": qq_id, "reason": "member_not_found"})
+            elif row["account_state"] != "active":
+                skipped.append({"qq_id": qq_id, "reason": "account_closed"})
             elif row["account_qq_id"]:
                 skipped.append({"qq_id": qq_id, "reason": "already_exists"})
             else:
@@ -689,7 +740,10 @@ async def api_batch_create_web_accounts():
     for item in eligible:
         temporary_password = generate_temporary_password(used_passwords)
         item["temporary_password"] = temporary_password
-        item["password_hash"] = hash_password(temporary_password)
+        try:
+            item["password_hash"] = await prepare_password(temporary_password)
+        except AccountCreationError as exc:
+            return jsonify({"success": False, "code": exc.code, "message": str(exc)}), exc.status
 
     created = []
     if eligible:
@@ -698,13 +752,17 @@ async def api_batch_create_web_accounts():
         db = await get_db()
         try:
             await db.execute("BEGIN IMMEDIATE")
+            await require_web_actor(db, request.web_identity, roles={"admin", "root"})
             for item in eligible:
                 async with db.execute(
-                    "SELECT 1 FROM users WHERE qq_id=?", (item["qq_id"],)
+                    "SELECT account_state FROM users WHERE qq_id=?", (item["qq_id"],)
                 ) as cursor:
                     member_exists = await cursor.fetchone()
                 if not member_exists:
                     skipped.append({"qq_id": item["qq_id"], "reason": "member_not_found"})
+                    continue
+                if member_exists["account_state"] != "active":
+                    skipped.append({"qq_id": item["qq_id"], "reason": "account_closed"})
                     continue
                 async with db.execute(
                     "SELECT 1 FROM web_accounts WHERE qq_id=?", (item["qq_id"],)
@@ -713,12 +771,11 @@ async def api_batch_create_web_accounts():
                 if account_exists:
                     skipped.append({"qq_id": item["qq_id"], "reason": "already_exists"})
                     continue
-                await db.execute(
-                    "INSERT INTO web_accounts(qq_id,password_hash,role,must_change_password,is_active,"
-                    "credential_version,created_at,updated_at,temporary_password_expires_at) "
-                    "VALUES(?,?, 'member',1,1,1,?,?,?)",
-                    (item["qq_id"], item["password_hash"], now, now, expires_at),
-                )
+                state, _, _ = await creation_state(db, item["qq_id"])
+                if state != "create_web_account_only":
+                    skipped.append({"qq_id": item["qq_id"], "reason": state})
+                    continue
+                await insert_web_account(db, item["qq_id"], item["password_hash"], now=now, expires_at=expires_at)
                 created.append({
                     "qq_id": item["qq_id"],
                     "name": item["name"],
@@ -726,6 +783,9 @@ async def api_batch_create_web_accounts():
                     "expires_at": expires_at,
                 })
             await db.commit()
+        except AccountLifecycleError:
+            await db.rollback()
+            raise
         except Exception:
             await db.rollback()
             LOG.exception("批量创建 Web 成员账号失败，数量=%s", len(eligible))
@@ -752,12 +812,13 @@ async def api_update_web_account(qq_id):
     db = await get_db()
     try:
         await db.execute("BEGIN IMMEDIATE")
+        actor = await require_web_actor(db, request.web_identity, roles={"admin", "root"})
+        await require_active_user(db, qq_id)
         async with db.execute("SELECT role,is_active FROM web_accounts WHERE qq_id=?", (qq_id,)) as cursor:
             target = await cursor.fetchone()
         if not target:
             await db.rollback()
             return jsonify({"success": False, "message": "Web 账号不存在。"}), 404
-        actor = await _session_identity()
         if target["role"] in {"admin", "root"} and (not actor or actor["role"] != "root"):
             await db.rollback()
             return jsonify({"success": False, "message": "只有 Web root 可以修改管理员账号。"}), 403
@@ -769,13 +830,7 @@ async def api_update_web_account(qq_id):
         if role != "member" and (not actor or actor["role"] != "root"):
             await db.rollback()
             return jsonify({"success": False, "message": "只有 Web root 可以授予管理员角色。"}), 403
-        legacy_admin_available = _legacy_login_enabled() and _admin_configured()
-        if target["role"] == "root" and (role != "root" or not active) and not legacy_admin_available:
-            async with db.execute("SELECT COUNT(*) AS count FROM web_accounts WHERE role='root' AND is_active=1 AND qq_id<>?", (qq_id,)) as cursor:
-                other_roots = int((await cursor.fetchone())["count"])
-            if other_roots == 0:
-                await db.rollback()
-                return jsonify({"success": False, "message": "不能停用或降级最后一个 Web root。"}), 409
+        await protect_last_root(db, qq_id, role=role, is_active=active)
         now = int(time.time())
         await db.execute(
             "UPDATE web_accounts SET role=?,is_active=?,credential_version=credential_version+1,updated_at=? WHERE qq_id=?",
@@ -783,6 +838,9 @@ async def api_update_web_account(qq_id):
         )
         await db.commit()
         return jsonify({"success": True, "qq_id": qq_id, "role": role, "is_active": active})
+    except AccountLifecycleError:
+        await db.rollback()
+        raise
     except Exception:
         await db.rollback()
         LOG.exception("更新 Web 账号失败，QQ=%s", qq_id)
@@ -803,19 +861,22 @@ async def api_reset_web_account_password(qq_id):
     initial_password = str(data.get("initial_password", ""))
     if (error := validate_password(initial_password)):
         return jsonify({"success": False, "message": error}), 400
+    password_hash = hash_password(initial_password)
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        actor = await require_web_actor(db, request.web_identity, roles={"admin", "root"})
+        await require_active_user(db, qq_id)
         async with db.execute("SELECT role FROM web_accounts WHERE qq_id=?", (qq_id,)) as cursor:
             target = await cursor.fetchone()
         if not target:
             return jsonify({"success": False, "message": "Web 账号不存在。"}), 404
-        actor = await _session_identity()
         if target["role"] in {"admin", "root"} and (not actor or actor["role"] != "root"):
             return jsonify({"success": False, "message": "只有 Web root 可以重置管理员密码。"}), 403
         now = int(time.time())
         await db.execute(
             "UPDATE web_accounts SET password_hash=?,must_change_password=1,temporary_password_expires_at=?,credential_version=credential_version+1,updated_at=? WHERE qq_id=?",
-            (hash_password(initial_password), _temporary_password_expiry(now) if target["role"] == "member" else None, now, qq_id),
+            (password_hash, _temporary_password_expiry(now) if target["role"] == "member" else None, now, qq_id),
         )
         await db.commit()
         _clear_login_failures((f"account:{qq_id}",))
@@ -833,6 +894,7 @@ async def api_reset_temporary_web_account_password(qq_id):
 
     db = await get_db()
     try:
+        await require_active_user(db, qq_id)
         async with db.execute(
             "SELECT role,must_change_password,is_active,credential_version,password_hash FROM web_accounts WHERE qq_id=?", (qq_id,)
         ) as cursor:
@@ -856,6 +918,8 @@ async def api_reset_temporary_web_account_password(qq_id):
     db = await get_db()
     try:
         await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity, roles={"admin", "root"})
+        await require_active_user(db, qq_id)
         async with db.execute(
             "SELECT role,must_change_password,is_active,credential_version FROM web_accounts WHERE qq_id=?", (qq_id,)
         ) as cursor:
@@ -877,6 +941,9 @@ async def api_reset_temporary_web_account_password(qq_id):
             "expires_at": expires_at,
             "must_change_password": True,
         })
+    except AccountLifecycleError:
+        await db.rollback()
+        raise
     except Exception:
         await db.rollback()
         LOG.exception("重发 Web 临时密码失败，QQ=%s", qq_id)
@@ -910,7 +977,9 @@ async def api_admins():
             normalized.append(qq_id)
     if not callable(updater):
         return jsonify({"success": False, "message": "管理员配置服务尚未就绪。"}), 503
-    result = updater(normalized)
+    result = updater(normalized, request.web_identity)
+    if inspect.isawaitable(result):
+        result = await result
     LOG.info("WebUI 管理员列表已更新：%s", normalized)
     return jsonify({"success": True, **result})
 
@@ -919,7 +988,10 @@ async def api_admins():
 @admin_required
 async def api_tasks():
     provider = current_app.config.get("PLUGIN_CONFIG", {}).get("_task_provider")
-    return jsonify(provider() if callable(provider) else [])
+    tasks = provider() if callable(provider) else []
+    if inspect.isawaitable(tasks):
+        tasks = await tasks
+    return jsonify(tasks)
 
 
 @api.route("/tasks/<task_id>/cancel", methods=["POST"])
@@ -942,6 +1014,9 @@ async def api_register_user():
         name = _field(data, "name", 100)
         if not _valid_qq(qq_id_str) or not name:
             return jsonify({"success": False, "message": "QQ号必须为4-12位数字，用户名不能为空。"}), 400
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity, roles={"admin", "root"})
+        await require_active_user(db, qq_id_str, allow_missing=True)
         async with db.execute("SELECT * FROM users WHERE qq_id = ?", (qq_id_str,)) as cursor:
             existing_user = await cursor.fetchone()
         account_values = {
@@ -949,6 +1024,13 @@ async def api_register_user():
             for _, field, _ in _ACCOUNT_FIELDS
         }
         changed_platforms = _changed_account_platforms(account_values, existing_user)
+        confirmation_error = _admin_binding_confirmation(data, existing_user, changed_platforms)
+        if confirmation_error:
+            await db.rollback()
+            for platform, _, _ in changed_platforms:
+                await binding_service.audit(db, session.get("webui_qq_id") or "legacy-admin", qq_id_str, platform, "admin_binding_update", "binding_changed" if confirmation_error[1] == 409 else "confirmation_required")
+            await db.commit()
+            return confirmation_error
         await db.execute(
             "INSERT INTO users (qq_id, name, cf_handle, luogu_id, nowcoder_id, atcoder_handle, cjlu_username, status, school, last_sync_timestamp) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
@@ -963,6 +1045,7 @@ async def api_register_user():
         )
         for platform, _, _ in changed_platforms:
             await _clear_platform_records(db, qq_id_str, platform)
+            await binding_service.audit(db, session.get("webui_qq_id") or "legacy-admin", qq_id_str, platform, "admin_binding_update")
         await db.commit()
         message = "注册/更新成功！"
         task_id = None
@@ -971,6 +1054,8 @@ async def api_register_user():
         if sync_platforms:
             submitter = current_app.config.get("PLUGIN_CONFIG", {}).get("_account_sync_submitter")
             task = submitter(qq_id_str, sync_platforms) if callable(submitter) else None
+            if inspect.isawaitable(task):
+                task = await task
             if task:
                 task_id = task["id"]
                 status_code = 202
@@ -984,6 +1069,9 @@ async def api_register_user():
             return jsonify({"success": False, "message": "该平台账号已绑定给其他成员。"}), 409
         LOG.error(f"[API Error] /register: {exc}", exc_info=True)
         return jsonify({"success": False, "message": "保存账号失败。"}), 400
+    except AccountLifecycleError:
+        await db.rollback()
+        raise
     except Exception as e:
         await db.rollback()
         LOG.error(f"[API Error] /register: {e}", exc_info=True)
@@ -1002,7 +1090,7 @@ async def api_admin_members():
         return jsonify({"success": False, "message": "分页参数必须为整数。"}), 400
     search = _field(request.args, "search", 100)
     fields = ("qq_id", "name", "school", "status", "cf_handle", "luogu_id", "nowcoder_id", "atcoder_handle", "cjlu_username")
-    where = " WHERE (" + " OR ".join(f"LOWER(COALESCE(u.{field},'')) LIKE ?" for field in fields) + ")" if search else ""
+    where = " WHERE u.account_state='active' AND (" + " OR ".join(f"LOWER(COALESCE(u.{field},'')) LIKE ?" for field in fields) + ")" if search else " WHERE u.account_state='active'"
     values = ["%" + search.lower() + "%"] * len(fields) if search else []
     db = await get_db()
     try:
@@ -1027,6 +1115,7 @@ async def api_member_detail(qq_id):
         qq_id = str(qq_id).strip()
         if not _valid_qq(qq_id):
             return jsonify({"error": "invalid qq_id"}), 400
+        await require_active_user(db, qq_id)
         async with db.execute("SELECT * FROM users WHERE qq_id=?", (qq_id,)) as cursor:
             user = await cursor.fetchone()
         if not user:
@@ -1174,6 +1263,9 @@ async def api_challenge_rating():
     except (TypeError, ValueError): return jsonify({"success": False, "message": "Rating 必须是整数。"}), 400
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity, roles={"admin", "root"})
+        await require_active_user(db, qq_id)
         await db.execute("UPDATE users SET challenge_rating=? WHERE qq_id=?", (rating, qq_id)); await db.commit()
         return jsonify({"success": True, "rating": rating})
     finally: await db.close()
@@ -1187,6 +1279,7 @@ async def api_get_user():
         qq_id = str(request.args.get("qq_id", "")).strip()
         if not qq_id:
             return jsonify({"error": "qq_id required"}), 400
+        await require_active_user(db, qq_id)
         async with db.execute("SELECT qq_id, name, real_name, cf_handle, luogu_id, nowcoder_id, atcoder_handle, cjlu_username, status, school FROM users WHERE qq_id=?", (qq_id,)) as cursor:
             user = await cursor.fetchone()
         if not user:
@@ -1207,16 +1300,26 @@ async def api_update_user():
             return jsonify({"success": False, "message": "QQ号必须为4-12位数字。"}), 400
         values = [_field(data, key, 64 if key == "status" else 128) for key in ("name", "real_name", "cf_handle", "luogu_id", "nowcoder_id", "atcoder_handle", "cjlu_username", "status", "school")]
         if not values[0]: values[0] = values[2] or qq_id
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity, roles={"admin", "root"})
+        await require_active_user(db, qq_id, allow_missing=False)
         async with db.execute("SELECT * FROM users WHERE qq_id=?", (qq_id,)) as cursor:
             existing = await cursor.fetchone()
             if not existing: return jsonify({"success": False, "message": "用户不存在，请先注册。"}), 404
         if "real_name" not in data:
             values[1] = existing["real_name"]
         account_values = {
-            field: values[index]
+            field: values[index] if field in data else existing[field]
             for index, (_, field, _) in enumerate(_ACCOUNT_FIELDS, start=2)
         }
         changed_platforms = _changed_account_platforms(account_values, existing)
+        confirmation_error = _admin_binding_confirmation(data, existing, changed_platforms)
+        if confirmation_error:
+            await db.rollback()
+            for platform, _, _ in changed_platforms:
+                await binding_service.audit(db, session.get("webui_qq_id") or "legacy-admin", qq_id, platform, "admin_binding_update", "binding_changed" if confirmation_error[1] == 409 else "confirmation_required")
+            await db.commit()
+            return confirmation_error
         values[2] = account_values["cf_handle"] or ""
         values[3] = account_values["luogu_id"] or ""
         values[4] = account_values["nowcoder_id"] or ""
@@ -1225,6 +1328,7 @@ async def api_update_user():
         await db.execute("UPDATE users SET name=?, real_name=?, cf_handle=?, luogu_id=?, nowcoder_id=?, atcoder_handle=?, cjlu_username=?, status=?, school=? WHERE qq_id=?", tuple(value or None for value in values) + (qq_id,))
         for platform, _, _ in changed_platforms:
             await _clear_platform_records(db, qq_id, platform)
+            await binding_service.audit(db, session.get("webui_qq_id") or "legacy-admin", qq_id, platform, "admin_binding_update")
         await db.commit()
         sync_platforms = [platform for platform, _, has_account in changed_platforms if has_account]
         task_id = None
@@ -1232,6 +1336,8 @@ async def api_update_user():
         if sync_platforms:
             submitter = current_app.config.get("PLUGIN_CONFIG", {}).get("_account_sync_submitter")
             task = submitter(qq_id, sync_platforms) if callable(submitter) else None
+            if inspect.isawaitable(task):
+                task = await task
             if task:
                 task_id = task["id"]
                 message += " 已清理旧做题记录，并创建对应平台的全量同步任务。"
@@ -1246,6 +1352,9 @@ async def api_update_user():
             return jsonify({"success": False, "message": "该平台账号已绑定给其他成员。"}), 409
         LOG.error("[API Error] /user: %s", exc, exc_info=True)
         return jsonify({"success": False, "message": "保存账号失败。"}), 400
+    except AccountLifecycleError:
+        await db.rollback()
+        raise
     except Exception:
         await db.rollback()
         LOG.exception("[API Error] /user")
@@ -1268,6 +1377,9 @@ async def api_update_real_name():
         async with db.execute("SELECT 1 FROM users WHERE qq_id=?", (qq_id,)) as cursor:
             if not await cursor.fetchone():
                 return jsonify({"success": False, "message": "用户不存在，请先注册。"}), 404
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity, roles={"admin", "root"})
+        await require_active_user(db, qq_id)
         await db.execute("UPDATE users SET real_name=? WHERE qq_id=?", (real_name or None, qq_id))
         await db.commit()
         return jsonify({"success": True, "real_name": real_name or None})
@@ -1294,6 +1406,9 @@ async def _save_problem_favorite(owner, platform, problem, data):
         return jsonify({"success": False, "message": "有效成员 QQ 和布尔 is_favorite 必填。"}), 400
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity)
+        await require_active_user(db, owner)
         await db.execute(
             "INSERT INTO user_problem_state(owner_qq_id,platform,problem_id,is_favorite,updated_at) "
             "VALUES(?,?,?,?,?) ON CONFLICT(owner_qq_id,platform,problem_id) DO UPDATE SET "
@@ -1343,6 +1458,9 @@ async def _save_contest_state(owner, data):
     db = await get_db()
     try:
         columns = list(fields)
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity)
+        await require_active_user(db, owner)
         await db.execute(
             "INSERT INTO contest_problem_reviews(owner_qq_id,contest_id,problem_id," + ",".join(columns) + ",updated_at) "
             "VALUES(" + ",".join("?" for _ in range(len(columns) + 4)) + ") "
@@ -1400,14 +1518,25 @@ async def api_problems():
         await db.close()
 
 
+def _problem_id_filter(platform, problem_id):
+    aliases = problem_id_aliases(platform, problem_id)
+    column = "problem_id COLLATE NOCASE" if platform == "codeforces" else "problem_id"
+    return column + " IN (" + ",".join("?" for _ in aliases) + ")", aliases
+
+
 async def _problem_detail(platform, problem_id):
     """Read the saved statement without triggering a remote fetch."""
     db = await get_db()
     try:
+        id_filter, aliases = _problem_id_filter(platform, problem_id)
         async with db.execute(
             "SELECT platform,problem_id,contest_id,problem_name,problem_rating,problem_url,tags,"
             "statement_html,statement_text,length(statement_pdf)>0 AS has_pdf,statement_language,samples,statement_fetched_at,last_fetch_status "
-            "FROM crawler_problems WHERE platform=? AND problem_id=?", (platform, problem_id),
+            "FROM crawler_problems WHERE platform=? AND " + id_filter +
+            " ORDER BY (COALESCE(length(statement_html),0)>0 OR COALESCE(length(statement_text),0)>0 "
+            "OR COALESCE(length(statement_pdf),0)>0) DESC,(problem_id=?) DESC,"
+            "(problem_id=? COLLATE NOCASE) DESC,statement_fetched_at DESC,problem_id LIMIT 1",
+            (platform, *aliases, problem_id, problem_id),
         ) as cursor:
             row = await cursor.fetchone()
         if row:
@@ -1417,19 +1546,28 @@ async def _problem_detail(platform, problem_id):
         else:
             # Older catalog/submission entries may not have a crawler row yet.
             async with db.execute(
-                "SELECT problem_name,problem_rating,problem_url,tags FROM ("
-                "SELECT problem_name,problem_rating,problem_url,tags,0 AS source,0 AS submit_time FROM recommendations "
-                "WHERE platform=? AND problem_id=? UNION ALL "
-                "SELECT problem_name,problem_rating,problem_url,tags,1 AS source,submit_time FROM submissions "
-                "WHERE platform=? AND problem_id=?) ORDER BY source,submit_time DESC LIMIT 1",
-                (platform, problem_id, platform, problem_id),
+                "SELECT problem_id,problem_name,problem_rating,problem_url,tags FROM ("
+                "SELECT problem_id,problem_name,problem_rating,problem_url,tags,0 AS source,0 AS submit_time FROM recommendations "
+                "WHERE platform=? AND " + id_filter + " UNION ALL "
+                "SELECT problem_id,problem_name,problem_rating,problem_url,tags,1 AS source,submit_time FROM submissions "
+                "WHERE platform=? AND " + id_filter + ") ORDER BY source,(problem_id=?) DESC,"
+                "(problem_id=? COLLATE NOCASE) DESC,submit_time DESC,problem_id LIMIT 1",
+                (platform, *aliases, platform, *aliases, problem_id, problem_id),
             ) as cursor:
                 row = await cursor.fetchone()
             if not row:
+                # The tracker also includes this account's attempts before the
+                # problem is collected or solved. Admin detail uses the same owner.
+                row = await attempt_problem_metadata(
+                    db, str(session.get("webui_qq_id") or ""), platform, problem_id,
+                )
+            if not row:
                 return jsonify({"success": False, "message": "题库中没有这道题目。"}), 404
+            metadata = dict(row)
             detail = {
-                **dict(row), "platform": platform, "problem_id": problem_id, "contest_id": None,
-                "tags": [tag.strip() for tag in (row["tags"] or "").split(",") if tag.strip()],
+                **metadata, "platform": platform, "problem_id": metadata.get("problem_id", problem_id),
+                "contest_id": metadata.get("contest_id"),
+                "tags": [tag.strip() for tag in (metadata["tags"] or "").split(",") if tag.strip()],
                 "statement_html": None, "statement_text": None, "statement_language": None,
                 "samples": [], "statement_fetched_at": None, "last_fetch_status": "never",
             }
@@ -1456,9 +1594,12 @@ async def api_me_problem_detail(platform, problem_id):
 async def _problem_pdf(platform, problem_id):
     db = await get_db()
     try:
+        id_filter, aliases = _problem_id_filter(platform, problem_id)
         async with db.execute(
-            "SELECT statement_pdf FROM crawler_problems WHERE platform=? AND problem_id=?",
-            (platform, problem_id),
+            "SELECT statement_pdf FROM crawler_problems WHERE platform=? AND " + id_filter +
+            " AND length(statement_pdf)>0 ORDER BY (problem_id=?) DESC,"
+            "(problem_id=? COLLATE NOCASE) DESC,statement_fetched_at DESC,problem_id LIMIT 1",
+            (platform, *aliases, problem_id, problem_id),
         ) as cursor:
             row = await cursor.fetchone()
         if not row or not row["statement_pdf"]:
@@ -1491,6 +1632,73 @@ async def api_database_status():
     db = await get_db()
     try:
         return jsonify(await problem_bank_status(db))
+    finally:
+        await db.close()
+
+
+@api.get("/admin/database/problems")
+@admin_required
+async def api_database_problems():
+    query_text = _field(request.args, "q", 160)
+    platform = _field(request.args, "platform", 24)
+    status = _field(request.args, "status", 16) or "all"
+    if status not in {"all", "collected", "pending", "failed"}:
+        return jsonify({"success": False, "message": "无效的题面采集状态。"}), 400
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+        page_size = max(1, min(100, int(request.args.get("page_size", 20))))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "message": "分页参数必须为整数。"}), 400
+
+    has_content = (
+        "(COALESCE(statement_html,'')<>'' OR COALESCE(statement_text,'')<>'' "
+        "OR COALESCE(length(statement_pdf),0)>0)"
+    )
+    conditions = []
+    params = []
+    if platform:
+        conditions.append("platform=?")
+        params.append(platform)
+    if query_text:
+        pattern = f"%{query_text}%"
+        conditions.append("(problem_id LIKE ? OR problem_name LIKE ? OR contest_id LIKE ?)")
+        params.extend([pattern, pattern, pattern])
+    if status == "collected":
+        conditions.append(has_content)
+    elif status == "pending":
+        conditions.extend([f"NOT {has_content}", "last_fetch_status<>'failed'"])
+    elif status == "failed":
+        conditions.append("last_fetch_status='failed'")
+    where = " WHERE " + " AND ".join(conditions) if conditions else ""
+
+    db = await get_db()
+    try:
+        async with db.execute("SELECT COUNT(*) FROM crawler_problems" + where, tuple(params)) as cursor:
+            total = int((await cursor.fetchone())[0])
+        page = min(page, max(1, (total + page_size - 1) // page_size))
+        async with db.execute(
+            "SELECT platform,problem_id,contest_id,problem_index,problem_name,problem_rating,"
+            "problem_url,tags,statement_language,sample_count,last_fetch_status,"
+            f"CASE WHEN {has_content} THEN 1 ELSE 0 END AS content_available,"
+            "statement_fetched_at,updated_at FROM crawler_problems"
+            + where
+            + " ORDER BY updated_at DESC,platform,problem_id LIMIT ? OFFSET ?",
+            tuple(params + [page_size, (page - 1) * page_size]),
+        ) as cursor:
+            items = [dict(row) for row in await cursor.fetchall()]
+        for item in items:
+            try:
+                item["tags"] = json.loads(item["tags"] or "[]")
+            except (TypeError, ValueError):
+                item["tags"] = []
+            item["content_available"] = bool(item["content_available"])
+        return jsonify({
+            "items": items,
+            "total": total,
+            "returned": len(items),
+            "page": page,
+            "page_size": page_size,
+        })
     finally:
         await db.close()
 
@@ -1568,6 +1776,8 @@ async def api_ui_preferences():
                     raise ValueError()
             except (TypeError, ValueError, KeyError):
                 return jsonify({"success": False, "message": "font_scale 必须在 0.8–1.5 之间。"}), 400
+            await db.execute("BEGIN IMMEDIATE")
+            await require_web_actor(db, request.web_identity, roles={"admin", "root"})
             await db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('webui_preferences',?)", (json.dumps({"font_scale": scale}),))
             await db.commit()
         return jsonify({"font_scale": scale})
@@ -1593,6 +1803,8 @@ async def api_contest_report_settings():
         schedule_time = str(data.get("time", "") or "").strip()
         if schedule_time and not valid_contest_report_time(schedule_time):
             return jsonify({"success": False, "message": "时间格式应为 24 小时制 HH:MM，例如 08:30。"}), 400
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity, roles={"admin", "root"})
         await db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('contest_report_time',?)", (schedule_time,))
         await db.commit()
         updater = current_app.config.get("PLUGIN_CONFIG", {}).get("_contest_report_updater")
@@ -1726,6 +1938,8 @@ async def api_me_profile():
             name = _field(data, "name", 100)
             if not name:
                 return jsonify({"success": False, "message": "昵称不能为空。"}), 400
+            await db.execute("BEGIN IMMEDIATE")
+            await require_web_actor(db, request.web_identity)
             await db.execute("UPDATE users SET name=? WHERE qq_id=?", (name, qq_id))
             await db.commit()
         async with db.execute(
@@ -1749,6 +1963,7 @@ async def api_me_profile():
             "platform_counts": platform_counts,
             "total_count": total,
             "recent_ac": recent_ac,
+            "bindings": await binding_service.bindings_summary(db, qq_id),
         })
     finally:
         await db.close()
@@ -1768,6 +1983,8 @@ async def api_me_avatar():
             return jsonify({"success": False, "message": "成员资料不存在。"}), 404
         old_file = _managed_avatar_file(user["avatar_url"])
         if request.method == "DELETE":
+            await db.execute("BEGIN IMMEDIATE")
+            await require_web_actor(db, request.web_identity)
             await db.execute("UPDATE users SET avatar_url=NULL WHERE qq_id=?", (qq_id,))
             await db.commit()
             _remove_avatar_file(upload_dir, old_file)
@@ -1790,6 +2007,8 @@ async def api_me_avatar():
         new_path = upload_dir / filename
         new_path.write_bytes(contents)
         avatar_url = "/uploads/avatars/" + filename
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity)
         await db.execute("UPDATE users SET avatar_url=? WHERE qq_id=?", (avatar_url, qq_id))
         await db.commit()
         new_path = None
@@ -1892,6 +2111,9 @@ async def api_me_challenge_rating():
         return jsonify({"success": False, "message": "Rating 必须是整数。"}), 400
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity)
+        await require_active_user(db, qq_id)
         await db.execute("UPDATE users SET challenge_rating=? WHERE qq_id=?", (rating, qq_id))
         await db.commit()
         return jsonify({"success": True, "rating": rating})
@@ -1927,8 +2149,14 @@ async def api_me_problems():
     state = _field(request.args, "state", 20)
     db = await get_db()
     try:
+        scope = request.args.get("scope", "all")
+        if scope not in {"all", "solved"}:
+            return jsonify({"success": False, "message": "无效的题目范围。"}), 400
         query = _PROBLEM_QUERY
         params = [qq_id]
+        if scope == "solved":
+            query = "SELECT p.*,ac.ac_at FROM (" + query + ") p JOIN (SELECT platform,problem_id,MAX(submit_time) AS ac_at FROM submissions WHERE user_qq_id=? GROUP BY platform,problem_id) ac ON ac.platform=p.platform AND ac.problem_id=p.problem_id WHERE 1=1"
+            params.append(qq_id)
         if platform:
             query += " AND p.platform=?"
             params.append(platform)
@@ -1936,21 +2164,39 @@ async def api_me_problems():
             query += " AND (p.problem_name LIKE ? OR p.problem_id LIKE ? OR COALESCE(p.tags,'') LIKE ?)"
             params.extend([f"%{tag}%", f"%{tag}%", f"%{tag}%"])
         if state == "favorite":
-            query += " AND COALESCE(s.is_favorite,0)=1"
+            query += " AND p.is_favorite=1" if scope == "solved" else " AND COALESCE(s.is_favorite,0)=1"
         elif state == "inbox":
-            query += " AND COALESCE(s.state,'inbox')='inbox'"
+            if scope == "solved":
+                query += " AND NOT EXISTS(SELECT 1 FROM user_problem_state prior WHERE prior.owner_qq_id=? AND prior.platform=p.platform AND prior.problem_id=p.problem_id AND COALESCE(prior.state,'inbox')<>'inbox')"
+                params.append(qq_id)
+            else:
+                query += " AND COALESCE(s.state,'inbox')='inbox'"
         count_query = "SELECT COUNT(*) FROM (" + query + ") filtered"
         async with db.execute(count_query, tuple(params)) as cursor:
             total = int((await cursor.fetchone())[0])
         try:
             page = max(1, int(request.args.get("page", 1)))
-            size = max(1, min(500, int(request.args.get("page_size", 500))))
+            size = max(1, min(100 if scope == "solved" else 500, int(request.args.get("page_size", 20 if scope == "solved" else 500))))
         except (TypeError, ValueError):
             return jsonify({"success": False, "message": "分页参数必须为整数。"}), 400
-        query += " ORDER BY CAST(p.problem_rating AS INTEGER),p.platform,p.problem_id LIMIT ? OFFSET ?"
+        query += (" ORDER BY ac_at DESC,p.platform,p.problem_id" if scope == "solved" else " ORDER BY CAST(p.problem_rating AS INTEGER),p.platform,p.problem_id") + " LIMIT ? OFFSET ?"
         async with db.execute(query, tuple(params + [size, (page - 1) * size])) as cursor:
             items = [dict(row) for row in await cursor.fetchall()]
         return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": size})
+    finally:
+        await db.close()
+
+
+@api.route("/me/problems/tracker", methods=["GET"])
+@member_required
+async def api_me_problem_tracker():
+    try:
+        options = tracker_options(request.args)
+    except ValueError as error:
+        return jsonify({"success": False, "message": str(error)}), 400
+    db = await get_db()
+    try:
+        return jsonify(await contest_tracker(db, _me_qq_id(), options))
     finally:
         await db.close()
 
@@ -2111,13 +2357,13 @@ def _leaderboard_options(args):
 
 def _leaderboard_user_filter(search):
     if not search:
-        return "", []
+        return " WHERE u.account_state='active'", []
     pattern = f"%{search.lower()}%"
     return (
-        " WHERE lower(COALESCE(NULLIF(u.cf_handle, ''), u.name, u.qq_id)) LIKE ?"
+        " WHERE u.account_state='active' AND (lower(COALESCE(NULLIF(u.cf_handle, ''), u.name, u.qq_id)) LIKE ?"
         " OR lower(COALESCE(u.real_name, '')) LIKE ?"
         " OR lower(COALESCE(u.school, '')) LIKE ?"
-        " OR u.qq_id LIKE ?",
+        " OR u.qq_id LIKE ?)",
         [pattern, pattern, pattern, pattern],
     )
 
@@ -2228,3 +2474,77 @@ async def api_export_leaderboard():
         return response
     finally:
         await db.close()
+
+
+async def _member_binding_operation(platform, action):
+    db = await get_db()
+    qq_id = _me_qq_id()
+    try:
+        data = await request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({"success": False, "message": "请求必须是 JSON 对象。"}), 400
+        canonical, _, _ = binding_service.platform_spec(platform)
+        if action == "verification":
+            result = await binding_service.create_verification(db, qq_id, canonical, data, identity=request.web_identity)
+        elif action == "confirm":
+            result = await binding_service.confirm_verification(db, qq_id, canonical, data, identity=request.web_identity)
+        elif action == "unbind":
+            result = await binding_service.unbind(db, qq_id, canonical, data, identity=request.web_identity)
+        else:
+            await binding_service.reserve(db, qq_id, canonical, "sync", identity=request.web_identity)
+            account, _ = await binding_service.snapshot(db, qq_id, canonical)
+            if not account:
+                raise binding_service.BindingError("请先绑定平台账号。", "not_bound", 400)
+            result = {"success": True, "message": ""}
+        if action in {"confirm", "sync"}:
+            sync_identity = await binding_service.snapshot(db, qq_id, canonical)
+            submitter = current_app.config.get("PLUGIN_CONFIG", {}).get("_account_sync_submitter")
+            try:
+                task = submitter(qq_id, [canonical]) if callable(submitter) else None
+                if inspect.isawaitable(task):
+                    task = await task
+            except Exception:
+                LOG.exception("绑定已保存，但同步调度失败")
+                task = None
+            if not task:
+                await binding_service.mark_dispatch_failure(db, qq_id, canonical, sync_identity)
+            result.update(task_id=task["id"] if task else None, sync_status="queued" if task else "failed")
+            result["message"] = result.get("message", "") + ("同步已排队。" if task else "同步未能排队，可稍后重试；已保存的绑定与数据保持有效。")
+        return jsonify(result), (202 if result.get("task_id") else 200)
+    except binding_service.BindingError as error:
+        await db.rollback()
+        await binding_service.audit(db, qq_id, qq_id, str(platform)[:24], action, error.code)
+        await db.commit()
+        return jsonify({"success": False, "code": error.code, "message": str(error)}), error.status
+    except (aiohttp.ClientError, TimeoutError, binding_service.CFUnavailable):
+        await db.rollback()
+        return jsonify({"success": False, "code": "upstream_unavailable", "message": "平台资料暂时不可用，请稍后重试。"}), 503
+    except sqlite3.IntegrityError:
+        await db.rollback()
+        return jsonify({"success": False, "code": "account_occupied", "message": "该 OJ 账号已被占用，请刷新后重新验证。"}), 409
+    finally:
+        await db.close()
+
+
+@api.post("/me/bindings/<platform>/verification")
+@member_required
+async def api_me_binding_verification(platform):
+    return await _member_binding_operation(platform, "verification")
+
+
+@api.post("/me/bindings/<platform>/confirm")
+@member_required
+async def api_me_binding_confirm(platform):
+    return await _member_binding_operation(platform, "confirm")
+
+
+@api.delete("/me/bindings/<platform>")
+@member_required
+async def api_me_binding_delete(platform):
+    return await _member_binding_operation(platform, "unbind")
+
+
+@api.post("/me/bindings/<platform>/sync")
+@member_required
+async def api_me_binding_sync(platform):
+    return await _member_binding_operation(platform, "sync")

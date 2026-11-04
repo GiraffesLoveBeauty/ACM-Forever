@@ -9,6 +9,7 @@ import { cleanupCompiled, find, loadSfc, mount, settle, textOf } from './helpers
 const Problem = (await import(await loadSfc('src/views/Problem.vue'))).default;
 const PdfPreview = (await import(await loadSfc('src/components/PdfPreview.vue'))).default;
 const Problems = (await import(await loadSfc('src/admin/Problems.vue'))).default;
+const MemberProblems = (await import(await loadSfc('src/views/MemberProblems.vue'))).default;
 const keys = ['document', 'Document', 'Node', 'ShadowRoot', 'navigator', 'fetch', 'location'];
 const originals = new Map(
   keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]),
@@ -112,9 +113,12 @@ beforeEach(() => {
         held.push(() => resolve(response(saved({ problem_id: holdId, problem_name: 'Stale' })))),
       );
     if (url === '/api/admin/database') return response({ initialized: true, platforms: [] });
+    if (url.startsWith('/api/admin/database/problems?'))
+      return response({ items: [saved()], total: 1, page: 1 });
     if (url === '/api/tasks') return response([]);
-    if (url.startsWith('/api/problems?') || url.startsWith('/api/me/problems?'))
-      return response({ items: [saved()], total: 1 });
+    if (url.startsWith('/api/me/problems?')) return response({ items: [saved()], total: 1 });
+    if (/^\/api\/me\/problems\/[^/]+\/[^/]+\/state$/.test(url) && options.method === 'PUT')
+      return response({ success: true });
     if (/^\/api\/(me\/)?problems\/[^/]+\/[^/]+$/.test(url))
       return response(responseData, responseStatus);
     throw Error('Unexpected request: ' + url);
@@ -142,7 +146,9 @@ async function page(
     [
       { path: '/problem.html', component: Problem },
       { path: '/admin.html', component: Problems },
-      { path: '/problem-bank.html', component: Problems },
+      { path: '/problem-bank.html', component: MemberProblems },
+      { path: '/my-problems.html', component: MemberProblems },
+      { path: '/home.html', component: { render: () => null } },
     ],
     path,
     { loadPdfRenderer: async () => renderer },
@@ -233,16 +239,59 @@ test('plain statements remain text and KaTeX cannot enable trusted HTML or URLs'
   assert.equal(originalProblemUrl('https://user:pass@codeforces.com/'), '');
 });
 
-test('both member and admin lists open the local viewer rather than problem_url', async () => {
-  for (const role of ['member', 'admin']) {
-    setAuth({ authenticated: true, qq_id: '12345678', role }, true);
-    await page(Problems, role === 'member' ? '/problem-bank.html' : '/admin.html?section=problems');
-    const link = find(mounted.root, (node) => node.type === 'a' && textOf(node) === '打开题目')[0];
-    assert.equal(link.props.href, '/problem.html?platform=codeforces&problem_id=cf_1843A');
-    assert.equal(link.props.target, '_blank');
-    mounted.unmount();
-    mounted = null;
-  }
+for (const role of ['member', 'admin', 'root']) {
+  test(`${role} browses and favorites in the independent personal problem bank without choosing a QQ`, async () => {
+    setAuth({ authenticated: true, qq_id: '12345678', role, csrf_token: 'fixture-csrf' }, true);
+    const path = '/my-problems.html?platform=codeforces&page=2';
+    await page(MemberProblems, path);
+    assert.doesNotMatch(textOf(mounted.root), /成员 QQ|题库管理|拉取题目/);
+    assert.equal(find(mounted.root, (node) => node.props.inputmode === 'numeric').length, 0);
+    const list = calls.find((call) => call.url.startsWith('/api/me/problems?'));
+    assert.ok(list);
+    const query = new URL(list.url, 'http://localhost').searchParams;
+    assert.equal(query.get('page'), '2');
+    assert.equal(query.get('platform'), 'codeforces');
+    assert.equal(query.has('qq_id'), false);
+    assert.equal(query.has('owner_qq_id'), false);
+    const link = find(mounted.root, (node) => node.type === 'a' && textOf(node) === '查看题面')[0];
+    assert.ok(link);
+    const target = new URL(link.props.href, 'http://localhost');
+    assert.equal(target.pathname, '/problem.html');
+    assert.equal(target.searchParams.get('platform'), 'codeforces');
+    assert.equal(target.searchParams.get('problem_id'), 'cf_1843A');
+    assert.equal(target.searchParams.get('from'), path);
+    const favorite = find(
+      mounted.root,
+      (node) => node.type === 'button' && textOf(node).trim() === '收藏',
+    )[0];
+    await favorite.props.onClick();
+    await settle();
+    const update = calls.find((call) => call.options.method === 'PUT');
+    assert.equal(update.url, '/api/me/problems/codeforces/cf_1843A/state');
+    assert.deepEqual(JSON.parse(update.options.body), { is_favorite: true });
+    assert.equal(update.options.headers['X-CSRF-Token'], 'fixture-csrf');
+    assert.ok(calls.filter((call) => call.url.startsWith('/api/me/problems?')).length >= 2);
+    assert.equal(
+      calls.some(
+        (call) => call.url.startsWith('/api/admin/') || call.url.startsWith('/api/problems?'),
+      ),
+      false,
+    );
+  });
+}
+
+test('management opens saved database records in the local viewer and has no personal browsing list', async () => {
+  setAuth({ authenticated: true, qq_id: '12345678', role: 'admin' }, true);
+  await page(Problems, '/admin.html?section=problems');
+  assert.equal(element('problem-list'), undefined);
+  assert.doesNotMatch(textOf(mounted.root), /成员 QQ|收藏/);
+  assert.equal(
+    calls.some((call) => /^\/api\/(?:me\/)?problems\?/.test(call.url)),
+    false,
+  );
+  const link = find(mounted.root, (node) => node.type === 'a' && textOf(node) === '查看题面')[0];
+  assert.equal(link.props.href, '/problem.html?platform=codeforces&problem_id=cf_1843A');
+  assert.equal(link.props.target, '_blank');
 });
 
 test('local viewer reads member detail, shows saved content and exposes a separate original link', async () => {
@@ -309,6 +358,111 @@ test('unmatched sample layout falls back to local text and copy buttons', async 
   ]);
   await find(element('problem-samples'), (node) => node.type === 'button')[1].props.onClick();
   assert.deepEqual(copied, [sample.output]);
+});
+
+test('officially omitted output shows an explanation without an answer copy button', async () => {
+  const note = 'Output omitted because it is too long. The minimum cost is <3739.378294998>.';
+  responseData = saved({
+    platform: 'atcoder',
+    statement_html:
+      '<h3>Sample Input 1</h3><pre>1\n</pre><h3>Sample Output 1</h3><p>Output omitted because it is too long.</p>',
+    samples: [{ index: 1, input: '1\n', output: null, output_note: note }],
+  });
+  await page(Problem, '/problem.html?platform=atcoder&problem_id=arc021_4');
+  const panel = element('problem-samples');
+  assert.ok(textOf(panel).includes('样例 1 · 输出说明'));
+  assert.ok(textOf(panel).includes(note));
+  assert.deepEqual(find(panel, (node) => node.type === 'pre').map(textOf), ['1\n']);
+  const buttons = find(panel, (node) => node.type === 'button');
+  assert.deepEqual(
+    buttons.map((button) => textOf(button).trim()),
+    ['复制样例 1 输入'],
+  );
+  await buttons[0].props.onClick();
+  assert.deepEqual(copied, ['1\n']);
+});
+
+test('official ZIP samples show input/output explanations and safe attachment links without copy buttons', async () => {
+  const attachment = {
+    url: 'https://img.atcoder.jp/example/samples.zip',
+    name: '官方入出力例 ZIP',
+  };
+  responseData = saved({
+    platform: 'atcoder',
+    statement_html: '<p>Sample input and output are provided in an archive.</p>',
+    samples: [
+      {
+        index: 1,
+        input: null,
+        output: null,
+        input_note: 'Input is provided in the official archive.',
+        output_note: 'Output is provided in the official archive.',
+        attachments: [attachment],
+      },
+    ],
+  });
+  await page(Problem, '/problem.html?platform=atcoder&problem_id=attachment_only');
+  const panel = element('problem-samples');
+  assert.ok(textOf(panel).includes('样例 1 · 输入说明'));
+  assert.ok(textOf(panel).includes(responseData.samples[0].input_note));
+  assert.ok(textOf(panel).includes('样例 1 · 输出说明'));
+  assert.ok(textOf(panel).includes(responseData.samples[0].output_note));
+  assert.equal(find(panel, (node) => node.type === 'button').length, 0);
+  assert.equal(find(panel, (node) => node.type === 'pre').length, 0);
+  assert.deepEqual(copied, []);
+  const links = find(panel, (node) => node.type === 'a');
+  assert.equal(links.length, 1);
+  assert.equal(links[0].props.href, attachment.url);
+  assert.equal(links[0].props.target, '_blank');
+  assert.equal(links[0].props.rel, 'noopener noreferrer');
+  assert.equal(textOf(links[0]), attachment.name);
+});
+
+test('sample attachment links reject malformed lists, foreign hosts, credentials, ports and non-ZIP files', async () => {
+  const invalid = [
+    null,
+    {},
+    { url: 123 },
+    { url: '/samples.zip' },
+    { url: 'javascript:alert(1)' },
+    { url: 'http://img.atcoder.jp/samples.zip' },
+    { url: 'https://evil.test/samples.zip' },
+    { url: 'https://img.atcoder.jp.evil.test/samples.zip' },
+    { url: 'https://user:password@img.atcoder.jp/samples.zip' },
+    { url: 'https://img.atcoder.jp:444/samples.zip' },
+    { url: 'https://img.atcoder.jp/samples.txt' },
+    { url: 'https://img.atcoder.jp/samples.zip/other' },
+  ];
+  responseData = saved({
+    platform: 'atcoder',
+    statement_html: '<p>Official attached samples.</p>',
+    samples: [
+      ...[undefined, null, {}, 'https://img.atcoder.jp/samples.zip', invalid].map(
+        (attachments) => ({
+          input: null,
+          output: null,
+          input_note: 'Input in ZIP.',
+          output_note: 'Output in ZIP.',
+          attachments,
+        }),
+      ),
+      {
+        input: null,
+        output: null,
+        input_note: 'Input in ZIP.',
+        output_note: 'Output in ZIP.',
+        attachments: [...invalid, { url: 'https://img.atcoder.jp/official/sample.ZIP', name: '' }],
+      },
+    ],
+  });
+  await page(Problem, '/problem.html?platform=atcoder&problem_id=attachment_only');
+  const links = find(element('problem-samples'), (node) => node.type === 'a');
+  assert.deepEqual(
+    links.map((link) => link.props.href),
+    ['https://img.atcoder.jp/official/sample.ZIP'],
+  );
+  assert.equal(textOf(links[0]), '官方样例 ZIP');
+  assert.equal(find(element('problem-samples'), (node) => node.type === 'button').length, 0);
 });
 
 test('missing parameters and 404 show local errors rather than redirecting', async () => {

@@ -2,23 +2,51 @@ import asyncio
 import json
 import logging
 import os
+import posixpath
 import re
 import sqlite3
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode, urlsplit
 
 from quart import Quart, abort, jsonify, redirect, request, send_from_directory
 
 from .acm_api.backend_api import api
 from .acm_api.bot_api import bot_api
+from .acm_api.account_closure_api import account_closure_api
+from .acm_api.account_closure_cleanup import ClosureCleanup
 from .acm_api.auth_service import hash_password, validate_password
+from .acm_api.account_lifecycle_service import AccountLifecycleError, bootstrap_root, user_lifecycle
 from .acm_api.database import connect_db
 from .acm_api.forum_api import forum_api
 from .acm_api.mobile_api import mobile_api
+from .acm_api.forum_notifications import forum_notification_api
+from .acm_api.wiki_api import wiki_api
+from .acm_api.wiki_cache import WikiResponseCache
+from .acm_api.markdown_api import markdown_api
+from .acm_api.forum_images import forum_image_api
 from .acm_api.cf_practice import PracticeQuery
 from .acm_api.cf_practice_api import cf_practice_api
 from .acm_api.cf_practice_jobs import PracticeJobs
 from .service_runtime import SyncEngine, WebTaskManager, create_web_challenge
+
+
+def _safe_web_next(value, fallback="/index.html"):
+    if not isinstance(value, str) or not value.startswith("/") or value.startswith("//") or re.search(r"[\\\x00-\x1f\x7f]", value):
+        return fallback
+    try:
+        raw_path = urlsplit(value).path
+        path = unquote(raw_path, errors="strict")
+        if re.search(r"%(?![0-9a-fA-F]{2})", raw_path):
+            return fallback
+        if path.startswith("//") or re.search(r"[\\\x00-\x1f\x7f]", path):
+            return fallback
+        if posixpath.normpath(path).lower() in {
+            "/login.html", "/auth-unavailable.html", "/forbidden.html",
+        }:
+            return fallback
+    except (ValueError, UnicodeError):
+        return fallback
+    return value
 
 
 def _bool_env(name, default=False):
@@ -47,18 +75,27 @@ def _read_admins(db_path, fallback):
     return list(fallback)
 
 
-def _write_admins(db_path, root_ids, admins):
-    with sqlite3.connect(db_path, timeout=5) as connection:
-        connection.execute(
-            "INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)",
-            ("webui_admin_qq_ids", json.dumps(admins, ensure_ascii=False)),
-        )
-        connection.commit()
-    return {"root": list(root_ids), "admins": list(admins)}
+async def _write_admins(db_path, root_ids, admins, identity):
+    from .acm_api.cf_practice_jobs import open_db
+    from .acm_api.account_lifecycle_service import require_web_actor
+    db = await open_db(db_path)
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, identity, roles={"root"})
+        await db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", ("webui_admin_qq_ids", json.dumps(admins, ensure_ascii=False)))
+        await db.commit()
+        return {"root": list(root_ids), "admins": list(admins)}
+    finally:
+        await db.close()
 
 
 def create_app():
     app = Quart(__name__, static_folder=None)
+
+    @app.errorhandler(AccountLifecycleError)
+    async def lifecycle_error_response(error):
+        return jsonify({"success": False, "code": error.code, "message": str(error)}), error.status
+
     db_path = Path(os.getenv("ACM_DATABASE_PATH", "./data/acm_forever.db")).expanduser()
     secret_key = os.getenv("ACM_WEBUI_SECRET_KEY", "").strip()
     app.secret_key = secret_key
@@ -68,8 +105,15 @@ def create_app():
         SESSION_COOKIE_SECURE=_bool_env("ACM_WEBUI_COOKIE_SECURE", False),
     )
     app.config["DB_PATH"] = str(db_path)
+    app.config["ACCOUNT_CLOSURE_ENABLED"] = _bool_env("ACM_ACCOUNT_CLOSURE_ENABLED", False)
+    app.config["ACCOUNT_IMPORT_ENABLED"] = _bool_env("ACM_ACCOUNT_IMPORT_ENABLED", False)
+    app.config["WIKI_CACHE_ENABLED"] = _bool_env("ACM_WIKI_CACHE_ENABLED", True)
+    app.extensions["wiki_public_cache"] = WikiResponseCache()
     app.config["AVATAR_UPLOAD_DIR"] = db_path.parent / "uploads" / "avatars"
-    app.config["MAX_CONTENT_LENGTH"] = 3 * 1024 * 1024
+    app.config["MARKDOWN_UPLOAD_DIR"] = Path(os.getenv("ACM_MARKDOWN_UPLOAD_DIR", str(db_path.parent / "uploads" / "markdown"))).expanduser()
+    app.config["PUBLIC_BASE_URL"] = os.getenv("ACM_PUBLIC_BASE_URL", "").strip()
+    app.config["FORUM_UPLOAD_DIR"] = db_path.parent / "uploads" / "forum"
+    app.config["MAX_CONTENT_LENGTH"] = 6 * 1024 * 1024
     app.config["BOT_API_TOKEN"] = os.getenv("ACM_BOT_API_TOKEN", "").strip()
     app.config["WEBUI_PUBLIC_DIR"] = Path(__file__).parent / "acm_api" / "public"
     app.config["WEBUI_DIST_DIR"] = Path(__file__).parent.parent / "web" / "dist"
@@ -116,10 +160,11 @@ def create_app():
         "webui_trusted_proxies": _csv_env("ACM_WEBUI_TRUSTED_PROXIES"),
         "admins": initial_admin_ids,
         "_admin_config_provider": admin_snapshot,
-        "_admin_config_updater": lambda admins: _write_admins(
-            db_path, root_ids, admins
+        "_admin_config_updater": lambda admins, identity: _write_admins(
+            db_path, root_ids, admins, identity
         ),
-        "_task_provider": task_manager.snapshots,
+        "_task_provider": task_manager.public_snapshots,
+        "_account_closure_notifier": task_manager.revoke_account_tasks,
         "_task_canceller": task_manager.cancel,
         "_problem_sync_submitter": task_manager.submit_problem_sync,
         "_account_sync_submitter": task_manager.submit_account_sync,
@@ -134,6 +179,16 @@ def create_app():
     }
     app.config["PLUGIN_CONFIG"] = plugin_config
 
+    closure_cleanup = ClosureCleanup(db_path, {
+        "avatar": app.config["AVATAR_UPLOAD_DIR"],
+        "forum": app.config["FORUM_UPLOAD_DIR"],
+        "forum_thumb": app.config["FORUM_UPLOAD_DIR"] / "thumbnails",
+        "markdown": app.config["MARKDOWN_UPLOAD_DIR"],
+    })
+    app.extensions["account_closure_cleanup"] = closure_cleanup
+    from .acm_api.account_import_api import account_import_api, maintenance_once, maintenance_loop
+    app.register_blueprint(account_import_api)
+
     @app.before_serving
     async def initialize_service():
         if not secret_key:
@@ -145,32 +200,34 @@ def create_app():
             if bootstrap_qq and bootstrap_password:
                 async with db.execute("SELECT COUNT(*) AS n FROM web_accounts") as cursor:
                     account_count = int((await cursor.fetchone())["n"])
-                if account_count == 0:
+                lifecycle = await user_lifecycle(db, bootstrap_qq)
+                if account_count == 0 and (not lifecycle or lifecycle["account_state"] == "active"):
                     error = validate_password(bootstrap_password)
                     if error:
                         raise RuntimeError("ACM_BOOTSTRAP_ROOT_PASSWORD: " + error)
                     if not bootstrap_qq.isdigit() or not 4 <= len(bootstrap_qq) <= 12:
                         raise RuntimeError("ACM_BOOTSTRAP_ROOT_QQ_ID must be 4-12 digits.")
                     now = int(__import__("time").time())
-                    await db.execute(
-                        "INSERT OR IGNORE INTO users(qq_id,name) VALUES(?,?)",
-                        (bootstrap_qq, bootstrap_qq),
-                    )
-                    await db.execute(
-                        "INSERT OR IGNORE INTO web_accounts"
-                        "(qq_id,password_hash,role,must_change_password,is_active,"
-                        "credential_version,created_at,updated_at) "
-                        "VALUES(?,?,'root',0,1,1,?,?)",
-                        (bootstrap_qq, hash_password(bootstrap_password), now, now),
-                    )
-                    await db.commit()
+                    bootstrap_hash = hash_password(bootstrap_password)
+                    await bootstrap_root(db, bootstrap_qq, bootstrap_hash, now)
         finally:
             await db.close()
         await sync_engine.start()
         await practice_jobs.start()
+        await closure_cleanup.start()
+        await maintenance_once(app)
+        app.extensions["account_import_maintenance"] = asyncio.create_task(maintenance_loop(app))
 
     @app.after_serving
     async def close_service():
+        await closure_cleanup.close()
+        import_task = app.extensions.pop("account_import_maintenance", None)
+        if import_task:
+            import_task.cancel()
+            await asyncio.gather(import_task, return_exceptions=True)
+        executor = app.extensions.pop("account_password_executor", None)
+        if executor:
+            executor.close()
         await task_manager.close()
         await practice_jobs.close()
         await sync_engine.close()
@@ -191,17 +248,19 @@ def create_app():
 
         identity = await _session_identity()
         if identity and identity["must_change_password"]:
-            return redirect("/change-password.html?" + urlencode({"next": "/"}))
+            return redirect("/change-password.html?" + urlencode({"next": request.full_path.rstrip("?")}))
         return await vue_entry()
 
-    async def vue_entry(filename="index.html"):
+    async def vue_entry(filename="index.html", status=200):
         dist = app.config["WEBUI_DIST_DIR"]
         if not (dist / "index.html").is_file():
             return (
                 "Vue frontend has not been built. Run pnpm install and pnpm build in feat/web.",
                 503,
             )
-        return await send_from_directory(dist, filename)
+        response = await send_from_directory(dist, filename)
+        response.status_code = status
+        return response
 
     @app.get("/<path:filename>")
     async def webui_static(filename):
@@ -222,12 +281,16 @@ def create_app():
                 response = await send_from_directory(dist_dir, filename)
                 if extension == ".mjs":
                     response.headers["Content-Type"] = "text/javascript; charset=utf-8"
+                elif extension == ".css":
+                    response.headers["Content-Type"] = "text/css; charset=utf-8"
                 return response
             response = await send_from_directory(app.config["WEBUI_PUBLIC_DIR"], filename)
             if extension == ".css":
                 response.headers["Content-Type"] = "text/css; charset=utf-8"
             return response
         if filename not in _PUBLIC_PAGES:
+            if filename.split("/", 1)[0] not in {"api", "internal", "assets", "uploads", "health"} and extension in {"", ".html"}:
+                return await vue_entry(status=404)
             abort(404)
 
         from .acm_api.backend_api import _session_identity
@@ -242,21 +305,20 @@ def create_app():
         if filename in _RETIRED_PAGES:
             return await vue_entry("retired.html")
         if identity and identity["must_change_password"] and filename != "change-password.html":
+            if filename == "login.html":
+                target = _safe_web_next(request.args.get("next"))
             return redirect("/change-password.html?" + urlencode({"next": target}))
         if filename in _ADMIN_PAGES:
             if not identity:
                 return redirect("/login.html?" + urlencode({"next": target}))
             if identity["role"] not in {"admin", "root"}:
-                abort(403)
+                return await vue_entry(status=403)
         elif filename == "change-password.html":
             if not identity:
                 return redirect("/login.html?" + urlencode({"next": target}))
         elif filename == "login.html":
             if identity:
-                next_url = request.args.get("next", "/index.html")
-                if not next_url.startswith("/") or next_url.startswith("//") or "\\" in next_url or any(ord(char) < 32 for char in next_url):
-                    next_url = "/index.html"
-                return redirect(next_url)
+                return redirect(_safe_web_next(request.args.get("next")))
         elif filename not in _ANONYMOUS_PAGES and not identity:
             return redirect("/login.html?" + urlencode({"next": target}))
         if target != request.full_path.rstrip("?"):
@@ -267,8 +329,16 @@ def create_app():
     async def uploaded_avatar(filename):
         if not re.fullmatch(r"[a-f0-9]{32}\.(?:png|jpg|webp)", filename):
             abort(404)
+        from .acm_api.backend_api import get_db
+        db = await get_db()
+        try:
+            async with db.execute("SELECT 1 FROM users WHERE account_state='active' AND avatar_url=?", ("/uploads/avatars/" + filename,)) as cursor:
+                if not await cursor.fetchone():
+                    abort(404)
+        finally:
+            await db.close()
         response = await send_from_directory(app.config["AVATAR_UPLOAD_DIR"], filename)
-        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        response.headers["Cache-Control"] = "no-store"
         return response
 
     @app.after_request
@@ -280,7 +350,7 @@ def create_app():
         response.headers.setdefault(
             "Content-Security-Policy",
             "default-src 'self'; base-uri 'self'; object-src 'none'; "
-            f"frame-ancestors 'none'; connect-src 'self'; img-src 'self' data:{problem_images}; "
+            f"frame-ancestors 'none'; connect-src 'self'; img-src 'self' data: blob:{problem_images}; "
             "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'",
         )
         if response.content_type == "application/json":
@@ -303,9 +373,14 @@ def create_app():
         return response
 
     app.register_blueprint(api, url_prefix="/api")
+    app.register_blueprint(account_closure_api, url_prefix="/api")
     app.register_blueprint(bot_api, url_prefix="/internal/v1")
     app.register_blueprint(forum_api, url_prefix="/api")
     app.register_blueprint(mobile_api, url_prefix="/api/mobile/v1")
+    app.register_blueprint(forum_notification_api, url_prefix="/api")
+    app.register_blueprint(wiki_api, url_prefix="/api")
+    app.register_blueprint(markdown_api, url_prefix="/api")
+    app.register_blueprint(forum_image_api, url_prefix="/api")
     app.register_blueprint(cf_practice_api, url_prefix="/api")
     app.sync_engine = sync_engine
     app.task_manager = task_manager
@@ -313,16 +388,16 @@ def create_app():
 
 
 _PUBLIC_PAGES = {
-    "index.html", "login.html", "post.html", "forum-moderation.html",
-    "change-password.html", "home.html", "admin.html",
-    "leaderboard.html", "challenge.html", "reviews.html", "problem-bank.html", "problem.html",
+    "account-closure.html", "index.html", "login.html", "post.html", "wiki.html", "forum-moderation.html",
+    "change-password.html", "home.html", "admin.html", "notifications.html", "my-post.html",
+    "leaderboard.html", "challenge.html", "reviews.html", "problem-bank.html", "my-problems.html", "problem.html",
     "submissions.html", "workspace.html", "contest-review.html", "member.html", "compose.html",
-    "tasks.html", "settings.html", "cf-practice.html",
+    "tasks.html", "settings.html", "cf-practice.html", "auth-unavailable.html", "forbidden.html",
 }
-_ANONYMOUS_PAGES = {"index.html", "login.html", "post.html", "leaderboard.html"}
+_ANONYMOUS_PAGES = {"account-closure.html", "wiki.html", "index.html", "login.html", "post.html", "leaderboard.html", "auth-unavailable.html", "forbidden.html"}
 _ADMIN_PAGES = {"admin.html", "member.html", "tasks.html", "settings.html", "forum-moderation.html", "cf-practice.html"}
 _RETIRED_PAGES = {"reviews.html", "submissions.html", "workspace.html"}
-_LEGACY_ADMIN_PAGES = {"member.html": "members", "challenge.html": "training", "problem-bank.html": "problems", "contest-review.html": "contests", "tasks.html": "tasks", "settings.html": "settings", "forum-moderation.html": "moderation", "cf-practice.html": "cf-practice"}
+_LEGACY_ADMIN_PAGES = {"member.html": "members", "problem-bank.html": "problems", "tasks.html": "tasks", "settings.html": "settings", "forum-moderation.html": "moderation", "cf-practice.html": "cf-practice"}
 
 
 app = create_app()

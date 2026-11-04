@@ -7,6 +7,10 @@ from .cjlu_api import fetch_cjlu_submissions
 from .constants import LOG, SYNC_USER_CONCURRENCY
 from .crawler import Crawler
 from .cf_client import binding_key
+from .database import isolated_connection
+from .binding_guard import BindingGuard, BindingChanged
+from .binding_service import platform_spec
+from .account_lifecycle_service import AccountLifecycleError, snapshot_epoch, require_active_user
 
 
 def _sync_platform_label(platform):
@@ -20,54 +24,93 @@ def _sync_platform_label(platform):
 
 
 class SyncMixin:
-    async def _get_platform_sync_state(self, qq_id, platform, legacy_cursor=0):
-        await self.db.execute(
-            "INSERT OR IGNORE INTO user_platform_sync_state "
-            "(user_qq_id, platform, cursor_timestamp, updated_at) VALUES (?, ?, ?, ?)",
-            (str(qq_id), platform, int(legacy_cursor or 0), int(time.time())),
-        )
-        async with self.db.execute(
-            "SELECT * "
-            "FROM user_platform_sync_state WHERE user_qq_id=? AND platform=?",
-            (str(qq_id), platform),
-        ) as cursor:
-            return await cursor.fetchone()
+    async def _get_platform_sync_state(self, qq_id, platform, legacy_cursor=0, *, user=None):
+        self._binding_tokens = getattr(self, "_binding_tokens", {})
+        if user is not None:
+            _, field, version = platform_spec(platform)
+            generation = int(user[version]) if version in user.keys() else 0
+            epoch = snapshot_epoch(user)
+            self._binding_tokens[(str(qq_id), platform)] = (field, version, str(user[field] or "").strip(), generation, epoch)
+        # Each worker owns its transaction; concurrent users never share BEGIN/COMMIT.
+        async with isolated_connection(self.db) as connection:
+            await connection.execute("BEGIN IMMEDIATE")
+            token = self._binding_tokens.get((str(qq_id), platform))
+            if not token or len(token) != 5:
+                raise BindingChanged("旧同步任务缺少账号版本，需重新排队")
+            if token:
+                field, version, account, generation, epoch = token
+                async with connection.execute(f"SELECT 1 FROM users WHERE account_state='active' AND account_epoch=? AND qq_id=? AND {version}=? AND LOWER(TRIM(COALESCE({field},'')))=LOWER(?)", (epoch, str(qq_id), generation, account)) as cursor:
+                    if not await cursor.fetchone():
+                        raise BindingChanged("绑定已变化，旧同步任务已取消")
+            await connection.execute("INSERT OR IGNORE INTO user_platform_sync_state (user_qq_id,platform,cursor_timestamp,updated_at) VALUES(?,?,?,?)", (str(qq_id), platform, int(legacy_cursor or 0), int(time.time())))
+            async with connection.execute("SELECT * FROM user_platform_sync_state WHERE user_qq_id=? AND platform=?", (str(qq_id), platform)) as cursor:
+                state = await cursor.fetchone()
+            await connection.commit()
+            return state
 
     async def _mark_platform_sync(self, qq_id, platform, status, now, *, success=False, error_code=None, error_message=None, cursor=None):
-        if status == "running":
-            await self.db.execute(
-                "UPDATE user_platform_sync_state SET last_attempt_at=?, last_status=?, updated_at=? "
-                "WHERE user_qq_id=? AND platform=?",
-                (now, status, now, str(qq_id), platform),
-            )
-            await self.db.commit()
-        elif success:
-            if platform == "codeforces":
-                async with self.db.execute("SELECT coverage_through_at FROM user_platform_sync_state WHERE user_qq_id=? AND platform=?", (str(qq_id), platform)) as state_cursor:
-                    cf_state = await state_cursor.fetchone()
-                if cf_state and cf_state["coverage_through_at"]:
-                    cursor = cf_state["coverage_through_at"]
-            await self.db.execute(
-                "UPDATE user_platform_sync_state SET cursor_timestamp=?, last_attempt_at=?, last_success_at=?, "
-                "last_status=?, last_error_code=NULL, last_error_message=NULL, consecutive_failures=0, "
-                "next_retry_at=0, updated_at=? WHERE user_qq_id=? AND platform=?",
-                (int(cursor or now), now, now, status, now, str(qq_id), platform),
-            )
-        else:
-            await self.db.execute(
-                "UPDATE user_platform_sync_state SET last_attempt_at=?, last_status=?, last_error_code=?, "
-                "last_error_message=?, consecutive_failures=consecutive_failures+1, updated_at=? "
-                "WHERE user_qq_id=? AND platform=?",
-                (now, status, error_code, error_message, now, str(qq_id), platform),
-            )
-        await self.db.commit()
+        async with isolated_connection(self.db) as connection:
+            if status == "running":
+                clause, values = "last_attempt_at=?,last_status=?,updated_at=?", [now, status, now]
+            elif status == "backfill":
+                # A bounded backfill succeeds without claiming full-history coverage.
+                clause = "last_attempt_at=?,last_success_at=?,last_status=?,last_error_code=NULL,last_error_message=NULL,consecutive_failures=0,next_retry_at=0,updated_at=?"
+                values = [now, now, status, now]
+            elif success:
+                if platform == "codeforces":
+                    async with connection.execute("SELECT coverage_through_at FROM user_platform_sync_state WHERE user_qq_id=? AND platform=?", (str(qq_id), platform)) as state_cursor:
+                        state = await state_cursor.fetchone()
+                    if state and state["coverage_through_at"]:
+                        cursor = state["coverage_through_at"]
+                clause = "cursor_timestamp=?,last_attempt_at=?,last_success_at=?,last_status=?,last_error_code=NULL,last_error_message=NULL,consecutive_failures=0,next_retry_at=0,updated_at=?"
+                values = [int(cursor or now), now, now, status, now]
+            else:
+                clause = "last_attempt_at=?,last_status=?,last_error_code=?,last_error_message=?,consecutive_failures=consecutive_failures+1,updated_at=?"
+                values = [now, status, error_code, error_message, now]
+            where = "user_qq_id=? AND platform=?"
+            values.extend([str(qq_id), platform])
+            token = getattr(self, "_binding_tokens", {}).get((str(qq_id), platform))
+            if token:
+                if len(token) != 5:
+                    return False
+                field, version, account, generation, epoch = token
+                where += f" AND EXISTS(SELECT 1 FROM users WHERE account_state='active' AND account_epoch=? AND qq_id=? AND {version}=? AND LOWER(TRIM(COALESCE({field},'')))=LOWER(?))"
+                values.extend([epoch, str(qq_id), generation, account])
+            else:
+                return False
+            cursor_result = await connection.execute("UPDATE user_platform_sync_state SET " + clause + " WHERE " + where, values)
+            await connection.commit()
+            return bool(cursor_result.rowcount)
+
+    async def _mark_user_synced(self, user, now):
+        # A late all-platform task must not mark a changed (even rebound) user current.
+        try:
+            epoch = snapshot_epoch(user)
+        except AccountLifecycleError:
+            return False
+        where, values = ["account_state='active'", "account_epoch=?", "qq_id=?"], [epoch, str(user["qq_id"]) ]
+        for platform in ("codeforces", "luogu", "nowcoder", "atcoder", "cjlu"):
+            _, field, version = platform_spec(platform)
+            where.append(f"{version}=? AND LOWER(TRIM(COALESCE({field},'')))=LOWER(?)")
+            values.extend([int(user[version]), str(user[field] or "").strip()])
+        async with isolated_connection(self.db) as connection:
+            result = await connection.execute("UPDATE users SET last_sync_timestamp=? WHERE " + " AND ".join(where), [now] + values)
+            await connection.commit()
+            return bool(result.rowcount)
 
     async def _fetch_platform_with_limit(self, platform, fetcher, session, user, start_timestamp):
+        async def fetch():
+            if platform == "codeforces":
+                return await fetcher(session, user, start_timestamp, self.db, self._crawler_config())
+            async with isolated_connection(self.db) as connection:
+                guarded = BindingGuard(connection, user, platform)
+                await guarded.check()
+                return await fetcher(session, user, start_timestamp, guarded, self._crawler_config())
         semaphore = self._platform_sync_semaphores.get(platform)
         if semaphore is None:
-            return await fetcher(session, user, start_timestamp, self.db, self._crawler_config())
+            return await fetch()
         async with semaphore:
-            return await fetcher(session, user, start_timestamp, self.db, self._crawler_config())
+            return await fetch()
 
     async def sync_single_user(self, qq_id: str):
         lock = self._sync_user_locks.setdefault(str(qq_id), asyncio.Lock())
@@ -75,7 +118,7 @@ class SyncMixin:
             LOG.info("跳过用户 %s：已有同步任务正在运行。", qq_id)
             return False
         async with lock:
-            async with self.db.execute("SELECT * FROM users WHERE qq_id = ?", (qq_id,)) as cursor:
+            async with self.db.execute("SELECT * FROM users WHERE account_state='active' AND qq_id = ?", (qq_id,)) as cursor:
                 user = await cursor.fetchone()
             if not user:
                 return False
@@ -95,7 +138,7 @@ class SyncMixin:
             ):
                 if not user[field]:
                     continue
-                state = await self._get_platform_sync_state(qq_id, platform, legacy_cursor)
+                state = await self._get_platform_sync_state(qq_id, platform, legacy_cursor, user=user)
                 cursor_timestamp = int(state["cursor_timestamp"] or 0)
                 # 外部平台偶发延迟或请求异常时，游标可能先推进而漏掉记录。
                 # AtCoder 每轮回看 7 天，已有题目由爬虫集合去重，不会重复入库。
@@ -136,11 +179,8 @@ class SyncMixin:
                     )
                     LOG.exception("同步用户 %s 的 %s 数据失败", qq_id, field)
             if sync_succeeded:
-                await self.db.execute(
-                    "UPDATE users SET last_sync_timestamp = ? WHERE qq_id = ?",
-                    (current_sync_time, qq_id),
-                )
-                await self.db.commit()
+                if not await self._mark_user_synced(user, current_sync_time):
+                    return False
                 if user_new_count > 0:
                     LOG.info(f"    为用户 {user['name']} 同步了 {user_new_count} 条新记录。")
                 return True
@@ -164,8 +204,8 @@ class SyncMixin:
         async with self._sync_cycle_lock:
             LOG.info(f"[智能同步] 开始执行 {time.strftime('%H:%M')} 周期的同步任务...")
             async with self.db.execute(
-                "SELECT qq_id FROM users WHERE cf_handle IS NOT NULL OR luogu_id IS NOT NULL "
-                "OR nowcoder_id IS NOT NULL OR atcoder_handle IS NOT NULL OR cjlu_username IS NOT NULL"
+                "SELECT qq_id FROM users WHERE account_state='active' AND (cf_handle IS NOT NULL OR luogu_id IS NOT NULL "
+                "OR nowcoder_id IS NOT NULL OR atcoder_handle IS NOT NULL OR cjlu_username IS NOT NULL)"
             ) as cursor:
                 user_rows = await cursor.fetchall()
             if not user_rows:
@@ -179,7 +219,7 @@ class SyncMixin:
                 )
             LOG.info("[智能同步] 本次周期任务完成。")
 
-    async def sync_single_platform_for_days(self, qq_id: str, platform: str, days: int, *, incremental=False):
+    async def sync_single_platform_for_days(self, qq_id: str, platform: str, days: int, *, incremental=False, expected_binding=None):
         """仅同步指定用户的指定平台，不启动浏览器。"""
         lock = self._sync_user_locks.setdefault(str(qq_id), asyncio.Lock())
         if lock.locked():
@@ -198,15 +238,19 @@ class SyncMixin:
             return None
         field, fetcher = field_fetcher
         async with lock:
-            async with self.db.execute("SELECT * FROM users WHERE qq_id = ?", (qq_id,)) as cursor:
+            async with self.db.execute("SELECT * FROM users WHERE account_state='active' AND qq_id = ?", (qq_id,)) as cursor:
                 user = await cursor.fetchone()
             if not user:
                 return -1
             if not (user[field] or "").strip():
                 return -2
             normalized_platform = "codeforces" if platform == "cf" else platform
+            if expected_binding is not None:
+                _, _, version = platform_spec(normalized_platform)
+                if expected_binding.get("account_epoch") != user["account_epoch"] or int(user[version]) != expected_binding["version"] or str(user[field] or "").strip().casefold() != expected_binding["account"].strip().casefold():
+                    return -4
             start_timestamp = 0 if days == 0 else int(time.time()) - days * 24 * 60 * 60
-            state = await self._get_platform_sync_state(qq_id, normalized_platform, user["last_sync_timestamp"] or 0)
+            state = await self._get_platform_sync_state(qq_id, normalized_platform, user["last_sync_timestamp"] or 0, user=user)
             if incremental and normalized_platform == "codeforces":
                 start_timestamp = int(state["cursor_timestamp"] or 0) if (
                     state["full_history_at"] and state["coverage_through_at"]
@@ -229,17 +273,14 @@ class SyncMixin:
             if result is not None and result >= 0:
                 finished_at = int(time.time())
                 if days == 0:
-                    await self._mark_platform_sync(
+                    if not await self._mark_platform_sync(
                         qq_id, normalized_platform, "success", finished_at,
                         success=True, cursor=finished_at,
-                    )
+                    ):
+                        return -4
                 else:
-                    await self.db.execute(
-                        "UPDATE user_platform_sync_state SET last_status='backfill', last_attempt_at=?, updated_at=? "
-                        "WHERE user_qq_id=? AND platform=?",
-                        (finished_at, finished_at, str(qq_id), normalized_platform),
-                    )
-                    await self.db.commit()
+                    if not await self._mark_platform_sync(qq_id, normalized_platform, "backfill", finished_at):
+                        return -4
             else:
                 await self._mark_platform_sync(qq_id, normalized_platform, "failed", int(time.time()), error_code="fetch_failed", error_message="平台抓取失败")
             return result
@@ -251,7 +292,7 @@ class SyncMixin:
             LOG.info("跳过用户 %s：已有同步任务正在运行。", qq_id)
             return None
         async with lock:
-            async with self.db.execute("SELECT * FROM users WHERE qq_id = ?", (qq_id,)) as cursor:
+            async with self.db.execute("SELECT * FROM users WHERE account_state='active' AND qq_id = ?", (qq_id,)) as cursor:
                 user = await cursor.fetchone()
             if not user:
                 return None
@@ -268,7 +309,7 @@ class SyncMixin:
             ):
                 if not (user[field] or "").strip():
                     continue
-                state = await self._get_platform_sync_state(qq_id, platform, legacy_cursor)
+                state = await self._get_platform_sync_state(qq_id, platform, legacy_cursor, user=user)
                 cursor_timestamp = int(state["cursor_timestamp"] or 0)
                 start_timestamp = requested_start if days else (cursor_timestamp or int(time.time()) - 7 * 86400)
                 attempt_at = int(time.time())
@@ -281,17 +322,15 @@ class SyncMixin:
                     if result is not None and result >= 0:
                         if days == 0:
                             finished_at = int(time.time())
-                            await self._mark_platform_sync(
+                            if not await self._mark_platform_sync(
                                 qq_id, platform, "success", finished_at,
                                 success=True, cursor=finished_at,
-                            )
+                            ):
+                                results[platform] = -4
                         else:
                             finished_at = int(time.time())
-                            await self.db.execute(
-                                "UPDATE user_platform_sync_state SET last_status='backfill', last_attempt_at=?, updated_at=? WHERE user_qq_id=? AND platform=?",
-                                (finished_at, finished_at, str(qq_id), platform),
-                            )
-                            await self.db.commit()
+                            if not await self._mark_platform_sync(qq_id, platform, "backfill", finished_at):
+                                results[platform] = -4
                     else:
                         await self._mark_platform_sync(
                             qq_id, platform, "failed", int(time.time()),
@@ -310,8 +349,7 @@ class SyncMixin:
                     )
                     LOG.exception("同步用户 %s 的 %s 数据失败", qq_id, platform)
             if results and all(value >= 0 for value in results.values()) and days == 0:
-                await self.db.execute("UPDATE users SET last_sync_timestamp = ? WHERE qq_id = ?", (int(time.time()), qq_id))
-                await self.db.commit()
+                await self._mark_user_synced(user, int(time.time()))
             return results
 
     async def _run_bind_sync_job(self, event, qq_id: str):
@@ -357,13 +395,13 @@ class SyncMixin:
     async def _check_inactive_users(self):
         now = int(time.time())
         async with self.db.execute(
-            "SELECT p.qq_id, p.inactive_days, p.last_notified_at, u.name, "
+            "SELECT p.qq_id, p.inactive_days, p.last_notified_at, u.name, u.account_epoch, "
             "MAX(s.submit_time) AS last_submit_time "
             "FROM notification_preferences p "
             "JOIN users u ON u.qq_id=p.qq_id "
             "LEFT JOIN submissions s ON s.user_qq_id=p.qq_id "
-            "WHERE p.enabled=1 "
-            "GROUP BY p.qq_id, p.inactive_days, p.last_notified_at, u.name"
+            "WHERE p.enabled=1 AND u.account_state='active' "
+            "GROUP BY p.qq_id, p.inactive_days, p.last_notified_at, u.name, u.account_epoch"
         ) as cursor:
             rows = await cursor.fetchall()
         for row in rows:
@@ -374,8 +412,10 @@ class SyncMixin:
             if row["last_notified_at"] and now - row["last_notified_at"] < 86400:
                 continue
             try:
+                async with isolated_connection(self.db) as connection:
+                    await require_active_user(connection, row["qq_id"], expected_epoch=row["account_epoch"])
                 await self.api.qq.post_private_msg(int(row["qq_id"]), text=f"📚 {row['name']}，你已经 {row['inactive_days']} 天没有新的已同步 AC 记录了，今天也来做一道吧！")
-                await self.db.execute("UPDATE notification_preferences SET last_notified_at=? WHERE qq_id=?", (now, row["qq_id"]))
+                await self.db.execute("UPDATE notification_preferences SET last_notified_at=? WHERE qq_id=? AND EXISTS(SELECT 1 FROM users WHERE qq_id=? AND account_state='active' AND account_epoch=?)", (now, row["qq_id"], row["qq_id"], row["account_epoch"]))
                 await self.db.commit()
             except Exception:
                 LOG.exception("发送不活跃提醒失败: %s", row["qq_id"])
