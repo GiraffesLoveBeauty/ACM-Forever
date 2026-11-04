@@ -210,13 +210,14 @@ final class ApiClient {
     }
 
     JSONObject leaderboard(String range, String sort, String platforms, String search, int page, int size) throws Exception {
-        JSONObject result=getObject(RankOptions.path(range,sort,platforms,search,page,size));
+        String endpoint=leaderboardPath("");
+        JSONObject result=getObject(endpoint+RankOptions.query(range,sort,platforms,search,page,size));
         if(result.optBoolean("positive_only"))return result;
         // Older servers include zero-AC rows: gather their pages before filtering and paging.
         JSONArray all=new JSONArray();
         int total=result.getInt("total");
         for(int offset=1;offset<=Math.max(1,(total+99)/100);offset++){
-            JSONObject chunk=getObject(RankOptions.path(range,sort,platforms,search,offset,100));
+            JSONObject chunk=getObject(endpoint+RankOptions.query(range,sort,platforms,search,offset,100));
             JSONArray data=chunk.getJSONArray("rows");
             for(int i=0;i<data.length();i++)if(data.getJSONObject(i).getInt("total_count")>0)all.put(data.getJSONObject(i));
         }

@@ -27,6 +27,7 @@ public class LoginStateTest {
     private static int pdfStatus;
     private static byte[] pdfBody;
     private static int loginStatus,meStatus,opens,loginRequests,readStatus;
+    private static int capabilitiesStatus;
     private static java.util.function.Function<URL,String> response;
     private static FakeConnection lastConnection;
     private TestApplication application;
@@ -41,6 +42,7 @@ public class LoginStateTest {
     @Before public void login() throws Exception {
         logoutStatus = 200;
         loginStatus=200;meStatus=200;readStatus=200;opens=0;loginRequests=0;response=null;
+        capabilitiesStatus=404;
         pdfStatus=200;pdfBody="%PDF-1.4\ntransport-test".getBytes(StandardCharsets.US_ASCII);
         application = new TestApplication();
         application.onCreate();
@@ -173,6 +175,58 @@ public class LoginStateTest {
         assertEquals(16,result.getInt("total"));assertEquals(2,result.getInt("page"));assertEquals(6,result.getJSONArray("rows").length());
         for(int i=0;i<result.getJSONArray("rows").length();i++)assertTrue(result.getJSONArray("rows").getJSONObject(i).getInt("total_count")>0);
         assertTrue(lastConnection.getURL().getQuery().contains("positive_only=1"));
+        assertEquals("/api/community/leaderboard",lastConnection.getURL().getPath());
+    }
+
+    private static String mobileCapabilities(){return "{\"api_version\":1,\"features\":{\"public_member_ids\":true,\"member_profiles\":true,\"member_posts\":true}}";}
+
+    @Test public void mobileLeaderboardIdentityOpensTheActualMemberProfileAndPosts() throws Exception {
+        capabilitiesStatus=200;String id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        java.util.List<String> requested=new java.util.ArrayList<>();
+        response=url->{requested.add(url.getPath());
+            if(url.getPath().endsWith("/capabilities"))return mobileCapabilities();
+            if(url.getPath().equals("/api/mobile/v1/leaderboard"))return "{\"positive_only\":true,\"rows\":[{\"public_member_id\":\""+id+"\",\"total_count\":3}],\"total\":1,\"page\":1}";
+            if(url.getPath().equals("/api/mobile/v1/members/"+id))return "{\"public_member_id\":\""+id+"\",\"name\":\"Member from leaderboard\"}";
+            if(url.getPath().equals("/api/mobile/v1/members/"+id+"/posts"))return "{\"rows\":[],\"total\":0}";
+            throw new AssertionError("Unexpected API: "+url);
+        };
+        org.json.JSONObject ranks=api.leaderboard("30","cf_count","codeforces,atcoder","a&中文",1,20);
+        assertTrue(lastConnection.getURL().getQuery().contains("search=a%26%E4%B8%AD%E6%96%87"));
+        String selected=ranks.getJSONArray("rows").getJSONObject(0).getString("public_member_id");
+        assertEquals("Member from leaderboard",api.memberProfile(selected).getString("name"));
+        assertEquals(0,api.memberPosts(selected,1).getInt("total"));
+        assertEquals(java.util.Arrays.asList("/api/mobile/v1/capabilities","/api/mobile/v1/leaderboard","/api/mobile/v1/members/"+id,"/api/mobile/v1/members/"+id+"/posts"),requested);
+    }
+
+    @Test public void mobileCompatibilityPaginationKeepsTheSameEndpointAndPublicIds() throws Exception {
+        capabilitiesStatus=200;java.util.List<URL> ranks=new java.util.ArrayList<>();
+        response=url->{if(url.getPath().endsWith("/capabilities"))return mobileCapabilities();
+            assertEquals("/api/mobile/v1/leaderboard",url.getPath());ranks.add(url);
+            String id=url.getQuery().contains("&page=2&")?"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+            return "{\"rows\":[{\"public_member_id\":\""+id+"\",\"total_count\":1},{\"total_count\":0}],\"total\":101}";
+        };
+        org.json.JSONObject result=api.leaderboard("all","total_count","atcoder","",1,10);
+        assertEquals(3,ranks.size());assertEquals(2,result.getInt("total"));
+        assertEquals("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",result.getJSONArray("rows").getJSONObject(0).getString("public_member_id"));
+        assertEquals("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",result.getJSONArray("rows").getJSONObject(1).getString("public_member_id"));
+        for(int i=1;i<ranks.size();i++)assertTrue(ranks.get(i).getQuery().contains("page_size=100"));
+    }
+
+    @Test public void explicitUnsupportedMobileIdentityUsesOrdinaryLeaderboard() throws Exception {
+        capabilitiesStatus=200;
+        response=url->{if(url.getPath().endsWith("/capabilities"))return "{\"api_version\":1,\"features\":{\"public_member_ids\":false}}";
+            assertEquals("/api/community/leaderboard",url.getPath());return "{\"positive_only\":true,\"rows\":[],\"total\":0}";};
+        assertEquals(0,api.leaderboard("7","total_count","codeforces","",1,20).getInt("total"));
+    }
+
+    @Test public void absentCapabilities404Or405FallsBackWithoutInventingMemberIds() throws Exception {
+        for(int status:new int[]{404,405}){
+            capabilitiesStatus=status;
+            response=url->{if(url.getPath().endsWith("/capabilities"))return "{}";
+                assertEquals("/api/community/leaderboard",url.getPath());return "{\"positive_only\":true,\"rows\":[{\"name\":\"Legacy member\",\"total_count\":1}],\"total\":1}";};
+            org.json.JSONObject row=fresh().leaderboard("7","total_count","codeforces","",1,20).getJSONArray("rows").getJSONObject(0);
+            assertFalse(row.has("public_member_id"));
+        }
     }
 
     @Test public void pdfRejectsHtmlAndDistinguishesMissingApiFromExpiredSession() throws Exception {
@@ -220,7 +274,7 @@ public class LoginStateTest {
 
     private static final class FakeConnection extends HttpURLConnection {
         private final int code;
-        FakeConnection(URL url) { super(url);opens++;if(url.getPath().endsWith("/login"))loginRequests++;code=url.getPath().endsWith("/me")?meStatus:url.getPath().endsWith("/login")?loginStatus:url.getPath().endsWith("statement.pdf")?pdfStatus:url.getPath().endsWith("/logout")?logoutStatus:readStatus;if(url.getPath().endsWith("/me"))meStatus=200; }
+        FakeConnection(URL url) { super(url);opens++;if(url.getPath().endsWith("/login"))loginRequests++;code=url.getPath().endsWith("/capabilities")?capabilitiesStatus:url.getPath().endsWith("/me")?meStatus:url.getPath().endsWith("/login")?loginStatus:url.getPath().endsWith("statement.pdf")?pdfStatus:url.getPath().endsWith("/logout")?logoutStatus:readStatus;if(url.getPath().endsWith("/me"))meStatus=200; }
         @Override public void connect() { }
         @Override public void disconnect() { }
         @Override public boolean usingProxy() { return false; }
