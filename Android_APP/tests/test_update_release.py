@@ -78,6 +78,26 @@ class ReleaseContractTests(unittest.TestCase):
             archive.writestr("other.json", "{}")
         with self.assertRaises(KeyError): release.bundled_history(self.apk, self.history)
 
+    def test_debug_filename_channel_and_certificate(self):
+        manifest = self.generate(channel="debug", certificate="a" * 64)
+        self.assertTrue(manifest["apkUrl"].endswith("/acmforever-0.2.13-debug.apk"))
+        self.assertEqual(manifest["channel"], "debug")
+        self.assertEqual(manifest["signingCertificateSha256"], "a" * 64)
+        with self.assertRaises(ValueError): self.generate(channel="beta")
+
+    def test_build_type_must_match_channel(self):
+        release.verify_variant(self.badging, "release")
+        release.verify_variant(self.badging + "\napplication-debuggable\n", "debug")
+        with self.assertRaises(ValueError): release.verify_variant(self.badging, "debug")
+        with self.assertRaises(ValueError): release.verify_variant(self.badging + "\napplication-debuggable\n", "release")
+
+    def test_single_signer_must_match_pinned_certificate(self):
+        output = "Signer #1 certificate SHA-256 digest: " + "a" * 64 + "\n"
+        self.assertEqual(release.signer_digest(output, ":".join(["AA"] * 32)), "a" * 64)
+        for text, pin in (("", "a" * 64), (output, "b" * 64), (output, "not a hash"),
+                          (output + output.replace("#1", "#2"), "a" * 64)):
+            with self.subTest(text=text, pin=pin), self.assertRaises(ValueError): release.signer_digest(text, pin)
+
 
 if __name__ == "__main__":
     unittest.main()

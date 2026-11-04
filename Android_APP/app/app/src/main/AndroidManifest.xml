@@ -19,6 +19,7 @@
         <activity android:name=".SpaceActivity" android:exported="false" />
         <activity android:name=".BackgroundCropActivity" android:exported="false" />
         <activity android:name=".UpdateActivity" android:exported="false" android:launchMode="singleTop" />
+        <activity android:name=".UpdateDownloadActivity" android:exported="false" android:launchMode="singleTop" />
         <provider android:name=".UpdateFileProvider" android:authorities="${applicationId}.updates" android:exported="false" android:grantUriPermissions="true" />
         <activity android:name=".WebFeaturesActivity" android:exported="false" />
         <activity android:name=".ImagePreviewActivity" android:exported="false" />

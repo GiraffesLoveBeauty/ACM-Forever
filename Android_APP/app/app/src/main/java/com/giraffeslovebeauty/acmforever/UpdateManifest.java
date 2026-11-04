@@ -7,13 +7,15 @@ import java.util.Locale;
 /** Public release metadata. It never contains cookies, credentials or an executable instruction. */
 final class UpdateManifest {
     static final long MAX_APK_BYTES=150L*1024*1024;
-    final String packageName,versionName,apkUrl,sha256,notes;
+    final String packageName,versionName,apkUrl,sha256,notes,channel;
     final long versionCode,sizeBytes;
     final int minSdk;
     private final String json;
     UpdateManifest(JSONObject value,String expectedPackage)throws Exception{
         packageName=value.getString("packageName");
         if(!expectedPackage.equals(packageName))throw new IllegalArgumentException("更新包名与当前 App 不一致。");
+        channel=value.optString("channel","");
+        if(!channel.isEmpty()&&!channel.equals("debug")&&!channel.equals("release"))throw new IllegalArgumentException("更新渠道无效。");
         versionCode=value.getLong("versionCode");versionName=value.getString("versionName");
         if(versionCode<1||versionCode>2100000000L||!versionName.matches("[0-9]+\\.[0-9]+(?:\\.[0-9]+)?(?:[-+][A-Za-z0-9_.-]+)?"))throw new IllegalArgumentException("更新版本无效。");
         apkUrl=https(value.getString("apkUrl"));sha256=value.getString("sha256").toLowerCase(Locale.ROOT);
@@ -24,6 +26,7 @@ final class UpdateManifest {
         json=value.toString();
     }
     String json(){return json;}
+    void requireChannel(String current){if(!channel.isEmpty()&&!channel.equals(current))throw new IllegalArgumentException("更新清单与当前 App 渠道不同，请安装对应渠道的版本。");}
     static String https(String value){
         try{
             URI uri=new URI(value.trim());

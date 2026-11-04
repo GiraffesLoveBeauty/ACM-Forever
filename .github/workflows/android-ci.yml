@@ -21,8 +21,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Test release manifest contracts
-        run: python -m unittest discover -s Android_APP/tests -p test_update_release.py -v
+      - name: Test release contracts and publication failures
+        run: python -m unittest discover -s Android_APP/tests -p 'test_*release*.py' -v
 
       - uses: actions/setup-java@v4
         with:

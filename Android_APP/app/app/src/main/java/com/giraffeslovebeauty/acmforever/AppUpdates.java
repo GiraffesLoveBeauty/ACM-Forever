@@ -7,6 +7,9 @@ import android.database.Cursor;
 import android.net.*;
 import android.os.*;
 import android.provider.Settings;
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
+import android.widget.*;
 import org.json.JSONObject;
 import java.io.*;
 import java.lang.ref.WeakReference;
@@ -27,21 +30,25 @@ final class AppUpdates {
     private WeakReference<Activity> owner=new WeakReference<>(null);
     private Runnable listener;
     private UpdateManifest release;
-    private String source="",error="",verifiedName="";
+    private String source="",error="",verifiedName="",pendingResult="",downloadState="";
     private long downloadId=-1,generation;
     private boolean checking,verifying,installRequested;
     private int progress=-1;
     private long promptedVersion;
+    private boolean startupChecked,pendingOffer,openingDownload,openingInstaller;
+    private AlertDialog offerDialog;
+    private final Runnable presentOffer=this::presentOffer;
     private final Runnable poll=this::pollDownload;
 
     AppUpdates(Context context,ApiClient api){
         this.context=context.getApplicationContext();this.api=api;prefs=AppAppearance.prefs(context);
+        prefs.edit().remove(KEY+"wifi_download").apply();
         downloadId=prefs.getLong(KEY+"download",-1);verifiedName=prefs.getString(KEY+"verified","");
         try{
             source=endpoint();
             if(source.equals(prefs.getString(KEY+"source",""))){
                 String stored=prefs.getString(KEY+"manifest","");
-                if(!stored.isEmpty())release=new UpdateManifest(new JSONObject(stored),context.getPackageName());
+                if(!stored.isEmpty()){release=new UpdateManifest(new JSONObject(stored),context.getPackageName());release.requireChannel(channel());}
                 if(release!=null&&release.versionCode>currentVersion()){
                     downloadId=prefs.getLong(KEY+"download",-1);verifiedName=prefs.getString(KEY+"verified","");
                     if(!verifiedFile().isFile())verifiedName="";
@@ -49,21 +56,25 @@ final class AppUpdates {
             }else clearStored();
         }catch(Exception ignored){clearStored();}
     }
-    void attach(Activity activity,Runnable changed){owner=new WeakReference<>(activity);listener=changed;syncSource();changed();if(downloadId!=-1&&!verifying){ui.removeCallbacks(poll);ui.post(poll);}}
-    void detach(Activity activity){if(owner.get()==activity){owner.clear();listener=null;}}
+    void attach(Activity activity,Runnable changed){owner=new WeakReference<>(activity);listener=changed;openingDownload=false;openingInstaller=false;syncSource();changed();ui.removeCallbacks(presentOffer);ui.post(presentOffer);if(downloadId!=-1&&!verifying){ui.removeCallbacks(poll);ui.post(poll);}}
+    void detach(Activity activity){if(owner.get()==activity){
+        ui.removeCallbacks(presentOffer);
+        // A rotation/background transition is not a decision to cancel the update.
+        if(offerDialog!=null){offerDialog.setOnDismissListener(null);offerDialog.dismiss();offerDialog=null;}
+        owner.clear();listener=null;
+    }}
     private Activity activity(){Activity a=owner.get();return a==null||a.isFinishing()||a.isDestroyed()?null:a;}
-    boolean automatic(){return prefs.getBoolean(KEY+"automatic",false);}
-    boolean automaticDownload(){return automatic()&&prefs.getBoolean(KEY+"wifi_download",false);}
-    void automatic(boolean value){prefs.edit().putBoolean(KEY+"automatic",value).apply();if(!value)prefs.edit().putBoolean(KEY+"wifi_download",false).apply();changed();}
-    void automaticDownload(boolean value){prefs.edit().putBoolean(KEY+"wifi_download",value).putBoolean(KEY+"automatic",value||automatic()).apply();changed();}
+    boolean automatic(){return prefs.getBoolean(KEY+"automatic",true);}
+    void automatic(boolean value){prefs.edit().putBoolean(KEY+"automatic",value).apply();changed();}
     void maybeCheck(){if(automatic()&&System.currentTimeMillis()-prefs.getLong(KEY+"attempt",0)>=6*60*60*1000L)check(false);}
+    void startupCheck(){if(startupChecked)return;startupChecked=true;maybeCheck();}
     long currentVersion(){try{PackageInfo p=context.getPackageManager().getPackageInfo(context.getPackageName(),0);return Build.VERSION.SDK_INT>=28?p.getLongVersionCode():p.versionCode;}catch(Exception e){return 0;}}
     String currentName(){try{return context.getPackageManager().getPackageInfo(context.getPackageName(),0).versionName;}catch(Exception e){return "未知";}}
+    private String channel(){return (context.getApplicationInfo().flags&ApplicationInfo.FLAG_DEBUGGABLE)!=0?"debug":"release";}
     String endpoint(){
-        boolean debug=(context.getApplicationInfo().flags&ApplicationInfo.FLAG_DEBUGGABLE)!=0;
         String configured=prefs.getString(KEY+"url","");
-        if(configured.trim().isEmpty()&&!debug)configured=context.getString(R.string.default_update_manifest_url);
-        return UpdateManifest.endpoint(api.getBaseUrl(),configured,debug?"debug":"release");
+        if(configured.trim().isEmpty())configured=context.getString(R.string.default_update_manifest_url);
+        return UpdateManifest.https(configured);
     }
     void source(String value){
         if(busy())throw new IllegalArgumentException("请等待当前检查完成，或先取消下载。");
@@ -71,21 +82,25 @@ final class AppUpdates {
         prefs.edit().putString(KEY+"url",checked).apply();syncSource();changed();
     }
     String customSource(){return prefs.getString(KEY+"url","");}
-    private void syncSource(){
-        String next;try{next=endpoint();}catch(Exception e){error=e.getMessage();return;}
-        if(next.equals(source))return;
-        ++generation;cancelDownload();source=next;release=null;error="";checking=false;clearStored();
+    private boolean syncSource(){
+        String next;try{next=endpoint();}catch(Exception e){error=e.getMessage();return false;}
+        if(next.equals(source))return true;
+        if(offerDialog!=null){offerDialog.setOnDismissListener(null);offerDialog.dismiss();offerDialog=null;}
+        ++generation;cancelDownload();source=next;release=null;error="";checking=false;pendingOffer=false;pendingResult="";promptedVersion=0;clearStored();
         prefs.edit().remove(KEY+"attempt").apply();
+        return true;
     }
     boolean busy(){return checking||verifying||downloadId!=-1;}
     boolean downloading(){return downloadId!=-1;}
+    boolean verifying(){return verifying;}
+    int progress(){return progress;}
     boolean ready(){return !verifiedName.isEmpty()&&verifiedFile().isFile();}
     boolean available(){return release!=null&&release.versionCode>currentVersion()&&release.minSdk<=Build.VERSION.SDK_INT;}
     String error(){return error;}
     String status(){
         if(checking)return "正在检查新版本…";
         if(verifying)return "正在校验安装包…";
-        if(downloadId!=-1)return progress<0?"正在等待或下载安装包…":"正在下载安装包 · "+progress+"%";
+        if(downloadId!=-1)return !downloadState.isEmpty()?downloadState:progress<0?"正在等待或下载安装包…":"正在下载安装包 · "+progress+"%";
         if(ready())return "新版已下载，等待安装";
         if(!error.isEmpty())return error;
         if(release==null)return "尚未检查更新";
@@ -98,7 +113,7 @@ final class AppUpdates {
     void dismissError(){error="";changed();}
     private void changed(){if(listener!=null&&activity()!=null)listener.run();}
     void check(boolean manual){
-        syncSource();if(busy())return;error="";checking=true;changed();
+        if(!syncSource()){changed();return;}if(busy())return;error="";pendingResult="";checking=true;changed();
         final long ticket=++generation;final String address=source;
         prefs.edit().putLong(KEY+"attempt",System.currentTimeMillis()).apply();
         io.execute(()->{
@@ -112,14 +127,17 @@ final class AppUpdates {
                         byte[] buffer=new byte[4096];int n;
                         while((n=stream.read(buffer))!=-1){if(bytes.size()+n>32768)throw new IllegalArgumentException("版本清单超过 32 KB。");bytes.write(buffer,0,n);}
                         found=new UpdateManifest(new JSONObject(new String(bytes.toByteArray(),StandardCharsets.UTF_8)),context.getPackageName());
+                        found.requireChannel(channel());
                     }
                 }finally{connection.disconnect();}
                 ui.post(()->{
                     if(ticket!=generation)return;checking=false;
                     if(release==null||release.versionCode!=found.versionCode||!release.sha256.equals(found.sha256)){deleteVerified();}
                     release=found;save();changed();
-                    if(!manual&&available()){
-                        if(automaticDownload())download(true);else prompt();
+                    if((manual||automatic())&&available()&&!ready()&&(manual||promptedVersion!=found.versionCode)){
+                        pendingOffer=true;presentOffer();
+                    }else if(manual){
+                        pendingResult=found.versionCode<=currentVersion()?"已是最新版本":ready()?"新版已下载，请点击安装新版继续":status();presentOffer();
                     }
                 });
             }catch(Exception failure){ui.post(()->{if(ticket!=generation)return;checking=false;error=failure instanceof IllegalArgumentException?failure.getMessage():FailureState.title(failure);changed();});}
@@ -142,33 +160,62 @@ final class AppUpdates {
         }
         throw new IllegalArgumentException("更新清单重定向次数过多。");
     }
-    private void prompt(){
-        Activity a=activity();if(a==null||listener!=null||ModalDialogs.isShowing(a)||release==null||promptedVersion==release.versionCode)return;
-        promptedVersion=release.versionCode;
-        new ModalDialogs.Builder(a).setTitle("发现新版本 "+release.versionName).setMessage(notes()).setNegativeButton("稍后",null)
-                .setPositiveButton("查看更新",(d,w)->a.startActivity(new Intent(a,UpdateActivity.class))).show();
+    private void presentOffer(){
+        Activity a=activity();if(a==null||busy()||offerDialog!=null)return;
+        if(!pendingOffer&&pendingResult.isEmpty())return;
+        if(ModalDialogs.isShowing(a)){ui.removeCallbacks(presentOffer);ui.postDelayed(presentOffer,500);return;}
+        if(!pendingResult.isEmpty()){
+            AlertDialog dialog=new ModalDialogs.Builder(a).setTitle(pendingResult).setPositiveButton("确认",(d,w)->{}).create();offerDialog=dialog;
+            dialog.setOnDismissListener(d->{offerDialog=null;pendingResult="";});ModalDialogs.show(dialog);return;
+        }
+        if(!available()||ready()){pendingOffer=false;return;}
+        LinearLayout panel=new LinearLayout(a);panel.setOrientation(LinearLayout.VERTICAL);
+        TextView version=new TextView(a);version.setText("ACMforever "+release.versionName);version.setContentDescription("新版版本号 "+release.versionName);version.setTextColor(MobileStyle.TEXT);version.setTextSize(23);version.setTypeface(null,android.graphics.Typeface.BOLD);version.setGravity(android.view.Gravity.CENTER);version.setPadding(0,0,0,MobileStyle.dp(a,16));panel.addView(version,new LinearLayout.LayoutParams(-1,-2));
+        TextView heading=new TextView(a);heading.setText("更新说明");heading.setTextColor(MobileStyle.MUTED);heading.setTextSize(13);heading.setPadding(0,0,0,MobileStyle.dp(a,8));panel.addView(heading);
+        ScrollView description=new ScrollView(a){@Override protected void onMeasure(int width,int height){int limit=(int)(getResources().getDisplayMetrics().heightPixels*.24f);super.onMeasure(width,android.view.View.MeasureSpec.makeMeasureSpec(limit,android.view.View.MeasureSpec.AT_MOST));}};
+        TextView copy=new TextView(a);copy.setText(notes().isEmpty()?"此版本未提供更新说明。":notes());copy.setContentDescription("新版更新说明");copy.setTextColor(MobileStyle.TEXT);copy.setTextSize(15);copy.setLineSpacing(MobileStyle.dp(a,4),1);copy.setPadding(0,0,0,MobileStyle.dp(a,16));description.addView(copy);panel.addView(description,new LinearLayout.LayoutParams(-1,-2));
+        LinearLayout actions=new LinearLayout(a);
+        Button download=new Button(a);download.setText("下载安装包");MobileStyle.button(download,true);
+        Button cancel=new Button(a);cancel.setText("取消更新");MobileStyle.button(cancel,false);
+        GradientDrawable red=new GradientDrawable();red.setColor(0x80ff0000);red.setCornerRadius(MobileStyle.dp(a,12));cancel.setBackground(red);
+        cancel.setTextColor(ThemePalette.readable(new int[]{ThemePalette.mix(MobileStyle.PANEL,Color.RED,.5)},MobileStyle.TEXT,4.5));
+        LinearLayout.LayoutParams left=new LinearLayout.LayoutParams(0,MobileStyle.dp(a,56),1);left.setMarginEnd(MobileStyle.dp(a,6));actions.addView(download,left);
+        LinearLayout.LayoutParams right=new LinearLayout.LayoutParams(0,MobileStyle.dp(a,56),1);right.setMarginStart(MobileStyle.dp(a,6));actions.addView(cancel,right);LinearLayout.LayoutParams actionBounds=new LinearLayout.LayoutParams(-1,-2);actionBounds.topMargin=MobileStyle.dp(a,16);panel.addView(actions,actionBounds);
+        AlertDialog dialog=new ModalDialogs.Builder(a).setTitle("发现新版本").setView(panel).create();offerDialog=dialog;
+        final long offeredVersion=release.versionCode;
+        dialog.setOnDismissListener(d->{offerDialog=null;pendingOffer=false;promptedVersion=offeredVersion;});
+        cancel.setOnClickListener(v->dialog.dismiss());
+        download.setOnClickListener(v->{download.setEnabled(false);dialog.dismiss();openDownload(a);});ModalDialogs.show(dialog);
     }
-    void download(boolean wifiOnly){
-        syncSource();if(busy()||!available()||ready())return;
+    void openDownload(Activity a){
+        if(openingDownload||a.isFinishing()||a.isDestroyed())return;
+        if(!ready()&&!busy())download();
+        if(!downloading()&&!verifying()&&!ready()&&error.isEmpty())return;
+        openingDownload=true;
+        try{a.startActivity(new Intent(a,UpdateDownloadActivity.class));}catch(Exception e){openingDownload=false;fail(e);}
+    }
+    void download(){
+        if(!syncSource()){changed();return;}if(busy()||!available()||ready())return;
         try{
             DownloadManager.Request request=new DownloadManager.Request(Uri.parse(release.apkUrl));
             request.setTitle("ACMforever "+release.versionName);request.setDescription("下载后校验并由系统确认安装");
             request.setMimeType("application/vnd.android.package-archive");request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-            if(wifiOnly){request.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI);request.setAllowedOverMetered(false);}
             request.setDestinationInExternalFilesDir(context,Environment.DIRECTORY_DOWNLOADS,"acmforever-"+release.versionCode+"-"+System.currentTimeMillis()+".apk");
-            downloadId=downloads().enqueue(request);progress=-1;error="";save();changed();ui.removeCallbacks(poll);ui.postDelayed(poll,1000);
+            downloadId=downloads().enqueue(request);progress=-1;downloadState="正在等待下载…";error="";save();changed();ui.removeCallbacks(poll);ui.postDelayed(poll,1000);
         }catch(Exception e){downloadId=-1;fail(e);}
     }
     private DownloadManager downloads(){return (DownloadManager)context.getSystemService(Context.DOWNLOAD_SERVICE);}
     private void pollDownload(){
         if(downloadId==-1||verifying||release==null)return;
         try(Cursor cursor=downloads().query(new DownloadManager.Query().setFilterById(downloadId))){
-            if(cursor==null||!cursor.moveToFirst())throw new IOException("下载任务不存在，请重新下载。");
+            if(cursor==null||!cursor.moveToFirst())throw new IllegalArgumentException("下载任务不存在，请重新下载。");
             long total=cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)),bytes=cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
             if(total>UpdateManifest.MAX_APK_BYTES||bytes>UpdateManifest.MAX_APK_BYTES)throw new IllegalArgumentException("安装包超过大小限制。");
-            progress=total>0?(int)Math.min(100,bytes*100/total):-1;changed();
+            progress=total>0?(int)Math.min(100,bytes*100/total):-1;
             int status=cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
-            if(status==DownloadManager.STATUS_FAILED)throw new IOException("APK 下载失败，系统原因 "+cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON)));
+            int reason=cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON));
+            downloadState=status==DownloadManager.STATUS_PENDING?"正在等待下载…":status==DownloadManager.STATUS_PAUSED?(reason==DownloadManager.PAUSED_WAITING_FOR_NETWORK?"无网络，恢复连接后继续下载…":reason==DownloadManager.PAUSED_QUEUED_FOR_WIFI?"系统正在等待可用网络…":"连接中断，系统正在重试下载…"):"";changed();
+            if(status==DownloadManager.STATUS_FAILED)throw new IllegalArgumentException(reason==DownloadManager.ERROR_INSUFFICIENT_SPACE?"下载失败：存储空间不足。":reason==DownloadManager.ERROR_DEVICE_NOT_FOUND?"下载失败：存储设备不可用。":reason==DownloadManager.ERROR_CANNOT_RESUME?"下载中断且无法续传，请重试。":"安装包下载失败，系统原因 "+reason+"，请重试。");
             if(status==DownloadManager.STATUS_SUCCESSFUL){Uri uri=downloads().getUriForDownloadedFile(downloadId);if(uri==null)throw new IOException("找不到下载文件。");verify(uri);}
             else ui.postDelayed(poll,1000);
         }catch(Exception e){cancelDownload();fail(e);}
@@ -205,7 +252,7 @@ final class AppUpdates {
         if(a==null||b==null||a.length==0||a.length!=b.length||!new HashSet<>(Arrays.asList(a)).equals(new HashSet<>(Arrays.asList(b))))throw new IllegalArgumentException("安装包签名与当前 App 不一致。");
     }
     void install(Activity a){
-        if(!ready())return;
+        if(!ready()||openingInstaller)return;
         if(!a.getPackageManager().canRequestPackageInstalls()){
             if(ModalDialogs.isShowing(a))return;
             new ModalDialogs.Builder(a).setTitle("允许安装更新").setMessage("打开本 App 的安装权限后，仍由系统确认安装。")
@@ -215,12 +262,12 @@ final class AppUpdates {
                     }).show();return;
         }
         try{
-            installRequested=false;Intent intent=new Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse("content://"+context.getPackageName()+".updates/"+verifiedName),"application/vnd.android.package-archive");
+            installRequested=false;openingInstaller=true;Intent intent=new Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse("content://"+context.getPackageName()+".updates/"+verifiedName),"application/vnd.android.package-archive");
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);a.startActivity(intent);
-        }catch(Exception e){fail(e);}
+        }catch(Exception e){openingInstaller=false;fail(e);}
     }
     void resumeInstall(Activity a){if(installRequested){installRequested=false;if(a.getPackageManager().canRequestPackageInstalls())install(a);}}
-    void cancelDownload(){++generation;ui.removeCallbacks(poll);if(downloadId!=-1)downloads().remove(downloadId);downloadId=-1;verifying=false;progress=-1;save();changed();}
+    void cancelDownload(){++generation;ui.removeCallbacks(poll);if(downloadId!=-1)downloads().remove(downloadId);downloadId=-1;verifying=false;progress=-1;downloadState="";save();changed();}
     private File verifiedFile(){return new File(new File(context.getCacheDir(),"updates"),verifiedName.matches("verified-[A-Za-z0-9_-]+\\.apk")?verifiedName:"missing");}
     private void deleteVerified(){if(!verifiedName.isEmpty())verifiedFile().delete();verifiedName="";}
     private void clearStored(){if(downloadId!=-1)downloads().remove(downloadId);downloadId=-1;deleteVerified();release=null;prefs.edit().remove(KEY+"manifest").remove(KEY+"download").remove(KEY+"verified").remove(KEY+"source").apply();}
