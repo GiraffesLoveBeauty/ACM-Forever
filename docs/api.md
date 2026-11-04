@@ -143,6 +143,8 @@ response.raise_for_status()
 
 ### 本人 AC 与站内题面
 
+成员题库将 Codeforces 的 `100A`、`cf_100A` 及大小写别名视为同一题。标签选项、列表和比赛进度按同一优先级取非空标签；本人 AC 与收藏也跨这些别名合并。AtCoder 仍按原题号精确区分。
+
 `GET /api/me/problems?scope=solved` 从会话读取 QQ，客户端的 `qq_id/owner_qq_id` 不改变归属。以平台和题号去重，返回 `ac_at`（Unix 秒），按最近 AC 时间倒序，再按平台、题号稳定排序。`platform/tag/problem_tag/state=favorite/page/page_size` 与总数使用相同条件；`tag` 同时匹配题名、题号和标签，独立的 `problem_tag` 按完整标签忽略大小写匹配（最长 100 字符，超长返回 400），兼容逗号等分隔的旧标签及 JSON 标签数组，不把 `math` 匹配为 `mathematics`，`%`、`_` 不作为通配符。标签与搜索、收藏、本人 AC 范围共同生效，先筛选再统计与分页。本人范围默认每页 20、上限 100，默认全站目录仍为 500、上限 500。返回 `items/total/returned/page/page_size`；无效 `scope` 或非整数分页参数返回 400。
 
 `GET /api/me/problems/tags?platform=codeforces` 返回 `tags: string[]`，供题库标签下拉框使用，沿用成员登录和首次改密限制。下拉选项、列表展示及标签筛选使用同一份有效标签：按已采集目录 → 推荐目录 → 会话本人的 AC 元数据取第一份非空标签，空字符串和 JSON 空数组均允许回退；不读取其他成员独有的提交标签，也不混入被优先来源替代的旧标签。比赛进度采用相同优先顺序。平台可为空或 `codeforces/atcoder/luogu/nowcoder/cjlu`，无效平台返回 400。按完整标签忽略大小写去重并排序，排除空白和超过 100 字符的标签；列表不受当前题目页码、搜索或收藏筛选限制，不联网或触发采集。

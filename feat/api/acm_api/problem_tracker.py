@@ -96,6 +96,17 @@ def problem_id_aliases(platform, problem_id):
     return tuple(dict.fromkeys(aliases))
 
 
+def problem_id_key(platform, problem_id):
+    """Group the same aliases accepted by CF detail lookups; keep other IDs exact."""
+    if platform != "codeforces":
+        return problem_id
+    aliases = problem_id_aliases(platform, problem_id)
+    if len(aliases) > 1:
+        bare = re.sub(r"^cf_", "", problem_id, flags=re.IGNORECASE)
+        return "CF_" + bare.upper()
+    return problem_id.upper()
+
+
 def rating(value):
     try:
         return int(value) if value is not None and str(value).strip() else None
@@ -138,9 +149,19 @@ async def contest_tracker(db, owner, options):
         contest_info = {(row["platform"], row["contest_id"]): dict(row) for row in await cursor.fetchall()}
 
     def add(row):
-        prior_key = aliases.get((row["platform"], row["problem_id"]))
-        if prior_key is not None:
-            problem = catalog[prior_key]
+        alias_key = (row["platform"], problem_id_key(row["platform"], row["problem_id"]))
+        key = aliases.get(alias_key)
+        if key is None:
+            parsed = identity(row["platform"], row["problem_id"], row.get("contest_id"),
+                              row.get("problem_index"), row.get("problem_url"))
+            if parsed is None:
+                return None
+            pid, contest, index = parsed
+            key = row["platform"], pid
+            aliases[alias_key] = key
+            aliases[row["platform"], problem_id_key(row["platform"], pid)] = key
+        if key in catalog:
+            problem = catalog[key]
             if problem["problem_rating"] is None:
                 problem["problem_rating"] = rating(row.get("problem_rating"))
             if problem["problem_name"] == problem["problem_id"] and row.get("problem_name"):
@@ -148,47 +169,37 @@ async def contest_tracker(db, owner, options):
             if not problem_tags(problem["tags"]) and problem_tags(row.get("tags")):
                 problem["tags"] = row["tags"]
             return problem
-        parsed = identity(row["platform"], row["problem_id"], row.get("contest_id"),
-                          row.get("problem_index"), row.get("problem_url"))
-        if parsed is None:
-            return None
-        pid, contest, index = parsed
-        key = row["platform"], pid
-        if key not in catalog:
-            contest_name = None
-            try:
-                metadata = json.loads(row.get("metadata_json") or "{}")
-                if isinstance(metadata, dict) and isinstance(metadata.get("contest_name"), str):
-                    contest_name = metadata["contest_name"].strip()[:300] or None
-            except (ValueError, TypeError):
-                pass
-            catalog[key] = {"platform": row["platform"], "problem_id": pid, "contest_id": contest,
-                            "problem_index": index, "problem_name": row.get("problem_name") or pid,
-                            "problem_rating": rating(row.get("problem_rating")),
-                            "tags": row.get("tags") or "", "contest_name": contest_name,
-                            "status": "unseen", "ac_at": None, "last_submit_at": None,
-                            "is_favorite": False}
-        aliases[row["platform"], row["problem_id"]] = key
-        aliases[row["platform"], pid] = key
-        if row["platform"] == "codeforces":
-            aliases[row["platform"], pid[3:]] = key
+        contest_name = None
+        try:
+            metadata = json.loads(row.get("metadata_json") or "{}")
+            if isinstance(metadata, dict) and isinstance(metadata.get("contest_name"), str):
+                contest_name = metadata["contest_name"].strip()[:300] or None
+        except (ValueError, TypeError):
+            pass
+        catalog[key] = {"platform": row["platform"], "problem_id": pid, "contest_id": contest,
+                        "problem_index": index, "problem_name": row.get("problem_name") or pid,
+                        "problem_rating": rating(row.get("problem_rating")),
+                        "tags": row.get("tags") or "", "contest_name": contest_name,
+                        "status": "unseen", "ac_at": None, "last_submit_at": None,
+                        "is_favorite": False}
         return catalog[key]
 
     async with db.execute(
         "SELECT platform,problem_id,contest_id,problem_index,problem_name,problem_rating,problem_url,tags,metadata_json "
-        "FROM crawler_problems WHERE platform IN ('codeforces','atcoder')"
+        "FROM crawler_problems WHERE platform IN ('codeforces','atcoder') ORDER BY problem_id"
     ) as cursor:
         for row in await cursor.fetchall():
             add(dict(row))
     async with db.execute(
         "SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags FROM recommendations "
-        "WHERE platform IN ('codeforces','atcoder')"
+        "WHERE platform IN ('codeforces','atcoder') ORDER BY problem_id"
     ) as cursor:
         for row in await cursor.fetchall():
             add(dict(row))
     async with db.execute(
         "SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags,submit_time "
-        "FROM submissions WHERE user_qq_id=? AND platform IN ('codeforces','atcoder')", (owner,)
+        "FROM submissions WHERE user_qq_id=? AND platform IN ('codeforces','atcoder') "
+        "ORDER BY submit_time DESC,problem_id", (owner,)
     ) as cursor:
         for row in await cursor.fetchall():
             problem = add(dict(row))
@@ -218,7 +229,7 @@ async def contest_tracker(db, owner, options):
     ) as cursor:
         for row in await cursor.fetchall():
             parsed = identity(row["platform"], row["problem_id"])
-            key = aliases.get((row["platform"], row["problem_id"]),
+            key = aliases.get((row["platform"], problem_id_key(row["platform"], row["problem_id"])),
                               (row["platform"], parsed[0] if parsed else row["problem_id"]))
             if key in catalog:
                 catalog[key]["is_favorite"] = True

@@ -32,8 +32,8 @@ from .reporting import valid_contest_report_time
 from .cf_client import cf_request
 from .problem_sync import sync_options
 from .problem_bank import problem_bank_status
-from .problem_tracker import attempt_problem_metadata, contest_tracker, problem_id_aliases, tracker_options
-from .problem_tags import effective_problem_tags, has_problem_tag, problem_tags
+from .problem_tracker import attempt_problem_metadata, contest_tracker, problem_id_aliases, problem_id_key, tracker_options
+from .problem_tags import has_problem_tag, problem_tags
 from .database import connect_db
 from . import binding_service
 from .binding_service import clear_platform_records as _clear_platform_records
@@ -1311,11 +1311,20 @@ async def _save_problem_favorite(owner, platform, problem, data):
         return jsonify({"success": False, "message": "有效成员 QQ 和布尔 is_favorite 必填。"}), 400
     db = await get_db()
     try:
+        favorite = int(data["is_favorite"])
+        updated_at = int(time.time())
+        if platform == "codeforces":
+            id_filter, aliases = _problem_id_filter(platform, problem[:160])
+            await db.execute(
+                "UPDATE user_problem_state SET is_favorite=?,updated_at=? "
+                "WHERE owner_qq_id=? AND platform=? AND " + id_filter,
+                (favorite, updated_at, owner, platform, *aliases),
+            )
         await db.execute(
             "INSERT INTO user_problem_state(owner_qq_id,platform,problem_id,is_favorite,updated_at) "
             "VALUES(?,?,?,?,?) ON CONFLICT(owner_qq_id,platform,problem_id) DO UPDATE SET "
             "is_favorite=excluded.is_favorite,updated_at=excluded.updated_at",
-            (owner, platform[:24], problem[:160], int(data["is_favorite"]), int(time.time())),
+            (owner, platform[:24], problem[:160], favorite, updated_at),
         )
         await db.commit()
         return jsonify({"success": True})
@@ -1374,8 +1383,8 @@ async def _save_contest_state(owner, data):
 
 
 # Prefer the catalog metadata and collapse repeated submission rows to one problem.
-_PROBLEM_QUERY_PREFIX = "SELECT p.platform,p.problem_id,p.problem_name,p.problem_rating,p.problem_url,"
-_PROBLEM_QUERY_SUFFIX = """COALESCE(s.is_favorite,0) AS is_favorite FROM (
+_PROBLEM_QUERY = """SELECT p.platform,p.problem_id,p.problem_name,p.problem_rating,p.problem_url,p.tags,
+    COALESCE(s.is_favorite,0) AS is_favorite FROM (
       SELECT *,ROW_NUMBER() OVER(PARTITION BY platform,problem_id ORDER BY source,submit_time DESC) AS position
       FROM (
         SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags,0 AS source,0 AS submit_time FROM recommendations
@@ -1384,13 +1393,53 @@ _PROBLEM_QUERY_SUFFIX = """COALESCE(s.is_favorite,0) AS is_favorite FROM (
       ) catalog
     ) p LEFT JOIN user_problem_state s ON s.owner_qq_id=? AND s.platform=p.platform AND s.problem_id=p.problem_id
     WHERE p.position=1"""
-_PROBLEM_QUERY = _PROBLEM_QUERY_PREFIX + "p.tags," + _PROBLEM_QUERY_SUFFIX
-# Only tag projection differs for members. Preserve catalog metadata and personal state.
-_MEMBER_PROBLEM_QUERY = _PROBLEM_QUERY_PREFIX + """problem_effective_tags(
-    (SELECT tags FROM crawler_problems c WHERE c.platform=p.platform AND c.problem_id=p.problem_id),
-    (SELECT tags FROM recommendations r WHERE r.platform=p.platform AND r.problem_id=p.problem_id),
-    (SELECT tags FROM submissions ac WHERE ac.user_qq_id=? AND ac.platform=p.platform AND ac.problem_id=p.problem_id)
-    ) AS tags,""" + _PROBLEM_QUERY_SUFFIX
+# Group aliases before choosing the displayed row and the first nonempty tag source.
+# Other members' submissions may supply catalog metadata, never personal tags or AC state.
+_MEMBER_PROBLEM_QUERY = """
+    WITH sources AS (
+        SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags,
+               0 AS source,0 AS submit_time,NULL AS own_ac FROM crawler_problems
+        UNION ALL
+        SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags,
+               1,0,NULL FROM recommendations
+        UNION ALL
+        SELECT platform,problem_id,problem_name,problem_rating,problem_url,
+               CASE WHEN user_qq_id=owner THEN tags ELSE '' END,2,submit_time,
+               CASE WHEN user_qq_id=owner THEN submit_time END
+        FROM submissions CROSS JOIN (SELECT ? AS owner)
+    ), keyed AS (
+        SELECT *,problem_id_key(platform,problem_id) AS id_key FROM sources
+    ), ranked AS (
+        SELECT *,
+            ROW_NUMBER() OVER (
+                PARTITION BY platform,id_key
+                ORDER BY CASE source WHEN 1 THEN 0 WHEN 0 THEN 1 ELSE 2 END,
+                         submit_time DESC,problem_id
+            ) AS position,
+            FIRST_VALUE(tags) OVER (
+                PARTITION BY platform,id_key
+                ORDER BY problem_has_tags(tags) DESC,source,submit_time DESC,problem_id
+            ) AS effective_tags,
+            MAX(own_ac) OVER (PARTITION BY platform,id_key) AS ac_at
+        FROM keyed
+    ), personal AS (
+        SELECT platform,problem_id_key(platform,problem_id) AS id_key,
+               MAX(is_favorite) AS is_favorite,
+               MAX(COALESCE(state,'inbox')<>'inbox') AS outside_inbox
+        FROM user_problem_state WHERE owner_qq_id=?
+        GROUP BY platform,id_key
+    )
+    SELECT p.platform,p.problem_id,p.problem_name,p.problem_rating,p.problem_url,p.id_key,p.ac_at,
+           CASE WHEN problem_has_tags(p.effective_tags) THEN p.effective_tags ELSE '' END AS tags,
+           COALESCE(s.is_favorite,0) AS is_favorite,COALESCE(s.outside_inbox,0) AS outside_inbox
+    FROM ranked p LEFT JOIN personal s ON s.platform=p.platform AND s.id_key=p.id_key
+    WHERE p.position=1
+"""
+
+
+async def _register_member_problem_functions(db):
+    await db.create_function("problem_id_key", 2, problem_id_key, deterministic=True)
+    await db.create_function("problem_has_tags", 1, lambda value: bool(problem_tags(value)), deterministic=True)
 
 
 @api.route("/problems", methods=["GET"])
@@ -2045,21 +2094,23 @@ async def api_me_problems():
     state = _field(request.args, "state", 20)
     db = await get_db()
     try:
-        await db.create_function("problem_effective_tags", 3, effective_problem_tags, deterministic=True)
+        await _register_member_problem_functions(db)
         scope = request.args.get("scope", "all")
         if scope not in {"all", "solved"}:
             return jsonify({"success": False, "message": "无效的题目范围。"}), 400
-        query = "SELECT p.* FROM (" + _MEMBER_PROBLEM_QUERY + ") p WHERE 1=1"
+        fields = "p.platform,p.problem_id,p.problem_name,p.problem_rating,p.problem_url,p.tags,p.is_favorite"
+        if scope == "solved":
+            fields += ",p.ac_at"
+        query = "SELECT " + fields + " FROM (" + _MEMBER_PROBLEM_QUERY + ") p WHERE 1=1"
         params = [qq_id, qq_id]
         if scope == "solved":
-            query = "SELECT p.*,ac.ac_at FROM (" + query + ") p JOIN (SELECT platform,problem_id,MAX(submit_time) AS ac_at FROM submissions WHERE user_qq_id=? GROUP BY platform,problem_id) ac ON ac.platform=p.platform AND ac.problem_id=p.problem_id WHERE 1=1"
-            params.append(qq_id)
+            query += " AND p.ac_at IS NOT NULL"
         if platform:
             query += " AND p.platform=?"
             params.append(platform)
         if tag:
-            query += " AND (p.problem_name LIKE ? OR p.problem_id LIKE ? OR COALESCE(p.tags,'') LIKE ?)"
-            params.extend([f"%{tag}%", f"%{tag}%", f"%{tag}%"])
+            query += " AND (p.problem_name LIKE ? OR p.problem_id LIKE ? OR p.id_key LIKE ? OR p.tags LIKE ?)"
+            params.extend([f"%{tag}%"] * 4)
         if problem_tag:
             await db.create_function("problem_has_tag", 2, has_problem_tag, deterministic=True)
             query += " AND problem_has_tag(p.tags,?)=1"
@@ -2067,8 +2118,7 @@ async def api_me_problems():
         if state == "favorite":
             query += " AND p.is_favorite=1"
         elif state == "inbox":
-            query += " AND NOT EXISTS(SELECT 1 FROM user_problem_state prior WHERE prior.owner_qq_id=? AND prior.platform=p.platform AND prior.problem_id=p.problem_id AND COALESCE(prior.state,'inbox')<>'inbox')"
-            params.append(qq_id)
+            query += " AND p.outside_inbox=0"
         count_query = "SELECT COUNT(*) FROM (" + query + ") filtered"
         async with db.execute(count_query, tuple(params)) as cursor:
             total = int((await cursor.fetchone())[0])
@@ -2098,7 +2148,7 @@ async def api_me_problem_tags():
         params.append(platform)
     db = await get_db()
     try:
-        await db.create_function("problem_effective_tags", 3, effective_problem_tags, deterministic=True)
+        await _register_member_problem_functions(db)
         async with db.execute(query, params) as cursor:
             values = await cursor.fetchall()
         tags = {}

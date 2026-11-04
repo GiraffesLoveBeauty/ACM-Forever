@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 import test_api_contract as contract
 from feat.api.acm_api.database import connect_db
 from feat.api.acm_api.problem_bank import save_metadata_batch
-from feat.api.acm_api.problem_tags import effective_problem_tags, has_problem_tag, problem_tags
+from feat.api.acm_api.problem_tags import has_problem_tag, problem_tags
 
 
 class ProblemTagParsingTests(unittest.TestCase):
@@ -19,8 +19,6 @@ class ProblemTagParsingTests(unittest.TestCase):
         self.assertEqual(has_problem_tag("100% math,under_score", "%"), 0)
         self.assertEqual(has_problem_tag("100% math,under_score", "100% math"), 1)
         self.assertEqual(has_problem_tag("under_score", "under_score"), 1)
-        self.assertEqual(effective_problem_tags("[]", "", "math"), "math")
-        self.assertEqual(effective_problem_tags('["math"]', "stale", "dp"), '["math"]')
 
 
 class MemberProblemTagTests(unittest.IsolatedAsyncioTestCase):
@@ -163,6 +161,65 @@ class MemberProblemTagTests(unittest.IsolatedAsyncioTestCase):
                 tracker = await (await client.get("/api/me/problems/tracker" + query)).get_json()
                 self.assertEqual(sorted(p["problem_id"] for contest in tracker["items"]
                                         for p in contest["problems"]), expected)
+
+    async def test_codeforces_aliases_share_tags_and_member_state_across_views(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            headers = await self.account_login(client, role="member")
+            db = await connect_db(self.db_path)
+            try:
+                await save_metadata_batch(db, [
+                    {"platform": "codeforces", "problem_id": problem_id, "contest_id": contest,
+                     "problem_index": "A", "problem_name": f"Problem {contest}",
+                     "problem_url": f"https://codeforces.com/contest/{contest}/problem/A", "tags": tags}
+                    for problem_id, contest, tags in (("100A", "100", ["greedy"]), ("cf_200A", "200", []))])
+                await db.execute(
+                    "INSERT INTO recommendations(platform,problem_id,problem_name,problem_url,tags) "
+                    "VALUES('codeforces','cf_100A','Old problem','https://codeforces.com/contest/100/problem/A','math')"
+                )
+                await db.executemany(
+                    "INSERT INTO submissions(user_qq_id,platform,problem_id,tags,submit_time) "
+                    "VALUES('12345678','codeforces',?,?,?)",
+                    [("CF_100a", "math", 10), ("200a", "dp", 20)],
+                )
+                await db.execute(
+                    "INSERT INTO user_problem_state(owner_qq_id,platform,problem_id,is_favorite,updated_at) "
+                    "VALUES('12345678','codeforces','100a',1,1)"
+                )
+                await db.commit()
+            finally:
+                await db.close()
+
+            base = "/api/me/problems"
+            platform = "?platform=codeforces"
+            tags = await (await client.get(base + "/tags" + platform)).get_json()
+            self.assertEqual(tags["tags"], ["dp", "greedy"])
+            listing = await (await client.get(base + platform)).get_json()
+            self.assertEqual(listing["total"], 2)
+            for selected, expected_contests in (("math", []), ("greedy", ["100"]), ("dp", ["200"])):
+                with self.subTest(selected=selected):
+                    query = platform + "&problem_tag=" + selected
+                    listing = await (await client.get(base + query)).get_json()
+                    self.assertEqual(listing["total"], len(expected_contests))
+                    self.assertEqual([problem_tags(item["tags"]) for item in listing["items"]],
+                                     [[selected]] if expected_contests else [])
+                    tracker = await (await client.get(base + "/tracker" + query)).get_json()
+                    self.assertEqual([contest["contest_id"] for contest in tracker["items"]], expected_contests)
+
+            query = platform + "&problem_tag=greedy&scope=solved&state=favorite"
+            listing = await (await client.get(base + query)).get_json()
+            self.assertEqual(listing["total"], 1)
+            self.assertEqual(listing["items"][0]["ac_at"], 10)
+            self.assertTrue(listing["items"][0]["is_favorite"])
+            tracker = await (await client.get(base + "/tracker" + query)).get_json()
+            self.assertEqual([contest["contest_id"] for contest in tracker["items"]], ["100"])
+
+            response = await client.put(base + "/codeforces/cf_100A/state",
+                                        json={"is_favorite": False}, headers=headers)
+            self.assertEqual(response.status_code, 200)
+            for endpoint in (base, base + "/tracker"):
+                data = await (await client.get(endpoint + query)).get_json()
+                self.assertEqual(data["total"], 0)
 
 
 if __name__ == "__main__":

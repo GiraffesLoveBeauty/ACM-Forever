@@ -20,11 +20,3 @@ def problem_tags(value):
 def has_problem_tag(value, selected):
     wanted = selected.strip().casefold()
     return int(any(tag.casefold() == wanted for tag in problem_tags(value)))
-
-
-def effective_problem_tags(*values):
-    """Match tracker priority: crawler, recommendations, then this member's AC."""
-    for value in values:
-        if problem_tags(value):
-            return value
-    return ""
