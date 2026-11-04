@@ -212,6 +212,43 @@ public class LoginStateTest {
         for(int i=1;i<ranks.size();i++)assertTrue(ranks.get(i).getQuery().contains("page_size=100"));
     }
 
+    @Test public void mobileForumReadsRetainAuthorIdentityAndNotificationComment() throws Exception {
+        capabilitiesStatus=200;String id="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        java.util.List<String> requested=new java.util.ArrayList<>();
+        response=url->{requested.add(url.getFile());
+            switch(url.getPath()){
+                case "/api/mobile/v1/capabilities":return mobileCapabilities();
+                case "/api/mobile/v1/forum/posts":return "{\"rows\":[{\"id\":8,\"author_public_member_id\":\""+id+"\"}]}";
+                case "/api/mobile/v1/forum/posts/8":return "{\"id\":8,\"author_public_member_id\":\""+id+"\",\"comments\":[{\"id\":17}]}";
+                case "/api/mobile/v1/members/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb":return "{\"public_member_id\":\""+id+"\",\"name\":\"Forum author\"}";
+                case "/api/mobile/v1/members/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/posts":return "{\"rows\":[{\"id\":8}],\"total\":1}";
+                default:throw new AssertionError("Unexpected API: "+url);
+            }
+        };
+        org.json.JSONObject list=api.getObject(api.publicPostsPath("?page=2&q=a%26%E4%B8%AD%E6%96%87&category=help"));
+        String author=list.getJSONArray("rows").getJSONObject(0).getString("author_public_member_id");
+        org.json.JSONObject detail=api.getObject(api.publicPostsPath("/8?comment_id=17"));
+        assertEquals(author,detail.getString("author_public_member_id"));
+        assertEquals(17,detail.getJSONArray("comments").getJSONObject(0).getInt("id"));
+        assertEquals("Forum author",api.memberProfile(author).getString("name"));
+        assertEquals(8,api.memberPosts(author,1).getJSONArray("rows").getJSONObject(0).getInt("id"));
+        assertEquals(java.util.Arrays.asList("/api/mobile/v1/capabilities","/api/mobile/v1/forum/posts?page=2&q=a%26%E4%B8%AD%E6%96%87&category=help","/api/mobile/v1/forum/posts/8?comment_id=17","/api/mobile/v1/members/"+id,"/api/mobile/v1/members/"+id+"/posts?page=1&page_size=12"),requested);
+    }
+
+    @Test public void legacyForumReadsKeepContentAndCommentTargetWithoutInventingIdentity() throws Exception {
+        for(int status:new int[]{200,404,405}){
+            capabilitiesStatus=status;ApiClient client=fresh();
+            response=url->{if(url.getPath().endsWith("/capabilities"))return "{\"api_version\":1,\"features\":{\"public_member_ids\":false}}";
+                if(url.getPath().equals("/api/forum/posts"))return "{\"rows\":[{\"id\":8,\"title\":\"Legacy topic\"}]}";
+                assertEquals("/api/forum/posts/8?comment_id=17",url.getFile());return "{\"id\":8,\"body\":\"Legacy content\",\"comments\":[{\"id\":17}]}";};
+            org.json.JSONObject row=client.getObject(client.publicPostsPath("?page=1")).getJSONArray("rows").getJSONObject(0);
+            assertEquals("Legacy topic",row.getString("title"));assertFalse(row.has("author_public_member_id"));
+            org.json.JSONObject detail=client.getObject(client.publicPostsPath("/8?comment_id=17"));
+            assertEquals("Legacy content",detail.getString("body"));assertFalse(detail.has("author_public_member_id"));
+            assertEquals(17,detail.getJSONArray("comments").getJSONObject(0).getInt("id"));
+        }
+    }
+
     @Test public void explicitUnsupportedMobileIdentityUsesOrdinaryLeaderboard() throws Exception {
         capabilitiesStatus=200;
         response=url->{if(url.getPath().endsWith("/capabilities"))return "{\"api_version\":1,\"features\":{\"public_member_ids\":false}}";

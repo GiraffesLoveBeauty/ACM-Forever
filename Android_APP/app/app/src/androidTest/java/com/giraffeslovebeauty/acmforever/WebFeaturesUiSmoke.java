@@ -85,7 +85,7 @@ final class WebFeaturesUiSmoke {
             if(p.contains("/images/")){imageCookie=String.valueOf(getRequestProperty("Cookie")).contains("features-fixture");imageReads.incrementAndGet();return "";}
             if(p.endsWith("/auth/me"))return "{\"authenticated\":true,\"csrf_token\":\"test-only\",\"role\":\"member\",\"qq_id\":\"90000001\"}";
             if(p.endsWith("/auth/login")||p.endsWith("/auth/logout"))return "{}";
-            if(p.equals("/api/mobile/v1/capabilities"))return "{\"api_version\":1,\"features\":{\"member_profiles\":true,\"member_posts\":true}}";
+            if(p.equals("/api/mobile/v1/capabilities"))return "{\"api_version\":1,\"features\":{\"public_member_ids\":true,\"member_profiles\":true,\"member_posts\":true}}";
             if(p.equals("/api/mobile/v1/members/"+HASH))return "{\"public_member_id\":\""+HASH+"\",\"name\":\"公开成员\",\"platform_counts\":{\"codeforces\":60},\"total_count\":60}";
             if(p.equals("/api/mobile/v1/members/"+HASH+"/posts"))return "{\"rows\":[],\"total\":0}";
             if(p.endsWith("/wiki/navigation"))return "{\"categories\":[{\"id\":1,\"name\":\"测试算法分类\",\"parent_id\":null}]}";
@@ -100,8 +100,8 @@ final class WebFeaturesUiSmoke {
             if(p.equals("/api/forum/drafts/51/submit")){submitVersion.set(body.getInt("edit_version"));return "{\"id\":8}";}
             if(p.equals("/api/forum/drafts/51")){if("PUT".equals(getRequestMethod()))savedVersion.set(body.getInt("edit_version"));return new JSONObject().put("id",51).put("category_id",1).put("title","测试投稿标题").put("body","Original body").put("edit_version",savedVersion.get()>0?5:4).put("source_post_id",8).toString();}
             if(p.equals("/api/forum/categories"))return "[{\"id\":1,\"name\":\"求助\",\"slug\":\"help\"}]";
-            if(p.equals("/api/forum/posts"))return "{\"rows\":[{\"id\":8,\"title\":\"公开成员话题\",\"author_name\":\"公开成员\",\"author_public_member_id\":\""+HASH+"\"},{\"id\":9,\"title\":\"无ID话题\",\"author_name\":\"无公开ID成员\",\"total_count\":999}],\"total\":2}";
-            if(p.equals("/api/forum/posts/8")){detailReads.incrementAndGet();return "{\"id\":8,\"title\":\"测试话题\",\"body\":\"# Test\",\"likes_count\":0,\"viewer_liked\":false,\"viewer_bookmarked\":false,\"comments\":[]}";}
+            if(p.equals("/api/mobile/v1/forum/posts"))return "{\"rows\":[{\"id\":8,\"title\":\"公开成员话题\",\"author_name\":\"公开成员\",\"author_public_member_id\":\""+HASH+"\"},{\"id\":9,\"title\":\"无ID话题\",\"author_name\":\"无公开ID成员\",\"total_count\":999}],\"total\":2}";
+            if(p.equals("/api/mobile/v1/forum/posts/8")){detailReads.incrementAndGet();return "{\"id\":8,\"title\":\"测试话题\",\"body\":\"# Test\",\"likes_count\":0,\"viewer_liked\":false,\"viewer_bookmarked\":false,\"comments\":[]}";}
             if(p.endsWith("/comments"))return "{\"id\":77}";
             if(p.endsWith("/like"))return "{\"active\":true,\"likes_count\":1}";
             throw new IOException("Fixture has no API for "+getRequestMethod()+" "+p);

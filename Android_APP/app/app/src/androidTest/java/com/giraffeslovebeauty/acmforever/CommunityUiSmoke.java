@@ -71,7 +71,7 @@ final class CommunityUiSmoke {
         private final ByteArrayOutputStream sent=new ByteArrayOutputStream();Fixture(URL url){super(url);}
         public void connect(){}public void disconnect(){}public boolean usingProxy(){return false;}public OutputStream getOutputStream(){return sent;}
         public Map<String,List<String>> getHeaderFields(){return url.getPath().endsWith("/login")?Collections.singletonMap("Set-Cookie",Collections.singletonList("session=community-fixture; Path=/; Secure; HttpOnly; Max-Age=600")):Collections.emptyMap();}
-        public int getResponseCode(){if(url.getPath().equals("/api/forum/images")){uploads.incrementAndGet();return failUpload?500:201;}return 200;}
+        public int getResponseCode(){if(url.getPath().equals("/api/mobile/v1/capabilities"))return 404;if(url.getPath().equals("/api/forum/images")){uploads.incrementAndGet();return failUpload?500:201;}return 200;}
         public InputStream getErrorStream(){return new ByteArrayInputStream("{\"message\":\"Synthetic upload failure\"}".getBytes(StandardCharsets.UTF_8));}
         public InputStream getInputStream()throws IOException{String path=url.getPath();if(path.startsWith("/uploads/avatars/")||path.startsWith("/api/forum/images/")){if(path.contains("first"))try{Thread.sleep(500);}catch(InterruptedException ignored){}return new ByteArrayInputStream(png);}String body="{}";
             if(path.endsWith("/auth/me"))body="{\"authenticated\":true,\"csrf_token\":\"test-only\",\"role\":\"member\",\"qq_id\":\"90000001\",\"avatar_url\":\""+avatar+"\"}";

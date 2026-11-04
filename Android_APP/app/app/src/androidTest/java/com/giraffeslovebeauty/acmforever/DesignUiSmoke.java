@@ -104,7 +104,7 @@ final class DesignUiSmoke {
         private boolean served,failed,unauthorized;private String body="{}";
         Fake(URL url){super(url);}@Override public void connect(){}@Override public void disconnect(){}@Override public boolean usingProxy(){return false;}@Override public OutputStream getOutputStream(){return new ByteArrayOutputStream();}
         @Override public Map<String,List<String>> getHeaderFields(){return url.getPath().endsWith("/login")?Collections.singletonMap("Set-Cookie",Collections.singletonList("session=isolated-design; Path=/; Secure; HttpOnly; Max-Age=600")):Collections.emptyMap();}
-        @Override public int getResponseCode(){serve();return unauthorized?401:failed?500:200;}
+        @Override public int getResponseCode(){if(url.getPath().equals("/api/mobile/v1/capabilities"))return 404;serve();return unauthorized?401:failed?500:200;}
         @Override public InputStream getErrorStream(){return new ByteArrayInputStream("{\"error\":\"isolated service failure\"}".getBytes(StandardCharsets.UTF_8));}
         @Override public InputStream getInputStream(){serve();return new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8));}
         private void serve(){if(served)return;served=true;String path=url.getPath();

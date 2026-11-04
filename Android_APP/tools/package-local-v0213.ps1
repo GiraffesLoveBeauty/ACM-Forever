@@ -18,7 +18,7 @@ foreach($file in Get-ChildItem -LiteralPath (Join-Path $buildCopy 'app\build\tes
     $tests += [int]$suite.testsuite.tests;$failures += [int]$suite.testsuite.failures;$errors += [int]$suite.testsuite.errors
     Copy-Item -LiteralPath $file.FullName -Destination $qa -Force
 }
-if($tests -lt 59 -or $failures -ne 0 -or $errors -ne 0){throw 'Unit tests did not pass'}
+if($tests -lt 61 -or $failures -ne 0 -or $errors -ne 0){throw 'Unit tests did not pass'}
 $lint=Join-Path $buildCopy 'app\build\intermediates\lint_intermediate_text_report\debug\lintReportDebug\lint-results-debug.txt'
 $lintText=Get-Content -LiteralPath $lint -Raw
 if($lintText -notmatch '0 errors, (\d+) warnings'){throw 'Lint errors or missing result'}

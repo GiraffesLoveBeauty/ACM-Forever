@@ -756,7 +756,7 @@ public final class MainActivity extends Activity {
             try {
                 String suffix = "?page=" + page + "&page_size=12&sort=" + sort
                         + "&q=" + encode(query) + "&category=" + encode(category);
-                JSONObject result = api.getObject("/api/forum/posts"+suffix);
+                JSONObject result = api.getObject(api.publicPostsPath(suffix));
                 result.getJSONArray("rows");
                 present(() -> { if (serial == requestSerial) showForum(null, result); });
             } catch (Exception e) {
@@ -877,7 +877,7 @@ public final class MainActivity extends Activity {
         loading("正在加载话题详情…");
         loadPage(serial,() -> {
             try {
-                JSONObject result = api.getObject("/api/forum/posts/"+postId+(notificationComment>0?"?comment_id="+notificationComment:""));
+                JSONObject result = api.getObject(api.publicPostsPath("/"+postId+(notificationComment>0?"?comment_id="+notificationComment:"")));
                 present(() -> { if (serial == requestSerial) showDetail(result); });
             } catch (Exception e) { present(() -> { if (serial == requestSerial) error(e); }); }
         });

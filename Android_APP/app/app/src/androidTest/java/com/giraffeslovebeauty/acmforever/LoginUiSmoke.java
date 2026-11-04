@@ -77,7 +77,7 @@ final class LoginUiSmoke {
     private void clickText(String text){test.runOnMainSync(()->{View v=find(text);check(v!=null,"Missing "+text);v.performClick();});}
     private void clickDescription(String text){test.runOnMainSync(()->{View v=description(text);check(v!=null,"Missing "+text);v.performClick();});}
     private static final class Fake extends HttpURLConnection {
-        Fake(URL url){super(url);}@Override public void connect(){}@Override public void disconnect(){}@Override public boolean usingProxy(){return false;}@Override public int getResponseCode(){return 200;}
+        Fake(URL url){super(url);}@Override public void connect(){}@Override public void disconnect(){}@Override public boolean usingProxy(){return false;}@Override public int getResponseCode(){return url.getPath().equals("/api/mobile/v1/capabilities")?404:200;}
         @Override public OutputStream getOutputStream(){return new ByteArrayOutputStream();}
         @Override public Map<String,List<String>> getHeaderFields(){return url.getPath().endsWith("/login")?Collections.singletonMap("Set-Cookie",Collections.singletonList("session=isolated-native; Path=/; Secure; HttpOnly; Max-Age=600")):Collections.emptyMap();}
         @Override public InputStream getInputStream(){

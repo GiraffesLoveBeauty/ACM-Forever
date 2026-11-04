@@ -14,6 +14,7 @@ import java.util.function.BooleanSupplier;
 
 /** Exercises the real navigation with test-only transport, never production records. */
 final class NavigationUiSmoke {
+    private static volatile boolean notificationCommentSeen;
     private final Instrumentation test;private final Context context;private Activity activity;
     private final ArrayList<Activity> opened=new ArrayList<>();
     private NavigationUiSmoke(Instrumentation test){this.test=test;context=test.getTargetContext();}
@@ -26,6 +27,8 @@ final class NavigationUiSmoke {
             activity=test.startActivitySync(new Intent().setClassName(context,MainActivity.class.getName()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK));opened.add(activity);
             await(()->find("社区话题")!=null,"home");main(()->{ImageView plus=(ImageView)description("常用工具");check(plus.getScaleType()==ImageView.ScaleType.FIT_CENTER&&plus.getDrawable().getIntrinsicWidth()>=MobileStyle.dp(context,28),"plus has an enlarged drawable");plus.performClick();});
             main(()->{Button settings=(Button)find("个性化设置");check(settings!=null&&settings.getGravity()==Gravity.CENTER&&settings.getCompoundDrawables()[0]==null,"personalization text is centered");ModalDialogs.close(activity);});
+            testForumMembers();
+            testManualSessionRecreation(api,prefs);
             testHomeSearch(prefs);
             click("排名");await(()->find("榜单导航成员")!=null,"mobile leaderboard with public identity");
             main(()->description("查看榜单导航成员的公开主页").performClick());
@@ -40,10 +43,40 @@ final class NavigationUiSmoke {
             main(()->{NavigationStack<Bundle> stack=(NavigationStack<Bundle>)field("navigation");stack.clear();stack.restore(history);});back();await(()->find("导航列表20")!=null&&scroll().getScrollY()==sourceY,"restore page and scroll");check("导航".equals(field("query"))&&"luogu".equals(field("platform"))&&Integer.valueOf(2).equals(field("page")),"filters and page preserved");
             click("个人中心");await(()->find("导航最近AC")!=null,"profile again");Activity profile=activity;Instrumentation.ActivityMonitor monitor=test.addMonitor(SpaceActivity.class.getName(),null,false);click("我的话题");activity=test.waitForMonitorWithTimeout(monitor,5000);test.removeMonitor(monitor);check(activity!=null,"space opened");opened.add(activity);await(()->find("查看话题")!=null,"space list");Activity space=activity;
             monitor=test.addMonitor(MainActivity.class.getName(),null,false);click("查看话题");activity=test.waitForMonitorWithTimeout(monitor,5000);test.removeMonitor(monitor);check(activity!=null,"external post opened");opened.add(activity);await(()->find("导航话题")!=null&&find("返回")!=null,"external detail");Activity child=activity;back();test.waitForIdleSync();check(child.isFinishing()&&!space.isFinishing()&&!profile.isFinishing(),"external back keeps the original activities");activity=space;await(()->find("查看话题")!=null,"original space visible");
-            result.putString("stream","PASS: mobile leaderboard identity opens fetched member profile/posts and returns to rank; home search clears on back/tab/home return while history and detail results survive, enlarged plus, centered tool text, recent AC source, filtered/search page and scroll restoration, saved-state history without credentials, external topic returns to original space.\n");outcome=Activity.RESULT_OK;
+            result.putString("stream","PASS: forum list/detail authors open fetched profiles/posts and return, notification comment_id retained; real Activity recreation with auto-login off preserves login; mobile leaderboard identity opens fetched member profile/posts and returns to rank; home search clears on back/tab/home return while history and detail results survive, enlarged plus, centered tool text, recent AC source, filtered/search page and scroll restoration, saved-state history without credentials, external topic returns to original space.\n");outcome=Activity.RESULT_OK;
         }catch(Throwable error){result.putString("stream","FAIL: "+android.util.Log.getStackTraceString(error));}
         finally{for(Activity item:opened)main(()->{ModalDialogs.close(item);item.finish();});try{api.logout();}catch(Exception ignored){}SharedPreferences.Editor edit=prefs.edit().clear();for(Map.Entry<String,?> item:before.entrySet()){Object value=item.getValue();if(value instanceof String)edit.putString(item.getKey(),(String)value);else if(value instanceof Integer)edit.putInt(item.getKey(),(Integer)value);else if(value instanceof Boolean)edit.putBoolean(item.getKey(),(Boolean)value);else if(value instanceof Long)edit.putLong(item.getKey(),(Long)value);else if(value instanceof Float)edit.putFloat(item.getKey(),(Float)value);}edit.apply();api.setBaseUrl(base);AppAppearance.load(context);}
         test.finish(outcome,result);
+    }
+    private void testForumMembers()throws Exception{
+        await(()->find("导航话题")!=null,"forum list loaded");
+        main(()->description("查看论坛导航作者的公开主页").performClick());
+        await(()->find("论坛作者的公开话题")!=null,"list author opens fetched public profile and posts");
+        check("member".equals(field("screen"))&&find("无API接口")==null,"forum list retains public author identity");
+        back();await(()->"forum".equals(field("screen"))&&find("导航话题")!=null,"author returns to forum list");
+        click("导航话题");await(()->"detail".equals(field("screen"))&&find("发布新的评论")!=null,"forum detail loaded");
+        main(()->{View author=walk(decor(),v->v instanceof TextView&&((TextView)v).getText().toString().startsWith("论坛导航作者 · ")&&v.isClickable());check(author!=null,"detail author control");author.performClick();});
+        await(()->find("论坛作者的公开话题")!=null,"detail author opens fetched public profile and posts");
+        check("member".equals(field("screen"))&&find("无API接口")==null,"forum detail retains public author identity");
+        back();await(()->"detail".equals(field("screen"))&&find("发布新的评论")!=null,"author returns to detail");back();
+        await(()->"forum".equals(field("screen")),"detail returns to list");notificationCommentSeen=false;
+        main(()->test.callActivityOnNewIntent(activity,new Intent().putExtra("club_post_id",8).putExtra("notification_comment_id",17)));
+        await(()->notificationCommentSeen&&"detail".equals(field("screen"))&&find("发布新的评论")!=null,"mobile detail preserves notification comment_id query");
+        back();await(()->"forum".equals(field("screen"))&&find("导航话题")!=null,"notification detail returns to list");
+    }
+    private void testManualSessionRecreation(ApiClient api,SharedPreferences prefs)throws Exception{
+        Activity previous=activity;long generation=api.sessionGeneration();Application app=previous.getApplication();
+        java.util.concurrent.atomic.AtomicReference<Activity> next=new java.util.concurrent.atomic.AtomicReference<>();
+        Application.ActivityLifecycleCallbacks callbacks=new Application.ActivityLifecycleCallbacks(){
+            public void onActivityCreated(Activity a,Bundle b){if(a instanceof MainActivity&&a!=previous)next.set(a);}
+            public void onActivityStarted(Activity a){}public void onActivityResumed(Activity a){}public void onActivityPaused(Activity a){}
+            public void onActivityStopped(Activity a){}public void onActivitySaveInstanceState(Activity a,Bundle b){}public void onActivityDestroyed(Activity a){}
+        };
+        app.registerActivityLifecycleCallbacks(callbacks);
+        try{main(previous::recreate);await(()->next.get()!=null,"real Activity recreated");activity=next.get();opened.add(activity);
+            await(()->find("导航话题")!=null,"forum survives recreation");
+            check(previous.isDestroyed()&&field("api")==api&&api.isLoggedIn()&&api.sessionGeneration()==generation&&!prefs.getBoolean("auto_login",true),"manual login survives recreation without automatic login");
+        }finally{app.unregisterActivityLifecycleCallbacks(callbacks);}
     }
     private void testHomeSearch(SharedPreferences prefs)throws Exception{
         main(()->((EditText)field("search")).performClick());await(()->find("最近 10 条搜索")!=null,"forum search");main(()->((EditText)field("search")).setText("清空验证"));click("搜索");await(()->"forum".equals(field("screen"))&&"清空验证".equals(field("query"))&&find("导航话题")!=null,"forum results");
@@ -77,12 +110,14 @@ final class NavigationUiSmoke {
             if(path.equals("/api/mobile/v1/leaderboard"))return "{\"positive_only\":true,\"rows\":[{\"name\":\"榜单导航成员\",\"public_member_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"total_count\":3}],\"total\":1,\"page\":1}";
             if(path.equals("/api/mobile/v1/members/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))return "{\"name\":\"榜单导航成员\",\"public_member_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"platform_counts\":{\"codeforces\":3},\"total_count\":3}";
             if(path.equals("/api/mobile/v1/members/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/posts"))return "{\"rows\":[{\"id\":8,\"title\":\"榜单成员的公开话题\",\"body\":\"Public member fixture\"}],\"total\":1}";
+            if(path.equals("/api/mobile/v1/members/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))return "{\"name\":\"论坛导航作者\",\"public_member_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"platform_counts\":{\"atcoder\":2},\"total_count\":2}";
+            if(path.equals("/api/mobile/v1/members/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/posts"))return "{\"rows\":[{\"id\":8,\"title\":\"论坛作者的公开话题\",\"body\":\"Public forum author fixture\"}],\"total\":1}";
             if(path.equals("/api/me/profile"))return "{\"user\":{\"name\":\"导航成员\",\"status\":\"active\"},\"platform_counts\":{\"luogu\":1},\"total_count\":1,\"recent_ac\":[{\"platform\":\"luogu\",\"problem_id\":\"P1000\",\"problem_name\":\"导航最近AC\"}]}";
-            if(path.equals("/api/forum/posts")||path.equals("/api/mobile/v1/forum/posts"))return "{\"rows\":[{\"id\":8,\"title\":\"导航话题\",\"excerpt\":\"Test fixture\",\"author_name\":\"导航成员\"}],\"total\":1}";
+            if(path.equals("/api/forum/posts")||path.equals("/api/mobile/v1/forum/posts")){JSONObject author=new JSONObject().put("id",8).put("title","导航话题").put("excerpt","Test fixture").put("author_name","论坛导航作者");if(path.startsWith("/api/mobile/"))author.put("author_public_member_id","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");return new JSONObject().put("rows",new JSONArray().put(author)).put("total",1).toString();}
             if(path.equals("/api/me/problems")){int page=android.net.Uri.parse(url.toString()).getQueryParameter("page")==null?1:Integer.parseInt(android.net.Uri.parse(url.toString()).getQueryParameter("page"));JSONArray items=new JSONArray();for(int i=(page-1)*20;i<page*20;i++)items.put(new JSONObject().put("platform","luogu").put("problem_id","P"+(1000+i)).put("problem_name","导航列表"+i));return new JSONObject().put("items",items).put("total",60).toString();}
             if(path.startsWith("/api/me/problems/"))return "{\"platform\":\"luogu\",\"problem_id\":\"P1000\",\"problem_name\":\"导航题面\",\"content_available\":true,\"statement_text\":\"Navigation fixture\",\"samples\":[]}";
             if(path.equals("/api/forum/mine/posts"))return "[{\"id\":8,\"status\":\"published\",\"title\":\"导航话题\",\"body\":\"Navigation fixture\"}]";
-            if(path.equals("/api/forum/posts/8"))return "{\"id\":8,\"title\":\"导航话题\",\"body\":\"Navigation fixture\",\"comments\":[]}";
+            if(path.equals("/api/forum/posts/8")||path.equals("/api/mobile/v1/forum/posts/8")){JSONObject post=new JSONObject().put("id",8).put("title","导航话题").put("author_name","论坛导航作者").put("body","Navigation fixture").put("comments",new JSONArray().put(new JSONObject().put("id",17).put("author_name","论坛导航作者").put("body","导航评论")));if(path.startsWith("/api/mobile/")){post.put("author_public_member_id","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");if("comment_id=17".equals(url.getQuery()))notificationCommentSeen=true;}return post.toString();}
             if(path.equals("/api/forum/categories")||path.equals("/api/forum/mine/bookmarks")||path.equals("/api/forum/drafts"))return "[]";
             return "{}";
         }
