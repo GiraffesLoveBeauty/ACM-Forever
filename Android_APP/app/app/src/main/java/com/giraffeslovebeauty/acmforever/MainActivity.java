@@ -13,6 +13,7 @@ import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
@@ -43,25 +44,63 @@ import java.util.concurrent.Executors;
 /** Small native API client sample. All business data remains on the existing backend. */
 public final class MainActivity extends Activity {
     private static final int PICK_AVATAR = 41;
-    private static final int BACKGROUND = Color.rgb(237, 243, 239);
-    private static final int PANEL = Color.rgb(251, 253, 249);
-    private static final int TEXT = Color.rgb(22, 52, 50);
-    private static final int MUTED = Color.rgb(93, 116, 113);
-    private static final int BRAND = Color.rgb(22, 118, 106);
-    private static final int ACCENT = Color.rgb(214, 234, 114);
-    private static final int LINE = Color.rgb(208, 222, 215);
+    private static final int IMPORT_MARKDOWN = 42;
+    private static final int PICK_COVER = 43;
+    private static final int PICK_POST_IMAGE = 44;
+    private boolean choosingPostImage,headerAvatarLoading;
+    private long imageOwner,imageDraftGeneration,headerCheckedAt;
+    private long headerAvatarOwner=-1,headerCheckOwner=-1;
+    private android.net.Uri pendingPostImage;
+    private EditText composeBodyInput;
+    private CloudDrafts cloud;
+    private final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
+    private boolean sessionRestoreAttempted;
+    private Exception sessionRestoreFailure;
+    private boolean openingPdf;
+    private boolean openingUpdates;
+    private String recoveryOffered="";
+    private int BACKGROUND = Color.rgb(244, 245, 247);
+    private int PANEL = Color.WHITE;
+    private int TEXT = Color.rgb(30, 33, 28);
+    private int MUTED = Color.rgb(112, 119, 107);
+    private int BRAND = Color.rgb(49, 91, 54);
+    private int ACCENT = Color.rgb(200, 235, 33);
+    private int LINE = Color.rgb(229, 232, 224);
 
     private final ExecutorService io = Executors.newSingleThreadExecutor();
+    private final ExecutorService previewIo=Executors.newSingleThreadExecutor();
+    private final ThreadLocal<LoadContext> loadContext=new ThreadLocal<>();
+    private PageRefresh pageRefresh;
+    private ActionNotice actionNotice;
+    private DetailUi detailUi;
+    private String profilePlatform="all";
+    private long appearanceSeen;
+    private static final class DetailUi {
+        int serial,id;JSONObject post;boolean interacted,sending;
+        Button like,bookmark,send;EditText input;TextView replyTo,title,author,reads,category;
+        LinearLayout editor,comments,body;
+    }
+    private boolean composeEditorShown;
+    private boolean presentingRead;
+    private static final class LoadContext {
+        final int serial;final boolean preview;final java.util.concurrent.atomic.AtomicBoolean delivered;
+        LoadContext(int serial,boolean preview,java.util.concurrent.atomic.AtomicBoolean delivered){this.serial=serial;this.preview=preview;this.delivered=delivered;}
+    }
     private final ExecutorService avatarIo = Executors.newFixedThreadPool(2);
     private ApiClient api;
     private AcmApplication application;
     private LinearLayout root;
     private LinearLayout content;
+    private ScrollView pageScroll;
+    private final NavigationStack<Bundle> navigation=new NavigationStack<>();
+    private int pendingScroll=-1;
+    private long navigationOwner;
+    private boolean externalRoot;
     private EditText search;
     private LinearLayout nav;
     private ImageButton headerAvatar;
     private SharedPreferences preferences;
-    private UpdateManager updates;
+
     private String screen = "forum";
     private String query = "";
     private String category = "";
@@ -78,7 +117,6 @@ public final class MainActivity extends Activity {
     private LinearLayout loadingRegion;
     private Exception publicFailure;
     private Exception publishedFailure;
-    private Exception mottoFailure;
     private String composeTitle = "";
     private String composeBody = "";
     private int composeCategoryId = 0;
@@ -99,6 +137,9 @@ public final class MainActivity extends Activity {
     private String loginIdentifier = "";
     private String loginDestination = "account";
     private String problemState = "";
+    private String problemScope="all";
+    private int notificationComment;
+    private String contestIdentifier="";
     private JSONObject selectedProblem;
     private String rankSort = "total_count";
     private boolean actionBusy;
@@ -111,6 +152,7 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         application = (AcmApplication) getApplication();
+        cloud = application.drafts();
         api = application.api();
         preferences = getSharedPreferences("acmforever_settings", MODE_PRIVATE);
         String defaultBase = getString(R.string.default_api_base_url);
@@ -121,53 +163,76 @@ public final class MainActivity extends Activity {
             preferences.edit().remove("api_base_url").apply();
             api.setBaseUrl(defaultBase);
         }
-        updates = new UpdateManager(this, io);
-        if (api.isLoggedIn() && state != null && state.getLong("session_generation", -1) == api.sessionGeneration()) restoreNavigation(state);
-        buildShell();
+
+        navigationOwner=api.sessionGeneration();externalRoot=getIntent().getBooleanExtra("external_navigation",false)||getIntent().hasExtra("web_problem_id")||getIntent().hasExtra("club_post_id")||getIntent().hasExtra("cloud_draft_id");
+        getIntent().putExtra("external_navigation",externalRoot);
+        if (state != null && state.getLong("session_generation", -1) == api.sessionGeneration()) {
+            restoreNavigation(state);navigation.restore(state.getParcelableArrayList("navigation_history"));
+        }
+        syncAppearance();buildShell();
         search.setText(query);
         updateSearchHeader();
         sessionVault = application.vault();
         loginIdentifier = preferences.getString("remembered_account", "");
-        if (api.isLoggedIn()) {
-            // Rotation recreates the screen, not the process-owned Cookie/CSRF state.
-            loadScreen();
-        } else if (preferences.getBoolean("auto_login", false)) {
-            loginDestination = "forum";
-            showLoginWaiting();
-            io.execute(() -> {
-                Exception failure = null;
-                try {
-                    if (!api.restoreSession(sessionVault.read(api.getBaseUrl()))) {
-                        sessionVault.clear(); throw new ApiClient.ApiException(401, "请重新登录", false);
-                    }
-                    api.refreshSession();
-                } catch (Exception e) { failure = e; }
-                Exception result = failure;
-                runOnUiThread(() -> {
-                    if (isFinishing() || isDestroyed()) return;
-                    finishLoginWaiting(); show(api.isLoggedIn() ? api.requiresPasswordChange() ? "account" : "forum" : "account");
-                    if (result != null && !api.requiresPasswordChange()) failureBox(card(), FailureState.title(result), 120, null);
-                });
-            });
-        } else loadScreen();
+        syncCloudEditor();
+        int incomingPost=getIntent().getIntExtra("club_post_id",0);getIntent().removeExtra("club_post_id");if(incomingPost>0){postId=incomingPost;screen="detail";}
+        String incomingPage=getIntent().getStringExtra("club_page");
+        if("checkin".equals(incomingPage)||"reviews".equals(incomingPage)){if(api.isLoggedIn())screen=incomingPage;else{loginDestination=incomingPage;screen="account";}}
+        updateSearchHeader();refreshNav();
+        acceptWebIntent(getIntent());
+        restoreWebSession();
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);setIntent(intent);
+        acceptWebIntent(intent);
+        int id=intent.getIntExtra("club_post_id",0);
+        intent.removeExtra("club_post_id");if(id>0){int comment=notificationComment;navigate("detail",()->{postId=id;notificationComment=comment;});}
+        String target=intent.getStringExtra("club_page");
+        if("checkin".equals(target)||"reviews".equals(target)){if(api.isLoggedIn())show(target);else{loginDestination=target;show("account");}}
     }
 
     @Override protected void onResume() {
-        super.onResume();
-        if (updates != null) updates.resumePendingInstall();
+        super.onResume();openingSpace=false;
+        if(navigationOwner!=api.sessionGeneration()){navigation.clear();navigationOwner=api.sessionGeneration();syncCloudEditor();loadScreen();}
+
+        if(root!=null&&appearanceSeen!=AppAppearance.revision(this)){
+            pendingScroll=pageScroll==null?0:pageScroll.getScrollY();syncAppearance();pageRefresh.close();ModalDialogs.close(this);buildShell();search.setText(query);updateSearchHeader();loadScreen();
+        }
         if (returnFromAdmin) { returnFromAdmin = false; loadScreen(); }
+        if(headerAvatar!=null)refreshHeaderAvatar(true);
+        openingUpdates=false;application.updates().attach(this,null);application.updates().maybeCheck();
+    }
+
+    @Override protected void onPause(){if(application!=null)application.updates().detach(this);super.onPause();}
+
+    private void acceptWebIntent(Intent intent){
+        int draft=intent.getIntExtra("cloud_draft_id",0);if(intent.hasExtra("cloud_draft_id")&&draft>=0){intent.removeExtra("cloud_draft_id");if(externalRoot&&navigation.isEmpty()&&"forum".equals(screen)){screen="compose";updateSearchHeader();refreshNav();}ui.post(()->openDraft(draft));}
+        if(intent.hasExtra("notification_comment_id")){notificationComment=Math.max(0,intent.getIntExtra("notification_comment_id",0));intent.removeExtra("notification_comment_id");}
+        String source=intent.getStringExtra("web_problem_platform"),id=intent.getStringExtra("web_problem_id");
+        if(source!=null&&id!=null&&!id.isEmpty()){try{JSONObject problem=new JSONObject().put("platform",source).put("problem_id",id);intent.removeExtra("web_problem_id");if(externalRoot&&navigation.isEmpty()){selectedProblem=problem;screen="problem_detail";}else openProblem(problem);}catch(org.json.JSONException ignored){}}
     }
 
     @Override protected void onSaveInstanceState(Bundle state) {
         super.onSaveInstanceState(state);
+        state.putLong("session_generation",api.sessionGeneration());
+        state.putParcelableArrayList("navigation_history",navigationOwner==api.sessionGeneration()?navigation.snapshot():new java.util.ArrayList<Bundle>());
+        savePageState(state);
+    }
+
+    private void savePageState(Bundle state) {
+        state.putBoolean("choosing_post_image",choosingPostImage);state.putLong("image_owner",imageOwner);state.putLong("image_draft_generation",imageDraftGeneration);
+        if(pendingPostImage!=null)state.putString("pending_post_image",pendingPostImage.toString());
         // UI state only: cookies, CSRF and passwords stay out of saved instance state.
-        state.putLong("session_generation", api.sessionGeneration());
         state.putString("screen", "login_wait".equals(screen) ? "account" : screen);
+        state.putInt("scroll_y",pendingScroll>=0?pendingScroll:pageScroll==null?0:pageScroll.getScrollY());
         state.putString("query", query); state.putString("category", category); state.putString("sort", sort);
         state.putString("days", days); state.putString("platform", platform); state.putInt("page", page);
         state.putInt("rank_page_size", rankPageSize); state.putString("rank_sort", rankSort);
         state.putStringArrayList("rank_platforms", new java.util.ArrayList<>(rankPlatforms));
-        state.putInt("post_id", postId); state.putString("problem_state", problemState);
+        state.putString("profile_platform",profilePlatform);state.putInt("post_id", postId); state.putString("problem_state", problemState);
+        state.putString("problem_scope",problemScope);state.putInt("notification_comment",notificationComment);
+        state.putString("contest_identifier",contestIdentifier);
         state.putString("member_return", memberReturnScreen);
         state.putString("member_preview", memberPreview == null ? "" : memberPreview.toString());
         if (selectedProblem != null) {
@@ -182,38 +247,63 @@ public final class MainActivity extends Activity {
     }
 
     private void restoreNavigation(Bundle state) {
+        pendingScroll=Math.max(0,state.getInt("scroll_y",0));
+        choosingPostImage=state.getBoolean("choosing_post_image",false);imageOwner=state.getLong("image_owner",-1);imageDraftGeneration=state.getLong("image_draft_generation",-1);
+        String pending=state.getString("pending_post_image","");if(!pending.isEmpty())pendingPostImage=android.net.Uri.parse(pending);
         screen = state.getString("screen", "forum");
         query = state.getString("query", ""); category = state.getString("category", ""); sort = state.getString("sort", "latest");
-        days = state.getString("days", "7"); platform = state.getString("platform", ""); page = state.getInt("page", 1);
-        rankPageSize = state.getInt("rank_page_size", 20); rankSort = state.getString("rank_sort", "total_count");
+        days = state.getString("days", "7");if(!java.util.Arrays.asList("7","30","90","365","all").contains(days))days="7"; platform = state.getString("platform", ""); page = state.getInt("page", 1);
+        rankPageSize = state.getInt("rank_page_size",20); rankSort = state.getString("rank_sort", "total_count");
         java.util.ArrayList<String> platforms = state.getStringArrayList("rank_platforms");
         if (platforms != null && !platforms.isEmpty()) { rankPlatforms.clear(); rankPlatforms.addAll(platforms); }
-        postId = state.getInt("post_id", 0); problemState = state.getString("problem_state", "");
+        profilePlatform=state.getString("profile_platform","all");postId = state.getInt("post_id", 0); problemState = state.getString("problem_state", "");
+        problemScope=state.getString("problem_scope","all");notificationComment=state.getInt("notification_comment",0);
+        contestIdentifier=state.getString("contest_identifier","");
         memberReturnScreen = state.getString("member_return", "forum");
         try {
             String member = state.getString("member_preview", "");
             memberPreview = member.isEmpty() ? null : new JSONObject(member);
+            selectedProblem=null;
             if (state.containsKey("problem_id")) selectedProblem = new JSONObject()
                     .put("platform", state.getString("problem_platform")).put("problem_id", state.getString("problem_id"));
         } catch (org.json.JSONException ignored) { memberPreview = null; selectedProblem = null; }
         searchScope = state.getString("search_scope", "forum"); searchReturn = state.getString("search_return", "forum");
-        composeTitle = state.getString("compose_title", ""); composeBody = state.getString("compose_body", "");
-        composeCategoryId = state.getInt("compose_category", 0); composeDraftId = state.getInt("compose_draft", 0);
-        composeRevision = state.getLong("compose_revision", 0); composeSavedRevision = state.getLong("compose_saved_revision", 0);
+        if(state.containsKey("compose_title")){
+            composeTitle = state.getString("compose_title", ""); composeBody = state.getString("compose_body", "");
+            composeCategoryId = state.getInt("compose_category", 0); composeDraftId = state.getInt("compose_draft", 0);
+            composeRevision = state.getLong("compose_revision", 0); composeSavedRevision = state.getLong("compose_saved_revision", 0);
+        }
         commentPostId = state.getInt("comment_post", 0); commentBody = state.getString("comment_body", ""); commentParent = state.getInt("comment_parent", 0);
     }
 
     @Override protected void onDestroy() {
         ++requestSerial;
+        ui.removeCallbacksAndMessages(null);
         ModalDialogs.close(this);
-        if (updates != null) updates.close();
+
         io.shutdownNow();
+        previewIo.shutdownNow();if(pageRefresh!=null)pageRefresh.close();
         avatarIo.shutdownNow();
         super.onDestroy();
     }
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if(requestCode==PICK_POST_IMAGE){choosingPostImage=false;if(resultCode==RESULT_OK&&data!=null&&data.getData()!=null){pendingPostImage=data.getData();consumePostImage();}return;}
+        if(requestCode==PICK_COVER&&resultCode==RESULT_OK&&data!=null&&data.getData()!=null){
+            android.net.Uri selected=data.getData();
+            io.execute(()->{try{ProfileCover.save(this,selected);present(()->{loadScreen();message("个人中心背景已保存到本机。");});}catch(Exception e){present(()->failureDialog(e));}});return;
+        }
+        if(requestCode==IMPORT_MARKDOWN && resultCode==RESULT_OK && data!=null && data.getData()!=null){
+            android.net.Uri selected=data.getData();
+            io.execute(()->{try(InputStream input=getContentResolver().openInputStream(selected);ByteArrayOutputStream out=new ByteArrayOutputStream()){
+                if(input==null)throw new IllegalStateException("无法读取文件");byte[] buf=new byte[4096];int count;
+                while((count=input.read(buf))!=-1){if(out.size()+count>100000)throw new IllegalArgumentException("Markdown 文件过大");out.write(buf,0,count);}
+                String text=new String(out.toByteArray(),StandardCharsets.UTF_8);if(text.startsWith("\uFEFF"))text=text.substring(1);
+                if(text.length()>20000)throw new IllegalArgumentException("正文最多20000字");final String markdown=text;
+                present(()->{if(isFinishing()||isDestroyed())return;composeBody=markdown;composerChanged();loadScreen();});
+            }catch(Exception e){present(()->failureDialog(e));}});return;
+        }
         if (requestCode != PICK_AVATAR || resultCode != RESULT_OK || data == null || data.getData() == null) return;
         android.net.Uri uri = data.getData();
         String mime = getContentResolver().getType(uri);
@@ -226,28 +316,88 @@ public final class MainActivity extends Activity {
                 if (input == null) throw new IllegalStateException("无法读取所选图片。");
                 byte[] buffer = new byte[8192]; int count;
                 while ((count = input.read(buffer)) != -1) {
-                    if (bytes.size() + count > 2 * 1024 * 1024) throw new IllegalArgumentException("头像图片不能超过 2 MB。");
+                    if (bytes.size() + count > 20 * 1024 * 1024) throw new IllegalArgumentException("原始头像不能超过20 MB。");
                     bytes.write(buffer, 0, count);
                 }
-                api.uploadAvatar(bytes.toByteArray(), mime);
-                runOnUiThread(() -> { message("头像已更新。"); loadScreen(); });
-            } catch (Exception e) { runOnUiThread(() -> failureDialog(e)); }
+                api.uploadAvatar(AvatarTools.compress(bytes.toByteArray()), "image/jpeg");
+                present(() -> { message("头像已更新。"); loadScreen(); });
+            } catch (Exception e) { present(() -> failureDialog(e)); }
         });
     }
 
     @Override public void onBackPressed() {
         if (loginBusy || composeBusy) { message("正在处理，请稍候…"); return; }
-        if ("search".equals(screen)) { show(searchReturn); return; }
-        if ("problem_detail".equals(screen)) { show("problems"); return; }
-        if ("training".equals(screen) || "contests".equals(screen)) { show("account"); return; }
-        if ("detail".equals(screen)) { show("forum"); return; }
-        if ("account".equals(screen)) { show("mine"); return; }
-        if ("member".equals(screen)) { show(memberReturnScreen); return; }
-        if (!"forum".equals(screen)) { show("forum"); return; }
+        if(navigationOwner!=api.sessionGeneration()){navigation.clear();navigationOwner=api.sessionGeneration();}
+        if(!allowLeavingEditor(this::onBackPressed))return;
+        leaveComposeOnce=false;ModalDialogs.close(this);
+        boolean returningFromDetail="detail".equals(screen)||"member".equals(screen);
+        Bundle previous=navigation.pop();
+        if(previous!=null){restoreNavigation(previous);if("forum".equals(screen)&&!returningFromDetail){query="";page=1;pendingScroll=0;}root.requestFocus();search.setText(query);updateSearchHeader();refreshNav();readFromAction=true;loadScreen();return;}
+        if(externalRoot){finish();return;}
+        if(!"forum".equals(screen)||!query.isEmpty()){screen="forum";query="";page=1;pendingScroll=0;root.requestFocus();search.setText("");updateSearchHeader();refreshNav();loadScreen();return;}
         super.onBackPressed();
     }
 
+    private Bundle pageSnapshot(){
+        Bundle state=new Bundle();savePageState(state);
+        // The cloud draft owns editor text. Avoid copying it into every history entry.
+        if(!"compose".equals(screen))for(String key:new String[]{"compose_title","compose_body","compose_category","compose_draft","compose_revision","compose_saved_revision"})state.remove(key);
+        return state;
+    }
+
+    private void restoreScroll(){
+        if(pageScroll==null)return;final int target=pendingScroll>=0?pendingScroll:pageScroll.getScrollY();final int serial=requestSerial;
+        pageScroll.post(()->{if(serial!=requestSerial||isDestroyed())return;pageScroll.scrollTo(0,target);pendingScroll=-1;});
+    }
+
+    private boolean allowLeavingEditor(Runnable proceed){
+        if(!"compose".equals(screen)||leaveComposeOnce||!cloud.state().dirty)return true;
+        if(ModalDialogs.isShowing(this))return false;
+        new ModalDialogs.Builder(this).setTitle("草稿尚未保存")
+                .setMessage("离开前保存到账号，云端草稿与网页同步。保存失败时会保留当前编辑内容。")
+                .setNegativeButton("继续编辑",null)
+                .setNeutralButton("放弃未保存修改",(d,w)->{clearComposer();leaveComposeOnce=true;proceed.run();})
+                .setPositiveButton("保存并离开",(d,w)->saveComposer(proceed)).show();return false;
+    }
+
+    private void syncAppearance(){
+        AppAppearance.load(this);BACKGROUND=MobileStyle.BACKGROUND;PANEL=MobileStyle.PANEL;TEXT=MobileStyle.TEXT;MUTED=MobileStyle.MUTED;
+        BRAND=MobileStyle.BRAND;ACCENT=MobileStyle.ACCENT;LINE=MobileStyle.LINE;appearanceSeen=AppAppearance.revision(this);AppAppearance.window(this);
+    }
+
     private int dp(float value) { return Math.round(value * getResources().getDisplayMetrics().density); }
+
+    private void loadPage(int serial,Runnable work){
+        pageRefresh.register(serial,()->startRead(serial,work));
+        pageRefresh.start(serial);java.util.concurrent.atomic.AtomicBoolean delivered=new java.util.concurrent.atomic.AtomicBoolean();
+        previewIo.execute(()->{
+            loadContext.set(new LoadContext(serial,true,delivered));api.beginReplay();
+            try{work.run();}finally{
+                api.endReplay();loadContext.remove();
+                try{io.execute(()->{api.beginReadCycle();loadContext.set(new LoadContext(serial,false,delivered));try{work.run();}finally{loadContext.remove();}});}
+                catch(java.util.concurrent.RejectedExecutionException ignored){/* Activity closed while the cache preview was finishing. */}
+            }
+        });
+    }
+    private void startRead(int serial,Runnable work){
+        if(isDestroyed()||serial!=requestSerial)return;
+        pageRefresh.start(serial);java.util.concurrent.atomic.AtomicBoolean delivered=new java.util.concurrent.atomic.AtomicBoolean();
+        try{io.execute(()->{api.beginReadCycle();loadContext.set(new LoadContext(serial,false,delivered));try{work.run();}finally{loadContext.remove();}});}catch(java.util.concurrent.RejectedExecutionException ignored){}
+    }
+    private void present(Runnable action){
+        LoadContext context=loadContext.get();
+        Exception readIssue=context!=null&&!context.preview?api.readIssue():null;
+        if(context!=null&&context.preview&&!api.replayReady())return;
+        runOnUiThread(()->{
+            if(isFinishing()||isDestroyed()||context!=null&&context.serial!=requestSerial)return;
+            if(context!=null&&context.preview)pageRefresh.cached(context.serial);
+            boolean previous=presentingRead;presentingRead=context!=null&&!context.preview;
+            try{if(readIssue==null||!pageRefresh.failure(FailureState.title(readIssue)))action.run();}finally{
+                AppAppearance.paintFields(root);presentingRead=previous;restoreScroll();
+                if(context!=null&&!context.preview&&context.delivered.compareAndSet(false,true))pageRefresh.finish(context.serial);
+            }
+        });
+    }
 
     private GradientDrawable shape(int fill, int radius, int stroke) {
         GradientDrawable drawable = new GradientDrawable();
@@ -268,13 +418,13 @@ public final class MainActivity extends Activity {
     }
 
     private LinearLayout column() {
-        LinearLayout layout = new LinearLayout(this);
+        LinearLayout layout = new SpacedLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         return layout;
     }
 
     private LinearLayout row() {
-        LinearLayout layout = new LinearLayout(this);
+        LinearLayout layout = new SpacedLayout(this);
         layout.setOrientation(LinearLayout.HORIZONTAL);
         layout.setGravity(Gravity.CENTER_VERTICAL);
         return layout;
@@ -287,8 +437,8 @@ public final class MainActivity extends Activity {
 
     private LinearLayout card() {
         LinearLayout box = column();
-        box.setPadding(dp(16), dp(15), dp(16), dp(15));
-        box.setBackground(shape(PANEL, 11, LINE));
+        box.setPadding(dp(18), dp(18), dp(18), dp(18));
+        box.setBackground(shape(MobileStyle.MODULE, 12, 0));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
         params.bottomMargin = dp(10);
         content.addView(box, params);
@@ -298,11 +448,7 @@ public final class MainActivity extends Activity {
     private Button action(String value, boolean primary) {
         Button button = new Button(this);
         button.setText(value);
-        button.setTextSize(13);
-        button.setAllCaps(false);
-        button.setTextColor(primary ? Color.WHITE : TEXT);
-        button.setBackground(shape(primary ? TEXT : PANEL, 8, primary ? 0 : LINE));
-        button.setMinHeight(dp(44));
+        MobileStyle.button(button,primary);
         return button;
     }
 
@@ -310,22 +456,15 @@ public final class MainActivity extends Activity {
         root = column();
         root.setFocusableInTouchMode(true);
         root.requestFocus();
-        root.setBackgroundColor(BACKGROUND);
-        if (Build.VERSION.SDK_INT >= 30) {
-            root.setOnApplyWindowInsetsListener((view, insets) -> {
-                android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
-                view.setPadding(0, bars.top, 0, bars.bottom);
-                return insets;
-            });
-        } else {
-            root.setFitsSystemWindows(true);
-        }
-        setContentView(root);
+        root.setBackground(ProfileCover.drawable(this));
+        AppAppearance.content(this,root);
 
         LinearLayout header = row();
         header.setPadding(dp(14), dp(10), dp(14), dp(10));
-        header.setBackgroundColor(PANEL);
+        header.setBackgroundColor(MobileStyle.CHROME);
         root.addView(header, new LinearLayout.LayoutParams(-1, dp(64)));
+        pageRefresh=new PageRefresh(this,root,1);
+        actionNotice=new ActionNotice(this,root,2);
 
         headerAvatar = avatarButton(44);
         headerAvatar.setContentDescription("进入账号设置");
@@ -333,11 +472,13 @@ public final class MainActivity extends Activity {
         header.addView(headerAvatar, new LinearLayout.LayoutParams(dp(44), dp(44)));
 
         search = new EditText(this);
+        search.setTag("appearance_field_surface");
         search.setSingleLine(true);
         search.setTextSize(13);
         search.setHint("搜索论坛话题");
         search.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
-        search.setBackground(shape(BACKGROUND, 9, LINE));
+        search.setBackground(shape(MobileStyle.SEARCH, 20, 0));
+        android.graphics.drawable.Drawable magnifier=AppIcons.get(this,"search",MUTED);magnifier.setBounds(0,0,dp(18),dp(18));search.setCompoundDrawables(magnifier,null,null,null);search.setCompoundDrawablePadding(dp(8));
         search.setPadding(dp(13), 0, dp(13), 0);
         search.setOnFocusChangeListener((v, focused) -> { if (focused) openSearch(); });
         search.setOnClickListener(v -> openSearch());
@@ -352,25 +493,18 @@ public final class MainActivity extends Activity {
         searchParams.leftMargin = dp(9);
         searchParams.rightMargin = dp(9);
         header.addView(search, searchParams);
-
-        ImageButton tools = new ImageButton(this);
-        tools.setImageResource(R.drawable.ic_add);
-        tools.setScaleType(ImageButton.ScaleType.CENTER_INSIDE);
-        tools.setPadding(dp(8), dp(8), dp(8), dp(8));
-        tools.setBackground(shape(PANEL, 9, LINE));
-        tools.setContentDescription("打开常用工具");
-        tools.setOnClickListener(this::showTools);
-        header.addView(tools, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        ImageButton tools=new ImageButton(this);MobileStyle.flat(tools);android.graphics.drawable.Drawable plus=getDrawable(R.drawable.skland_add);plus.setTint(MobileStyle.ON_ACCENT);tools.setImageDrawable(plus);tools.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);tools.setBackground(MobileStyle.panel(this,MobileStyle.controlFill(ACCENT),12,0));tools.setPadding(dp(8),dp(8),dp(8),dp(8));tools.setContentDescription("常用工具");tools.setOnClickListener(v->showTools(tools));header.addView(tools,new LinearLayout.LayoutParams(dp(44),dp(44)));
 
         ScrollView scroll = new ScrollView(this);
+        pageScroll=scroll;
         scroll.setFillViewport(true);
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         content = column();
-        content.setPadding(dp(14), dp(16), dp(14), dp(24));
+        content.setPadding(dp(12), dp(12), dp(12), dp(24));
         scroll.addView(content);
 
         nav = row();
-        nav.setBackgroundColor(PANEL);
+        nav.setBackgroundColor(MobileStyle.CHROME);
         nav.setPadding(dp(3), dp(5), dp(3), dp(5));
         root.addView(nav, new LinearLayout.LayoutParams(-1, dp(65)));
         refreshNav();
@@ -379,23 +513,16 @@ public final class MainActivity extends Activity {
     private void refreshNav() {
         nav.removeAllViews();
         String[] ids = {"forum", "rank", "compose", "problems", "mine"};
-        String[] names = {"▦\n主页", "♛\n排名", "＋", "⌘\n题库", "◉\n个人中心"};
+        String[] names = {"主页", "排名", "发帖", "题库", "个人中心"};
         for (int i = 0; i < ids.length; i++) {
             String id = ids[i];
             boolean compose = "compose".equals(id);
-            TextView item = label(names[i], compose ? 26 : 12,
-                    compose ? Color.WHITE : id.equals(screen) ? BRAND : MUTED, id.equals(screen));
-            item.setGravity(Gravity.CENTER);
-            item.setOnClickListener(view -> show(id));
-            if (compose) {
-                item.setContentDescription("发布话题");
-                item.setBackground(shape("compose".equals(screen) ? TEXT : BRAND, 24, 0));
-                LinearLayout holder = column();
-                holder.setGravity(Gravity.CENTER);
-                holder.setOnClickListener(view -> show("compose"));
-                holder.addView(item, new LinearLayout.LayoutParams(dp(46), dp(46)));
-                nav.addView(holder, new LinearLayout.LayoutParams(0, -1, 1));
-            } else nav.addView(item, new LinearLayout.LayoutParams(0, -1, 1));
+            boolean active=id.equals(screen);LinearLayout holder=column();holder.setGravity(Gravity.CENTER);holder.setContentDescription(names[i]);holder.setOnClickListener(v->show(id));
+            android.widget.ImageView icon=new android.widget.ImageView(this);icon.setImageDrawable(AppIcons.get(this,id,compose?MobileStyle.ON_ACCENT:active?TEXT:MUTED));
+            if(compose){icon.setPadding(dp(5),dp(5),dp(5),dp(5));icon.setBackground(shape(MobileStyle.controlFill(ACCENT),16,0));icon.setImageDrawable(AppIcons.get(this,id,MobileStyle.ON_ACCENT));}
+            holder.addView(icon,new LinearLayout.LayoutParams(dp(compose?44:23),dp(compose?44:23)));
+            if(!compose){TextView title=label(names[i],10,active?TEXT:MUTED,active);title.setGravity(Gravity.CENTER);holder.addView(title);View indicator=new View(this);indicator.setBackground(shape(active?ACCENT:Color.TRANSPARENT,2,0));LinearLayout.LayoutParams mark=new LinearLayout.LayoutParams(dp(16),dp(3));mark.topMargin=dp(3);holder.addView(indicator,mark);}
+            nav.addView(holder,new LinearLayout.LayoutParams(0,-1,1));
         }
     }
 
@@ -407,7 +534,9 @@ public final class MainActivity extends Activity {
     private void openSearch() {
         if (loginBusy || !java.util.Arrays.asList("forum", "rank", "problems").contains(screen)) return;
         searchScope = screen; searchReturn = screen;
+        navigation.push(pageSnapshot());pendingScroll=0;
         screen = "search"; ++requestSerial; refreshNav();
+        pageRefresh.reset(requestSerial);
         content.removeAllViews(); renderSearch();
     }
 
@@ -450,7 +579,7 @@ public final class MainActivity extends Activity {
                     .setNeutralButton("清空记录", (d, w) -> { preferences.edit().remove("search_history").apply(); renderSearch(); })
                     .setNegativeButton("取消", null).setPositiveButton("保存", (d, w) -> preferences.edit().putBoolean("record_search", record.isChecked()).apply()).show();
         }); content.addView(settings);
-        Button cancel = action("取消搜索", false); cancel.setOnClickListener(v -> { root.requestFocus(); show(searchReturn); }); content.addView(cancel);
+        Button cancel = action("取消搜索", false); cancel.setOnClickListener(v -> onBackPressed()); content.addView(cancel);
     }
 
     private void showSearchRecords() {
@@ -465,19 +594,20 @@ public final class MainActivity extends Activity {
         dialog.show();
     }
 
+    private boolean readFromAction;
     private void show(String next) {
+        navigate(next,null);
+    }
+
+    private void navigate(String next,Runnable prepare) {
         if (loginBusy || composeBusy) return;
-        if ("compose".equals(screen) && !"compose".equals(next) && !leaveComposeOnce
-                && composeRevision != composeSavedRevision && api.isLoggedIn()) {
-            new ModalDialogs.Builder(this).setTitle("草稿尚未保存")
-                    .setMessage("保存到账号后可在其他设备继续编辑。")
-                    .setNegativeButton("继续编辑", null)
-                    .setNeutralButton("暂不保存", (d, w) -> { leaveComposeOnce = true; show(next); })
-                    .setPositiveButton("保存并离开", (d, w) -> saveComposer(() -> show(next))).show();
-            return;
-        }
+        if(!next.equals(screen)&&!allowLeavingEditor(()->navigate(next,prepare)))return;
+        readFromAction=true;
         leaveComposeOnce = false;
         if (forumFilterDialog != null) forumFilterDialog.dismiss();
+        if(java.util.Arrays.asList("club","sheets","discussions","mistakes","reviews","templates","checkin").contains(next)){openTrainingCenter(next);return;}
+        if(!next.equals(screen)||prepare!=null){navigation.push(pageSnapshot());pendingScroll=0;}
+        if(prepare!=null)prepare.run();
         screen = next;
         query = "";
         page = 1;
@@ -486,6 +616,9 @@ public final class MainActivity extends Activity {
         refreshNav();
         loadScreen();
     }
+
+    private void openPost(int id){navigate("detail",()->{postId=id;notificationComment=0;});}
+    private void openProblem(JSONObject problem){navigate("problem_detail",()->selectedProblem=problem);}
 
     private void updateSearchHeader() {
         search.setEnabled(java.util.Arrays.asList("forum", "rank", "problems").contains(screen));
@@ -501,13 +634,16 @@ public final class MainActivity extends Activity {
 
     private void loadScreen() {
         if (loginBusy) return;
+        if(navigationOwner!=api.sessionGeneration()){navigation.clear();navigationOwner=api.sessionGeneration();}
+        if(api.isLoggedIn()&&api.requiresPasswordChange())screen="account";
         int serial = ++requestSerial;
-        if (!api.isLoggedIn()) headerAvatar.setImageResource(android.R.drawable.ic_menu_myplaces);
+        pageRefresh.reset(serial);if(readFromAction)pageRefresh.userAction();actionNotice.hide();detailUi=null;composeEditorShown=false;composeBodyInput=null;
+        if (!api.isLoggedIn()) defaultAvatar(headerAvatar);
+        else refreshHeaderAvatar(false);
         content.removeAllViews();
         loadingRegion = null;
         publicFailure = null;
         publishedFailure = null;
-        mottoFailure = null;
         if ("search".equals(screen)) renderSearch();
         else if ("forum".equals(screen)) renderForum(serial);
         else if ("rank".equals(screen)) renderRank(serial);
@@ -519,7 +655,9 @@ public final class MainActivity extends Activity {
         else if ("problem_detail".equals(screen)) renderProblemDetail(serial);
         else if ("training".equals(screen)) renderTraining(serial);
         else if ("contests".equals(screen)) renderContests();
+        else if (java.util.Arrays.asList("club","sheets","discussions","mistakes","reviews","templates","checkin").contains(screen)){String target=screen;screen="problems";updateSearchHeader();refreshNav();renderProblems(serial);openTrainingCenter(target);}
         else renderMine(serial);
+        if(loadingRegion==null)restoreScroll();
     }
 
     private void heading(String eyebrow, String title, String subtitle) {
@@ -527,13 +665,16 @@ public final class MainActivity extends Activity {
             subtitle = "关键词：" + query + "\n" + subtitle;
             title = "搜索结果 · " + title;
         }
-        LinearLayout box = card();
-        box.setBackground(shape(Color.rgb(220, 235, 220), 9, 0));
-        box.addView(label(eyebrow, 11, BRAND, true));
-        space(box, 4);
-        box.addView(label(title, 23, TEXT, true));
-        space(box, 4);
-        box.addView(label(subtitle, 12, MUTED, false));
+        LinearLayout box=HomeBanner.create(this,eyebrow,title,subtitle,"rank".equals(screen)||"account".equals(screen),this::exploreGraph);
+        LinearLayout.LayoutParams size=new LinearLayout.LayoutParams(-1,-2);size.bottomMargin=dp(10);content.addView(box,size);
+    }
+
+    private void exploreGraph(int initial){
+        LinearLayout panel=column();panel.setPadding(dp(12),dp(12),dp(12),dp(16));panel.setBackground(shape(MobileStyle.HERO,12,0));
+        GraphArtView graph=new GraphArtView(this,true);graph.setContentDescription("放大的最短路径图谱");panel.addView(graph,new LinearLayout.LayoutParams(-1,dp(236)));TextView status=label("",13,MobileStyle.ON_HERO,true);status.setContentDescription("图谱路径结果");panel.addView(status);
+        Spinner nodes=new Spinner(this);nodes.setContentDescription("图谱终点选择");String[] names=new String[GraphRoutes.NAMES.length];for(int i=0;i<names.length;i++)names[i]="终点 "+GraphRoutes.NAMES[i];nodes.setAdapter(MobileStyle.options(this,names));panel.addView(nodes,new LinearLayout.LayoutParams(-1,dp(48)));graph.onTarget(i->{status.setText(graph.status());if(nodes.getSelectedItemPosition()!=i)nodes.setSelection(i);});
+        nodes.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){public void onItemSelected(AdapterView<?> parent,View view,int position,long id){if(graph.target()!=position)graph.select(position);}public void onNothingSelected(AdapterView<?> parent){}});graph.select(initial);nodes.setSelection(initial);
+        TextView hint=label("点选节点探索；s 为起点，数字为边权。",11,MobileStyle.ON_HERO,false);panel.addView(hint);detailsDialog("最短路径图谱",panel);
     }
 
     private void status(String message) {
@@ -555,17 +696,19 @@ public final class MainActivity extends Activity {
         loadingRegion = card();
         loadingRegion.setMinimumHeight(dp("compose".equals(screen) ? 600 : 320));
         loadingRegion.setGravity(Gravity.CENTER);
+        loadingRegion.addView(new CodingCatView(this),new LinearLayout.LayoutParams(dp(180),dp(120)));
         loadingRegion.addView(label(text, 13, MUTED, false));
     }
 
     private void failureBox(LinearLayout box, String reason, int height, Runnable retry) {
+        if(pageRefresh!=null&&presentingRead&&pageRefresh.failure(reason))return;
         int retainedHeight = Math.max(dp(height), box.getHeight());
         box.removeAllViews();
         box.setMinimumHeight(retainedHeight);
         box.setGravity(Gravity.CENTER);
         box.setPadding(dp(16), dp(16), dp(16), dp(16));
-        box.setBackground(shape(Color.rgb(255, 244, 244), 10, Color.rgb(204, 57, 57)));
-        TextView title = label(reason, 15, Color.rgb(183, 35, 35), true);
+        ErrorModule.style(box);
+        TextView title = label(reason, 15, ErrorModule.ink(), true);
         title.setGravity(Gravity.CENTER);
         title.setContentDescription(reason);
         box.addView(title);
@@ -578,48 +721,46 @@ public final class MainActivity extends Activity {
     }
 
     private void error(Exception failure) {
+        if(pageRefresh!=null&&presentingRead&&pageRefresh.failure(FailureState.title(failure)))return;
         if (loadingRegion == null || loadingRegion.getParent() != content) loadingRegion = card();
         failureBox(loadingRegion, FailureState.title(failure), "compose".equals(screen) ? 600 : 320, this::loadScreen);
     }
 
     private void failureDialog(Exception failure) {
+        if(pageRefresh!=null&&PageRefresh.isConnectionFailure(FailureState.title(failure))){pageRefresh.actionFailure(FailureState.title(failure));return;}
         LinearLayout box = column();
         failureBox(box, FailureState.title(failure), 180, null);
         new ModalDialogs.Builder(this).setView(box).setPositiveButton("关闭", null).show();
     }
 
     private void chips(String[] labels, String[] values, String selected, java.util.function.Consumer<String> onChoose) {
-        HorizontalScrollView scrolling = new HorizontalScrollView(this);
-        scrolling.setHorizontalScrollBarEnabled(false);
-        LinearLayout line = row();
+        WrapLayout line = new WrapLayout(this);
+        line.setContentDescription("筛选选项，自动换行");
         for (int i = 0; i < labels.length; i++) {
             String value = values[i];
-            TextView chip = label(labels[i], 12, selected.equals(value) ? TEXT : MUTED, selected.equals(value));
+            TextView chip = label(labels[i], 12, TEXT, selected.equals(value));
+            MobileStyle.control(chip,false,selected.equals(value),20);
             chip.setGravity(Gravity.CENTER);
             chip.setPadding(dp(13), 0, dp(13), 0);
-            chip.setBackground(shape(selected.equals(value) ? Color.rgb(231, 240, 196) : PANEL, 20, LINE));
             chip.setOnClickListener(view -> onChoose.accept(value));
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, dp(36));
-            params.rightMargin = dp(8);
-            line.addView(chip, params);
+            line.addView(chip, new ViewGroup.LayoutParams(-2, dp(44)));
         }
-        scrolling.addView(line);
-        content.addView(scrolling);
+        content.addView(line,new LinearLayout.LayoutParams(-1,-2));
         space(content, 12);
     }
 
     private void renderForum(int serial) {
         forumHeader(null);
         loading("正在加载社区话题…");
-        io.execute(() -> {
+        loadPage(serial,() -> {
             try {
                 String suffix = "?page=" + page + "&page_size=12&sort=" + sort
                         + "&q=" + encode(query) + "&category=" + encode(category);
-                JSONObject result = api.getObject(api.publicPostsPath(suffix));
+                JSONObject result = api.getObject("/api/forum/posts"+suffix);
                 result.getJSONArray("rows");
-                runOnUiThread(() -> { if (serial == requestSerial) showForum(null, result); });
+                present(() -> { if (serial == requestSerial) showForum(null, result); });
             } catch (Exception e) {
-                runOnUiThread(() -> { if (serial == requestSerial) error(e); });
+                present(() -> { if (serial == requestSerial) error(e); });
             }
         });
     }
@@ -636,15 +777,15 @@ public final class MainActivity extends Activity {
     }
 
     private void forumHeader(JSONArray categories) {
-        heading("ACMforever · 打一辈子爱臭美", "今天想聊点什么？", "提问、分享题解，记录每一步进步。");
+        heading("ACMFOREVER / COMMUNITY", "一起交流，一起 AC", "打一辈子爱臭美\n提问 · 题解 · 每一次进步");
         LinearLayout titleRow = row();
         titleRow.addView(label("社区话题", 18, TEXT, true), new LinearLayout.LayoutParams(0, -2, 1));
         ImageButton filter = new ImageButton(this);
-        filter.setImageResource(R.drawable.ic_filter);
+        filter.setImageDrawable(AppIcons.get(this,"filter",TEXT));
         filter.setScaleType(ImageButton.ScaleType.CENTER_INSIDE);
         filter.setPadding(dp(10), dp(10), dp(10), dp(10));
-        filter.setBackground(shape(!category.isEmpty() || !"latest".equals(sort)
-                ? Color.rgb(231, 240, 196) : PANEL, 9, LINE));
+        filter.setBackground(shape(MobileStyle.controlFill(!category.isEmpty() || !"latest".equals(sort)
+                ? MobileStyle.SELECTED : PANEL), 9, MobileStyle.controlFill(LINE)));
         filter.setContentDescription("筛选社区话题");
         filter.setOnClickListener(view -> {
             if (filterLoading || forumFilterDialog != null && forumFilterDialog.isShowing()) return;
@@ -654,8 +795,8 @@ public final class MainActivity extends Activity {
             io.execute(() -> {
                 try {
                     JSONArray options = api.getArray("/api/forum/categories");
-                    runOnUiThread(() -> { filterLoading = false; if (serial == requestSerial && "forum".equals(screen)) showForumFilters(options); });
-                } catch (Exception e) { runOnUiThread(() -> { filterLoading = false; if (serial == requestSerial) failureDialog(e); }); }
+                    present(() -> { filterLoading = false; if (serial == requestSerial && "forum".equals(screen)) showForumFilters(options); });
+                } catch (Exception e) { present(() -> { filterLoading = false; if (serial == requestSerial) failureDialog(e); }); }
             });
         });
         titleRow.addView(filter, new LinearLayout.LayoutParams(dp(44), dp(44)));
@@ -665,170 +806,177 @@ public final class MainActivity extends Activity {
 
     private void showForumFilters(JSONArray categories) {
         if (forumFilterDialog != null && forumFilterDialog.isShowing()) return;
-        LinearLayout form = column();
-        form.setPadding(dp(22), dp(4), dp(22), 0);
-        form.addView(label("话题分类", 14, TEXT, true));
-        RadioGroup categoryGroup = new RadioGroup(this);
-        String[] categoryValues = new String[categories.length() + 1];
-        categoryValues[0] = "";
-        RadioButton[] categoryButtons = new RadioButton[categoryValues.length];
-        categoryButtons[0] = filterChoice("全部", category.isEmpty());
-        categoryGroup.addView(categoryButtons[0]);
-        for (int i = 0; i < categories.length(); i++) {
-            JSONObject item = categories.optJSONObject(i);
-            String name = item == null ? "分类" : item.optString("name", "分类");
-            String slug = item == null ? "" : item.optString("slug", "");
-            categoryValues[i + 1] = slug;
-            categoryButtons[i + 1] = filterChoice(name, category.equals(slug));
-            categoryGroup.addView(categoryButtons[i + 1]);
-        }
-        form.addView(categoryGroup);
-        space(form, 10);
-        form.addView(label("排序方式", 14, TEXT, true));
-        String[] sortValues = {"latest", "hot", "unanswered"};
-        String[] sortNames = {"最新", "热门", "待回答"};
-        RadioGroup sortGroup = new RadioGroup(this);
-        RadioButton[] sortButtons = new RadioButton[sortValues.length];
-        for (int i = 0; i < sortValues.length; i++) {
-            sortButtons[i] = filterChoice(sortNames[i], sort.equals(sortValues[i]));
-            sortGroup.addView(sortButtons[i]);
-        }
-        form.addView(sortGroup);
-        ScrollView scrolling = new ScrollView(this);
-        scrolling.addView(form);
-        forumFilterDialog = new ModalDialogs.Builder(this).setTitle("筛选社区话题").setView(scrolling)
-                .setNegativeButton("取消", null)
-                .setPositiveButton("应用筛选", (dialog, which) -> {
-                    for (int i = 0; i < categoryButtons.length; i++)
-                        if (categoryButtons[i].isChecked()) category = categoryValues[i];
-                    for (int i = 0; i < sortButtons.length; i++)
-                        if (sortButtons[i].isChecked()) sort = sortValues[i];
-                    page = 1;
-                    loadScreen();
+        LinearLayout form=column();form.setPadding(0,dp(2),0,dp(4));
+        TextView intro=label("分类与排序可分别选择。",12,MUTED,false);form.addView(intro);space(form,16);
+        form.addView(filterSection("话题分类","forum"));
+        String[] values=new String[categories.length()+1],names=new String[values.length];values[0]="";names[0]="全部";
+        for(int i=0;i<categories.length();i++){JSONObject item=categories.optJSONObject(i);values[i+1]=value(item,"slug","");names[i+1]=value(item,"name","分类");}
+        RadioButton[] categoryButtons=filterGrid(form,names,values,category,"forum");
+        space(form,18);form.addView(filterSection("排序方式","filter"));
+        String[] sortValues={"latest","hot","unanswered"};
+        RadioButton[] sortButtons=filterGrid(form,new String[]{"最新发布","热门话题","等待回答"},sortValues,sort,"history");
+        forumFilterDialog=new ModalDialogs.Builder(this).setTitle("筛选社区话题").setView(form).setNegativeButton("取消",null)
+                .setPositiveButton("应用筛选",(dialog,which)->{
+                    for(int i=0;i<values.length;i++)if(categoryButtons[i].isChecked())category=values[i];
+                    for(int i=0;i<sortValues.length;i++)if(sortButtons[i].isChecked())sort=sortValues[i];
+                    page=1;loadScreen();
                 }).create();
-        forumFilterDialog.setOnDismissListener(d -> forumFilterDialog = null);
-        ModalDialogs.show(forumFilterDialog);
+        forumFilterDialog.setOnDismissListener(d->forumFilterDialog=null);ModalDialogs.show(forumFilterDialog);
     }
-
-    private RadioButton filterChoice(String name, boolean selected) {
-        RadioButton option = new RadioButton(this);
-        option.setId(View.generateViewId());
-        option.setText(name);
-        option.setTextColor(TEXT);
-        option.setTextSize(14);
-        option.setMinHeight(dp(44));
-        option.setChecked(selected);
-        return option;
+    private TextView filterSection(String title,String icon){TextView text=label(title,14,TEXT,true);AppIcons.on(text,icon,BRAND,21);return text;}
+    private android.graphics.drawable.Drawable choiceBackground(){
+        android.graphics.drawable.StateListDrawable states=new android.graphics.drawable.StateListDrawable();
+        states.addState(new int[]{android.R.attr.state_checked},shape(MobileStyle.controlFill(MobileStyle.SELECTED),12,MobileStyle.controlFill(BRAND)));
+        states.addState(new int[]{},shape(MobileStyle.controlFill(BACKGROUND),12,0));return states;
+    }
+    private RadioButton[] filterGrid(LinearLayout form,String[] names,String[] values,String selected,String icon){
+        android.widget.GridLayout grid=new android.widget.GridLayout(this);grid.setColumnCount(2);form.addView(grid,new LinearLayout.LayoutParams(-1,-2));
+        RadioButton[] options=new RadioButton[names.length];
+        for(int i=0;i<names.length;i++){
+            RadioButton option=new RadioButton(this);options[i]=option;option.setId(View.generateViewId());option.setText(names[i]);
+            option.setTextSize(13);option.setTextColor(TEXT);option.setButtonDrawable((android.graphics.drawable.Drawable)null);
+            option.setBackground(choiceBackground());option.setPadding(dp(12),dp(9),dp(12),dp(9));option.setMinHeight(dp(50));
+            AppIcons.on(option,icon,BRAND,20);option.setChecked(selected.equals(values[i]));MobileStyle.flat(option);
+            android.widget.GridLayout.LayoutParams params=new android.widget.GridLayout.LayoutParams();params.width=0;params.height=-2;
+            params.columnSpec=android.widget.GridLayout.spec(i%2,1f);params.rowSpec=android.widget.GridLayout.spec(i/2);
+            params.setMargins(i%2==0?0:dp(4),dp(8),i%2==0?dp(4):0,0);grid.addView(option,params);
+            option.setOnClickListener(v->{for(RadioButton other:options)if(other!=null)other.setChecked(other==option);});
+        }
+        return options;
     }
 
     private void addPost(JSONObject post) {
         if (post == null) return;
         LinearLayout box = card();
-        box.addView(label(post.optString("category_name", "话题"), 11, BRAND, true));
-        space(box, 7);
-        box.addView(label(post.optString("title"), 16, TEXT, true));
-        space(box, 6);
-        box.addView(label(post.optString("excerpt"), 12, MUTED, false));
-        space(box, 10);
         LinearLayout authorRow = row();
         ImageButton avatar = avatarButton(32);
         avatar.setContentDescription("查看" + value(post, "author_name", "ACM 成员") + "的公开主页");
         avatar.setOnClickListener(view -> openMember(post, "forum"));
         loadAvatar(avatar, value(post, "author_avatar_url", ""));
         authorRow.addView(avatar, new LinearLayout.LayoutParams(dp(32), dp(32)));
-        TextView author = label("  " + post.optString("author_name", "ACM 成员") + "  ·  查看公开主页", 11, BRAND, true);
-        author.setMinHeight(dp(40)); author.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout authorCopy=column();authorCopy.setPadding(dp(10),0,0,0);
+        TextView author = label(post.optString("author_name", "ACM 成员"), 13, TEXT, true);
         author.setOnClickListener(view -> openMember(post, "forum"));
-        authorRow.addView(author, new LinearLayout.LayoutParams(0, -2, 1));
+        authorCopy.addView(author);if(post.optLong("created_at")>0)authorCopy.addView(label(date(post.optLong("created_at")),10,MUTED,false));
+        authorRow.addView(authorCopy, new LinearLayout.LayoutParams(0, -2, 1));
         box.addView(authorRow);
-        box.addView(label(post.optInt("comments_count") + " 评论  ·  " + post.optInt("likes_count") + " 赞", 11, MUTED, false));
+        space(box, 12);
+        box.addView(label(post.optString("title"), 17, TEXT, true));
+        if(!api.communityImageUrl(post.optString("cover_url")).isEmpty())box.addView(new CommunityCover(this,post.optString("cover_url"),true));
+        space(box, 6);
+        TextView excerpt=label(post.optString("excerpt"),13,MUTED,false);excerpt.setMaxLines(3);excerpt.setEllipsize(android.text.TextUtils.TruncateAt.END);box.addView(excerpt);
+        space(box,10);TextView categoryTag=label("# "+post.optString("category_name", "话题"),11,MUTED,false);
+        categoryTag.setPadding(dp(8),dp(4),dp(8),dp(4));categoryTag.setBackground(shape(BACKGROUND,10,0));box.addView(categoryTag,new LinearLayout.LayoutParams(-2,-2));
+        space(box,14);LinearLayout interactions=row();interactions.addView(label(post.optInt("views_count")+" 阅读",10,MUTED,false),new LinearLayout.LayoutParams(0,-2,1));
+        postMetric(interactions,"comment",post.optInt("comments_count"));postMetric(interactions,"like",post.optInt("likes_count"));box.addView(interactions);
         int id = post.optInt("id");
-        box.setOnClickListener(view -> { postId = id; screen = "detail"; loadScreen(); });
+        box.setOnClickListener(view -> openPost(id));
     }
 
     private void renderDetail(int serial) {
         loading("正在加载话题详情…");
-        io.execute(() -> {
+        loadPage(serial,() -> {
             try {
-                JSONObject result = api.getObject(api.publicPostsPath("/" + postId));
-                runOnUiThread(() -> { if (serial == requestSerial) showDetail(result); });
-            } catch (Exception e) { runOnUiThread(() -> { if (serial == requestSerial) error(e); }); }
+                JSONObject result = api.getObject("/api/forum/posts/"+postId+(notificationComment>0?"?comment_id="+notificationComment:""));
+                present(() -> { if (serial == requestSerial) showDetail(result); });
+            } catch (Exception e) { present(() -> { if (serial == requestSerial) error(e); }); }
         });
     }
 
     private void showDetail(JSONObject post) {
-        content.removeAllViews();
-        Button back = action("← 返回论坛", false);
-        back.setOnClickListener(view -> show("forum"));
-        content.addView(back);
-        space(content, 10);
-        LinearLayout box = card();
-        box.addView(label(post.optString("category_name", "话题"), 11, BRAND, true));
-        space(box, 8);
-        box.addView(label(post.optString("title"), 22, TEXT, true));
-        space(box, 8);
-        TextView author = label(post.optString("author_name", "ACM 成员") + " · " + date(post.optLong("created_at")), 12, BRAND, true);
-        author.setOnClickListener(v -> openMember(post, "forum")); box.addView(author);
-        space(box, 16);
-        box.addView(new ContentView(this, post.optString("body"), false, this::openBrowser));
-        box.addView(label(post.optInt("views_count") + " 阅读", 12, MUTED, false));
-        LinearLayout actions = row();
-        Button like = action((post.optBoolean("viewer_liked") ? "♥ " : "♡ ") + post.optInt("likes_count") + " 赞", false);
-        Button bookmark = action(post.optBoolean("viewer_bookmarked") ? "★ 已收藏" : "☆ 收藏", false);
-        Button report = action("举报", false);
-        like.setOnClickListener(v -> forumAction(like, "like", "", 0));
-        bookmark.setOnClickListener(v -> forumAction(bookmark, "bookmark", "", 0));
-        report.setOnClickListener(v -> {
-            if (!requireLogin("detail")) return;
-            EditText reason = new EditText(this); reason.setHint("请说明举报原因（3–500 字）");
-            new ModalDialogs.Builder(this).setTitle("举报话题").setView(reason).setNegativeButton("取消", null)
-                    .setPositiveButton("提交", (d, w) -> {
-                        String text = reason.getText().toString().trim();
-                        if (text.codePointCount(0, text.length()) < 3 || text.codePointCount(0, text.length()) > 500) { message("举报原因需要 3–500 字。"); return; }
-                        forumAction(report, "report", text, 0);
-                    }).show();
-        });
-        actions.addView(like, new LinearLayout.LayoutParams(0, dp(44), 1));
-        actions.addView(bookmark, new LinearLayout.LayoutParams(0, dp(44), 1));
-        actions.addView(report, new LinearLayout.LayoutParams(0, dp(44), 1));
-        box.addView(actions);
-        if (commentPostId != postId) { commentPostId = postId; commentBody = ""; commentParent = 0; }
-        space(content, 9);
-        content.addView(label("讨论区", 18, TEXT, true));
-        LinearLayout editor = card();
-        EditText input = new EditText(this); input.setMinLines(3); input.setGravity(Gravity.TOP);
-        input.setHint("写下你的问题、想法或补充（2–5000 字）");
-        input.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(5000)});
-        input.setText(commentBody); input.addTextChangedListener(watch(value -> commentBody = value));
-        editor.addView(input);
-        TextView replyTo = label(commentParent > 0 ? "正在回复评论 #" + commentParent + " · 点击取消回复" : "发布新的评论", 12, BRAND, true);
-        replyTo.setOnClickListener(v -> { commentParent = 0; replyTo.setText("发布新的评论"); }); editor.addView(replyTo);
-        Button send = action("发布评论", true);
-        send.setOnClickListener(v -> {
-            String text = input.getText().toString().trim();
-            if (text.codePointCount(0, text.length()) < 2 || text.codePointCount(0, text.length()) > 5000) { message("评论需要 2–5000 字。"); return; }
-            forumAction(send, "comments", text, commentParent);
-        }); editor.addView(send);
-        JSONArray comments = post.optJSONArray("comments");
-        if (comments == null || comments.length() == 0) status("暂无已发布评论。");
-        else for (int i = 0; i < comments.length(); i++) {
-            JSONObject comment = comments.optJSONObject(i);
-            if (comment == null) continue;
-            LinearLayout item = card();
-            item.addView(label(comment.optString("author_name", "ACM 成员") + " · " + date(comment.optLong("created_at")), 12, BRAND, true));
-            if (comment.optInt("parent_id") > 0) item.addView(label("↳ 回复评论 #" + comment.optInt("parent_id"), 11, MUTED, false));
-            item.addView(label(comment.optString("body"), 13, TEXT, false));
-            if (comment.optInt("parent_id") == 0) {
-                Button reply = action("回复", false);
-                reply.setOnClickListener(v -> {
-                    if (!requireLogin("detail")) return;
-                    commentParent = comment.optInt("id"); replyTo.setText("正在回复 " + comment.optString("author_name") + " · 点击取消回复");
-                    input.requestFocus();
-                    ((ScrollView) content.getParent()).smoothScrollTo(0, editor.getTop());
-                    ((android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).showSoftInput(input, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
-                }); item.addView(reply);
-            }
+        if(detailUi!=null&&detailUi.serial==requestSerial&&detailUi.id==postId){
+            DetailUi current=detailUi;
+            // A read started before a write must not replace optimistic/confirmed local state.
+            if(current.interacted)return;
+            String oldBody=current.post.optString("body");
+            try{java.util.Iterator<String> keys=post.keys();while(keys.hasNext()){String key=keys.next();current.post.put(key,post.get(key));}}catch(org.json.JSONException ignored){}
+            current.title.setText(post.optString("title"));current.category.setText(post.optString("category_name","话题"));
+            current.author.setText(post.optString("author_name","ACM 成员")+" · "+date(post.optLong("created_at")));
+            current.reads.setText(post.optInt("views_count")+" 阅读");
+            if(!oldBody.equals(post.optString("body"))){current.body.removeAllViews();current.body.addView(new ContentView(this,post.optString("body"),false,this::openBrowser));}
+            reactionLabel(current.like,"like",current.post);reactionLabel(current.bookmark,"bookmark",current.post);renderComments(current,post.optJSONArray("comments"));return;
         }
+        content.removeAllViews();
+        DetailUi current=new DetailUi();current.serial=requestSerial;current.id=postId;current.post=post;detailUi=current;
+        Button back=action("← 返回",false);back.setOnClickListener(v->onBackPressed());content.addView(back);space(content,10);
+        LinearLayout box=card();current.category=label(post.optString("category_name","话题"),11,BRAND,true);box.addView(current.category);space(box,8);
+        current.title=label(post.optString("title"),22,TEXT,true);box.addView(current.title);space(box,8);
+        current.author=label(post.optString("author_name","ACM 成员")+" · "+date(post.optLong("created_at")),12,BRAND,true);
+        current.author.setOnClickListener(v->openMember(post,"detail"));box.addView(current.author);space(box,16);
+        if(!api.communityImageUrl(post.optString("cover_url")).isEmpty())box.addView(new CommunityCover(this,post.optString("cover_url"),false));
+        current.body=column();current.body.addView(new ContentView(this,post.optString("body"),false,this::openBrowser));box.addView(current.body);
+        current.reads=label(post.optInt("views_count")+" 阅读",12,MUTED,false);box.addView(current.reads);
+        LinearLayout actions=row();current.like=action("",false);current.bookmark=action("",false);Button report=action("举报",false);
+        reactionLabel(current.like,"like",post);reactionLabel(current.bookmark,"bookmark",post);
+        current.like.setOnClickListener(v->toggleReaction(current.like,"like",post));current.bookmark.setOnClickListener(v->toggleReaction(current.bookmark,"bookmark",post));
+        report.setOnClickListener(v->{
+            if(!requireLogin("detail"))return;EditText reason=new EditText(this);reason.setHint("请说明举报原因（3–500 字）");
+            new ModalDialogs.Builder(this).setTitle("举报话题").setView(reason).setNegativeButton("取消",null).setPositiveButton("提交",(d,w)->{
+                String text=reason.getText().toString().trim();int length=text.codePointCount(0,text.length());
+                if(length<3||length>500){message("举报原因需要 3–500 字。");return;}forumAction(report,"report",text,0);
+            }).show();
+        });
+        for(Button b:new Button[]{current.like,current.bookmark,report}){b.setMinWidth(0);b.setPadding(dp(8),0,dp(8),0);actions.addView(b,new LinearLayout.LayoutParams(0,dp(48),1));}box.addView(actions);
+        if(post.optBoolean("viewer_is_author")){
+            Button progress=action("投稿进度 / 修改帖子",false);progress.setOnClickListener(v->openWebFeature("progress",current.id));box.addView(progress);
+            Button remove=action("删除帖子",false);box.addView(remove);
+            remove.setOnClickListener(v->new ModalDialogs.Builder(this).setTitle("删除帖子？").setMessage("删除后无法恢复。")
+                    .setNegativeButton("取消",null).setPositiveButton("删除",(d,w)->mutate(remove,()->api.writeObject("DELETE","/api/forum/posts/"+current.id,new JSONObject()),()->show("forum"))).show());
+        }
+        if(commentPostId!=postId){commentPostId=postId;commentBody="";commentParent=0;}
+        space(content,9);content.addView(label("讨论区",18,TEXT,true));current.editor=card();
+        current.input=new EditText(this);current.input.setMinLines(3);current.input.setGravity(Gravity.TOP);
+        current.input.setHint("支持 Markdown、代码和公式（2–5000 字）");current.input.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(10000)});
+        current.input.setText(commentBody);current.input.addTextChangedListener(watch(text->{commentBody=text;current.interacted=true;}));current.editor.addView(current.input);
+        WrapLayout format=new WrapLayout(this);format.setContentDescription("评论Markdown工具");
+        String[][] marks={{"加粗","**","**"},{"斜体","*","*"},{"代码","`","`"},{"代码块","\n```cpp\n","\n```\n"},{"公式","$","$"},{"引用","\n> ",""},{"链接","[","](https://)"}};
+        for(String[] mark:marks){Button tool=action(mark[0],false);compactTool(tool);tool.setOnClickListener(v->insertFormat(current.input,mark[1],mark[2]));format.addView(tool);}
+        Button preview=action("预览评论",false);preview.setContentDescription("预览评论");compactTool(preview);preview.setOnClickListener(v->{LinearLayout article=column();article.addView(new ContentView(this,current.input.getText().toString(),false,this::openBrowser));detailsDialog("评论预览",article);});format.addView(preview);current.editor.addView(format,new LinearLayout.LayoutParams(-1,-2));
+        current.replyTo=label(commentParent>0?"正在回复评论 #"+commentParent+" · 点击取消回复":"发布新的评论",12,BRAND,true);
+        current.replyTo.setPadding(0,dp(10),0,dp(10));current.replyTo.setMinHeight(dp(44));current.replyTo.setOnClickListener(v->{current.interacted=true;commentParent=0;current.replyTo.setText("发布新的评论");});current.editor.addView(current.replyTo);
+        current.send=action("发布评论",true);current.send.setOnClickListener(v->sendComment(current));current.editor.addView(current.send);
+        current.comments=column();content.addView(current.comments,new LinearLayout.LayoutParams(-1,-2));renderComments(current,post.optJSONArray("comments"));
+        if(notificationComment>0){int target=notificationComment;current.comments.postDelayed(()->{View comment=current.comments.findViewWithTag("comment-"+target);if(comment!=null&&detailUi==current){comment.setBackground(shape(MobileStyle.SELECTED,12,BRAND));comment.requestRectangleOnScreen(new android.graphics.Rect(0,0,comment.getWidth(),comment.getHeight()),false);}},350);}
+    }
+    private void renderComments(DetailUi current,JSONArray comments){
+        current.comments.removeAllViews();
+        if(comments==null||comments.length()==0){TextView empty=label("暂无已发布评论。",13,MUTED,false);empty.setTag("empty");empty.setPadding(dp(16),dp(14),dp(16),dp(14));current.comments.addView(empty);return;}
+        for(int i=0;i<comments.length();i++){JSONObject comment=comments.optJSONObject(i);if(comment==null)continue;
+            LinearLayout item=commentCard();item.addView(label(comment.optString("author_name","ACM 成员")+" · "+date(comment.optLong("created_at")),12,BRAND,true));
+            if(comment.optInt("parent_id")>0)item.addView(label("回复评论 #"+comment.optInt("parent_id"),11,MUTED,false));
+            item.setTag("comment-"+comment.optInt("id"));item.addView(new ContentView(this,comment.optString("body"),false,this::openBrowser));if(comment.optInt("parent_id")==0)addReply(item,current,comment.optInt("id"),comment.optString("author_name"));current.comments.addView(item);
+        }
+    }
+    private LinearLayout commentCard(){LinearLayout item=column();item.setPadding(dp(16),dp(14),dp(16),dp(14));item.setBackground(shape(MobileStyle.MODULE,12,0));LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(-1,-2);params.bottomMargin=dp(10);item.setLayoutParams(params);return item;}
+    private void addReply(LinearLayout item,DetailUi current,int id,String author){
+        Button reply=action("回复",false);reply.setOnClickListener(v->{
+            if(!requireLogin("detail"))return;current.interacted=true;commentParent=id;current.replyTo.setText("正在回复 "+author+" · 点击取消回复");current.input.requestFocus();
+            ((ScrollView)content.getParent()).smoothScrollTo(0,current.editor.getTop());
+            ((android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).showSoftInput(current.input,android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+        });item.addView(reply);
+    }
+    private void sendComment(DetailUi current){
+        if(current.sending||!requireLogin("detail"))return;
+        String text=current.input.getText().toString().trim();int length=text.codePointCount(0,text.length());
+        if(length<2||length>5000){actionNotice.show("评论发送",new IllegalArgumentException("评论需要 2–5000 字"));return;}
+        int parent=commentParent;long account=api.sessionGeneration();current.interacted=true;current.sending=true;current.send.setEnabled(false);current.send.setText("正在发送…");
+        actionNotice.hide();View empty=current.comments.findViewWithTag("empty");if(empty!=null)current.comments.removeView(empty);
+        LinearLayout pending=commentCard();TextView state=label("我 · 正在发送…",12,MUTED,true);pending.addView(state);
+        if(parent>0)pending.addView(label("回复评论 #"+parent,11,MUTED,false));pending.addView(new ContentView(this,text,false,this::openBrowser));current.comments.addView(pending,0);
+        io.execute(()->{
+            int id=0;Exception failure=null;try{JSONObject response=api.postAction(current.id,"comments",text,parent);id=response.getInt("id");if(id<=0)throw new org.json.JSONException("缺少评论编号");}catch(Exception e){failure=e;}
+            int confirmed=id;Exception error=failure;
+            present(()->{
+                current.sending=false;if(current!=detailUi||current.serial!=requestSerial||account!=api.sessionGeneration()&&!expiredWrite(error))return;
+                current.send.setEnabled(true);current.send.setText("发布评论");
+                if(error==null){
+                    state.setText("我 · 评论 #"+confirmed);state.setTextColor(BRAND);
+                    if(text.equals(current.input.getText().toString().trim()))current.input.setText("");
+                    if(commentParent==parent){commentParent=0;current.replyTo.setText("发布新的评论");}
+                    if(parent==0)addReply(pending,current,confirmed,"我");
+                }else{state.setText("发送失败 · 正文保留在输入框");state.setTextColor(0xffaf2424);pending.setBackground(shape(0xfffff0ef,12,0xfff2c7c2));actionNotice.show("评论发送",error);}
+            });
+        });
     }
 
     private String date(long seconds) {
@@ -853,7 +1001,7 @@ public final class MainActivity extends Activity {
             Exception failure = null;
             try { work.run(); } catch (Exception e) { failure = e; }
             Exception error = failure;
-            runOnUiThread(() -> {
+            present(() -> {
                 actionBusy = false;
                 if (isFinishing() || isDestroyed()) return;
                 button.setEnabled(true); button.setText(title);
@@ -866,34 +1014,59 @@ public final class MainActivity extends Activity {
     private void forumAction(Button button, String kind, String text, int parent) {
         if (!requireLogin("detail")) return;
         int target = postId;
-        mutate(button, () -> api.postAction(target, kind, text, parent), () -> {
-            if ("report".equals(kind)) message("举报已提交，等待管理员核查。");
-            else {
-                if ("comments".equals(kind)) { commentBody = ""; commentParent = 0; }
-                loadScreen();
-            }
+        mutate(button, () -> api.postAction(target, kind, text, parent), () -> message("举报已提交，等待管理员核查。"));
+    }
+
+    private void reactionLabel(Button button,String kind,JSONObject post){
+        boolean liked="like".equals(kind),active=post.optBoolean(liked?"viewer_liked":"viewer_bookmarked");
+        button.setText(liked?(active?"已赞 ":"赞 ")+post.optInt("likes_count"):(active?"已收藏":"收藏"));
+        AppIcons.on(button,liked?"like":"bookmark",active?BRAND:MUTED,18);
+        button.setContentDescription(liked?"话题点赞":"收藏话题");
+    }
+    private void toggleReaction(Button button,String kind,JSONObject post){
+        if(Boolean.TRUE.equals(button.getTag())||!requireLogin("detail"))return;
+        String key="like".equals(kind)?"viewer_liked":"viewer_bookmarked";boolean old=post.optBoolean(key);int oldCount=post.optInt("likes_count");
+        int serial=requestSerial,target=post.optInt("id",postId);long account=api.sessionGeneration();if(detailUi!=null)detailUi.interacted=true;
+        button.setTag(Boolean.TRUE);button.setEnabled(false);button.setAlpha(.65f);actionNotice.hide();
+        try{post.put(key,!old);if("like".equals(kind))post.put("likes_count",Math.max(0,oldCount+(old?-1:1)));}catch(org.json.JSONException ignored){}
+        reactionLabel(button,kind,post);
+        io.execute(()->{
+            JSONObject response=null;Exception failure=null;try{response=api.postAction(target,kind,"",0);response.getBoolean("active");}catch(Exception e){failure=e;}
+            JSONObject result=response;Exception error=failure;
+            present(()->{
+                if(serial!=requestSerial||account!=api.sessionGeneration()&&!expiredWrite(error))return;
+                button.setTag(null);button.setEnabled(true);button.setAlpha(1f);
+                boolean active=error==null?result.optBoolean("active"):old;
+                try{post.put(key,active);if("like".equals(kind))post.put("likes_count",Math.max(0,oldCount+(old==active?0:active?1:-1)));}catch(org.json.JSONException ignored){}
+                reactionLabel(button,kind,post);if(error!=null)actionNotice.show("like".equals(kind)?"点赞":"收藏",error);
+            });
         });
     }
+
+    private boolean expiredWrite(Exception failure){return failure instanceof ApiClient.ApiException&&((ApiClient.ApiException)failure).status==401&&!api.isLoggedIn();}
 
     private void renderRank(int serial) {
         rankHeader();
         loading("正在加载排名…");
         final String range=days, ordering=rankSort, selectedPlatforms=String.join(",",rankPlatforms), searchText=query;
         final int requestedPage=page, size=rankPageSize;
-        io.execute(() -> {
+        loadPage(serial,() -> {
             try {
-                JSONObject result = api.leaderboard(range, ordering, selectedPlatforms, searchText, requestedPage, size);
+                JSONObject result = api.leaderboard(range,ordering,selectedPlatforms,searchText,requestedPage,size);
                 result.getJSONArray("rows");
-                runOnUiThread(() -> { if (serial == requestSerial) showRank(result); });
-            } catch (Exception e) { runOnUiThread(() -> { if (serial == requestSerial) error(e); }); }
+                present(() -> { if (serial == requestSerial) showRank(result); });
+            } catch (Exception e) { present(() -> { if (serial == requestSerial) error(e); }); }
         });
     }
 
     private void rankHeader(){
-        heading("KEEP CLIMBING", "社区排名", "today".equals(days)?"北京时间当日 00:00 起 · 不含 0 AC 成员":"公开昵称与各平台去重 AC 题数 · 不含 0 AC 成员");
-        chips(new String[]{"当日", "近 7 日", "近 30 日", "近 90 日", "近 1 年", "生涯"}, new String[]{"today", "7", "30", "90", "365", "all"}, days,
-                value -> { if(days.equals(value))return;days = value; page = 1; loadScreen(); });
-        Button filter = action("平台与排序筛选", false); filter.setOnClickListener(v -> showRankFilter()); content.addView(filter);
+        heading("ACMFOREVER / RANKING", "每一题，都算数", "社区排行榜\n仅展示所选平台合计通过数大于 0 的成员");
+        chips(new String[]{"近7日","近30日","近90日","近1年","生涯"},new String[]{"7","30","90","365","all"},days,
+            value->{if(days.equals(value))return;days=value;page=1;loadScreen();});
+        Button filter=action("平台组合 · 排序 · 每页数量",false);filter.setOnClickListener(v->showRankFilter());content.addView(filter);
+        String[] names={"Codeforces","洛谷","AtCoder","牛客","校 OJ"}, keys={"codeforces","luogu","atcoder","nowcoder","cjlu"};
+        java.util.List<String> selected=new java.util.ArrayList<>();for(int i=0;i<keys.length;i++)if(rankPlatforms.contains(keys[i]))selected.add(names[i]);
+        TextView summary=label(String.join(" / ",selected)+" · 每页"+rankPageSize+"人",12,MUTED,false);summary.setPadding(0,dp(10),0,dp(10));content.addView(summary);
     }
 
     private void showRank(JSONObject result) {
@@ -905,29 +1078,31 @@ public final class MainActivity extends Activity {
         if (rows == null || rows.length() == 0) status("暂无符合条件的成员。");
         else for (int i = 0; i < rows.length(); i++) {
             JSONObject user = rows.optJSONObject(i);
-            if (user == null || user.optInt("total_count")<=0) continue;
+            if (user == null||user.optInt("total_count")<=0) continue;
             LinearLayout box = card();
             LinearLayout identity = row();
+            int position=(page-1)*rankPageSize+i+1;TextView number=label(String.format(java.util.Locale.ROOT,"%02d",position),20,position<=3?BRAND:MUTED,true);identity.addView(number,new LinearLayout.LayoutParams(dp(40),-2));
             ImageButton avatar = avatarButton(36);
             avatar.setContentDescription("查看" + value(user, "name", "ACM 成员") + "的公开主页");
             avatar.setOnClickListener(view -> openMember(user, "rank"));
             loadAvatar(avatar, value(user, "avatar_url", ""));
             identity.addView(avatar, new LinearLayout.LayoutParams(dp(36), dp(36)));
-            identity.addView(label("  #" + ((page - 1) * rankPageSize + i + 1) + " " + user.optString("name", "ACM 成员"), 16, TEXT, true));
+            LinearLayout person=column();person.setPadding(dp(10),0,dp(6),0);TextView nickname=label(user.optString("name", "ACM 成员"),15,TEXT,true);nickname.setMaxLines(1);nickname.setEllipsize(android.text.TextUtils.TruncateAt.END);person.addView(nickname);person.addView(label(user.optString("status",""),10,MUTED,false));identity.addView(person,new LinearLayout.LayoutParams(0,-2,1));
+            LinearLayout total=column();TextView ac=label(String.valueOf(user.optInt("total_count")),25,TEXT,true);ac.setGravity(Gravity.RIGHT);total.addView(ac);total.addView(label("AC / 通过",9,BRAND,true));identity.addView(total);
             box.addView(identity);
             space(box, 5);
-            box.addView(label(user.optString("status", "") + "  ·  CF " + user.optInt("cf_count")
+            box.addView(label("CF " + user.optInt("cf_count")
                     + "  ·  洛谷 " + user.optInt("luogu_count"), 12, MUTED, false));
             box.addView(label("AtCoder " + user.optInt("atcoder_count") + " · 牛客 " + user.optInt("nowcoder_count") + " · 校 OJ " + user.optInt("cjlu_count"), 12, MUTED, false));
-            space(box, 4);
-            box.addView(label("总 AC  " + user.optInt("total_count"), 17, BRAND, true));
             box.setOnClickListener(view -> openMember(user, "rank"));
         }
         addRankPager(result.optInt("total"));
     }
 
     private void renderProblems(int serial) {
+        if(!java.util.Arrays.asList("codeforces","atcoder","luogu","nowcoder","cjlu").contains(platform))platform="codeforces";
         heading("PROBLEM BANK", "题库", "找一道适合今天的题，继续向 AC 前进。");
+        addClubEntry();
         if (api.isUnconfigured()) { error(connectionFailure()); return; }
         if (!api.isLoggedIn()) {
             failureBox(card(), "未登录", 320, null);
@@ -937,24 +1112,26 @@ public final class MainActivity extends Activity {
             return;
         }
         loading("正在加载题库…");
-        io.execute(() -> {
+        loadPage(serial,() -> {
             try {
                 String path = "/api/me/problems?page=" + page + "&page_size=20&platform="
-                        + encode(platform) + "&tag=" + encode(query) + "&state=" + problemState;
+                        + encode(platform) + "&tag=" + encode(query) + "&state=" + problemState+"&scope="+problemScope;
                 JSONObject result = api.getObject(path);
                 result.getJSONArray("items");
-                runOnUiThread(() -> { if (serial == requestSerial) showProblems(result); });
-            } catch (Exception e) { runOnUiThread(() -> { if (serial == requestSerial) error(e); }); }
+                present(() -> { if (serial == requestSerial) showProblems(result); });
+            } catch (Exception e) { present(() -> { if (serial == requestSerial) error(e); }); }
         });
     }
 
     private void showProblems(JSONObject result) {
         content.removeAllViews();
         heading("PROBLEM BANK", "题库", "找一道适合今天的题，继续向 AC 前进。");
-        chips(new String[]{"全部", "Codeforces", "洛谷", "AtCoder", "牛客", "校 OJ"},
-                new String[]{"", "codeforces", "luogu", "atcoder", "nowcoder", "cjlu"}, platform,
+        addClubEntry();
+        chips(new String[]{"Codeforces", "洛谷", "AtCoder", "牛客", "校 OJ"},
+                new String[]{"codeforces", "luogu", "atcoder", "nowcoder", "cjlu"}, platform,
                 value -> { platform = value; page = 1; loadScreen(); });
-        chips(new String[]{"全部题目", "已收藏"}, new String[]{"", "favorite"}, problemState, value -> { problemState = value; page = 1; loadScreen(); });
+        chips(new String[]{"全部题目","我已 AC"},new String[]{"all","solved"},problemScope,value->{problemScope=value;page=1;loadScreen();});
+        chips(new String[]{"全部收藏状态", "已收藏"}, new String[]{"", "favorite"}, problemState, value -> { problemState = value; page = 1; loadScreen(); });
         content.addView(label("共 " + result.optInt("total") + " 道题目", 12, MUTED, false));
 
         JSONArray items = result.optJSONArray("items");
@@ -968,7 +1145,7 @@ public final class MainActivity extends Activity {
             box.addView(label(problem.optString("platform") + "  ·  " + problem.optString("problem_rating", "难度未知"), 12, BRAND, true));
             box.addView(label(problem.optString("tags", ""), 12, MUTED, false));
             Button detail = action("查看题面与样例", true);
-            detail.setOnClickListener(v -> { selectedProblem = problem; screen = "problem_detail"; loadScreen(); }); box.addView(detail);
+            detail.setOnClickListener(v -> openProblem(problem)); box.addView(detail);
             Button favorite = action(problem.optBoolean("is_favorite") ? "★ 已收藏 · 取消" : "☆ 收藏", false);
             favorite.setOnClickListener(v -> mutate(favorite, () -> api.favoriteProblem(problem.getString("platform"), problem.getString("problem_id"), !problem.optBoolean("is_favorite")), this::loadScreen));
             box.addView(favorite);
@@ -985,51 +1162,65 @@ public final class MainActivity extends Activity {
         android.widget.CheckBox[] checks = new android.widget.CheckBox[values.length];
         for (int i = 0; i < values.length; i++) {
             checks[i] = new android.widget.CheckBox(this); checks[i].setText(names[i]);
-            checks[i].setChecked(rankPlatforms.contains(values[i])); form.addView(checks[i]);
+            checks[i].setChecked(rankPlatforms.contains(values[i]));checks[i].setBackground(choiceBackground());checks[i].setTextColor(TEXT);checks[i].setPadding(dp(12),dp(8),dp(12),dp(8));checks[i].setMinHeight(dp(50));
+            android.graphics.drawable.Drawable mark=PlatformAssets.logo(this,values[i]);mark.setBounds(0,0,dp(36),dp(28));checks[i].setCompoundDrawablesRelative(null,null,mark,null);form.addView(checks[i],new LinearLayout.LayoutParams(-1,-2));
         }
         form.addView(label("排序方式", 14, TEXT, true));
         String[] sorts = {"total_count", "cf_count", "luogu_count", "atcoder_count", "nowcoder_count", "cjlu_count"};
         Spinner ordering = spinner(new String[]{"总 AC 数", "Codeforces", "洛谷", "AtCoder", "牛客", "校 OJ"});
-        ordering.setSelection(java.util.Arrays.asList(sorts).indexOf(rankSort)); form.addView(ordering);
+        ordering.setSelection(Math.max(0,java.util.Arrays.asList(sorts).indexOf(rankSort))); form.addView(ordering);
+        form.addView(label("每页显示",14,TEXT,true));
+        int[] sizes={10,20,50,100}; Spinner size=spinner(new String[]{"10人","20人","50人","100人"});
+        for(int i=0;i<sizes.length;i++)if(sizes[i]==rankPageSize)size.setSelection(i);form.addView(size);
         AlertDialog dialog = new ModalDialogs.Builder(this).setTitle("排名筛选").setView(form).setNegativeButton("取消", null).setPositiveButton("应用", null).create();
         dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             java.util.LinkedHashSet<String> selected = new java.util.LinkedHashSet<>();
             for (int i = 0; i < values.length; i++) if (checks[i].isChecked()) selected.add(values[i]);
-            if (selected.isEmpty()) { message("至少选择一个平台。"); return; }
-            rankPlatforms.clear(); rankPlatforms.addAll(selected); rankSort = sorts[ordering.getSelectedItemPosition()];
+            if (selected.isEmpty()) { android.widget.Toast.makeText(this,"至少选择一个平台",android.widget.Toast.LENGTH_SHORT).show(); return; }
+            rankPlatforms.clear(); rankPlatforms.addAll(selected); rankSort = sorts[ordering.getSelectedItemPosition()];rankPageSize=sizes[size.getSelectedItemPosition()];
             dialog.dismiss(); page = 1; loadScreen();
         })); ModalDialogs.show(dialog);
     }
 
     private Spinner spinner(String[] names) {
         Spinner result = new Spinner(this);
-        ArrayAdapter<String> options = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, names);
-        options.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item); result.setAdapter(options);
+        result.setAdapter(MobileStyle.options(this,names));
+        result.setBackgroundTintList(android.content.res.ColorStateList.valueOf(BRAND));
         result.setMinimumHeight(dp(48)); return result;
     }
 
     private void renderProblemDetail(int serial) {
-        if (selectedProblem == null) { show("problems"); return; }
+        if (selectedProblem == null) { onBackPressed(); return; }
         loading("正在加载题面与样例…");
         JSONObject selected = selectedProblem;
-        io.execute(() -> {
+        loadPage(serial,() -> {
             try {
                 JSONObject problem = api.getObject(ApiClient.problemPath(selected.getString("platform"), selected.getString("problem_id")));
-                runOnUiThread(() -> { if (serial == requestSerial) showProblemDetail(problem, selected); });
-            } catch (Exception e) { runOnUiThread(() -> { if (serial == requestSerial) error(e); }); }
+                present(() -> { if (serial == requestSerial) showProblemDetail(problem, selected); });
+            } catch (Exception e) { present(() -> { if (serial == requestSerial) error(e); }); }
         });
     }
 
     private void showProblemDetail(JSONObject problem, JSONObject selected) {
         content.removeAllViews();
-        Button back = action("← 返回题库", false); back.setOnClickListener(v -> show("problems")); content.addView(back);
+        Button back = action("← 返回", false); back.setOnClickListener(v -> onBackPressed()); content.addView(back);
         heading("PROBLEM", value(problem, "problem_name", problem.optString("problem_id")), problem.optString("platform") + " · " + value(problem, "problem_rating", "难度未知"));
+        Button discussion=action("按题讨论 / 加入错题本",true);content.addView(discussion);
+        discussion.setOnClickListener(v->{Intent intent=new Intent(this,ClubActivity.class);intent.putExtra("page","discussions");intent.putExtra("platform",selected.optString("platform"));intent.putExtra("problem_id",selected.optString("problem_id"));startActivity(intent);});
+
         LinearLayout box = card();
-        if (problem.optBoolean("content_available")) {
+        if (problem.optBoolean("content_available") && "pdf".equals(problem.optString("statement_format"))) {
+            box.addView(label("已采集 PDF 题面，含原始图示、公式与样例。",14,MUTED,false));
+            Button pdf=action("阅读 PDF · 翻页 / 缩放 / 适应宽度",true);box.addView(pdf);
+            pdf.setOnClickListener(v->{if(openingPdf)return;openingPdf=true;Intent intent=new Intent(this,PdfActivity.class);intent.putExtra("platform",selected.optString("platform"));intent.putExtra("problem_id",selected.optString("problem_id"));startActivity(intent);ui.postDelayed(()->openingPdf=false,800);});
+        } else if (problem.optBoolean("content_available")) {
             String html = value(problem, "statement_html", "");
             String source = html.isEmpty() ? value(problem, "statement_text", "") : html;
             box.addView(new ContentView(this, source, !html.isEmpty(), this::openBrowser));
-        } else box.addView(label("题库已有目录，题面与样例尚未采集；可先打开原题。", 14, MUTED, false));
+        } else {
+            box.addView(label("failed".equals(problem.optString("last_fetch_status"))?"上次采集失败，请管理员重新拉取题面。":"已收录目录，题面尚未采集；可等待后重新检查。",14,MUTED,false));
+            Button retry=action("重新检查",false);retry.setOnClickListener(v->loadScreen());box.addView(retry);
+        }
         JSONArray samples = problem.optJSONArray("samples");
         if (samples != null) for (int i = 0; i < samples.length(); i++) {
             JSONObject sample = samples.optJSONObject(i); if (sample == null) continue;
@@ -1043,10 +1234,11 @@ public final class MainActivity extends Activity {
             mutate(favorite, () -> api.favoriteProblem(problem.getString("platform"), problem.getString("problem_id"), next), () -> {
                 try { selected.put("is_favorite", next); } catch (org.json.JSONException ignored) { }
                 favorite.setText(next ? "★ 已收藏 · 取消" : "☆ 收藏题目");
+                MobileStyle.symbol(favorite);
             });
         }); actions.addView(favorite);
         String url = value(problem, "problem_url", "");
-        if (!url.isEmpty()) { Button original = action("在 App 内打开原题", true); original.setOnClickListener(v -> openBrowser(url)); actions.addView(original); }
+        if (!url.isEmpty()) { Button original = action("查看原题 ↗", true); original.setOnClickListener(v -> openBrowser(url)); actions.addView(original); }
     }
 
     private void sampleValue(LinearLayout box, String title, String text) {
@@ -1062,13 +1254,24 @@ public final class MainActivity extends Activity {
     private void renderTraining(int serial) {
         heading("MY TRAINING", "今日训练", "只访问本人训练记录；按相邻难度生成三个训练区。");
         if (!requireLogin("training")) return;
+        Button due=action("查看今日到期补题 / 间隔复习",true);due.setOnClickListener(v->show("reviews"));content.addView(due);
+        LinearLayout dueList=card();dueList.addView(label("正在读取今日到期补题…",13,MUTED,false));
+        loadPage(serial,()->{
+            try{
+                JSONArray plans=api.getArray("/api/me/club/reviews");
+                present(()->{if(serial!=requestSerial)return;TrainingReminder.scheduleReviews(this,plans);dueList.removeAllViews();dueList.addView(label("今日到期补题",17,BRAND,true));int count=0;
+                    for(int i=0;i<plans.length();i++){JSONObject item=plans.optJSONObject(i);if(item==null||!item.optBoolean("due"))continue;count++;Button entry=action(item.optString("platform")+" · "+item.optString("problem_id"),false);entry.setOnClickListener(v->{Intent intent=new Intent(this,ClubActivity.class);intent.putExtra("page","discussions").putExtra("platform",item.optString("platform")).putExtra("problem_id",item.optString("problem_id"));startActivity(intent);});dueList.addView(entry);}
+                    if(count==0)dueList.addView(label("暂无到期补题",13,MUTED,false));
+                });
+            }catch(Exception e){present(()->{if(serial==requestSerial)failureBox(dueList,FailureState.title(e),180,null);});}
+        });
         LinearLayout summary = card(); summary.addView(label("正在读取训练统计…",13,MUTED,false));
-        io.execute(() -> {
+        loadPage(serial,() -> {
             try {
                 JSONObject data = api.getObject("/api/me/training/summary");
                 int streak = data.getInt("streak_days"), active = data.getInt("active_days");
-                runOnUiThread(() -> { if (serial == requestSerial) { summary.removeAllViews(); summary.addView(label("连续 " + streak + " 天 · 近一年活跃 " + active + " 天",16,BRAND,true)); } });
-            } catch (Exception e) { runOnUiThread(() -> { if (serial == requestSerial) failureBox(summary,FailureState.title(e),100,null); }); }
+                present(() -> { if (serial == requestSerial) { summary.removeAllViews(); summary.addView(label("连续 " + streak + " 天 · 近一年活跃 " + active + " 天",16,BRAND,true)); } });
+            } catch (Exception e) { present(() -> { if (serial == requestSerial) failureBox(summary,FailureState.title(e),100,null); }); }
         });
         LinearLayout form = card();
         String[] platforms = {"", "codeforces", "luogu", "atcoder", "nowcoder"};
@@ -1096,7 +1299,7 @@ public final class MainActivity extends Activity {
             actionBusy = true; generate.setEnabled(false); zones.removeAllViews();
             String[] names = {"稳定基础", "主训练", "突破上限"};
             LinearLayout[] slots = new LinearLayout[3];
-            for (int i = 0; i < 3; i++) { slots[i] = column(); slots[i].setPadding(dp(16),dp(16),dp(16),dp(16)); slots[i].setBackground(shape(PANEL,10,LINE)); slots[i].setMinimumHeight(dp(180)); slots[i].addView(label(names[i] + " · 正在生成…", 15, BRAND, true)); zones.addView(slots[i]); }
+            for (int i = 0; i < 3; i++) { slots[i] = column(); slots[i].setPadding(dp(16),dp(16),dp(16),dp(16)); slots[i].setBackground(shape(MobileStyle.MODULE,10,LINE)); slots[i].setMinimumHeight(dp(180)); slots[i].addView(label(names[i] + " · 正在生成…", 15, BRAND, true)); zones.addView(slots[i]); }
             io.execute(() -> {
                 for (int i = 0; i < 3; i++) {
                     int slot = i; JSONObject result = null; Exception failure = null;
@@ -1109,7 +1312,7 @@ public final class MainActivity extends Activity {
                         result = api.writeObject("POST", "/api/me/challenge/start", new JSONObject().put("platform",selected).put("tag",tagText).put("weak_tag",byWeak).put("difficulty", target));
                     } catch (Exception e) { failure = e; }
                     JSONObject value = result; Exception error = failure;
-                    runOnUiThread(() -> {
+                    present(() -> {
                         if (serial != requestSerial) return;
                         slots[slot].removeAllViews();
                         if (error != null) failureBox(slots[slot], FailureState.title(error),180,null);
@@ -1122,7 +1325,7 @@ public final class MainActivity extends Activity {
                         }
                     });
                 }
-                runOnUiThread(() -> { actionBusy = false; if (serial == requestSerial) { generate.setEnabled(true); loadTrainingHistory(history, serial); } });
+                present(() -> { actionBusy = false; if (serial == requestSerial) { generate.setEnabled(true); loadTrainingHistory(history, serial); } });
             });
         });
         loadTrainingHistory(history, serial);
@@ -1139,10 +1342,10 @@ public final class MainActivity extends Activity {
 
     private void loadTrainingHistory(LinearLayout box, int serial) {
         box.removeAllViews(); box.addView(label("正在读取挑战历史…", 14, MUTED, false));
-        io.execute(() -> {
+        loadPage(serial,() -> {
             try {
                 JSONArray rows = api.getArray("/api/me/training/challenges");
-                runOnUiThread(() -> {
+                present(() -> {
                     if (serial != requestSerial) return;
                     box.removeAllViews(); box.addView(label("挑战历史 · 仅自己可见", 17, TEXT, true));
                     if (rows.length() == 0) box.addView(label("暂无挑战记录。", 13, MUTED, false));
@@ -1152,24 +1355,23 @@ public final class MainActivity extends Activity {
                         box.addView(label(row.optString("platform") + " · " + row.optString("status") + " · " + date(row.optLong("created_at")),12,MUTED,false));
                     }
                 });
-            } catch (Exception e) { runOnUiThread(() -> { if (serial == requestSerial) failureBox(box,FailureState.title(e),250,()->loadTrainingHistory(box,serial)); }); }
+            } catch (Exception e) { present(() -> { if (serial == requestSerial) failureBox(box,FailureState.title(e),250,()->loadTrainingHistory(box,serial)); }); }
         });
     }
 
     private void renderContests() {
         heading("CONTEST REVIEW", "赛事复盘", "查询自己的比赛题目，并保存逐题补题状态。");
         if (!requireLogin("contests")) return;
-        LinearLayout form = card(); EditText contest = new EditText(this); contest.setHint("比赛 ID"); contest.setSingleLine(true); form.addView(contest);
+        LinearLayout form = card(); EditText contest = new EditText(this); contest.setHint("比赛 ID"); contest.setSingleLine(true);contest.setText(contestIdentifier);contest.addTextChangedListener(watch(value->contestIdentifier=value)); form.addView(contest);
         Button load = action("查询比赛题目", true); form.addView(load);
         LinearLayout results = card(); results.addView(label("请输入比赛 ID 查询；无记录时请先同步数据。",13,MUTED,false));
-        load.setOnClickListener(v -> {
+        Runnable lookup=() -> {
             String id = contest.getText().toString().trim(); if (id.isEmpty()) { message("请输入比赛 ID。"); return; }
-            int serial = requestSerial;
-            mutate(load, () -> {
-                JSONArray rows = api.getArray("/api/me/contest/reviews?contest_id=" + encode(id));
-                runOnUiThread(() -> { if (serial == requestSerial) showContestRows(results,id,rows); });
-            }, () -> { });
-        });
+            int serial = ++requestSerial;pageRefresh.reset(serial);if(readFromAction)pageRefresh.userAction();load.setEnabled(false);
+            loadPage(serial,()->{try{JSONArray rows=api.getArray("/api/me/contest/reviews?contest_id="+encode(id));present(()->{showContestRows(results,id,rows);load.setEnabled(true);});}
+                catch(Exception e){present(()->{failureBox(results,FailureState.title(e),180,null);load.setEnabled(true);});}});
+        };
+        load.setOnClickListener(v->lookup.run());if(!contestIdentifier.trim().isEmpty())lookup.run();
     }
 
     private void showContestRows(LinearLayout box, String contest, JSONArray rows) {
@@ -1181,7 +1383,8 @@ public final class MainActivity extends Activity {
             JSONObject row = rows.optJSONObject(i); if (row == null) continue;
             space(box, 14); box.addView(label(row.optString("problem_id"),16,TEXT,true));
             box.addView(label(value(row,"verdict","未记录结果") + " · " + value(row,"rating","难度未知"),12,MUTED,false));
-            Spinner status = spinner(labels); int selected = java.util.Arrays.asList(keys).indexOf(row.optString("status")); status.setSelection(Math.max(0,selected)); box.addView(status);
+            String current=row.optString("status");
+            Spinner status = spinner(labels); int selected = java.util.Arrays.asList(keys).indexOf(current); status.setSelection(Math.max(0,selected)); box.addView(status);
             Button save = action("保存本题状态",false);
             save.setOnClickListener(v -> {
                 String next = keys[status.getSelectedItemPosition()];
@@ -1204,44 +1407,38 @@ public final class MainActivity extends Activity {
         content.addView(pager);
     }
 
-    private void addRankPager(int total){
-        final int pages=Math.max(1,(total+rankPageSize-1)/rankPageSize);
-        LinearLayout pager=row();pager.setPadding(0,dp(12),0,dp(12));
-        Button previous=action("上一页",false),next=action("下一页",false);
-        previous.setTextSize(11);next.setTextSize(11);previous.setMinWidth(0);next.setMinWidth(0);
-        previous.setPadding(dp(4),0,dp(4),0);next.setPadding(dp(4),0,dp(4),0);
+    private void addRankPager(int total) {
+        int pages=Math.max(1,(total+rankPageSize-1)/rankPageSize);
+        LinearLayout pager=row();Button previous=action("上一页",false),next=action("下一页",false);
         previous.setEnabled(page>1);next.setEnabled(page<pages);
         previous.setOnClickListener(v->{page--;loadScreen();});next.setOnClickListener(v->{page++;loadScreen();});
-        pager.addView(previous,new LinearLayout.LayoutParams(0,dp(46),1));
-        LinearLayout position=column(),number=row();number.setGravity(Gravity.CENTER);
-        EditText input=new EditText(this);input.setSingleLine(true);input.setInputType(InputType.TYPE_CLASS_NUMBER);input.setText(String.valueOf(page));input.setTextSize(12);input.setGravity(Gravity.CENTER);input.setPadding(0,0,0,0);input.setSelectAllOnFocus(true);input.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_GO);input.setContentDescription("输入排行榜页码");
-        number.addView(label("第",11,MUTED,false));number.addView(input,new LinearLayout.LayoutParams(dp(36),dp(42)));number.addView(label("页",11,MUTED,false));
-        position.addView(number);TextView count=label("（共"+pages+"页）",10,MUTED,false);count.setGravity(Gravity.CENTER);position.addView(count);
-        pager.addView(position,new LinearLayout.LayoutParams(0,-2,1.3f));
-        Runnable jump=()->{int target;try{String raw=input.getText().toString().trim();target=raw.matches("[0-9]+")?Integer.parseInt(raw):1;}catch(Exception e){target=1;}if(target<1||target>pages)target=1;input.setText(String.valueOf(target));if(target!=page){page=target;loadScreen();}};
-        input.setOnEditorActionListener((v,id,event)->{if(id==android.view.inputmethod.EditorInfo.IME_ACTION_GO||(event!=null&&event.getKeyCode()==android.view.KeyEvent.KEYCODE_ENTER&&event.getAction()==android.view.KeyEvent.ACTION_UP)){jump.run();return true;}return false;});
-        input.setOnFocusChangeListener((v,focus)->{if(!focus&&v.isAttachedToWindow())jump.run();});
-        LinearLayout quantity=row();quantity.setGravity(Gravity.CENTER);quantity.addView(label("一页",11,MUTED,false));Spinner sizes=spinner(new String[]{"5","10","20","100"});int[] options={5,10,20,100};sizes.setSelection(rankPageSize==5?0:rankPageSize==10?1:rankPageSize==100?3:2);
-        sizes.setContentDescription("排行榜每页数量");sizes.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> parent){}public void onItemSelected(android.widget.AdapterView<?> parent,View view,int index,long id){if(options[index]!=rankPageSize){rankPageSize=options[index];page=1;loadScreen();}}});
-        quantity.addView(sizes,new LinearLayout.LayoutParams(0,dp(48),1));quantity.addView(label("项",11,MUTED,false));pager.addView(quantity,new LinearLayout.LayoutParams(0,dp(48),1.8f));pager.addView(next,new LinearLayout.LayoutParams(0,dp(46),1));content.addView(pager);
+        pager.addView(previous,new LinearLayout.LayoutParams(0,dp(44),1));
+        pager.addView(label(" 第"+page+" / "+pages+"页 ",12,MUTED,false));
+        pager.addView(next,new LinearLayout.LayoutParams(0,dp(44),1));content.addView(pager);
+        content.addView(label("共"+total+"名成员 · 每页"+rankPageSize+"人",12,MUTED,false));
     }
 
     private void renderCompose(int serial) {
-        heading("CREATE A POST", "发布话题", "写下问题或经验，选择分类后提交审核。");
+        if(!api.isLoggedIn()){loginDestination="compose";screen="account";updateSearchHeader();refreshNav();renderAccount(serial);return;}
+        syncCloudEditor();
+        heading("WRITE / COMMUNITY", "发布话题", "草稿自动保存到账号，与网页版同步。");
         loading("正在加载论坛分类…");
-        io.execute(() -> {
+        loadPage(serial,() -> {
             try {
                 JSONArray categories = api.getArray("/api/forum/categories");
-                runOnUiThread(() -> { if (serial == requestSerial) showCompose(categories); });
+                present(() -> { if (serial == requestSerial) showCompose(categories); });
             } catch (Exception e) {
-                runOnUiThread(() -> { if (serial == requestSerial) error(e); });
+                present(() -> { if (serial == requestSerial) error(e); });
             }
         });
     }
 
     private void showCompose(JSONArray categories) {
+        if(composeEditorShown)return;composeEditorShown=true;
         content.removeAllViews();
-        heading("CREATE A POST", "发布话题", "写下问题或经验，选择分类后提交审核。");
+        syncCloudEditor();
+        offerDraftRecovery();
+        heading("WRITE / COMMUNITY", "发布话题", "草稿自动保存到账号，与网页版同步。");
         if (!api.isLoggedIn()) status("可先编辑内容；提交前需要登录成员账号。");
         if (categories.length() == 0) { status("暂无可用分类，请稍后重试。"); return; }
 
@@ -1282,31 +1479,43 @@ public final class MainActivity extends Activity {
         space(box, 12);
         box.addView(label("正文（5–20000 字）", 13, TEXT, true));
         EditText body = new EditText(this);
+        composeBodyInput=body;
         body.setHint("描述问题、已经尝试的方法，或分享解题思路…");
         body.setGravity(Gravity.TOP);
         body.setMinLines(8);
         body.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         body.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(20000)});
         body.setText(composeBody);
+        body.setContentDescription("发帖正文输入");
         body.addTextChangedListener(watch(value -> { composeBody = value; composerChanged(); }));
         box.addView(body, new LinearLayout.LayoutParams(-1, -2));
-        LinearLayout format = row();
+        space(box,12);
+        WrapLayout format = new WrapLayout(this);format.setContentDescription("发帖格式工具");
         Button bold = action("加粗", false), code = action("代码块", false), quote = action("引用", false);
         bold.setOnClickListener(v -> insertFormat(body, "**", "**"));
         code.setOnClickListener(v -> insertFormat(body, "\n```\n", "\n```\n"));
         quote.setOnClickListener(v -> insertFormat(body, "> ", ""));
-        format.addView(bold, new LinearLayout.LayoutParams(0, dp(44), 1)); format.addView(code, new LinearLayout.LayoutParams(0, dp(44), 1)); format.addView(quote, new LinearLayout.LayoutParams(0, dp(44), 1)); box.addView(format);
+        compactTool(bold);compactTool(code);compactTool(quote);format.addView(bold);format.addView(code);format.addView(quote);
+        String[] titles={"H1","H2","斜体","删除线","无序列表","有序列表","行内代码","链接"};
+        String[] before={"# ","## ","*","~~","- ","1. ","`","["},after={"","","*","~~","","","`","](https://)"};
+        for(int i=0;i<titles.length;i++){final int index=i;Button tool=action(titles[i],false);compactTool(tool);tool.setOnClickListener(v->insertFormat(body,before[index],after[index]));format.addView(tool);}
+        box.addView(format,new LinearLayout.LayoutParams(-1,-2));space(box,14);
+        WrapLayout tools=new WrapLayout(this);tools.setContentDescription("发帖草稿工具");box.addView(tools,new LinearLayout.LayoutParams(-1,-2));
+        Button image=action("插入图片",false);compactTool(image);image.setContentDescription("插入发帖图片");image.setOnClickListener(v->choosePostImage());tools.addView(image);
+        Button importMd=action("导入 .md",false);compactTool(importMd);importMd.setOnClickListener(v->{if(composeBusy)return;Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT);picker.setType("text/*");picker.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(picker,IMPORT_MARKDOWN);});tools.addView(importMd);
+        Button draftList=action("云端草稿",false);compactTool(draftList);draftList.setOnClickListener(v->showCloudDraftList());tools.addView(draftList);
         Button preview = action("预览正文", false);
-        preview.setOnClickListener(v -> { LinearLayout article = column(); article.addView(new ContentView(this, composeBody, false, this::openBrowser)); detailsDialog("正文预览", article); }); box.addView(preview);
-        composeStatus = label(composeRevision == composeSavedRevision && composeDraftId > 0 ? "草稿已保存" : "编辑内容尚未保存到账号", 12, MUTED, false);
+        preview.setContentDescription("预览发帖正文");
+        compactTool(preview);preview.setOnClickListener(v -> { LinearLayout article = column(); article.addView(new ContentView(this, composeBody, false, this::openBrowser)); detailsDialog("正文预览", article); });tools.addView(preview);
+        composeStatus = label(cloud.state().status, 12, MUTED, false);
         box.addView(composeStatus);
         Button save = action("保存草稿", false);
-        save.setOnClickListener(v -> { if (requireLogin("compose")) saveComposer(null); }); box.addView(save);
+        compactTool(save);save.setOnClickListener(v -> { if (requireLogin("compose")) saveComposer(null); });tools.addView(save);
         if (composeDraftId > 0) {
             Button remove = action("删除当前草稿", false);
             remove.setOnClickListener(v -> new ModalDialogs.Builder(this).setTitle("删除草稿？").setMessage("删除后无法恢复。")
                     .setNegativeButton("取消", null).setPositiveButton("删除", (d, w) -> mutate(remove, () -> api.deleteDraft(composeDraftId), () -> { clearComposer(); loadScreen(); })).show());
-            box.addView(remove);
+            compactTool(remove);tools.addView(remove);
         }
         space(box, 10);
         box.addView(label("提交后进入人工审核；通过后才会出现在主页。", 12, MUTED, false));
@@ -1326,20 +1535,21 @@ public final class MainActivity extends Activity {
             }
             saveComposer(() -> {
                 submit.setEnabled(false);
+                setControlsEnabled(box,false);
                 composeBusy = true;
-                int draftId = composeDraftId;
+                CloudDrafts.State snapshot=cloud.state();int draftId = composeDraftId;long owner=api.sessionGeneration();
                 io.execute(() -> {
                     try {
-                        JSONObject result = api.submitDraft(draftId);
-                        runOnUiThread(() -> {
-                            composeBusy = false; clearComposer(); show("forum");
-                            message(result.optString("message", "已提交审核。"));
+                        JSONObject result = api.submitDraft(owner,draftId,snapshot.editVersion);int submitted=result.getInt("id");
+                        present(() -> {
+                            composeBusy = false; clearComposer(); show("forum");openWebFeature("progress",submitted);
                         });
-                    } catch (Exception e) { runOnUiThread(() -> { composeBusy = false; submit.setEnabled(true); failureDialog(e); }); }
+                    } catch (Exception e) { present(() -> { composeBusy = false; submit.setEnabled(true);setControlsEnabled(box,true);failureDialog(e); }); }
                 });
             });
         });
         content.addView(submit);
+        ui.post(this::consumePostImage);
     }
 
     private void insertFormat(EditText input, String before, String after) {
@@ -1349,65 +1559,81 @@ public final class MainActivity extends Activity {
         input.setSelection(start + before.length(), start + before.length() + selected.length()); input.requestFocus();
     }
 
+    private void compactTool(Button tool){tool.setTextSize(12);tool.setMinWidth(0);tool.setMinimumWidth(0);tool.setMinHeight(dp(44));tool.setMinimumHeight(dp(44));tool.setPadding(dp(10),dp(6),dp(10),dp(6));}
+
     private void composerChanged() {
-        composeRevision++;
-        if (composeStatus != null) composeStatus.setText("有未保存的修改");
+        composeRevision++;cloud.update(composeCategoryId,composeTitle,composeBody);
+        try {preferences.edit().putString(recoveryKey(),new JSONObject().put("id",composeDraftId).put("title",composeTitle).put("body",composeBody).put("category_id",composeCategoryId).toString()).apply();}catch(Exception ignored){}
+        if(composeStatus!=null)composeStatus.setText("等待自动保存…");
     }
-
-    private void clearComposer() {
-        composeTitle = ""; composeBody = ""; composeCategoryId = 0; composeDraftId = 0;
-        composeRevision = 0; composeSavedRevision = 0; composeStatus = null;
+    private void syncCloudEditor(){
+        cloud.bind(api.isLoggedIn()?api.getBaseUrl()+"/"+api.accountKey():"",api.sessionGeneration());
+        CloudDrafts.State state=cloud.state();composeDraftId=state.id;composeCategoryId=state.category;composeTitle=state.title;composeBody=state.body;
+        if(!state.dirty)composeSavedRevision=composeRevision;
     }
-
-    private void saveComposer(Runnable afterSave) {
-        if (composeBusy || actionBusy || !requireLogin("compose")) return;
-        composeBusy = true;
-        int draft = composeDraftId, categoryId = composeCategoryId;
-        String title = composeTitle, body = composeBody;
-        long revision = composeRevision;
-        if (composeStatus != null) composeStatus.setText("正在保存草稿…");
-        io.execute(() -> {
-            try {
-                JSONObject saved = api.saveDraft(draft, categoryId, title, body);
-                int savedId = saved.getInt("id");
-                runOnUiThread(() -> {
-                    composeBusy = false; composeDraftId = savedId; composeSavedRevision = revision;
-                    if (isFinishing() || isDestroyed()) return;
-                    if (composeStatus != null) composeStatus.setText(composeRevision == revision ? "草稿已保存" : "已保存上一版，仍有新修改未保存");
-                    if (afterSave != null) {
-                        if (composeRevision != revision) saveComposer(afterSave); else afterSave.run();
-                    }
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> {
-                    composeBusy = false;
-                    if (isFinishing() || isDestroyed()) return;
-                    if (composeStatus != null) composeStatus.setText("保存失败，编辑内容仍保留");
-                    failureDialog(e);
-                });
-            }
+    private void clearComposer(){
+        if(api.isLoggedIn())preferences.edit().remove(recoveryKey()).apply();
+        cloud.reset();composeTitle="";composeBody="";composeCategoryId=0;composeDraftId=0;composeRevision=0;composeSavedRevision=0;composeStatus=null;
+    }
+    private void saveComposer(Runnable afterSave){
+        if(composeBusy||!requireLogin("compose"))return;
+        cloud.update(composeCategoryId,composeTitle,composeBody);composeBusy=true;setControlsEnabled(content,false);
+        cloud.flush(error->present(()->{
+            composeBusy=false;if(isFinishing()||isDestroyed())return;
+            setControlsEnabled(content,true);
+            CloudDrafts.State state=cloud.state();composeDraftId=state.id;
+            if(error!=null){popupLoading=false;if(composeStatus!=null)composeStatus.setText(state.status);failureDialog(error);return;}
+            composeSavedRevision=composeRevision;preferences.edit().remove(recoveryKey()).apply();if(composeStatus!=null)composeStatus.setText(state.status);
+            if(afterSave!=null)afterSave.run();
+        }));
+    }
+    private void openDraft(int id){
+        if(composeBusy||actionBusy||!requireLogin("compose"))return;
+        saveBeforeSwitch(()->{
+            if(id==0){clearComposer();show("compose");return;}
+            int serial=requestSerial;actionBusy=true;
+            io.execute(()->{try{JSONObject draft=api.getObject("/api/forum/drafts/"+id);present(()->{
+                actionBusy=false;if(serial!=requestSerial||isFinishing()||isDestroyed())return;
+                cloud.load(draft);syncCloudEditor();show("compose");
+            });}catch(Exception e){present(()->{actionBusy=false;if(serial==requestSerial)failureDialog(e);});}});
         });
     }
-
-    private void openDraft(int id) {
-        if (composeBusy || loginBusy) return;
-        if (composeRevision != composeSavedRevision && (!composeTitle.isEmpty() || !composeBody.isEmpty())) {
-            new ModalDialogs.Builder(this).setTitle("先处理当前编辑内容")
-                    .setMessage("读取另一份草稿前，请先保存或放弃当前修改。")
-                    .setNegativeButton("取消", null).setNeutralButton("放弃当前修改", (d,w) -> { clearComposer(); openDraft(id); })
-                    .setPositiveButton("保存当前草稿", (d,w) -> saveComposer(() -> openDraft(id))).show(); return;
-        }
-        int serial = requestSerial;
-        io.execute(() -> {
-            try {
-                JSONObject draft = api.getObject("/api/forum/drafts/" + id);
-                runOnUiThread(() -> {
-                    if (serial != requestSerial || isFinishing() || isDestroyed()) return;
-                    composeTitle = draft.optString("title"); composeBody = draft.optString("body");
-                    composeCategoryId = draft.optInt("category_id"); composeDraftId = id;
-                    composeRevision = 0; composeSavedRevision = 0; show("compose");
-                });
-            } catch (Exception e) { runOnUiThread(() -> { if (serial == requestSerial) failureDialog(e); }); }
+    private void saveBeforeSwitch(Runnable action){
+        if(cloud.state().dirty){saveComposer(action);}else action.run();
+    }
+    private void showCloudDraftList(){
+        if(popupLoading||ModalDialogs.isShowing(this)||!requireLogin("compose"))return;
+        popupLoading=true;saveBeforeSwitch(()->{popupLoading=false;openSpace("drafts");});
+    }
+    private final Runnable draftTicker=new Runnable(){public void run(){
+        if(isFinishing()||isDestroyed())return;
+        if("compose".equals(screen)&&composeStatus!=null){CloudDrafts.State state=cloud.state();composeDraftId=state.id;composeStatus.setText(state.status);if(!state.dirty){composeSavedRevision=composeRevision;if(api.isLoggedIn()&&state.id>0)preferences.edit().remove(recoveryKey()).apply();}}
+        ui.postDelayed(this,700);
+    }};
+    @Override protected void onStart(){super.onStart();ui.removeCallbacks(draftTicker);ui.post(draftTicker);}
+    @Override protected void onStop(){ui.removeCallbacks(draftTicker);if("compose".equals(screen)&&api.isLoggedIn())cloud.flush(null);super.onStop();}
+    private void setControlsEnabled(View view,boolean enabled){view.setEnabled(enabled);if(view instanceof android.view.ViewGroup){android.view.ViewGroup group=(android.view.ViewGroup)view;for(int i=0;i<group.getChildCount();i++)setControlsEnabled(group.getChildAt(i),enabled);}}
+    private String recoveryKey(){return "cloud_recovery_v021_"+android.util.Base64.encodeToString((api.getBaseUrl()+"\n"+api.accountKey()).getBytes(StandardCharsets.UTF_8),android.util.Base64.NO_WRAP);}
+    private void offerDraftRecovery(){
+        if(!api.isLoggedIn()||!cloud.state().title.isEmpty()||!cloud.state().body.isEmpty())return;
+        String key=recoveryKey();if(key.equals(recoveryOffered)||!preferences.contains(key))return;recoveryOffered=key;
+        new ModalDialogs.Builder(this).setTitle("恢复未保存内容？").setMessage("本机保留了此账号上次未确认保存的编辑内容。恢复后会另存为新云端草稿，避免覆盖网页中的修改。")
+            .setNegativeButton("暂不恢复",null).setNeutralButton("丢弃备份",(d,w)->preferences.edit().remove(key).apply())
+            .setPositiveButton("恢复为新草稿",(d,w)->{try{JSONObject draft=new JSONObject(preferences.getString(key,"{}"));cloud.reset();composeTitle=draft.optString("title");composeBody=draft.optString("body");composeCategoryId=draft.optInt("category_id");composeDraftId=0;composerChanged();loadScreen();}catch(Exception e){failureDialog(e);}}).show();
+    }
+    private void restoreWebSession(){
+        if(api.isLoggedIn()||sessionRestoreAttempted||!preferences.getBoolean("auto_login",false)){loadScreen();return;}
+        sessionRestoreAttempted=true;String destination=screen;showLoginWaiting();
+        java.lang.ref.WeakReference<MainActivity> owner=new java.lang.ref.WeakReference<>(this);
+        application.restoreSavedLogin().whenComplete((restored,failure)->{
+            MainActivity current=owner.get();if(current==null)return;
+            current.present(()->{
+                if(current.isFinishing()||current.isDestroyed())return;
+                current.finishLoginWaiting();
+                current.sessionRestoreFailure=failure instanceof java.util.concurrent.CompletionException&&failure.getCause() instanceof Exception?(Exception)failure.getCause():failure instanceof Exception?(Exception)failure:null;
+                current.screen=Boolean.TRUE.equals(restored)?destination:"account";
+                current.syncCloudEditor();current.updateSearchHeader();current.refreshNav();current.loadScreen();
+            });
         });
     }
 
@@ -1422,7 +1648,6 @@ public final class MainActivity extends Activity {
     }
 
     private void renderMine(int serial) {
-        heading("PUBLIC PROFILE", "个人中心", "公开资料、各平台通过题数与已发布话题。");
         if (api.isUnconfigured() || !api.isLoggedIn()) {
             publicFailure = api.isUnconfigured() ? connectionFailure() : new ApiClient.ApiException(401, "未登录", false);
             publishedFailure = publicFailure;
@@ -1430,7 +1655,7 @@ public final class MainActivity extends Activity {
             return;
         }
         loading("正在加载公开主页…");
-        io.execute(() -> {
+        loadPage(serial,() -> {
             JSONObject user = null, posts = null;
             Exception profileError = null, postsError = null;
             try {
@@ -1438,7 +1663,7 @@ public final class MainActivity extends Activity {
                 JSONObject account = result.getJSONObject("user");
                 user = new JSONObject().put("name", account.getString("name")).put("status", account.optString("status"))
                         .put("avatar_url", account.optString("avatar_url", "")).put("platform_counts", result.getJSONObject("platform_counts"))
-                        .put("total_count", result.getInt("total_count"));
+                        .put("total_count", result.getInt("total_count")).put("recent_ac",result.optJSONArray("recent_ac"));
                 String[] platforms = {"codeforces", "luogu", "atcoder", "nowcoder", "cjlu"};
                 String[] keys = {"cf_count", "luogu_count", "atcoder_count", "nowcoder_count", "cjlu_count"};
                 for (int i = 0; i < keys.length; i++) user.put(keys[i], user.getJSONObject("platform_counts").optInt(platforms[i], 0));
@@ -1452,18 +1677,11 @@ public final class MainActivity extends Activity {
                 }
                 posts = new JSONObject().put("rows", published).put("total", total);
             } catch (Exception e) { postsError = e; }
-            // Motto is optional; its absence must not hide existing profile or posts APIs.
-            Exception mottoError = null;
-            if (user != null) {
-                try { user.put("motto", api.ownPublicProfile().getString("motto")); }
-                catch (Exception e) { mottoError = e; }
-            }
             JSONObject profile = user, published = posts;
-            Exception profileFailure = profileError, postsFailure = postsError, mottoResult = mottoError;
-            runOnUiThread(() -> {
+            Exception profileFailure = profileError, postsFailure = postsError;
+            present(() -> {
                 if (serial != requestSerial) return;
                 publicFailure = profileFailure; publishedFailure = postsFailure;
-                mottoFailure = mottoResult;
                 showPublicMember(profile, true, published);
             });
         });
@@ -1473,10 +1691,9 @@ public final class MainActivity extends Activity {
         showPublicMember(profile == null ? null : profile.optJSONObject("user"), true);
     }
 
-    private void openMember(JSONObject row, String from) {
-        memberPreview = row;
-        memberReturnScreen = from;
-        show("member");
+    private void openMember(JSONObject row,String from) {
+        if(row==null||ModalDialogs.isShowing(this))return;
+        try{JSONObject member=new JSONObject(row.toString());navigate("member",()->{memberPreview=member;memberReturnScreen=from;});}catch(org.json.JSONException e){failureDialog(e);}
     }
 
     private void renderMember(int serial) {
@@ -1487,17 +1704,17 @@ public final class MainActivity extends Activity {
             showPublicMember(memberPreview, false, null); return;
         }
         loading("正在加载成员公开主页…");
-        io.execute(() -> {
+        loadPage(serial,() -> {
             JSONObject profile = null, posts = null;
             Exception profileError = null, postsError = null;
             try {
                 profile = api.memberProfile(publicId);
-                profile.getString("public_member_id"); profile.getString("name"); profile.getJSONObject("platform_counts"); profile.getString("motto");
+                profile.getString("public_member_id"); profile.getString("name"); profile.getJSONObject("platform_counts");
             } catch (Exception e) { profileError = e; profile = null; }
             try { posts = api.memberPosts(publicId, page); posts.getJSONArray("rows"); } catch (Exception e) { postsError = e; posts = null; }
             JSONObject user = profile == null ? memberPreview : profile, published = posts;
             Exception profileFailure = profileError, postsFailure = postsError;
-            runOnUiThread(() -> {
+            present(() -> {
                 if (serial != requestSerial) return;
                 publicFailure = profileFailure; publishedFailure = postsFailure;
                 showPublicMember(user, false, published);
@@ -1511,23 +1728,55 @@ public final class MainActivity extends Activity {
 
     private ImageButton avatarButton(int size) {
         ImageButton avatar = new ImageButton(this);
-        avatar.setImageResource(android.R.drawable.ic_menu_myplaces);
+        defaultAvatar(avatar);
         avatar.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
         avatar.setBackground(shape(ACCENT, size / 2, 0));
         avatar.setClipToOutline(true);
         avatar.setPadding(0, 0, 0, 0);
         return avatar;
     }
+    private void defaultAvatar(ImageButton view){view.setImageDrawable(AppIcons.get(this,"avatar",TEXT));view.setImageTintList(null);view.setTag("");if(view==headerAvatar)headerAvatarOwner=api.sessionGeneration();}
 
     private void loadAvatar(ImageButton view, String path) {
+        if(view==headerAvatar){refreshHeaderAvatar(false);return;}
         if (api.isUnconfigured() || path.isEmpty()) return;
         int serial = requestSerial;
         avatarIo.execute(() -> {
             if (serial != requestSerial) return;
             try {
                 android.graphics.Bitmap image = api.avatarBitmap(path);
-                if (image != null) runOnUiThread(() -> { if (serial == requestSerial) view.setImageBitmap(image); });
+                if (image != null) present(() -> { if (serial == requestSerial) view.setImageBitmap(image); });
             } catch (Exception ignored) { /* Keep the local default avatar if the image is unavailable. */ }
+        });
+    }
+
+    /** Header loads belong to the account and shell, so changing pages cannot drop them. */
+    private void refreshHeaderAvatar(boolean force){
+        if(headerAvatar==null||isDestroyed())return;if(!api.isLoggedIn()){defaultAvatar(headerAvatar);return;}
+        ImageButton destination=headerAvatar;long owner=api.sessionGeneration();String known=api.currentAvatarUrl();
+        if(headerAvatarOwner!=owner||known.isEmpty())defaultAvatar(destination);
+        android.graphics.Bitmap cached=api.cachedAvatarBitmap(known);if(cached!=null){destination.setImageBitmap(cached);destination.setTag(known);headerAvatarOwner=owner;}
+        if(headerAvatarLoading)return;long now=android.os.SystemClock.elapsedRealtime();boolean check=force||headerCheckOwner!=owner||now-headerCheckedAt>30000;if(!check&&known.equals(destination.getTag()))return;
+        headerAvatarLoading=true;avatarIo.execute(()->{android.graphics.Bitmap bitmap=cached;String path=known;boolean checked=false;try{if(check){api.refreshSession();checked=true;path=api.currentAvatarUrl();}if(!path.isEmpty())bitmap=api.avatarBitmap(path);}catch(Exception ignored){if(!path.equals(known))bitmap=null;}android.graphics.Bitmap image=bitmap;String current=path;boolean refreshed=checked;
+            present(()->{headerAvatarLoading=false;if(isDestroyed())return;if(destination!=headerAvatar||owner!=api.sessionGeneration()){refreshHeaderAvatar(true);return;}if(!current.equals(api.currentAvatarUrl())){refreshHeaderAvatar(false);return;}if(refreshed){headerCheckedAt=android.os.SystemClock.elapsedRealtime();headerCheckOwner=owner;}if(current.isEmpty())defaultAvatar(destination);else if(image!=null){destination.setImageBitmap(image);destination.setTag(current);headerAvatarOwner=owner;}});
+        });
+    }
+
+    private void consumePostImage(){if(pendingPostImage!=null&&composeBodyInput!=null&&"compose".equals(screen)){android.net.Uri uri=pendingPostImage;pendingPostImage=null;insertPostImage(uri);}}
+
+    private void choosePostImage(){
+        if(choosingPostImage||composeBusy||!requireLogin("compose"))return;imageOwner=api.sessionGeneration();imageDraftGeneration=cloud.generation();choosingPostImage=true;
+        Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"image/png","image/jpeg","image/webp"});
+        try{startActivityForResult(picker,PICK_POST_IMAGE);}catch(Exception e){choosingPostImage=false;actionNotice.show("选择图片",e);}
+    }
+    private void insertPostImage(android.net.Uri uri){
+        if(imageOwner!=api.sessionGeneration()||imageDraftGeneration!=cloud.generation()||!"compose".equals(screen)||composeBodyInput==null){actionNotice.show("插入图片",new IllegalArgumentException("账号或草稿已切换，请重新选择图片"));return;}
+        final long owner=imageOwner,draft=imageDraftGeneration;final EditText editor=composeBodyInput;composeBusy=true;if(composeStatus!=null)composeStatus.setText("正在上传图片…");
+        io.execute(()->{String markdown=null;Exception failure=null;try(InputStream input=getContentResolver().openInputStream(uri);ByteArrayOutputStream bytes=new ByteArrayOutputStream()){
+            String mime=getContentResolver().getType(uri);if(!"image/png".equals(mime)&&!"image/jpeg".equals(mime)&&!"image/webp".equals(mime))throw new IllegalArgumentException("请选择 PNG、JPEG 或 WebP 图片");
+            if(input==null)throw new IllegalArgumentException("无法读取图片");byte[] buffer=new byte[8192];int count;while((count=input.read(buffer))!=-1){if(bytes.size()+count>20*1024*1024)throw new IllegalArgumentException("原图不能超过 20 MB");bytes.write(buffer,0,count);}if(draft!=cloud.generation())throw new IllegalStateException("草稿已切换，上传已取消");markdown=ForumImages.markdown(api.uploadForumImage(owner,ForumImages.compress(bytes.toByteArray())).getString("url"));
+        }catch(Exception e){failure=e;}String content=markdown;Exception error=failure;
+            present(()->{composeBusy=false;if(isDestroyed()||owner!=api.sessionGeneration()||draft!=cloud.generation())return;if(error!=null){actionNotice.show("上传图片",error);if(composeStatus!=null)composeStatus.setText("图片上传失败，正文已保留");return;}if(editor!=composeBodyInput||!"compose".equals(screen)){actionNotice.show("插入图片",new IllegalArgumentException("编辑页面已切换，请重新选择图片"));return;}int at=editor.getSelectionStart();if(at<0)at=editor.length();if(editor.length()+content.length()>20000){actionNotice.show("插入图片",new IllegalArgumentException("正文达到 20000 字上限，请精简后重新插入"));return;}editor.getText().insert(at,content);editor.setSelection(at+content.length());});
         });
     }
 
@@ -1550,24 +1799,24 @@ public final class MainActivity extends Activity {
         boolean publicData = publicFailure == null && user != null && user.has("platform_counts");
         content.removeAllViews();
         if (!own) {
-            Button back = action("← 返回" + ("rank".equals(memberReturnScreen) ? "排名" : "论坛"), false);
-            back.setOnClickListener(v -> show(memberReturnScreen));
+            Button back = action("← 返回", false);
+            back.setOnClickListener(v -> onBackPressed());
             content.addView(back);
         }
         String name = user == null ? "资料不可用" : user.optString("name", user.optString("author_name", "ACM 成员"));
         LinearLayout hero = card();
-        hero.setBackground(shape(Color.rgb(220, 235, 220), 12, 0));
-        hero.addView(label("PUBLIC PROFILE · " + (own ? "我的主页" : "成员主页"), 11, BRAND, true));
-        space(hero, 12);
+        hero.setBackground(shape(MobileStyle.MODULE,12,0));
+        hero.addView(label("ACMFOREVER / " + (own ? "MY PROFILE" : "MEMBER"), 10, MUTED, true));
+        space(hero, 36);
         LinearLayout identity = row();
-        ImageButton avatar = avatarButton(58);
-        identity.addView(avatar, new LinearLayout.LayoutParams(dp(58), dp(58)));
+        ImageButton avatar = avatarButton(76);
+        identity.addView(avatar, new LinearLayout.LayoutParams(dp(76), dp(76)));
         String avatarPath = value(user, "avatar_url", value(user, "author_avatar_url", ""));
         loadAvatar(avatar, avatarPath);
         if (own) {
             avatar.setContentDescription("进入账号设置");
             avatar.setOnClickListener(v -> show("account"));
-            if (avatarPath.isEmpty()) headerAvatar.setImageResource(android.R.drawable.ic_menu_myplaces);
+            if (avatarPath.isEmpty()) defaultAvatar(headerAvatar);
             else loadAvatar(headerAvatar, avatarPath);
         } else avatar.setContentDescription(name + "的头像");
         LinearLayout copy = column(); copy.setPadding(dp(12), 0, 0, 0);
@@ -1576,28 +1825,34 @@ public final class MainActivity extends Activity {
         identity.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
         hero.addView(identity);
         space(hero, 12);
-        if (publicData && user.has("motto")) hero.addView(label("座右铭 · " + value(user, "motto", "暂无座右铭"), 12, MUTED, false));
-        else {
-            LinearLayout motto = column(); hero.addView(motto, new LinearLayout.LayoutParams(-1, dp(64)));
-            failureBox(motto, FailureState.title(publicFailure == null ? mottoFailure : publicFailure), 64, null);
+        LinearLayout summary=row();hero.addView(summary);publicStat(summary,"累计通过",publicData?count(user,"total_count"):"—");publicStat(summary,"公开话题",publishedPosts==null?"—":String.valueOf(publishedPosts.optInt("total")));
+        if(own){
+            LinearLayout shortcuts=card();shortcuts.addView(label("我的空间",17,TEXT,true));space(shortcuts,12);LinearLayout tiles=row();shortcuts.addView(tiles);
+            quickTile(tiles,"我的话题","forum",()->openOwnCollection("我的话题","/api/forum/mine/posts"));
+            quickTile(tiles,"话题收藏","bookmark",()->openOwnCollection("我的收藏","/api/forum/mine/bookmarks"));
+            quickTile(tiles,"云端草稿","drafts",this::showCloudDraftList);
+            quickTile(tiles,"账号设置","settings",()->show("account"));
         }
-        LinearLayout achievements = card();
-        achievements.addView(label("各平台通过题数", 17, TEXT, true));
-        space(achievements, 7);
-        if (!publicData) {
-            LinearLayout region = column(); achievements.addView(region);
-            failureBox(region, FailureState.title(publicFailure), 264, this::loadScreen);
-        } else {
-            String[] names = {"Codeforces", "洛谷", "AtCoder", "牛客", "校 OJ", "合计"};
-            String[] keys = {"cf_count", "luogu_count", "atcoder_count", "nowcoder_count", "cjlu_count", "total_count"};
-            for (int i = 0; i < names.length; i += 2) {
-                LinearLayout stats = row();
-                publicStat(stats, names[i], count(user, keys[i]));
-                publicStat(stats, names[i + 1], count(user, keys[i + 1]));
-                achievements.addView(stats);
+        LinearLayout achievements=column();content.addView(achievements,new LinearLayout.LayoutParams(-1,-2));
+        LinearLayout tabsCard=column();tabsCard.setPadding(dp(14),dp(16),dp(14),dp(14));tabsCard.setBackground(shape(MobileStyle.MODULE,14,0));achievements.addView(tabsCard);
+        tabsCard.addView(label("各平台通过题数",17,TEXT,true));space(tabsCard,12);
+        if(!publicData){failureBox(tabsCard,FailureState.title(publicFailure),264,this::loadScreen);}
+        else{
+            String[] names={"ALL","Codeforces","洛谷","AtCoder","牛客","校 OJ"},ids={"all","codeforces","luogu","atcoder","nowcoder","cjlu"};
+            LinearLayout tabs=row();tabsCard.addView(tabs,new LinearLayout.LayoutParams(-1,-2));
+            LinearLayout panel=column();panel.setContentDescription("平台详情区域");LinearLayout.LayoutParams panelSize=new LinearLayout.LayoutParams(-1,-2);panelSize.topMargin=dp(12);achievements.addView(panel,panelSize);
+            View[] buttons=new View[ids.length];
+            for(int i=0;i<ids.length;i++){
+                String id=ids[i];LinearLayout tab=column();buttons[i]=tab;tab.setGravity(Gravity.CENTER);tab.setPadding(0,dp(4),0,dp(4));
+                android.widget.ImageView logo=new android.widget.ImageView(this){@Override protected void onMeasure(int width,int height){int side=Math.min(dp(46),View.MeasureSpec.getSize(width));super.onMeasure(View.MeasureSpec.makeMeasureSpec(side,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(side,View.MeasureSpec.EXACTLY));}};
+                logo.setImageDrawable(PlatformAssets.logo(this,id));logo.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);logo.setPadding(dp(6),dp(6),dp(6),dp(6));logo.setBackground(shape(Color.TRANSPARENT,999,LINE));logo.setTag("platform_logo");tab.addView(logo,new LinearLayout.LayoutParams(-1,dp(46)));
+                TextView caption=label(names[i],9,TEXT,false);caption.setPadding(0,dp(6),0,0);caption.setGravity(Gravity.CENTER);caption.setSingleLine(true);caption.setAutoSizeTextTypeUniformWithConfiguration(6,9,1,android.util.TypedValue.COMPLEX_UNIT_SP);tab.addView(caption,new LinearLayout.LayoutParams(-1,-2));
+                LinearLayout.LayoutParams size=new LinearLayout.LayoutParams(0,-2,1);if(i>0)size.leftMargin=dp(4);tabs.addView(tab,size);
+                tab.setContentDescription("切换平台 "+names[i]);tab.setOnClickListener(v->{profilePlatform=id;for(int j=0;j<buttons.length;j++)stylePlatformTab(buttons[j],ids[j].equals(id));renderPlatformPanel(panel,user,own,id);});
             }
-            achievements.addView(label("生涯各平台通过题数 · 逐题记录仅自己可见", 12, MUTED, false));
+            for(int i=0;i<buttons.length;i++)stylePlatformTab(buttons[i],ids[i].equals(profilePlatform));renderPlatformPanel(panel,user,own,profilePlatform);
         }
+        space(content,12);
         LinearLayout community = card();
         community.addView(label("发布的论坛话题", 17, TEXT, true));
         space(community, 7);
@@ -1610,23 +1865,22 @@ public final class MainActivity extends Activity {
             if (rows == null || rows.length() == 0) community.addView(label("暂无已发布话题。", 12, MUTED, false));
             else for (int i = 0; i < rows.length(); i++) {
                 JSONObject post = rows.optJSONObject(i); if (post == null) continue;
-                menuRow(community, post.optString("title"), post.optString("category_name", "话题"), () -> { postId = post.optInt("id"); show("detail"); });
+                menuRow(community, post.optString("title"), post.optString("category_name", "话题"), () -> openPost(post.optInt("id")));
             }
             addPager(publishedPosts.optInt("total"), 12);
         }
-        if (own) {
-            Button account = action(user == null ? "登录并查看账号设置" : "打开账号设置与我的记录", true);
-            account.setOnClickListener(v -> show("account"));
-            content.addView(account);
-        }
+        if(own&&!api.isLoggedIn()){Button login=action("登录并查看个人中心",true);login.setOnClickListener(v->show("account"));content.addView(login);}
     }
 
     private void renderAccount(int serial) {
-        heading("MY ACCOUNT", "账号设置", "登录、资料、安全和仅自己可见的记录。");
+        heading("ACMFOREVER / ACCOUNT", api.isLoggedIn()?"账号设置":"欢迎回来", "登录、资料、安全\n你的 ACMforever 随身社区");
         if (!api.isLoggedIn()) {
+            if(sessionRestoreFailure!=null){
+                failureBox(card(),FailureState.title(sessionRestoreFailure),160,null);
+                Button retrySession=action("重试自动登录",false);retrySession.setOnClickListener(v->{sessionRestoreAttempted=false;sessionRestoreFailure=null;restoreWebSession();});content.addView(retrySession);
+            }
             showLogin();
-            Button connection = action("检查更新", false);
-            connection.setOnClickListener(v -> checkForUpdates()); content.addView(connection);
+            appearanceEntry();
             return;
         }
         if (api.requiresPasswordChange()) {
@@ -1635,15 +1889,14 @@ public final class MainActivity extends Activity {
             change.setOnClickListener(v -> showChangePassword()); content.addView(change); return;
         }
         loading("正在加载账号资料…");
-        io.execute(() -> {
-            try { api.refreshSession(); }
+        loadPage(serial,() -> {
+            try { if(!api.isReplay())api.refreshSession(); }
             catch (Exception e) {
-                runOnUiThread(() -> {
+                present(() -> {
                     if (serial != requestSerial) return;
                     if (api.requiresPasswordChange()) { loadScreen(); return; }
                     error(e);
-                    Button connection = action("检查更新", false);
-                    connection.setOnClickListener(v -> checkForUpdates()); content.addView(connection);
+
                     if (!api.isLoggedIn()) showLogin();
                 }); return;
             }
@@ -1652,11 +1905,11 @@ public final class MainActivity extends Activity {
             Exception[] failures = new Exception[4];
             try { profile = api.getObject("/api/me/profile"); profile.getJSONObject("user"); } catch (Exception e) { failures[0] = e; profile = null; }
             try { posts = api.getArray("/api/forum/mine/posts"); } catch (Exception e) { failures[1] = e; }
-            try { bookmarks = api.getArray("/api/forum/mine/bookmarks"); } catch (Exception e) { failures[2] = e; }
-            try { drafts = api.getArray("/api/forum/drafts"); } catch (Exception e) { failures[3] = e; }
+            try { bookmarks=api.getArray("/api/forum/mine/bookmarks"); } catch(Exception e){failures[2]=e;}
+            try { drafts=api.getArray("/api/forum/drafts"); } catch(Exception e){failures[3]=e;}
             JSONObject account = profile;
             JSONArray mine = posts, saved = bookmarks, editing = drafts;
-            runOnUiThread(() -> { if (serial == requestSerial) showAccountProfile(account, mine, saved, editing, failures); });
+            present(() -> { if (serial == requestSerial) showAccountProfile(account, mine, saved, editing, failures); });
         });
     }
 
@@ -1673,24 +1926,46 @@ public final class MainActivity extends Activity {
         EditText qq = new EditText(this);
         qq.setHint("用户名 / QQ"); qq.setSingleLine(true);
         qq.setInputType(InputType.TYPE_CLASS_TEXT); qq.setText(loginIdentifier);
+        qq.setTextSize(15);qq.setPadding(dp(14),0,dp(14),0);qq.setBackground(shape(BACKGROUND,10,0));
         box.addView(qq);
+        qq.setLayoutParams(new LinearLayout.LayoutParams(-1,dp(52)));space(box,12);
         EditText password = new EditText(this);
         password.setHint("密码"); password.setSingleLine(true);
         password.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        password.setText(sessionVault.readPassword(api.getBaseUrl(), loginIdentifier));
-        box.addView(password);
-        CheckBox remember = new CheckBox(this); remember.setText("记住我（记住账号）");
-        remember.setChecked(preferences.getBoolean("remember_account", false)); box.addView(remember);
-        CheckBox savePassword = new CheckBox(this); savePassword.setText("保存密码（在此设备加密保存）");
-        savePassword.setChecked(preferences.getBoolean("save_password", false)); box.addView(savePassword);
-        savePassword.setOnCheckedChangeListener((button, checked) -> { if (checked) remember.setChecked(true); else sessionVault.clearPassword(); });
-        CheckBox auto = new CheckBox(this); auto.setText("自动登录（会话失效后需重新登录）");
-        auto.setChecked(preferences.getBoolean("auto_login", false)); box.addView(auto);
-        auto.setOnCheckedChangeListener((button, checked) -> { if (checked) remember.setChecked(true); else { preferences.edit().putBoolean("auto_login", false).apply(); sessionVault.clear(); } });
-        remember.setOnCheckedChangeListener((button, checked) -> { if (!checked) { auto.setChecked(false); savePassword.setChecked(false); preferences.edit().remove("remembered_account").putBoolean("remember_account", false).apply(); } });
+        password.setSaveEnabled(false);password.setTextSize(15);password.setPadding(dp(14),0,0,0);password.setBackgroundColor(Color.TRANSPARENT);
+        LinearLayout passwordRow=row();passwordRow.setBackground(shape(BACKGROUND,10,0));box.addView(passwordRow,new LinearLayout.LayoutParams(-1,dp(52)));
+        passwordRow.addView(password,new LinearLayout.LayoutParams(0,-1,1));
+        ImageButton eye=new ImageButton(this);eye.setImageDrawable(AppIcons.get(this,"eye",MUTED));eye.setPadding(dp(12),dp(12),dp(12),dp(12));eye.setBackgroundColor(Color.TRANSPARENT);eye.setContentDescription("显示密码");passwordRow.addView(eye,new LinearLayout.LayoutParams(dp(48),dp(48)));
+        final boolean[] visible={false};eye.setOnClickListener(v->{int start=password.getSelectionStart(),end=password.getSelectionEnd();visible[0]=!visible[0];password.setTransformationMethod(visible[0]?android.text.method.HideReturnsTransformationMethod.getInstance():android.text.method.PasswordTransformationMethod.getInstance());if(start>=0&&end>=0)password.setSelection(start,end);eye.setImageDrawable(AppIcons.get(this,visible[0]?"eye-off":"eye",MUTED));eye.setContentDescription(visible[0]?"隐藏密码":"显示密码");});
+        final LoginOptions[] options={LoginOptions.read(preferences)};
+        CheckBox remember = new CheckBox(this); remember.setText("记住账号");
+        CheckBox rememberPassword=new CheckBox(this);rememberPassword.setText("记住密码");
+        CheckBox automatic=new CheckBox(this);automatic.setText("自动登录");
+        remember.setChecked(options[0].account);rememberPassword.setChecked(options[0].password);automatic.setChecked(options[0].automatic);
+        space(box,10);for(CheckBox option:new CheckBox[]{remember,rememberPassword,automatic}){option.setTextColor(TEXT);option.setTextSize(14);option.setMinHeight(dp(44));box.addView(option);}
+        password.setText(sessionVault.readPassword(api.getBaseUrl(),loginIdentifier));
+        options[0]=LoginOptions.read(preferences);remember.setChecked(options[0].account);rememberPassword.setChecked(options[0].password);automatic.setChecked(options[0].automatic);
+        final boolean[] changing={false};
+        java.util.function.BiConsumer<String,Boolean> changeOption=(name,checked)->{
+            if(changing[0])return;changing[0]=true;
+            options[0]=options[0].change(name,checked);options[0].save(preferences,qq.getText().toString().trim());
+            if(!options[0].password)sessionVault.clearPassword();else if(!options[0].automatic)sessionVault.clear();
+            remember.setChecked(options[0].account);rememberPassword.setChecked(options[0].password);automatic.setChecked(options[0].automatic);changing[0]=false;
+        };
+        remember.setOnCheckedChangeListener((v,checked)->changeOption.accept("account",checked));
+        rememberPassword.setOnCheckedChangeListener((v,checked)->changeOption.accept("password",checked));
+        automatic.setOnCheckedChangeListener((v,checked)->changeOption.accept("automatic",checked));
+        box.addView(label("自动登录会同时记住账号和密码，仅保存在此设备。",11,MUTED,false));space(box,12);
         qq.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
-            public void onTextChanged(CharSequence s, int start, int before, int count) { password.setText(""); }
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                String account=s.toString().trim();loginIdentifier=account;
+                if(!account.equals(preferences.getString("remembered_account",""))){
+                    sessionVault.clear();
+                    if(preferences.contains("password_cipher")){sessionVault.clearPassword();changeOption.accept("password",false);}
+                }
+                options[0].save(preferences,account);password.setText(sessionVault.readPassword(api.getBaseUrl(),account));
+            }
             public void afterTextChanged(Editable s) { }
         });
         Button submit = action("登录", true);
@@ -1702,20 +1977,19 @@ public final class MainActivity extends Activity {
             if (user.isEmpty() || secret.isEmpty()) { message("请输入用户名 / QQ 和密码。"); return; }
             submit.setEnabled(false);
             loginIdentifier = user;
-            boolean shouldSavePassword = savePassword.isChecked();
-            preferences.edit().putBoolean("remember_account", remember.isChecked()).putBoolean("auto_login", auto.isChecked())
-                    .putString("remembered_account", remember.isChecked() ? user : "").apply();
+
+            options[0].save(preferences,user);boolean keepPassword=options[0].password;
             showLoginWaiting();
             io.execute(() -> {
                 try {
                     JSONObject result = api.login(user, secret);
-                    if (shouldSavePassword) passwordSaveFailed = !sessionVault.savePassword(api.getBaseUrl(), user, secret);
-                    else sessionVault.clearPassword();
-                    runOnUiThread(() -> {
+                    passwordSaveFailed=keepPassword&&!sessionVault.savePassword(api.getBaseUrl(),user,secret);
+                    if(!keepPassword)sessionVault.clearPassword();
+                    present(() -> {
                         if (isFinishing() || isDestroyed()) return;
                         finishLoginWaiting();
-                        if (application.consumeSessionSaveFailure()) message("登录成功，但无法安全保存会话；下次请重新登录。");
-                        if (passwordSaveFailed) { passwordSaveFailed = false; message("登录成功，但设备无法安全保存密码；下次请手动输入。"); }
+                        sessionRestoreFailure=null;
+                        if(passwordSaveFailed){passwordSaveFailed=false;message("登录成功，但本机保存密码失败，请下次手动登录。");}
                         if (result.optBoolean("must_change_password")) {
                             show("account");
                             showChangePassword();
@@ -1723,7 +1997,7 @@ public final class MainActivity extends Activity {
                     });
                 } catch (Exception e) {
                     if (e instanceof ApiClient.ApiException && ((ApiClient.ApiException) e).status == 401) sessionVault.clearPassword();
-                    runOnUiThread(() -> {
+                    present(() -> {
                         if (isFinishing() || isDestroyed()) return;
                         finishLoginWaiting();
                         show("account");
@@ -1734,6 +2008,7 @@ public final class MainActivity extends Activity {
             });
         });
         box.addView(submit);
+        Button updates=action("检查更新",false);updates.setOnClickListener(v->checkForUpdates());box.addView(updates);
     }
 
     private void showLoginWaiting() {
@@ -1747,9 +2022,8 @@ public final class MainActivity extends Activity {
         content.removeAllViews();
         LinearLayout wait = card();
         wait.setMinimumHeight(dp(520)); wait.setGravity(Gravity.CENTER);
-        ProgressBar spinner = new ProgressBar(this);
-        spinner.setContentDescription("正在登录，请稍候");
-        wait.addView(spinner, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        CodingCatView spinner = new CodingCatView(this);
+        wait.addView(spinner, new LinearLayout.LayoutParams(dp(210), dp(140)));
         space(wait, 26);
         wait.addView(label("正在登录…", 23, TEXT, true));
         space(wait, 10);
@@ -1773,7 +2047,7 @@ public final class MainActivity extends Activity {
         heading("MY ACCOUNT", "账号设置", "仅自己可见的资料与账号操作。");
 
         String avatarPath = value(user, "avatar_url", "");
-        if (avatarPath.isEmpty()) headerAvatar.setImageResource(android.R.drawable.ic_menu_myplaces);
+        if (avatarPath.isEmpty()) defaultAvatar(headerAvatar);
         else loadAvatar(headerAvatar, avatarPath);
         addAdministratorSection();
         if (user != null) {
@@ -1781,27 +2055,32 @@ public final class MainActivity extends Activity {
         identity.addView(label("个人资料", 13, BRAND, true));
         menuRow(identity, "修改昵称", value(user, "name", "ACM 成员"), () -> showRename(value(user, "name", "")));
         menuRow(identity, "社区头像", "上传图片或恢复默认", this::showAvatarActions);
-        menuRow(identity, "座右铭", api.mottoStatus(), this::showMottoEditor);
-        menuRow(identity, "OJ 账号绑定", "仅自己可见 · 只读", () -> showBindings(user));
+
+        menuRow(identity, "OJ 账号绑定", "App 不支持修改，请到网页端或联系管理员", () -> showBindings(user));
         LinearLayout training = card();
         training.addView(label("我的学习 · 仅自己可见", 13, BRAND, true));
         menuRow(training, "通过题数", "累计 " + result.optInt("total_count") + " 题", () -> showTraining(result));
         menuRow(training, "最近 AC", "题目、平台与通过时间", () -> showRecent(result.optJSONArray("recent_ac")));
         menuRow(training, "今日训练", "稳定基础、主训练、突破上限与挑战历史", () -> show("training"));
         menuRow(training, "赛事复盘", "按比赛查看题目并保存补题状态", () -> show("contests"));
-        menuRow(training, "我的题目收藏", "查看自己收藏的题目", () -> { problemState = "favorite"; show("problems"); });
+        menuRow(training, "我的题目收藏", "查看自己收藏的题目", () -> navigate("problems",()->problemState="favorite"));
         } else failureBox(card(), FailureState.title(failures[0]), 300, this::loadScreen);
-        LinearLayout community = card();
-        community.addView(label("我的社区 · 仅自己可见", 13, BRAND, true));
-        privateMenuRow(community, "我的话题", posts, failures[1]);
-        privateMenuRow(community, "我的收藏", bookmarks, failures[2]);
-        privateMenuRow(community, "草稿", drafts, failures[3]);
+        LinearLayout community = card();community.addView(label("我的社区 · 仅自己可见", 13, TEXT, true));space(community,12);
+        LinearLayout shortcuts=row();community.addView(shortcuts);
+        communityShortcut(shortcuts,"我的话题","forum",posts,failures[1]);
+        communityShortcut(shortcuts,"我的收藏","bookmark",bookmarks,failures[2]);
+        communityShortcut(shortcuts,"草稿","drafts",drafts,failures[3]);
+        quickTile(shortcuts,"写新话题","compose",()->openDraft(0));
+        menuRow(community,"通知中心","回复和审核结果",()->openWebFeature("notifications",0));
+        menuRow(community,"投稿进度","查看状态、退回原因与修改记录",()->openWebFeature("submissions",0));
         LinearLayout settings = card();
         settings.addView(label("账号与应用", 13, BRAND, true));
+        menuRow(settings,"个性化设置","背景选择 · 主题选择",this::showCoverSettings);
         menuRow(settings, "修改密码", "保护账号安全", this::showChangePassword);
-        menuRow(settings, "外观设置", "薄荷主题", () -> message("样品当前使用薄荷主题，深色模式待加入。"));
-        menuRow(settings, "检查更新", "检查新版本并下载安装", this::checkForUpdates);
-        menuRow(settings, "关于 ACMforever", "0.1.12 · 调试版", () -> message("打一辈子爱臭美 / ACMforever\n版本 0.1.12 · 调试版"));
+        menuRow(settings, "检查更新", "下载新版 · 自动更新选项", this::checkForUpdates);
+
+
+        menuRow(settings, "关于 ACMforever", appVersion()+" · 调试版", () -> message("打一辈子爱臭美 / ACMforever\n版本 "+appVersion()+" · 调试版"));
         Button logout = action("退出登录", false);
         logout.setOnClickListener(view -> {
             logout.setEnabled(false);
@@ -1810,7 +2089,7 @@ public final class MainActivity extends Activity {
                 try { api.logout(); }
                 catch (Exception e) { remoteFailure = e; }
                 Exception logoutFailure = remoteFailure;
-                runOnUiThread(() -> {
+                present(() -> {
                     if (isFinishing() || isDestroyed()) return;
                     clearComposer(); commentBody = ""; commentParent = 0;
                     selectedProblem = null; memberPreview = null; loginDestination = "account";
@@ -1826,60 +2105,14 @@ public final class MainActivity extends Activity {
         return api.isAdministrator();
     }
 
-    private void addAdministratorSection() {
-        if (!isAdministratorAccount()) return;
-        LinearLayout admin = card();
-        admin.setBackground(shape(Color.rgb(231, 240, 196), 11, LINE));
-        admin.addView(label("管理员栏", 15, BRAND, true));
-        menuRow(admin, "管理后台", "成员、训练、社区与系统管理", this::showAdministratorMenu);
-    }
+    private void addAdministratorSection() { }
 
-    private void showAdministratorMenu() {
-        if (!isAdministratorAccount()) { message("请使用管理员账号登录。"); return; }
-        returnFromAdmin = true;
-        AdminActivity.open(this, api);
-    }
+    private void showAdministratorMenu() { message("成员、题单与内容管理请使用社团 Web 后台。"); }
 
     private String value(JSONObject object, String key, String fallback) {
         if (object == null || object.isNull(key)) return fallback;
         String result = object.optString(key, "").trim();
         return result.isEmpty() ? fallback : result;
-    }
-
-    private void showMottoEditor() {
-        if(popupLoading||ModalDialogs.isShowing(this))return;
-        if (api.isUnconfigured()) { failureDialog(connectionFailure()); return; }
-        popupLoading=true;
-        int serial = requestSerial;
-        io.execute(() -> {
-            try {
-                if (!api.supportsMobile("edit_motto")) throw new ApiClient.UnavailableEndpointException("座右铭编辑");
-                JSONObject profile = api.ownPublicProfile();
-                runOnUiThread(() -> {
-                    popupLoading=false;
-                    if (serial != requestSerial) return;
-                    EditText input = new EditText(this);
-                    input.setHint("最多 100 个字符；留空可清除"); input.setText(profile.optString("motto"));
-                    AlertDialog dialog = new ModalDialogs.Builder(this).setTitle("修改座右铭")
-                            .setMessage("座右铭会展示在公开主页。")
-                            .setView(input).setNegativeButton("取消", null).setPositiveButton("保存", null).create();
-                    dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-                        String motto = input.getText().toString().trim();
-                        if (motto.codePointCount(0, motto.length()) > 100) { input.setError("不能超过 100 个字符"); return; }
-                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
-                        io.execute(() -> {
-                            try {
-                                api.updateMotto(motto);
-                                runOnUiThread(() -> { dialog.dismiss(); message("座右铭已保存。"); });
-                            } catch (Exception e) {
-                                runOnUiThread(() -> { dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true); failureDialog(e); });
-                            }
-                        });
-                    }));
-                    ModalDialogs.show(dialog);
-                });
-            } catch (Exception e) { runOnUiThread(() -> { popupLoading=false;if (serial == requestSerial) failureDialog(e); }); }
-        });
     }
 
     private void menuRow(LinearLayout parent, String title, String subtitle, Runnable onClick) {
@@ -1890,7 +2123,6 @@ public final class MainActivity extends Activity {
         copy.addView(label(title, 15, TEXT, true));
         copy.addView(label(subtitle, 11, MUTED, false));
         line.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
-        line.addView(label("›", 23, MUTED, false));
         line.setOnClickListener(v -> {if(!popupLoading&&!ModalDialogs.isShowing(this))onClick.run();});
         parent.addView(line);
         View divider = new View(this); divider.setBackgroundColor(LINE);
@@ -1907,15 +2139,28 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private void postMetric(LinearLayout parent,String icon,int value){
+        TextView metric=label(String.valueOf(value),11,MUTED,false);android.graphics.drawable.Drawable image=AppIcons.get(this,icon,MUTED);image.setBounds(0,0,dp(18),dp(18));metric.setCompoundDrawables(image,null,null,null);metric.setCompoundDrawablePadding(dp(4));metric.setPadding(dp(14),0,0,0);parent.addView(metric);
+    }
+    private LinearLayout quickTile(LinearLayout parent,String title,String icon,Runnable action){
+        LinearLayout tile=column();tile.setGravity(Gravity.CENTER);tile.setPadding(0,dp(8),0,dp(8));
+        android.widget.ImageView picture=new android.widget.ImageView(this);picture.setImageDrawable(AppIcons.get(this,icon,BRAND));picture.setPadding(dp(8),dp(8),dp(8),dp(8));picture.setBackground(shape(MobileStyle.controlFill(MobileStyle.SELECTED),12,0));tile.addView(picture,new LinearLayout.LayoutParams(dp(46),dp(46)));space(tile,8);
+        TextView name=label(title,11,MUTED,false);name.setGravity(Gravity.CENTER);tile.addView(name);tile.setContentDescription(title);tile.setOnClickListener(v->{if(!ModalDialogs.isShowing(this))action.run();});parent.addView(tile,new LinearLayout.LayoutParams(0,-2,1));return tile;
+    }
+    private void communityShortcut(LinearLayout parent,String title,String icon,JSONArray items,Exception failure){
+        quickTile(parent,title,icon,()->{if(items!=null)showPrivateList(title,items);else failureDialog(failure==null?new IllegalStateException("资料不可用"):failure);});
+    }
+
     private AlertDialog detailsDialog(String title, LinearLayout body) {
         body.setPadding(dp(20), dp(8), dp(20), dp(12));
         ScrollView scroll = new ScrollView(this); scroll.addView(body);
-        return new ModalDialogs.Builder(this).setTitle(title).setView(scroll).setPositiveButton("关闭", null).show();
+        return new ModalDialogs.Builder(this).setTitle(title).setView(scroll).fullPage().show();
     }
 
     private void showBindings(JSONObject user) {
         LinearLayout body = column();
-        body.addView(label("绑定由管理员维护，仅本人及管理员可见。", 12, MUTED, false));
+        body.addView(label("App 不支持账号绑定、改绑、解绑及同步操作，请到网页端或联系管理员。", 14, TEXT, true));
+        space(body,12);body.addView(label("以下绑定信息仅本人及管理员可见。", 12, MUTED, false));
         String[] fields = {"cf_handle", "luogu_id", "atcoder_handle", "nowcoder_id", "cjlu_username"};
         String[] names = {"Codeforces", "洛谷", "AtCoder", "牛客", "校 OJ"};
         for (int i = 0; i < fields.length; i++) {
@@ -1938,6 +2183,40 @@ public final class MainActivity extends Activity {
         detailsDialog("我的学习统计", body);
     }
 
+    private void appearanceEntry(){LinearLayout panel=card();menuRow(panel,"个性化设置","背景选择 · 主题选择",this::showCoverSettings);}
+    private void showCoverSettings(){startActivity(new Intent(this,AppearanceActivity.class));}
+    private boolean openingSpace;
+    private void openSpace(String kind){if(openingSpace)return;openingSpace=true;startActivity(new Intent(this,SpaceActivity.class).putExtra("kind",kind));}
+    private void openOwnCollection(String title,String path){
+        if(popupLoading||ModalDialogs.isShowing(this)||!requireLogin("mine"))return;
+        openSpace(path.contains("bookmarks")?"bookmarks":"posts");
+    }
+    private void stylePlatformTab(View tab,boolean selected){
+        if(tab==null)return;tab.setSelected(selected);View logo=tab.findViewWithTag("platform_logo");if(logo!=null){GradientDrawable circle=shape(Color.TRANSPARENT,999,0);circle.setStroke(dp(selected?3:1),selected?BRAND:LINE);logo.setBackground(circle);}
+    }
+    private LinearLayout platformCard(LinearLayout panel){LinearLayout box=column();box.setPadding(dp(16),dp(16),dp(16),dp(16));box.setBackground(shape(MobileStyle.MODULE,14,0));LinearLayout.LayoutParams size=new LinearLayout.LayoutParams(-1,-2);size.bottomMargin=dp(12);panel.addView(box,size);return box;}
+    private void renderPlatformPanel(LinearLayout panel,JSONObject user,boolean own,String id){
+        panel.removeAllViews();JSONObject counts=user.optJSONObject("platform_counts");String number="all".equals(id)?count(user,"total_count"):counts==null||!counts.has(id)?"—":count(counts,id);
+        LinearLayout summary=platformCard(panel);summary.setContentDescription("过题数框");LinearLayout row=row(),copy=column();copy.addView(label(PlatformAssets.name(id),17,TEXT,true));space(copy,14);copy.addView(label(number,34,TEXT,true));copy.addView(label("累计通过题数",11,MUTED,false));row.addView(copy,new LinearLayout.LayoutParams(0,-2,1));
+        android.widget.ImageView mark=new android.widget.ImageView(this);mark.setImageDrawable(PlatformAssets.logo(this,id));mark.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);mark.setBackgroundColor(Color.TRANSPARENT);row.addView(mark,new LinearLayout.LayoutParams(dp(88),dp(88)));summary.addView(row);row.setContentDescription(PlatformAssets.name(id)+"通过题数 "+number);
+        if(!own){summary.addView(label("公开信息仅展示平台累计通过数。",12,MUTED,false));return;}
+        LinearLayout recentBox=platformCard(panel);recentBox.setContentDescription("最近AC框");recentBox.addView(filterSection("最近 AC · 仅自己可见","history"));space(recentBox,10);
+        JSONArray recent=user.optJSONArray("recent_ac");if(recent==null){failureBox(recentBox,"无API接口",130,null);return;}
+        int shown=0;for(int i=0;i<recent.length()&&shown<10;i++){
+            JSONObject item=recent.optJSONObject(i);if(item==null||!"all".equals(id)&&!id.equals(item.optString("platform")))continue;shown++;
+            TextView title=label(value(item,"problem_name",value(item,"problem_id","题目")),14,TEXT,true);title.setPadding(0,dp(8),0,dp(4));recentBox.addView(title);
+            title.setMinHeight(dp(44));title.setOnClickListener(v->openRecentProblem(item));
+            recentBox.addView(label(("all".equals(id)?PlatformAssets.name(item.optString("platform"))+" · ":"")+date(item.optLong("submit_time")),11,MUTED,false));
+        }
+        if(shown==0)recentBox.addView(label("all".equals(id)?"暂无最近 AC 记录。":"最近记录中暂无该平台的 AC。",12,MUTED,false));
+    }
+
+    private void openRecentProblem(JSONObject item){
+        String platform=item.optString("platform"),id=item.optString("problem_id");
+        if(platform.isEmpty()||id.isEmpty()){failureDialog(new IllegalArgumentException("记录缺少平台或题号"));return;}
+        try{JSONObject problem=new JSONObject().put("platform",platform).put("problem_id",id);ModalDialogs.close(this);openProblem(problem);}catch(org.json.JSONException e){failureDialog(e);}
+    }
+
     private void showRecent(JSONArray rows) {
         LinearLayout body = column();
         body.addView(label("这些逐题记录仅自己可见。", 12, MUTED, false));
@@ -1946,8 +2225,7 @@ public final class MainActivity extends Activity {
             JSONObject item = rows.optJSONObject(i); if (item == null) continue;
             space(body, 14);
             TextView title = label(value(item, "problem_name", value(item, "problem_id", "题目")), 15, TEXT, true);
-            String url = value(item, "problem_url", "");
-            if (!url.isEmpty()) title.setOnClickListener(v -> openBrowser(url));
+            title.setMinHeight(dp(44));title.setOnClickListener(v -> openRecentProblem(item));
             body.addView(title);
             String date = item.optLong("submit_time") > 0 ? new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.CHINA)
                     .format(new java.util.Date(item.optLong("submit_time") * 1000L)) : "";
@@ -1957,34 +2235,8 @@ public final class MainActivity extends Activity {
     }
 
     private void showPrivateList(String title, JSONArray rows) {
-        LinearLayout box = column();
-        final AlertDialog[] dialog = new AlertDialog[1];
-        box.addView(label("仅自己可见", 12, MUTED, false));
-        if (rows == null || rows.length() == 0) box.addView(label("暂无内容", 12, MUTED, false));
-        else for (int i = 0; i < rows.length(); i++) {
-            JSONObject item = rows.optJSONObject(i);
-            if (item == null) continue;
-            space(box, 14);
-            box.addView(label(value(item, "title", "未命名草稿"), 15, TEXT, true));
-            String state = value(item, "status", "");
-            String status = "pending".equals(state) ? "待审核" : "published".equals(state) ? "已发布" : "rejected".equals(state) ? "未通过" : state;
-            box.addView(label(value(item, "category_name", "") + " " + status, 12, MUTED, false));
-            box.addView(label(date(item.optLong("updated_at",item.optLong("created_at"))),12,MUTED,false));
-            if ("草稿".equals(title)) {
-                Button edit = action("继续编辑草稿", true);
-                edit.setOnClickListener(v -> { dialog[0].dismiss(); openDraft(item.optInt("id")); }); box.addView(edit);
-            } else if ("published".equals(state) || "我的收藏".equals(title)) {
-                Button open = action("查看话题与讨论", false);
-                open.setOnClickListener(v -> { dialog[0].dismiss(); postId = item.optInt("id"); show("detail"); }); box.addView(open);
-            }
-            if ("我的话题".equals(title)) {
-                Button remove = action("删除话题", false);
-                remove.setOnClickListener(v -> new ModalDialogs.Builder(this).setTitle("删除此话题？").setMessage("删除后将不再展示。")
-                        .setNegativeButton("取消",null).setPositiveButton("删除",(d,w) -> mutate(remove, () -> api.writeObject("DELETE","/api/forum/posts/" + item.getInt("id"),new JSONObject()), () -> { dialog[0].dismiss(); loadScreen(); })).show());
-                box.addView(remove);
-            }
-        }
-        dialog[0] = detailsDialog(title, box);
+        ModalDialogs.close(this);if("草稿".equals(title)){showCloudDraftList();return;}
+        openOwnCollection(title,"我的收藏".equals(title)?"/api/forum/mine/bookmarks":"/api/forum/mine/posts");
     }
 
     private void showAvatarActions() {
@@ -2005,8 +2257,8 @@ public final class MainActivity extends Activity {
                     String name = input.getText().toString().trim();
                     if (name.isEmpty() || name.length() > 100) { message("昵称需要 1–100 字。"); return; }
                     if (api.isUnconfigured()) { failureDialog(connectionFailure()); return; }
-                    io.execute(() -> { try { api.updateName(name); runOnUiThread(this::loadScreen); }
-                    catch (Exception e) { runOnUiThread(() -> failureDialog(e)); } });
+                    io.execute(() -> { try { api.updateName(name); present(this::loadScreen); }
+                    catch (Exception e) { present(() -> failureDialog(e)); } });
                 }).show();
     }
 
@@ -2034,53 +2286,57 @@ public final class MainActivity extends Activity {
         if (api.isUnconfigured()) { failureDialog(connectionFailure()); return; }
         new ModalDialogs.Builder(this).setMessage("恢复默认社区头像？").setNegativeButton("取消", null)
                 .setPositiveButton("恢复", (d, w) -> io.execute(() -> {
-                    try { api.resetAvatar(); runOnUiThread(this::loadScreen); }
-                    catch (Exception e) { runOnUiThread(() -> failureDialog(e)); }
+                    try { api.resetAvatar(); present(this::loadScreen); }
+                    catch (Exception e) { present(() -> failureDialog(e)); }
                 })).show();
     }
 
     private String encode(String value) { return UrlEncoding.form(value); }
+    private String appVersion(){try{return getPackageManager().getPackageInfo(getPackageName(),0).versionName;}catch(android.content.pm.PackageManager.NameNotFoundException e){return "未知版本";}}
 
     private void message(String value) {
         new ModalDialogs.Builder(this).setMessage(value).setPositiveButton("知道了", null).show();
     }
 
+    private void openWebFeature(String feature,int id){if(!"wiki".equals(feature)&&!requireLogin("account"))return;startActivity(new Intent(this,WebFeaturesActivity.class).putExtra("feature",feature).putExtra("post_id",id));}
     private void showTools(View anchor) {
-        if (loginBusy || composeBusy || actionBusy || popupLoading || ModalDialogs.isShowing(this)) return;
-        new ModalDialogs.Builder(this).setTitle("常用工具").setItems(new String[]{"扫一扫", "检查更新"}, (dialog, index) -> {
-            if(index==0)showScanPreview();else checkForUpdates();
-        }).setNegativeButton("关闭",null).show();
+        if(ModalDialogs.isShowing(this))return;LinearLayout tools=column();final AlertDialog[] dialog=new AlertDialog[1];
+        String[] names={"通知中心","我的投稿","Wiki 手册","比赛进度","训练工具","个性化设置"},targets={"notifications","submissions","wiki","tracker","club","appearance"};
+        for(int i=0;i<names.length;i++){String target=targets[i];Button button=action(names[i],false);button.setGravity(Gravity.CENTER);button.setCompoundDrawables(null,null,null,null);button.setCompoundDrawablePadding(0);button.setOnClickListener(v->{dialog[0].dismiss();if("club".equals(target))show("club");else if("appearance".equals(target))showCoverSettings();else openWebFeature(target,0);});tools.addView(button);}
+        dialog[0]=new ModalDialogs.Builder(this).setTitle("常用工具").setView(tools).show();
     }
 
-    private void showScanPreview() {
-        EditText address = new EditText(this);
-        address.setSingleLine(true);
-        address.setHint("粘贴 HTTPS 网页链接，演示扫码结果");
-        new ModalDialogs.Builder(this).setTitle("扫一扫 · 链接预览")
-                .setMessage("二维码格式和相机识别仍待确认。当前可粘贴 HTTPS 链接，确认后在 App 内打开。")
-                .setView(address).setNegativeButton("取消", null)
-                .setPositiveButton("预览链接", (dialog, which) -> openBrowser(address.getText().toString().trim()))
-                .show();
-    }
+    private void showScanPreview() { message("扫一扫已后置。"); }
 
     private void openBrowser(String value) {
         try {
-            String checked = BrowserActivity.checkedUrl(value);
-            String domain = java.net.URI.create(checked).getHost();
-            new ModalDialogs.Builder(this).setTitle("打开网页")
-                    .setMessage("域名：" + domain + "\n完整链接：" + checked + "\n\n确认在应用内打开？")
-                    .setNegativeButton("取消", null)
-                    .setPositiveButton("打开", (dialog, which) -> {
-                        Intent intent = new Intent(this, BrowserActivity.class);
-                        intent.putExtra("url", checked);
-                        startActivity(intent);
-                    }).show();
-        } catch (Exception e) { failureDialog(e); }
+            java.net.URI uri=java.net.URI.create(value);
+            if(!"https".equalsIgnoreCase(uri.getScheme())||uri.getHost()==null||uri.getUserInfo()!=null)throw new IllegalArgumentException("只支持 HTTPS 原题/网页链接。");
+            startActivity(new Intent(Intent.ACTION_VIEW,android.net.Uri.parse(value)));
+        }catch(Exception e){message("无法打开链接："+e.getMessage());}
     }
 
+    private void checkForUpdates() { if(openingUpdates)return;openingUpdates=true;startActivity(new Intent(this,UpdateActivity.class)); }
 
 
-    private void checkForUpdates() {
-        updates.check(preferences.getString("update_manifest_url", getString(R.string.default_update_manifest_url)));
+    private String draftKey() {
+        return "local_draft_v2_"+android.util.Base64.encodeToString((api.getBaseUrl()+"\n"+(api.isLoggedIn()?api.accountKey():"guest")).getBytes(StandardCharsets.UTF_8),android.util.Base64.NO_WRAP);
     }
+    private void loadLocalDraft() {
+        try { JSONObject draft=new JSONObject(preferences.getString(draftKey(),"{}"));
+            composeTitle=draft.optString("title");composeBody=draft.optString("body");composeCategoryId=draft.optInt("category");composeDraftId=0;composeRevision=0;composeSavedRevision=0;
+        }catch(Exception e){clearComposer();}
+    }
+    private void addClubEntry() {
+        LinearLayout box=card(),title=row();title.addView(label("训练工具",13,TEXT,true),new LinearLayout.LayoutParams(0,-2,1));
+        TextView all=label("全部  ›",11,MUTED,false);all.setMinHeight(dp(36));all.setGravity(Gravity.CENTER);all.setOnClickListener(v->show("club"));title.addView(all);box.addView(title);
+        LinearLayout tools=row();String[] names={"社团题单","我的错题","Wiki","训练打卡"},targets={"sheets","mistakes","templates","checkin"},icons={"problems","forum","templates","checkin"};
+        for(int i=0;i<names.length;i++){String target=targets[i];quickTile(tools,names[i],icons[i],()->{if("templates".equals(target))openWebFeature("wiki",0);else show(target);});}box.addView(tools);
+        Button progress=action("比赛进度 · 本人 AC 记录",false);progress.setOnClickListener(v->openWebFeature("tracker",0));box.addView(progress);
+    }
+    private void openTrainingCenter(String target) {
+        Intent intent=new Intent(this,ClubActivity.class);intent.putExtra("page",target);
+        startActivity(intent);
+    }
+
 }

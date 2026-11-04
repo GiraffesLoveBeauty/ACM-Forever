@@ -26,9 +26,28 @@ final class ApiClient {
     private volatile String csrfToken = "";
     private volatile boolean mustChangePassword;
     private volatile String role = "";
+    private volatile String memberAccount = "";
+    private volatile String currentAvatar = "";
+    String currentAvatarUrl(){return currentAvatar;}
     private volatile long sessionGeneration;
     private volatile JSONObject mobileFeatures;
     private volatile long mobileCheckedAt;
+    private final ResponseCache responses=new ResponseCache();
+    private final ResponseCache readFailures=new ResponseCache(64*1024);
+    private final Map<String,android.graphics.Bitmap> avatarCache=java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<String,android.graphics.Bitmap>(32,.75f,true){
+        @Override protected boolean removeEldestEntry(Map.Entry<String,android.graphics.Bitmap> entry){return size()>64;}
+    });
+    private static final class Replay {int hits;boolean missed;}
+    private final ThreadLocal<Replay> replay=new ThreadLocal<>();
+    private final ThreadLocal<Exception> readIssue=new ThreadLocal<>();
+    void beginReadCycle(){readIssue.remove();}
+    Exception readIssue(){return readIssue.get();}
+    static final class CacheMissException extends IllegalStateException {CacheMissException(){super("No cached response");}}
+    void beginReplay(){replay.set(new Replay());}
+    void endReplay(){replay.remove();}
+    boolean isReplay(){return replay.get()!=null;}
+    boolean replayReady(){Replay state=replay.get();return state!=null&&state.hits>0&&!state.missed;}
+    private String cacheKey(String path){return baseUrl+"\n"+sessionGeneration+"\n"+path;}
     private Runnable sessionChanged = () -> {};
     private Runnable loggedOut = () -> {};
     private final java.util.IdentityHashMap<java.net.HttpCookie, Long> cookieExpiry = new java.util.IdentityHashMap<>();
@@ -109,7 +128,7 @@ final class ApiClient {
         }
     }
 
-    void setBaseUrl(String value) {
+    synchronized void setBaseUrl(String value) {
         String checked = checkedBaseUrl(value);
         if (!checked.equals(baseUrl)) {
             ++sessionGeneration;
@@ -117,9 +136,14 @@ final class ApiClient {
             csrfToken = "";
             mustChangePassword = false;
             role = "";
+            memberAccount = "";
             mobileFeatures = null;
             mobileCheckedAt = 0;
             baseUrl = checked;
+            responses.clear();
+            readFailures.clear();
+            avatarCache.clear();
+            media.clear();
             sessionChanged.run();
         }
     }
@@ -133,12 +157,14 @@ final class ApiClient {
     }
 
     long sessionGeneration() { return sessionGeneration; }
+    String accountKey() { return memberAccount; }
 
     boolean requiresPasswordChange() { return mustChangePassword; }
 
     boolean isAdministrator() { return isLoggedIn() && ("admin".equals(role) || "root".equals(role)); }
 
-    JSONObject refreshSession() throws Exception {
+    synchronized JSONObject refreshSession() throws Exception {
+        if(isReplay())return new JSONObject();
         JSONObject result = getObject("/api/auth/me");
         if (!result.optBoolean("authenticated")) {
             clearSession();
@@ -146,6 +172,7 @@ final class ApiClient {
         }
         csrfToken = result.optString("csrf_token", "");
         role = result.optString("role", "");
+        memberAccount = result.optString("qq_id", memberAccount);
         mustChangePassword = result.optBoolean("must_change_password");
         sessionChanged.run();
         if (mustChangePassword) throw new IllegalStateException("请先修改初始密码。");
@@ -157,7 +184,7 @@ final class ApiClient {
     }
 
     boolean supportsMobile(String feature) throws Exception {
-        checkConnection();
+        if(!isReplay())checkConnection();
         if (mobileFeatures == null || System.currentTimeMillis() - mobileCheckedAt >= 60000) {
             try {
                 JSONObject result = getObject("/api/mobile/v1/capabilities");
@@ -183,19 +210,13 @@ final class ApiClient {
     }
 
     JSONObject leaderboard(String range, String sort, String platforms, String search, int page, int size) throws Exception {
-        String suffix="?days="+("today".equals(range)?"7":range)+"&period="+("today".equals(range)?"today":"")
-                +"&positive_only=1&sort="+sort+"&platforms="+UrlEncoding.form(platforms)
-                +"&search="+UrlEncoding.form(search);
-        String path=leaderboardPath(suffix);
-        JSONObject result=getObject(path+"&page="+page+"&page_size="+size);
-        if("today".equals(range)&&(!"today".equals(result.optString("period"))||!"Asia/Shanghai".equals(result.optString("timezone"))))
-            throw new UnavailableEndpointException("当日排名");
+        JSONObject result=getObject(RankOptions.path(range,sort,platforms,search,page,size));
         if(result.optBoolean("positive_only"))return result;
         // Older servers include zero-AC rows: gather their pages before filtering and paging.
         JSONArray all=new JSONArray();
         int total=result.getInt("total");
         for(int offset=1;offset<=Math.max(1,(total+99)/100);offset++){
-            JSONObject chunk=getObject(path+"&page="+offset+"&page_size=100");
+            JSONObject chunk=getObject(RankOptions.path(range,sort,platforms,search,offset,100));
             JSONArray data=chunk.getJSONArray("rows");
             for(int i=0;i<data.length();i++)if(data.getJSONObject(i).getInt("total_count")>0)all.put(data.getJSONObject(i));
         }
@@ -220,13 +241,6 @@ final class ApiClient {
         return getObject("/api/mobile/v1/members/" + checkedPublicId(publicId) + "/posts?page=" + page + "&page_size=12");
     }
 
-    JSONObject updateMotto(String motto) throws Exception {
-        requireMobile("edit_motto", "座右铭编辑");
-        String value = motto.trim();
-        if (value.codePointCount(0, value.length()) > 100) throw new IllegalArgumentException("座右铭不能超过 100 个字符。");
-        return (JSONObject) request("PUT", "/api/mobile/v1/me/public-profile", new JSONObject().put("motto", value));
-    }
-
     private void requireMobile(String feature, String name) throws Exception {
         if (!supportsMobile(feature)) throw new UnavailableEndpointException(name);
     }
@@ -236,13 +250,29 @@ final class ApiClient {
         return value;
     }
 
-    String mottoStatus() {
-        if (mobileFeatures != null && !mobileFeatures.optBoolean("edit_motto")) return "无API接口";
-        return mobileFeatures == null ? "连接后确认可用状态" : "编辑公开主页简介";
-    }
-
     Object get(String path) throws Exception {
-        return request("GET", path, null);
+        String key=cacheKey(path);Replay state=replay.get();
+        boolean cacheable=!path.startsWith("/api/auth/");
+        if(state!=null){
+            Object cached=cacheable?responses.get(key):null;
+            if(cached!=null){state.hits++;return cached;}
+            JSONObject failure=cacheable?(JSONObject)readFailures.get(key):null;
+            if(failure!=null){state.hits++;throw new ApiException(failure.getInt("status"),failure.getString("message"),failure.getBoolean("missing"));}
+            state.missed=true;throw new CacheMissException();
+        }
+        try{
+            Object result=request("GET",path,null);
+            if(key.equals(cacheKey(path))&&cacheable){responses.put(key,result);readFailures.remove(key);}
+            return result;
+        }catch(ApiException e){
+            if(e.status>=500)readIssue.set(e);
+            if(cacheable&&key.equals(cacheKey(path))&&(e.status==403||e.status==404||e.status==405||e.status==410))
+                readFailures.put(key,new JSONObject().put("status",e.status).put("message",e.getMessage()).put("missing",e.missingContent));
+            throw e;
+        }catch(Exception e){
+            if(PageRefresh.isConnectionFailure(FailureState.title(e)))readIssue.set(e);
+            throw e;
+        }
     }
 
     JSONObject getObject(String path) throws Exception {
@@ -257,7 +287,7 @@ final class ApiClient {
         return (JSONArray) result;
     }
 
-    JSONObject login(String identifier, String password) throws Exception {
+    synchronized JSONObject login(String identifier, String password) throws Exception {
         clearSession();
         JSONObject body = new JSONObject().put("username", identifier).put("password", password);
         if (identifier.matches("[0-9]{4,12}")) body.put("qq_id", identifier);
@@ -270,6 +300,7 @@ final class ApiClient {
             ++sessionGeneration;
             mustChangePassword = session.optBoolean("must_change_password");
             role = session.optString("role", "");
+            memberAccount = session.optString("qq_id", identifier);
             sessionChanged.run();
             return session;
         } catch (Exception e) { clearSession(); throw e; }
@@ -277,13 +308,17 @@ final class ApiClient {
 
     private void clearSession() {
         ++sessionGeneration;
-        csrfToken = ""; mustChangePassword = false; role = "";
+        media.clear();
+        avatarCache.clear();currentAvatar="";
+        responses.clear();
+        readFailures.clear();
+        csrfToken = ""; mustChangePassword = false; role = ""; memberAccount = "";
         cookies.getCookieStore().removeAll();
         cookieExpiry.clear();
         sessionChanged.run();
     }
 
-    void logout() throws Exception {
+    synchronized void logout() throws Exception {
         try {
             if (!csrfToken.isEmpty()) request("POST", "/api/auth/logout", new JSONObject());
         } finally {
@@ -315,13 +350,46 @@ final class ApiClient {
     }
 
     JSONObject saveDraft(int draftId, int categoryId, String title, String body) throws Exception {
+        return saveDraft(draftId,categoryId,title,body,0);
+    }
+    JSONObject saveDraft(int draftId, int categoryId, String title, String body,int version) throws Exception {
         JSONObject payload = new JSONObject().put("category_id", categoryId > 0 ? categoryId : JSONObject.NULL)
                 .put("title", title).put("body", body);
+        if(version>0)payload.put("edit_version",version);
         return writeObject(draftId > 0 ? "PUT" : "POST", "/api/forum/drafts" + (draftId > 0 ? "/" + draftId : ""), payload);
     }
 
-    JSONObject submitDraft(int draftId) throws Exception {
-        return writeObject("POST", "/api/forum/drafts/" + draftId + "/submit", new JSONObject());
+    synchronized JSONObject saveDraftBound(long expected, int id, int category, String title, String body,int version) throws Exception {
+        if(expected!=sessionGeneration || !isLoggedIn())throw new IllegalStateException("登录账号已切换，草稿保存已取消");
+        return saveDraft(id,category,title,body,version);
+    }
+
+    synchronized void downloadPdf(String platform,String problemId,java.io.File file) throws Exception {
+        checkConnection();
+        URI uri=URI.create(baseUrl+problemPath(platform,problemId)+"/statement.pdf");
+        HttpURLConnection connection=(HttpURLConnection)uri.toURL().openConnection();
+        connection.setConnectTimeout(10000);connection.setReadTimeout(30000);connection.setInstanceFollowRedirects(false);
+        connection.setRequestProperty("Accept","application/pdf");
+        for(Map.Entry<String,List<String>> header:cookies.get(uri,Collections.emptyMap()).entrySet())
+            if(header.getKey()!=null)connection.setRequestProperty(header.getKey(),String.join("; ",header.getValue()));
+        try {
+            int code=connection.getResponseCode();
+            if(code!=200){readResult(connection,uri);throw new java.io.IOException("PDF 接口响应异常");}
+            if(connection.getContentLengthLong()>32L*1024*1024)throw new java.io.IOException("PDF 超过32 MB，请使用网页阅读");
+            try(InputStream input=connection.getInputStream();java.io.FileOutputStream output=new java.io.FileOutputStream(file)){
+                byte[] buffer=new byte[8192];int count,total=0;
+                byte[] signature=new byte[5];int n=0;while(n<5){int read=input.read(signature,n,5-n);if(read<0)break;n+=read;}
+                if(n!=5||!new String(signature,StandardCharsets.US_ASCII).equals("%PDF-"))throw new java.io.IOException("服务器未返回有效PDF");
+                output.write(signature);
+                while((count=input.read(buffer))!=-1){total+=count;if(total>32*1024*1024)throw new java.io.IOException("PDF 超过32 MB");output.write(buffer,0,count);}
+            }
+        }finally{connection.disconnect();}
+    }
+
+    synchronized JSONObject submitDraft(long expected,int draftId,int version) throws Exception {
+        if(expected!=sessionGeneration||!isLoggedIn())throw new IllegalStateException("登录账号已切换，提交已取消");
+        JSONObject payload=new JSONObject();if(version>0)payload.put("edit_version",version);
+        return writeObject("POST", "/api/forum/drafts/" + draftId + "/submit",payload);
     }
 
     JSONObject deleteDraft(int draftId) throws Exception {
@@ -365,8 +433,11 @@ final class ApiClient {
         return (JSONObject) request("DELETE", "/api/me/avatar", new JSONObject());
     }
 
+    android.graphics.Bitmap cachedAvatarBitmap(String path){return avatarCache.get(baseUrl+"/"+path);}
+
     android.graphics.Bitmap avatarBitmap(String path) throws Exception {
         String base = baseUrl;
+        String key=base+"/"+path;android.graphics.Bitmap cached=avatarCache.get(key);if(cached!=null)return cached;
         if (base.isEmpty() || path == null || !(path.startsWith("/uploads/avatars/") || path.equals("/assets/default-avatar.png"))) return null;
         URI address = URI.create(base).resolve(path);
         if (!address.getHost().equals(URI.create(base).getHost()) || !"https".equals(address.getScheme())) return null;
@@ -389,11 +460,19 @@ final class ApiClient {
                 options.inSampleSize = 1;
                 while (Math.max(options.outWidth, options.outHeight) / options.inSampleSize > 256) options.inSampleSize *= 2;
                 options.inJustDecodeBounds = false;
-                return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.length, options);
+                android.graphics.Bitmap image=android.graphics.BitmapFactory.decodeByteArray(bytes,0,bytes.length,options);if(image!=null&&base.equals(baseUrl))avatarCache.put(key,image);return image;
             }
         } finally { connection.disconnect(); }
     }
 
+    synchronized JSONObject uploadForumImage(long expected,byte[] image)throws Exception{
+        if(expected!=sessionGeneration||!isLoggedIn())throw new IllegalStateException("登录账号已切换，上传已取消");checkConnection();
+        if(image.length==0||image.length>5*1024*1024)throw new IllegalArgumentException("上传图片不能超过 5 MB");
+        String boundary="acmforum"+java.util.UUID.randomUUID().toString().replace("-","");URI uri=URI.create(baseUrl+"/api/forum/images");HttpURLConnection connection=(HttpURLConnection)uri.toURL().openConnection();
+        connection.setRequestMethod("POST");connection.setConnectTimeout(10000);connection.setReadTimeout(60000);connection.setInstanceFollowRedirects(false);connection.setDoOutput(true);connection.setRequestProperty("X-CSRF-Token",csrfToken);connection.setRequestProperty("Content-Type","multipart/form-data; boundary="+boundary);
+        for(Map.Entry<String,List<String>> header:cookies.get(uri,Collections.emptyMap()).entrySet())if(header.getKey()!=null)connection.setRequestProperty(header.getKey(),String.join("; ",header.getValue()));
+        try{try(OutputStream out=connection.getOutputStream()){out.write(("--"+boundary+"\r\nContent-Disposition: form-data; name=\"image\"; filename=\"image.webp\"\r\nContent-Type: image/webp\r\n\r\n").getBytes(StandardCharsets.UTF_8));out.write(image);out.write(("\r\n--"+boundary+"--\r\n").getBytes(StandardCharsets.UTF_8));}JSONObject result=(JSONObject)readResult(connection,uri);ForumImages.markdown(result.getString("url"));return result;}finally{connection.disconnect();}
+    }
     JSONObject uploadAvatar(byte[] image, String mimeType) throws Exception {
         checkConnection();
         if (csrfToken.isEmpty()) throw new IllegalStateException("请先登录再上传头像。");
@@ -407,8 +486,8 @@ final class ApiClient {
         URI uri = url.toURI();
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setRequestMethod("POST");
-        connection.setConnectTimeout(15000);
-        connection.setReadTimeout(15000);
+        connection.setConnectTimeout(10000);
+        connection.setReadTimeout(10000);
         connection.setInstanceFollowRedirects(false);
         connection.setDoOutput(true);
         connection.setRequestProperty("Accept", "application/json");
@@ -428,15 +507,16 @@ final class ApiClient {
         } finally { connection.disconnect(); }
     }
 
-    private Object request(String method, String path, JSONObject body) throws Exception {
+    private synchronized Object request(String method, String path, JSONObject body) throws Exception {
+        if(isReplay())throw new CacheMissException(); // Preview work can never perform a write or network request.
         checkConnection();
         if (!path.startsWith("/api/")) throw new IllegalArgumentException("只能调用现有 /api/* 接口。");
         URL url = new URL(baseUrl + path);
         URI uri = url.toURI();
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setRequestMethod(method);
-        connection.setConnectTimeout(15000);
-        connection.setReadTimeout(15000);
+        connection.setConnectTimeout(10000);
+        connection.setReadTimeout(10000);
         connection.setInstanceFollowRedirects(false);
         connection.setRequestProperty("Accept", "application/json");
         for (Map.Entry<String, List<String>> header : cookies.get(uri, Collections.emptyMap()).entrySet()) {
@@ -450,10 +530,29 @@ final class ApiClient {
             byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
             try (OutputStream out = connection.getOutputStream()) { out.write(bytes); }
         }
-            return readResult(connection, uri);
+            Object result=readResult(connection,uri);
+            if(!"GET".equals(method)){
+                if(path.startsWith("/api/forum/drafts")){responses.removeContaining("/api/forum/drafts");readFailures.removeContaining("/api/forum/drafts");}
+                else {responses.clear();readFailures.clear();}
+            }
+            return result;
         } finally {
             connection.disconnect();
         }
+    }
+
+    static final class Media {final byte[] bytes;final String mime;Media(byte[] bytes,String mime){this.bytes=bytes;this.mime=mime;}}
+    private final java.util.LinkedHashMap<String,Media> media=new java.util.LinkedHashMap<>(8,.75f,true);
+    String communityImageUrl(String address){try{String resolved=new URI(baseUrl+"/").resolve(address).toString();return isCommunityMedia(resolved)?resolved:"";}catch(Exception ignored){return "";}}
+    boolean isCommunityMedia(String address){try{URI uri=new URI(address),base=new URI(baseUrl);String path=uri.getRawPath(),query=uri.getRawQuery();return "https".equals(uri.getScheme())&&java.util.Objects.equals(uri.getHost(),base.getHost())&&(uri.getPort()<0?443:uri.getPort())==(base.getPort()<0?443:base.getPort())&&uri.getUserInfo()==null&&uri.getFragment()==null&&path!=null&&path.matches("/api/forum/images/[a-f0-9]{32}")&&(query==null||"variant=thumb".equals(query));}catch(Exception ignored){return false;}}
+    synchronized Media communityMedia(String address)throws Exception{
+        if(!isCommunityMedia(address))throw new IllegalArgumentException("图片地址不属于当前社区");String key=baseUrl+"/"+sessionGeneration+"/"+address;
+        Media cached=media.get(key);if(cached!=null)return cached;checkConnection();URL url=new URL(address);HttpURLConnection connection=(HttpURLConnection)url.openConnection();connection.setInstanceFollowRedirects(false);connection.setConnectTimeout(10000);connection.setReadTimeout(10000);
+        for(Map.Entry<String,List<String>> header:cookies.get(url.toURI(),Collections.emptyMap()).entrySet())if(header.getKey()!=null)connection.setRequestProperty(header.getKey(),String.join("; ",header.getValue()));
+        try{int status=connection.getResponseCode();if(status!=200)throw new ApiException(status,"图片读取失败",status==404);String mime=connection.getContentType();if(mime==null)throw new java.io.IOException("图片缺少格式");mime=mime.split(";",2)[0].trim().toLowerCase(java.util.Locale.ROOT);if(!java.util.Arrays.asList("image/png","image/jpeg","image/webp","image/gif").contains(mime))throw new java.io.IOException("不支持的图片格式");
+            java.io.ByteArrayOutputStream bytes=new java.io.ByteArrayOutputStream();try(InputStream in=connection.getInputStream()){byte[] buffer=new byte[8192];int count;while((count=in.read(buffer))!=-1){if(bytes.size()+count>8*1024*1024)throw new java.io.IOException("图片超过 8 MB");bytes.write(buffer,0,count);}}
+            Media result=new Media(bytes.toByteArray(),mime);media.put(key,result);int total=0;for(Media item:media.values())total+=item.bytes.length;java.util.Iterator<Media> oldest=media.values().iterator();while((total>16*1024*1024||media.size()>8)&&oldest.hasNext()){Media item=oldest.next();total-=item.bytes.length;oldest.remove();}return result;
+        }finally{connection.disconnect();}
     }
 
     private Object readResult(HttpURLConnection connection, URI uri) throws Exception {
@@ -473,11 +572,17 @@ final class ApiClient {
                 JSONObject details = null;
                 try { details = new JSONObject(text.toString()); message = details.optString("message", message); } catch (Exception ignored) { }
                 if (status == 401) clearSession();
+                if(status==403||status==404||status==410)responses.removeContaining(uri.getPath());
                 if (status == 428) mustChangePassword = true;
                 boolean missingContent = status == 404 && uri.getPath().matches(".*/(?:members/[A-Za-z0-9_-]{32}(?:/posts)?|posts/[0-9]+)");
                 ApiException failure = new ApiException(status, message, missingContent); failure.details = details; throw failure;
             }
-            return new JSONTokener(text.toString()).nextValue();
+            Object result=new JSONTokener(text.toString()).nextValue();
+            if(result instanceof JSONObject){JSONObject object=(JSONObject)result;String path=uri.getPath();
+                if(("/api/auth/me".equals(path)||"/api/me/avatar".equals(path))&&object.has("avatar_url"))currentAvatar=object.isNull("avatar_url")?"":object.optString("avatar_url");
+                else if("/api/me/profile".equals(path)&&object.optJSONObject("user")!=null&&object.getJSONObject("user").has("avatar_url"))currentAvatar=object.getJSONObject("user").isNull("avatar_url")?"":object.getJSONObject("user").optString("avatar_url");
+            }
+            return result;
     }
 
     private void checkConnection() throws Exception {

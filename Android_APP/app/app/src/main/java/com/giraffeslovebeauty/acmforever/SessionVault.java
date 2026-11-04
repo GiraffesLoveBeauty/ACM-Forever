@@ -11,7 +11,7 @@ import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 
-/** Device-bound encrypted session and opt-in password storage. CSRF is never persisted. */
+/** Device-bound encrypted, opt-in login persistence; credentials are bound to origin and account. */
 final class SessionVault {
     private static final String ALIAS = "acmforever.session.v1";
     private final SharedPreferences prefs;
@@ -26,19 +26,23 @@ final class SessionVault {
     }
     synchronized void clear() { prefs.edit().remove("session_cipher").remove("session_iv").apply(); }
     synchronized void clearPassword() {
-        prefs.edit().remove("password_cipher").remove("password_iv").putBoolean("save_password", false).apply();
+        prefs.edit().remove("password_cipher").remove("password_iv").remove("password_origin").remove("password_account")
+                .putBoolean("save_password", false).putBoolean("auto_login",false).apply();
+        clear();
     }
     synchronized boolean savePassword(String origin, String account, String password) {
         try {
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE, key());
             cipher.updateAAD(("password\n" + origin + "\n" + account).getBytes(StandardCharsets.UTF_8));
             prefs.edit().putString("password_cipher", Base64.encodeToString(cipher.doFinal(password.getBytes(StandardCharsets.UTF_8)), Base64.NO_WRAP))
-                    .putString("password_iv", Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP)).putBoolean("save_password", true).apply();
+                    .putString("password_iv", Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP))
+                    .putString("password_origin",origin).putString("password_account",account).putBoolean("save_password", true).apply();
             return true;
         } catch (Exception e) { clearPassword(); return false; }
     }
     synchronized String readPassword(String origin, String account) {
         if (!prefs.getBoolean("save_password", false) || account.isEmpty()) return "";
+        if(!origin.equals(prefs.getString("password_origin",""))||!account.equals(prefs.getString("password_account","")))return "";
         try {
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.DECRYPT_MODE, key(), new GCMParameterSpec(128, Base64.decode(prefs.getString("password_iv", ""), Base64.NO_WRAP)));
@@ -47,7 +51,7 @@ final class SessionVault {
         } catch (Exception e) { clearPassword(); return ""; }
     }
     synchronized boolean save(String origin, String value) {
-        if (!prefs.getBoolean("auto_login", false) || value.isEmpty()) { clear(); return true; }
+        if (!prefs.getBoolean("auto_login",false)||value.isEmpty()) { clear(); return true; }
         try {
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE, key());
             cipher.updateAAD(origin.getBytes(StandardCharsets.UTF_8));
@@ -57,8 +61,9 @@ final class SessionVault {
         } catch (Exception e) { clear(); prefs.edit().putBoolean("auto_login", false).apply(); return false; }
     }
     synchronized String read(String origin) throws Exception {
+        if(!prefs.getBoolean("auto_login",false))return "";
         String data = prefs.getString("session_cipher", "");
-        if (!prefs.getBoolean("auto_login", false) || data.isEmpty()) return "";
+        if (data.isEmpty()) return "";
         try {
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.DECRYPT_MODE, key(), new GCMParameterSpec(128, Base64.decode(prefs.getString("session_iv", ""), Base64.NO_WRAP)));

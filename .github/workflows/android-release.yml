@@ -29,12 +29,24 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name }}
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Test release manifest contracts
+        run: python -m unittest discover -s Android_APP/tests -p test_update_release.py -v
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install Android SDK platform
+        run: sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
 
       - name: Configure signing key
         env:
@@ -52,7 +64,9 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon assembleRelease
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon testReleaseUnitTest lintRelease assembleRelease
 
       - name: Create update manifest
         id: manifest
@@ -61,31 +75,12 @@ jobs:
           RELEASE_NOTES: ${{ github.event.release.body }}
         run: |
           set -euo pipefail
-          apk="Android_APP/app/app/build/outputs/apk/release/app-release.apk"
-          test -s "$apk"
-          aapt_path="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
-          test -x "$aapt_path"
-          badging="$("$aapt_path" dump badging "$apk" | sed -n '1p')"
-          package_name="$(printf '%s' "$badging" | sed -n "s/.*name='\([^']*\)'.*/\1/p")"
-          version_code="$(printf '%s' "$badging" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")"
-          version_name="$(printf '%s' "$badging" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")"
-          test "$package_name" = "com.giraffeslovebeauty.acmforever"
-          test "$version_code" -gt 13
-          test -n "$version_name"
-          apk_name="acmforever-${version_name}.apk"
-          cp "$apk" "$RUNNER_TEMP/$apk_name"
-          sha256="$(sha256sum "$RUNNER_TEMP/$apk_name" | cut -d ' ' -f 1)"
-          apk_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${apk_name}"
-          jq -n \
-            --arg packageName "$package_name" \
-            --argjson versionCode "$version_code" \
-            --arg versionName "$version_name" \
-            --arg apkUrl "$apk_url" \
-            --arg sha256 "$sha256" \
-            --arg notes "${RELEASE_NOTES:-本次更新没有附加说明。}" \
-            '{packageName:$packageName,versionCode:$versionCode,versionName:$versionName,apkUrl:$apkUrl,sha256:$sha256,notes:$notes}' \
-            > "$RUNNER_TEMP/update.json"
-          echo "apk_name=$apk_name" >> "$GITHUB_OUTPUT"
+          python Android_APP/tools/create_update_manifest.py \
+            --apk Android_APP/app/app/build/outputs/apk/release/app-release.apk \
+            --aapt "$ANDROID_HOME/build-tools/35.0.0/aapt" \
+            --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner" \
+            --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY" \
+            --server "$GITHUB_SERVER_URL" --output-dir "$RUNNER_TEMP" >> "$GITHUB_OUTPUT"
 
       - name: Attach APK and update manifest to GitHub Release
         env:
@@ -94,4 +89,5 @@ jobs:
           APK_NAME: ${{ steps.manifest.outputs.apk_name }}
         run: |
           set -euo pipefail
-          gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/$APK_NAME" "$RUNNER_TEMP/update.json" --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/$APK_NAME" "$RUNNER_TEMP/$APK_NAME.sha256" --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/update.json" --repo "$GITHUB_REPOSITORY" --clobber

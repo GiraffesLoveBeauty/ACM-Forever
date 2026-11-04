@@ -1,4 +1,6 @@
 // Real responses only. Local storage never contains passwords, cookies or CSRF tokens.
+const OFFLINE_PREVIEW = new URLSearchParams(location.search).get('offline') === '1';
+const OFFLINE_MESSAGE = '离线预览：未连接后端';
 const state = {view:'forum',category:'',sort:'latest',days:'7',platform:'',query:'',user:null,role:'',csrf:'',serial:0,memberId:'',postId:0,loginBusy:false,loginIdentifier:'',loginDestination:'account',mustChangePassword:false,actionBusy:false,problemState:'',rankSort:'total_count',rankPlatforms:['codeforces','luogu','atcoder','nowcoder','cjlu']};
 const compose = {id:0,title:'',body:'',category:0,revision:0,saved:0};
 const comment = {postId:0,body:'',parent:0};
@@ -32,6 +34,7 @@ function checkedHttps(value, root = false) {
 try { apiBase = checkedHttps(localStorage.getItem('acm_api_base') || '', true) || DEFAULT_API_BASE; }
 catch { localStorage.removeItem('acm_api_base'); }
 async function request(path, method = 'GET', body) {
+  if (OFFLINE_PREVIEW) throw failure(OFFLINE_MESSAGE);
   if (!navigator.onLine) throw failure('无网络');
   if (!apiBase) throw failure('未配置服务器');
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15000);
@@ -155,6 +158,7 @@ function bindRankPager(){
   document.getElementById('rank-page-size').onchange=event=>{state.rankPageSize=Number(event.target.value);state.rankPage=1;show('rank');};
 }
 async function renderProblems() {
+  if (OFFLINE_PREVIEW) throw failure(OFFLINE_MESSAGE);
   if (!navigator.onLine) throw failure('无网络'); if (!apiBase) throw failure('未配置服务器'); if (!state.csrf) throw failure('未登录');
   const result = await request('/api/me/problems?' + new URLSearchParams({page:'1',page_size:'20',platform:state.platform,tag:state.query,state:state.problemState}));
   return rows(result,'items').map(problem => `<article class="card"><h3>${esc(problem.problem_name || problem.problem_id)}</h3><p>${esc(problem.platform)} · ${esc(problem.problem_rating ?? '难度未知')}</p><p>${esc(problem.tags)}</p><button class="link" data-problem="${esc(problem.problem_id)}" data-problem-platform="${esc(problem.platform)}">查看题面与样例</button><button class="menu-action" data-favorite="${esc(problem.problem_id)}" data-problem-platform="${esc(problem.platform)}" data-current="${!!problem.is_favorite}">${problem.is_favorite?'★ 已收藏 · 取消':'☆ 收藏题目'}</button></article>`).join('') || empty('暂无符合条件的题目');
@@ -172,6 +176,7 @@ async function renderProfile(own) {
   cover.textContent = '';
   let profile = null, profileError = null, posts = null, postsError = null, mottoError = null;
   try {
+    if (OFFLINE_PREVIEW) throw failure(OFFLINE_MESSAGE);
     if (own && !state.csrf) { if (!navigator.onLine) throw failure('无网络'); throw failure(apiBase ? '未登录' : '未配置服务器'); }
     if (!own && !state.memberId) throw failure('无API接口');
     if (own) {
@@ -187,6 +192,7 @@ async function renderProfile(own) {
     document.getElementById(own ? 'public-name' : 'member-name').textContent = profile.name;
   }
   try {
+    if (OFFLINE_PREVIEW) throw failure(OFFLINE_MESSAGE);
     if (own) {
       if (!state.csrf) throw failure('未登录');
       const result = await request('/api/forum/mine/posts');
@@ -231,6 +237,12 @@ async function renderAccount() {
 }
 function bindLogin() {
   const form = document.getElementById('login-form'); if (!form) return;
+  if (OFFLINE_PREVIEW) {
+    form.onsubmit = event => event.preventDefault();
+    form.querySelectorAll('input,button').forEach(node => node.disabled = true);
+    form.insertAdjacentHTML('afterbegin', errorBox(OFFLINE_MESSAGE, 100, false));
+    return;
+  }
   const remember = document.getElementById('remember-me'), auto = document.getElementById('auto-login');
   const savePassword = document.getElementById('save-password');
   savePassword.disabled = typeof PasswordCredential !== 'function' || !navigator.credentials?.store;
@@ -305,13 +317,21 @@ function loginWaiting(active) {
   if(active){++state.serial;document.querySelectorAll('.view').forEach(node=>node.classList.toggle('active',node.id==='login-wait-view'));}
 }
 async function renderCompose() {
-  const result = await request('/api/forum/categories'); if (!Array.isArray(result)) throw failure('数据格式异常');
+  const result = OFFLINE_PREVIEW ? [] : await request('/api/forum/categories'); if (!Array.isArray(result)) throw failure('数据格式异常');
   categories = result;
-  if (!categories.length) return empty('暂无可用分类');
+  if (!categories.length && !OFFLINE_PREVIEW) return empty('暂无可用分类');
   return `<form class="card compose-form" id="compose-form"><label>话题分类</label><select id="compose-category">${categories.map(item=>`<option value="${esc(item.id)}" ${Number(item.id)===compose.category?'selected':''}>${esc(item.name)}</option>`).join('')}</select><label>标题（4–120字）</label><input id="compose-title" maxlength="120" value="${esc(compose.title)}" required><label>正文（5–20000字）</label><textarea id="compose-body" maxlength="20000" required>${esc(compose.body)}</textarea><div class="format-bar"><button type="button" data-format="bold">加粗</button><button type="button" data-format="code">代码块</button><button type="button" data-format="quote">引用</button><button type="button" id="preview-compose">预览</button></div><p id="draft-state" class="notice">${compose.id&&compose.revision===compose.saved?'草稿已保存':'编辑内容尚未保存到账号'}</p><button type="button" class="menu-action" id="save-draft">保存草稿</button>${compose.id?'<button type="button" class="menu-action" id="delete-draft">删除当前草稿</button>':''}<button class="solid">提交审核</button><p class="notice">支持Markdown；提交后进入人工审核，通过后展示。</p></form>`;
 }
 function bindCompose() {
   const form = document.getElementById('compose-form'); if (!form) return;
+  if (OFFLINE_PREVIEW) {
+    const category = document.getElementById('compose-category');
+    category.innerHTML = '<option value="0">离线预览：分类不可用</option>';
+    category.disabled = true;
+    form.insertAdjacentHTML('afterbegin', errorBox('离线预览：可编辑、预览正文；不能保存或发布', 100, false));
+    document.getElementById('save-draft').disabled = true;
+    form.querySelector('button.solid').disabled = true;
+  }
   const sync=()=>{compose.title=document.getElementById('compose-title').value;compose.body=document.getElementById('compose-body').value;compose.category=Number(document.getElementById('compose-category').value);++compose.revision;document.getElementById('draft-state').textContent='有未保存的修改';};
   compose.category=Number(document.getElementById('compose-category').value);
   ['compose-title','compose-body','compose-category'].forEach(id=>document.getElementById(id).addEventListener('input',sync));
@@ -435,6 +455,7 @@ async function openAdmin() {
 }
 async function checkForUpdates() {
   if(updateChecking)return;
+  if(OFFLINE_PREVIEW){showFailure(failure(OFFLINE_MESSAGE));return;}
   if(!navigator.onLine){showFailure(failure('无网络'));return;}
   if(!updateUrl){showFailure(failure('无API接口'));return;}
   updateChecking=true;detail('检查更新',empty('正在检查新版本…'),true);
@@ -537,6 +558,13 @@ window.addEventListener('online',()=>show(state.view));
 window.addEventListener('beforeunload',event=>{if(compose.revision!==compose.saved||composeSaving){event.preventDefault();event.returnValue='';}});
 const requestedView=new URLSearchParams(location.search).get('view');
 async function startApp(view) {
+  if (OFFLINE_PREVIEW) {
+    const notice = document.createElement('p');
+    notice.className = 'notice';
+    notice.textContent = '离线界面预览 · 不请求 API · 数据、登录与发布不可用';
+    document.querySelector('.top').append(notice);
+    return show(view);
+  }
   if(localStorage.getItem('acm_auto_login')!==apiBase)return show(view);
   loginWaiting(true);
   try {

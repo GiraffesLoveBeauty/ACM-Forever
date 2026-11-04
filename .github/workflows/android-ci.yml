@@ -5,6 +5,7 @@ on:
     paths:
       - Android_APP/**
       - .github/workflows/android-ci.yml
+      - .github/workflows/android-release.yml
   workflow_dispatch:
 
 permissions:
@@ -15,6 +16,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Test release manifest contracts
+        run: python -m unittest discover -s Android_APP/tests -p test_update_release.py -v
 
       - uses: actions/setup-java@v4
         with:

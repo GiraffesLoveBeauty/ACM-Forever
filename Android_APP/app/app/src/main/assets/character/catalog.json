@@ -1,0 +1,112 @@
+{
+  "version": 2,
+  "assets": {
+    "avatar": {
+      "width": 512,
+      "height": 512,
+      "layers": [
+        {
+          "file": "avatar/01-hair-back.png",
+          "group": "hair_eyes",
+          "name": "hair-back"
+        },
+        {
+          "file": "avatar/02-clothes.png",
+          "group": "clothes",
+          "name": "clothes"
+        },
+        {
+          "file": "avatar/03-collar.png",
+          "group": "fixed",
+          "name": "collar"
+        },
+        {
+          "file": "avatar/04-face.png",
+          "group": "fixed",
+          "name": "face"
+        },
+        {
+          "file": "avatar/05-hair-front.png",
+          "group": "hair_eyes",
+          "name": "hair-front"
+        },
+        {
+          "file": "avatar/06-headband-ears.png",
+          "group": "fixed",
+          "name": "headband-ears"
+        },
+        {
+          "file": "avatar/07-eyes.png",
+          "group": "hair_eyes",
+          "name": "eyes"
+        },
+        {
+          "file": "avatar/08-decor-bow.png",
+          "group": "decor",
+          "name": "decor-bow"
+        }
+      ]
+    },
+    "loading": {
+      "width": 640,
+      "height": 640,
+      "layers": [
+        {
+          "file": "loading/01-hair-back.png",
+          "group": "hair_eyes",
+          "name": "hair-back"
+        },
+        {
+          "file": "loading/02-clothes.png",
+          "group": "clothes",
+          "name": "clothes"
+        },
+        {
+          "file": "loading/03-collar-cuffs.png",
+          "group": "fixed",
+          "name": "collar-cuffs"
+        },
+        {
+          "file": "loading/04-laptop.png",
+          "group": "fixed",
+          "name": "laptop"
+        },
+        {
+          "file": "loading/05-face.png",
+          "group": "fixed",
+          "name": "face"
+        },
+        {
+          "file": "loading/06-hands.png",
+          "group": "fixed",
+          "name": "hands"
+        },
+        {
+          "file": "loading/07-hair-front.png",
+          "group": "hair_eyes",
+          "name": "hair-front"
+        },
+        {
+          "file": "loading/08-headband-ears.png",
+          "group": "fixed",
+          "name": "headband-ears"
+        },
+        {
+          "file": "loading/09-eyes.png",
+          "group": "hair_eyes",
+          "name": "eyes"
+        },
+        {
+          "file": "loading/10-decor-bow-chest.png",
+          "group": "decor",
+          "name": "decor-bow-chest"
+        },
+        {
+          "file": "loading/11-decor-bow-hair.png",
+          "group": "decor",
+          "name": "decor-bow-hair"
+        }
+      ]
+    }
+  }
+}
