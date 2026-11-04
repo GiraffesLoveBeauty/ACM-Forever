@@ -1,0 +1,187 @@
+{
+  "pack": "ACMforever_猫娘素材包",
+  "version": 2,
+  "generated_by": {
+    "platform": "Codex / DeepSeek Harness",
+    "image_model": "gpt-image-2 (MCP imagegen relay, edit_image)",
+    "calls": 3,
+    "pipeline": "model redraw -> alpha normalise/defringe -> region-growing part segmentation -> layer/mask/preview export",
+    "originals": [
+      "原图/1.png",
+      "原图/2.png",
+      "原图/3.png"
+    ],
+    "model_raw": {
+      "avatar": "sources/model-raw/avatar-v3.png",
+      "loading": "sources/model-raw/loading-v3.png",
+      "silhouette": "sources/model-raw/silhouette-v3.png"
+    }
+  },
+  "default_theme": "original",
+  "themes": {
+    "mint": "#82C7AA",
+    "sky": "#83B8E5",
+    "pink": "#EBAFC5",
+    "lime": "#C8EB21"
+  },
+  "assets": {
+    "avatar": {
+      "width": 1024,
+      "height": 1024,
+      "reference": "avatar/reference.png",
+      "layers": [
+        {
+          "file": "avatar/layers/original/01-hair-back.png",
+          "name": "hair-back",
+          "group": "hair_eyes",
+          "neutral": "avatar/layers/neutral/01-hair-back.png"
+        },
+        {
+          "file": "avatar/layers/original/02-clothes.png",
+          "name": "clothes",
+          "group": "clothes",
+          "neutral": "avatar/layers/neutral/02-clothes.png"
+        },
+        {
+          "file": "avatar/layers/original/03-collar.png",
+          "name": "collar",
+          "group": "fixed"
+        },
+        {
+          "file": "avatar/layers/original/04-face.png",
+          "name": "face",
+          "group": "fixed"
+        },
+        {
+          "file": "avatar/layers/original/05-hair-front.png",
+          "name": "hair-front",
+          "group": "hair_eyes",
+          "neutral": "avatar/layers/neutral/05-hair-front.png"
+        },
+        {
+          "file": "avatar/layers/original/06-headband-ears.png",
+          "name": "headband-ears",
+          "group": "fixed"
+        },
+        {
+          "file": "avatar/layers/original/07-eyes.png",
+          "name": "eyes",
+          "group": "hair_eyes",
+          "neutral": "avatar/layers/neutral/07-eyes.png"
+        },
+        {
+          "file": "avatar/layers/original/08-decor-bow.png",
+          "name": "decor-bow",
+          "group": "decor",
+          "neutral": "avatar/layers/neutral/08-decor-bow.png"
+        }
+      ],
+      "masks": {
+        "hair_eyes": "avatar/masks/hair_eyes.png",
+        "clothes": "avatar/masks/clothes.png",
+        "decor": "avatar/masks/decor.png"
+      },
+      "previews": {
+        "original": "avatar/previews/original.png",
+        "mint": "avatar/previews/mint.png",
+        "sky": "avatar/previews/sky.png",
+        "pink": "avatar/previews/pink.png",
+        "lime": "avatar/previews/lime.png"
+      }
+    },
+    "loading": {
+      "width": 1536,
+      "height": 1536,
+      "reference": "loading/reference.png",
+      "layers": [
+        {
+          "file": "loading/layers/original/01-hair-back.png",
+          "name": "hair-back",
+          "group": "hair_eyes",
+          "neutral": "loading/layers/neutral/01-hair-back.png"
+        },
+        {
+          "file": "loading/layers/original/02-clothes.png",
+          "name": "clothes",
+          "group": "clothes",
+          "neutral": "loading/layers/neutral/02-clothes.png"
+        },
+        {
+          "file": "loading/layers/original/03-collar-cuffs.png",
+          "name": "collar-cuffs",
+          "group": "fixed"
+        },
+        {
+          "file": "loading/layers/original/04-laptop.png",
+          "name": "laptop",
+          "group": "fixed"
+        },
+        {
+          "file": "loading/layers/original/05-face.png",
+          "name": "face",
+          "group": "fixed"
+        },
+        {
+          "file": "loading/layers/original/06-hands.png",
+          "name": "hands",
+          "group": "fixed"
+        },
+        {
+          "file": "loading/layers/original/07-hair-front.png",
+          "name": "hair-front",
+          "group": "hair_eyes",
+          "neutral": "loading/layers/neutral/07-hair-front.png"
+        },
+        {
+          "file": "loading/layers/original/08-headband-ears.png",
+          "name": "headband-ears",
+          "group": "fixed"
+        },
+        {
+          "file": "loading/layers/original/09-eyes.png",
+          "name": "eyes",
+          "group": "hair_eyes",
+          "neutral": "loading/layers/neutral/09-eyes.png"
+        },
+        {
+          "file": "loading/layers/original/10-decor-bow-chest.png",
+          "name": "decor-bow-chest",
+          "group": "decor",
+          "neutral": "loading/layers/neutral/10-decor-bow-chest.png"
+        },
+        {
+          "file": "loading/layers/original/11-decor-bow-hair.png",
+          "name": "decor-bow-hair",
+          "group": "decor",
+          "neutral": "loading/layers/neutral/11-decor-bow-hair.png"
+        }
+      ],
+      "masks": {
+        "hair_eyes": "loading/masks/hair_eyes.png",
+        "clothes": "loading/masks/clothes.png",
+        "decor": "loading/masks/decor.png"
+      },
+      "previews": {
+        "original": "loading/previews/original.png",
+        "mint": "loading/previews/mint.png",
+        "sky": "loading/previews/sky.png",
+        "pink": "loading/previews/pink.png",
+        "lime": "loading/previews/lime.png"
+      }
+    },
+    "silhouette": {
+      "width": 1024,
+      "height": 1024,
+      "color": "#0A0A0A",
+      "file": "silhouette/silhouette.png",
+      "previews": [
+        "silhouette/preview-24px.png",
+        "silhouette/preview-48px.png"
+      ]
+    }
+  },
+  "animation": {
+    "included": false,
+    "note": "仅静态素材：未交付逐帧敲键盘动画，避免用未完成动画冒充成品。"
+  }
+}

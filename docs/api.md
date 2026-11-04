@@ -45,7 +45,9 @@ App 通过响应字段确认服务器支持当日统计；旧服务器忽略 per
 
 公开资料包含 `public_member_id/name/avatar_url/status/motto/platform_counts/total_count`，另保留 `cf_count/luogu_count/nowcoder_count/atcoder_count/cjlu_count` 统计别名。平台键是 `codeforces/luogu/nowcoder/atcoder/cjlu`，通过题数按各平台题目 ID 去重，`total_count` 为五个平台的合计。公开用户名使用社区昵称；旧排行榜仍按现有规则展示昵称或 CF handle。App 通过稳定 ID 关联，不能依昵称或头像匹配。
 
-公开响应不包含 QQ、真实姓名、学校、OJ 绑定字段、逐题记录、收藏、草稿和未发布帖子。公开 ID 为随机生成的 32 字符标识，不是认证凭据。首次数据库初始化创建 `mobile_public_profiles` 表，为已有成员分配 ID；已有用户和做题数据保持原值。新增成员在后续初始化或移动端列表/本人资料请求时补充分配，重复执行保留已有 ID 和座右铭。
+公开响应不包含 QQ、真实姓名、学校、OJ 绑定字段、逐题记录、收藏、草稿和未发布帖子。公开 ID 为随机生成的 32 字符标识，不是认证凭据。首次数据库初始化创建 `mobile_public_profiles` 表，为 active 成员分配 ID；已有用户和做题数据保持原值。新增成员在后续初始化或移动端列表/本人资料请求时补充分配，同一账号代际重复执行保留已有 ID 和座右铭。
+
+公开身份绑定 `users.account_epoch`。旧移动资料表缺少该列时增量添加，原 ID 视为第一代身份；账号注销后旧公开主页及帖子列表返回 404，保留的论坛内容不再提供可点击的公开作者 ID。同 QQ 重新开户生成全新公开 ID、清空旧座右铭，旧帖子不归入新主页。此迁移与主线账号注销、重新开户规则配套，不能单独回退移动身份检查而继续提供新账号功能。上线前备份 SQLite 主库与 WAL，并验证同代幂等、注销匿名和同 QQ 新建账号。
 
 座右铭必须为字符串，去首尾空白后最多 100 个 Unicode 字符，空字符串清除；多余字段或无效类型返回 400。认证复用 `/api/auth/login`、`/api/auth/me`、`/api/auth/logout`：未登录/停用/失效会话返回 401、CSRF 失败返回 403、初始密码未修改返回 428。不支持通过公开成员路径 PUT 编辑他人。
 

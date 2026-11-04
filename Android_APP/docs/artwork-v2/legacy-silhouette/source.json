@@ -1,0 +1,18 @@
+{
+  "source": "acmforever-0.2.6-debug.apk",
+  "apk_sha256": "6eea6a501e06daa49b5e35a2c342f3d17db1a218b1ddfd31c298a3e294bfda84",
+  "resources": {
+    "catgirl_mask.png": {
+      "apk_path": "res/drawable-nodpi-v4/catgirl_mask.png",
+      "sha256": "787ba2f892490d10494af968e6427531812bc51ba814f50f4659c2ca91ed8078"
+    },
+    "launcher_silhouette.png": {
+      "apk_path": "res/drawable-nodpi-v4/launcher_silhouette.png",
+      "sha256": "77b3d90e175a35c35f8de90aaf3f656c033001217fd23917adb87c4c2155bbe2"
+    },
+    "ic_cat_notification.png": {
+      "apk_path": "res/drawable-nodpi-v4/ic_cat_notification.png",
+      "sha256": "2bf7366dae2ee966eecc5639200876a9e6f02c0ed906c97a5fabafcb515fb206"
+    }
+  }
+}
