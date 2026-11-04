@@ -33,15 +33,15 @@ Actions 需要有一把公钥已授权给 root 的 SSH 私钥。可以复用已�
 | Secret | 内容 |
 | --- | --- |
 | `ACM_FOREVER_SERVER_SSH_KEY` | 对应已授权公钥的完整私钥，包含 BEGIN/END 行；此工作流使用无口令部署密钥 |
-| `ACM_FOREVER_SERVER_FINGERPRINT` | 新服务器 SSH host key 的 `SHA256:…` 指纹 |
+| `ACM_FOREVER_SERVER_FINGERPRINT` | 当前部署客户端使用的服务器 ECDSA host key 的 `SHA256:…` 指纹 |
 
 在已可信登录的服务器终端读取 host key 指纹：
 
 ```sh
-ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256
+ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub -E sha256
 ```
 
-仅复制输出中的 `SHA256:…` 字段。上传和远程执行两步都校验这个指纹。`TS_AUTHKEY` 不再被此工作流使用；若其他工作流仍引用，按其需要保留。
+仅复制输出中的 `SHA256:…` 字段。该服务器同时提供 RSA、ECDSA 和 ED25519 主机密钥；当前固定版本的部署组件与其协商 ECDSA，因此不能直接使用本地 OpenSSH 登录时看到的 ED25519 指纹。上传和远程执行两步都校验这个指纹；更换服务器密钥或部署组件版本时应重新核验。`TS_AUTHKEY` 不再被此工作流使用；若其他工作流仍引用，按其需要保留。
 
 ## 3. 首次部署代码，暂不启动
 
