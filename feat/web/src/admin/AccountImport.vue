@@ -16,7 +16,9 @@ const file = ref(null),
   input = ref(null),
   error = ref(''),
   busy = ref(false),
-  loading = ref(false);
+  loading = ref(false),
+  settingsBusy = ref(false),
+  settingsMessage = ref('');
 const credentials = ref([]),
   acknowledge = ref(false),
   running = ref(false),
@@ -55,7 +57,39 @@ const statusText = computed(
     })[batch.value?.status] || '准备上传',
 );
 function showError(e) {
-  if (!disposed && e.name !== 'AbortError') error.value = e.message || '操作失败，请重试。';
+  if (disposed || e.name === 'AbortError') return;
+  if (e.code === 'import_disabled' && capabilities.value)
+    capabilities.value = { ...capabilities.value, enabled: false };
+  error.value = e.message || '操作失败，请重试。';
+}
+async function toggleImport() {
+  if (!capabilities.value || settingsBusy.value || busy.value) return;
+  const enabled = !capabilities.value.enabled;
+  if (
+    !enabled &&
+    !confirm(
+      '关闭 Excel 导入？此设置对所有管理员生效，将停止新上传和后续创建。正在处理的一段可能完成，已创建账号和已有结果会保留。',
+    )
+  )
+    return;
+  settingsBusy.value = true;
+  settingsMessage.value = '';
+  error.value = '';
+  try {
+    const data = await request(`${prefix}/settings`, {
+      method: 'PATCH',
+      body: { enabled },
+    });
+    if (disposed) return;
+    capabilities.value = { ...capabilities.value, enabled: data.enabled };
+    settingsMessage.value = data.enabled
+      ? 'Excel 导入已开启，对所有管理员立即生效。'
+      : 'Excel 导入已关闭，已有结果仍可查询。';
+  } catch (e) {
+    showError(e);
+  } finally {
+    settingsBusy.value = false;
+  }
 }
 function schedule() {
   clearTimeout(pollTimer);
@@ -98,7 +132,7 @@ function chooseFile(event) {
   error.value = '';
 }
 async function upload() {
-  if (busy.value || !file.value) return;
+  if (busy.value || settingsBusy.value || !capabilities.value?.enabled || !file.value) return;
   if (dirty.value && !leave()) return;
   const lifetimeAtStart = lifetime;
   const chosenFile = file.value;
@@ -167,7 +201,15 @@ function nextRequest() {
   };
 }
 async function execute() {
-  if (busy.value || uncertain.value || !batch.value || batch.value.read_only) return;
+  if (
+    busy.value ||
+    settingsBusy.value ||
+    !capabilities.value?.enabled ||
+    uncertain.value ||
+    !batch.value ||
+    batch.value.read_only
+  )
+    return;
   const first = !batch.value.selection_digest;
   if (first && !chosen.value.length) return;
   const scope = first
@@ -215,14 +257,14 @@ async function execute() {
   } catch (e) {
     if (!disposed && lifetimeAtStart === lifetime) {
       running.value = false;
-      uncertain.value = true;
+      uncertain.value = e.code !== 'import_disabled';
       error.value = '本次请求结果尚未确认，请先查询进度；已创建账号不会重复创建，也不会重放密码。';
       try {
         await refresh();
       } catch (queryError) {
         showError(queryError);
       }
-      if (e.status && e.status < 500) showError(e);
+      if (e.code === 'import_disabled' || (e.status && e.status < 500)) showError(e);
     }
   } finally {
     if (lifetimeAtStart === lifetime) {
@@ -324,6 +366,8 @@ watch(
     ++generation;
     ++lifetime;
     clearSecrets();
+    capabilities.value = null;
+    settingsMessage.value = '';
     rows.value = [];
     batch.value = null;
   },
@@ -360,6 +404,26 @@ onBeforeUnmount(() => {
       </div>
       <span class="admin-limit">{{ capabilities?.max_rows || 200 }} 人 / 文件</span>
     </div>
+    <div v-if="capabilities" class="admin-panel import-setting">
+      <div>
+        <h3>Excel 导入开关</h3>
+        <p class="muted">对所有管理员生效，保存后立即生效，刷新或重启服务后保留。</p>
+        <p class="muted">关闭只停止新上传和后续创建，不影响已有账号及结果查询。</p>
+      </div>
+      <button
+        type="button"
+        class="btn import-toggle"
+        role="switch"
+        aria-label="Excel 导入开关"
+        :aria-checked="capabilities.enabled"
+        :disabled="settingsBusy || busy"
+        @click="toggleImport"
+      >
+        <span class="import-toggle-track" aria-hidden="true"></span>
+        {{ settingsBusy ? '正在保存…' : capabilities.enabled ? '已开启' : '已关闭' }}
+      </button>
+    </div>
+    <p v-if="settingsMessage" role="status">{{ settingsMessage }}</p>
     <ol class="import-steps" aria-label="导入步骤">
       <li :aria-current="!batch ? 'step' : undefined">01 下载并填写模板</li>
       <li :aria-current="batch?.status === 'preview_ready' ? 'step' : undefined">02 上传与预检</li>
@@ -370,13 +434,18 @@ onBeforeUnmount(() => {
     <p v-if="error" role="alert" class="import-error">{{ error }}</p>
     <p v-if="!capabilities && !error" role="status">正在读取导入配置…</p>
     <p v-if="capabilities && !capabilities.enabled" role="status">
-      Excel 导入尚未启用。已有批次仍可查询结果，启用后才能上传或继续创建。
+      Excel 导入已关闭。可使用上方开关重新启用；已有批次仍可查询结果。
     </p>
     <form v-if="capabilities?.enabled" class="admin-panel import-upload" @submit.prevent="upload">
       <div>
         <h3>使用标准模板</h3>
         <p>QQ 必填，支持五个平台账号标识。已有成员只补开户，保留原资料和绑定。</p>
-        <button type="button" class="btn" :disabled="busy" @click="download('template')">
+        <button
+          type="button"
+          class="btn"
+          :disabled="busy || settingsBusy"
+          @click="download('template')"
+        >
           下载 Excel 模板
         </button>
       </div>
@@ -387,14 +456,14 @@ onBeforeUnmount(() => {
           ref="input"
           type="file"
           accept=".xlsx"
-          :disabled="busy"
+          :disabled="busy || settingsBusy"
           @change="chooseFile"
         />
         <p class="muted">
           最多 5 MiB / {{ capabilities.max_rows }} 行，不要填写 OJ 密码、公式或外部链接。
         </p>
         <p v-if="file">待上传：{{ file.name }}</p>
-        <button class="btn primary" :disabled="busy || !file">
+        <button class="btn primary" :disabled="busy || settingsBusy || !file">
           {{ busy && !batch ? '正在安全解析…' : '上传并校验' }}
         </button>
       </div>
@@ -449,6 +518,7 @@ onBeforeUnmount(() => {
           class="btn primary"
           :disabled="
             busy ||
+            settingsBusy ||
             loading ||
             uncertain ||
             !chosen.length ||
@@ -465,7 +535,7 @@ onBeforeUnmount(() => {
         ><button
           v-if="canContinue"
           class="btn primary"
-          :disabled="busy || uncertain || loading"
+          :disabled="busy || settingsBusy || uncertain || loading"
           @click="execute"
         >
           继续未处理成员</button
@@ -494,6 +564,49 @@ onBeforeUnmount(() => {
 <style scoped>
 .account-import {
   min-width: 0;
+}
+.import-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.import-setting h3 {
+  margin: 0 0 8px;
+}
+.import-setting p {
+  margin: 4px 0;
+}
+.import-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+.import-toggle-track {
+  display: inline-block;
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--line);
+  position: relative;
+}
+.import-toggle-track::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+}
+.import-toggle[aria-checked='true'] .import-toggle-track {
+  background: var(--accent, #42715a);
+}
+.import-toggle[aria-checked='true'] .import-toggle-track::after {
+  transform: translateX(16px);
 }
 .import-steps {
   display: flex;

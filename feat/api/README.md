@@ -84,7 +84,7 @@ python3 -m api.sync_contests --database /home/WYJ/acm-forever-data/acm_forever.d
 | 变量 | 用途 |
 | --- | --- |
 | `ACM_API_HOST` / `ACM_API_PORT` | 监听地址和端口，默认 `127.0.0.1:8088`，沿用原 WebUI 端口 |
-| `ACM_ACCOUNT_IMPORT_ENABLED` | Excel 批量开户开关，默认 `false`；启用前完成迁移及联调。关闭后仍可查已有结果 |
+| `ACM_ACCOUNT_IMPORT_ENABLED` | Excel 导入尚未保存页面开关时的后备默认值，默认 `true`；页面保存的数据库设置优先，关闭后仍可查已有结果 |
 | `ACM_DATABASE_PATH` | SQLite 数据库文件路径，默认 `./data/acm_forever.db` |
 | `ACM_MARKDOWN_UPLOAD_DIR` | Wiki/论坛持久化图片目录，默认数据库同级 `uploads/markdown`；必须在代码同步目录外 |
 | `ACM_PUBLIC_BASE_URL` | Markdown 导出图片的公开站点根地址，例如 `https://实际域名`，不带路径 |
@@ -316,7 +316,9 @@ API 回归新增 `tests/test_member_training.py`，共 20 项，覆盖三种 Web
 
 ## Excel 批量开户
 
-统一管理中心“成员账号 → Excel 导入”，支持模板下载、受控解析、逐行预检、分段开户、一次性初始凭据和无密码结果报告。只对具名 Web admin/root 开放。设置 `ACM_ACCOUNT_IMPORT_ENABLED=true` 启用，默认关闭；表格仅创建普通成员，旧共享管理登录不支持此入口。
+统一管理中心“成员账号 → Excel 导入”，支持模板下载、受控解析、逐行预检、分段开户、一次性初始凭据和无密码结果报告。只对具名 Web admin/root 开放。默认开启；页面顶部提供全站开关，保存后立即生效并在服务重启后保留。表格仅创建普通成员，旧共享管理登录不支持导入及开关设置。
+
+开关读取顺序为数据库 `settings.account_import_enabled` → 环境变量 `ACM_ACCOUNT_IMPORT_ENABLED` → 默认 `true`。环境变量仅在尚未保存页面设置时提供默认值，不是不可绕过的禁用锁。`PATCH /api/admin/account-imports/settings` 仅接受布尔字段 `enabled`，沿用个人管理员身份及 CSRF 校验，不新增表结构。关闭不撤销在途段和既有账号；后续新请求被阻止，已有结果、取消和未过期报告保持可用。
 
 安装 requirements 中锁定的 openpyxl/defusedxml。初始化新增批次、行、段、绑定来源四张表，可重复执行且保留既有账号、绑定和证据。解析使用可终止子进程，最大 5 MiB / 200 行、8 秒；PBKDF2 在最多 2 个线程的有界执行器运行，不持有写事务。批次确认窗口 30 分钟，确认后执行窗口 2 小时，每段 10 人；不自动向外部 OJ 发请求或触发同步。
 

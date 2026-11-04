@@ -557,11 +557,12 @@ CF 持久 job 成员捕获 epoch，closed 分项不能被晚到成功覆盖；�
 
 ## Excel 批量开户与 OJ 资料导入
 
-管理入口 `/admin.html?section=accounts&tab=import`。部署设置 `ACM_ACCOUNT_IMPORT_ENABLED=true` 后允许新上传及执行，默认关闭。全部接口要求具名个人 Web `admin/root`，旧共享 root、普通成员和匿名请求不能使用。写接口沿用 Cookie 与 `X-CSRF-Token`；表格不能指定角色、密码或 QQBot 管理员。
+管理入口 `/admin.html?section=accounts&tab=import`。默认允许新上传及执行，页面顶部提供全站开关。设置持久化到 `settings.account_import_enabled`，对后续请求立即生效并跨进程、服务重启保留。尚未保存页面设置时才采用环境变量 `ACM_ACCOUNT_IMPORT_ENABLED`，其默认值为 `true`；已保存的页面设置优先。全部接口要求具名个人 Web `admin/root`，旧共享 root、普通成员和匿名请求不能使用。写接口沿用 Cookie 与 `X-CSRF-Token`；表格不能指定角色、密码或 QQBot 管理员。
 
 | 方法与路径 | 功能 |
 | --- | --- |
-| `GET /api/admin/account-imports/capabilities` | 开关、模板版本、5 MiB/200 行限制、每段 10 人和有效期 |
+| `GET /api/admin/account-imports/capabilities` | 当前有效开关、模板版本、5 MiB/200 行限制、每段 10 人和有效期 |
+| `PATCH /api/admin/account-imports/settings` | 仅接受 `{ "enabled": true/false }`，保存全站开关并返回 `{ "enabled": true/false }`；关闭状态下仍可调用以重新开启 |
 | `GET /api/admin/account-imports/template` | 下载 `account-import-v1.xlsx` |
 | `POST /api/admin/account-imports/preview` | 仅一个 multipart `file`，不接受其他表单字段；201 返回预检摘要 |
 | `GET /api/admin/account-imports/{id}` | 无密码摘要、冻结范围、恢复标识及当前处理段 |
@@ -570,7 +571,7 @@ CF 持久 job 成员捕获 epoch，closed 分项不能被晚到成功覆盖；�
 | `POST /api/admin/account-imports/{id}/cancel` | 空对象请求，停止未处理行，保留已创建账号 |
 | `GET /api/admin/account-imports/{id}/report` | 无密码、强制字符串单元格的 `.xlsx` 报告，到期返回 410 |
 
-关闭开关后仍可查询、取消及下载未过期报告。默认只有同一账号代际的操作者可访问；root 只读审计其他操作者批次，不能接管提交。凭据版本变化后旧批次只读。
+开关设置只接受一个真正的 JSON 布尔字段 `enabled`；字符串、数值、空对象和额外字段均返回 `400 invalid_settings`。必须使用具名 Web `admin/root` 及有效 CSRF，普通成员、匿名和旧共享 root 不能修改。关闭后模板下载、新上传及后续提交返回 `503 import_disabled`；正在处理的一段可能完成，已创建账号不撤销。关闭开关后仍可查询、取消及下载未过期报告。默认只有同一账号代际的操作者可访问；root 只读审计其他操作者批次，不能接管提交。凭据版本变化后旧批次只读。
 
 首次确认只接受以下字段：
 
