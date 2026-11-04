@@ -169,6 +169,7 @@ public final class MainActivity extends Activity {
         getIntent().putExtra("external_navigation",externalRoot);
         if (state != null && state.getLong("session_generation", -1) == api.sessionGeneration()) {
             restoreNavigation(state);navigation.restore(state.getParcelableArrayList("navigation_history"));
+            markdownOwner=state.getLong("markdown_owner",-1);markdownGeneration=state.getLong("markdown_draft_generation",-1);
         }
         syncAppearance();buildShell();
         search.setText(query);
@@ -221,6 +222,7 @@ public final class MainActivity extends Activity {
     @Override protected void onSaveInstanceState(Bundle state) {
         super.onSaveInstanceState(state);
         state.putLong("session_generation",api.sessionGeneration());
+        state.putLong("markdown_owner",markdownOwner);state.putLong("markdown_draft_generation",markdownGeneration);
         state.putParcelableArrayList("navigation_history",navigationOwner==api.sessionGeneration()?navigation.snapshot():new java.util.ArrayList<Bundle>());
         savePageState(state);
     }
