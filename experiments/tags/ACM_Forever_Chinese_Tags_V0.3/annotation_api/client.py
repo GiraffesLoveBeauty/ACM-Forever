@@ -1,8 +1,10 @@
-"""OpenAI transport. Retries belong exclusively to runner.py."""
+"""Guarded OpenAI transport. Real calls require a single-use executor permit; SDK retries are zero."""
 from dataclasses import dataclass
 import time
 import openai
+import httpx
 from .schema import SCHEMA
+from .dispatch import ACTIVE, wire_request
 
 
 class CallError(Exception):
@@ -33,27 +35,39 @@ class Response:
 class APIClient:
     def __init__(self, config, *, http_client=None):
         self.config = config
+        self.offline_transport = bool(http_client is not None and isinstance(http_client._transport, httpx.MockTransport))
         if http_client is None:
             http_client = openai.DefaultHttpxClient(timeout=config.timeout, follow_redirects=False,
                                                    trust_env=False)
         else:
             http_client.follow_redirects = False
+            if self.offline_transport:
+                # A proxy mount must never divert an allegedly offline Mock request to the network.
+                http_client._mounts.clear()
+            elif http_client.trust_env:
+                raise ValueError("真实自定义 HTTP 客户端必须禁用环境代理")
+        http_client.event_hooks["request"].append(self._check_dispatch)
         self.sdk = openai.OpenAI(api_key=config.api_key, base_url=config.base_url,
                                  timeout=config.timeout, max_retries=0, http_client=http_client)
 
     def close(self):
         self.sdk.close()
 
+    def _check_dispatch(self, request):
+        if not self.offline_transport:
+            permit = ACTIVE.get()
+            if permit is None:
+                raise CallError("executor_required", fatal=True)
+            permit.http(self.config, request)
+
     def call(self, messages, *, schema=None, schema_name="acm_tag_annotation"):
         cfg = self.config
-        kwargs = {"model": cfg.model, "messages": messages, "stream": False}
-        if cfg.response_format == "json_schema":
-            kwargs["response_format"] = {"type": "json_schema", "json_schema": {
-                "name": schema_name, "strict": True, "schema": SCHEMA if schema is None else schema}}
-        else:
-            kwargs["response_format"] = {"type": "json_object"}
-        if cfg.max_output_tokens is not None:
-            kwargs[cfg.token_parameter] = cfg.max_output_tokens
+        kwargs = wire_request(cfg, messages, SCHEMA if schema is None else schema, schema_name)
+        if not self.offline_transport:
+            permit = ACTIVE.get()
+            if permit is None:
+                raise CallError("executor_required", fatal=True)
+            permit.call(cfg, kwargs)
         started = time.perf_counter()
         try:
             result = self.sdk.chat.completions.create(**kwargs)

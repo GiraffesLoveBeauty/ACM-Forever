@@ -24,7 +24,7 @@ data/labels/
   translations/
     requests/<翻译指纹>.json        独立请求状态与安全响应
     history/<翻译指纹>.json         译文或异常记录
-    current.json                   只激活校验通过的真实生成结果
+    current.json                   激活可解析的真实结果；当前默认不做译文内容一致性校验
   catalog/
     generations/<版本哈希>/
       problems.jsonl               原题名、题面、链接及派生元数据

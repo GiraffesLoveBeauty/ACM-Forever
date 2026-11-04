@@ -1,6 +1,7 @@
 """Adapt crawler/flattened records, keeping prepare() as mapping authority."""
 import hashlib
 import json
+import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -33,15 +34,20 @@ def canonical_identity(p):
         if platform and platform != kp:
             raise ValueError("Conflicting platform")
         platform = kp
+        if platform == "codeforces" and not re.fullmatch(r"(?:[A-Z]{1,3}\d{0,2}|\d{1,3})", ki):
+            raise ValueError("Noncanonical CF index in problem_key")
         if contest is not None and str(contest) != kc:
             raise ValueError("Conflicting contest_id")
-        if pid is not None and problem_key({"platform": platform, "contest_id": kc,
-                                           "problem_id": pid}) != key:
-            raise ValueError("Conflicting problem_id")
+        if pid is not None:
+            # An explicit key already separates a numeric CF index from its contest.
+            allowed = {ki, kc + ki} if platform == "codeforces" else {ki}
+            if str(pid) not in allowed:
+                raise ValueError("Conflicting problem_id")
         contest, pid = kc, ki
     if platform not in {"atcoder", "codeforces"} or not contest or not pid:
         raise ValueError("Missing/unsupported source identity")
-    canonical = problem_key({"platform": platform, "contest_id": str(contest), "problem_id": str(pid)})
+    canonical = (key if key and platform == "codeforces" else
+                 problem_key({"platform": platform, "contest_id": str(contest), "problem_id": str(pid)}))
     if key and canonical != key:
         raise ValueError("problem_key must use canonical identity")
     url = p.get("url") or p.get("problem_url") or p.get("source_url")
@@ -119,8 +125,12 @@ def adapt(p, line=1, review=None):
     if content_hash is not None and (not isinstance(content_hash, str) or not content_hash.strip()):
         raise ValueError("content_hash must be nonempty string or null")
     content_hash = content_hash or digest({"problem_key": key, "title": title, "statement_markdown": statement})
-    base = prepare({"platform": platform, "contest_id": contest, "problem_id": pid,
+    # prepare() accepts combined CF IDs; protect the rare numeric index beginning
+    # with the contest digits from its legacy combined-ID prefix stripping.
+    prepared_pid = contest + pid if platform == "codeforces" and pid.startswith(contest) else pid
+    base = prepare({"platform": platform, "contest_id": contest, "problem_id": prepared_pid,
                     "title": title, "url": url, "tags": raw, "content_hash": content_hash})
+    base["problem_id"] = pid
     base["human_review_status"] = "pending_review" if base["needs_ai"] else "not_reviewed"
     if human_confirmed(p):
         base = apply_review(base, p)

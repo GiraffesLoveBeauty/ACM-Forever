@@ -98,13 +98,14 @@ def allowed_data_path(path):
         rf"(?:annotations/{HEX}\.jsonl|catalog/current\.json|"
         rf"catalog/generations/{HEX}/(?:manifest\.json|problems\.jsonl|auto_tags\.jsonl)|"
         rf"manual/overrides\.jsonl|translations/current\.json|"
-        rf"translations/(?:history|requests)/{HEX}\.json|exports/[A-Za-z0-9_.-]+\.jsonl?|"
+        rf"translations/(?:history|requests)/{HEX}\.json|execution/(?:tasks|responses|results)/{HEX}\.json|exports/[A-Za-z0-9_.-]+\.jsonl?|"
         rf"exports/[A-Za-z0-9_.-]+\.json)", path))
 
 
 def allowed_data_directory(path):
     return bool(re.fullmatch(rf"(?:annotations|catalog|catalog/generations|catalog/generations/{HEX}|"
-                             r"manual|translations|translations/history|translations/requests|exports)", path))
+                             r"manual|translations|translations/history|translations/requests|exports|"
+                             r"execution|execution/tasks|execution/responses|execution/results|execution/locks)", path))
 
 
 def check_sensitive(value):
@@ -267,10 +268,42 @@ def validate_dataset(root, files):
     for key, fp in index.items():
         if key not in known_keys or not isinstance(fp, str) or fp not in translations or translations[fp]["problem_key"] != key or translations[fp]["translation_status"] != "auto":
             raise ValueError("翻译索引指向错误题目或缺失版本")
-    return {"generation_id": pointer["generation_id"], "generations": len(versions), "problems": len(ps),
+    counts = {"generation_id": pointer["generation_id"], "generations": len(versions), "problems": len(ps),
             "annotation_records": annotations, "manual_events": len(events), "translations": len(translations),
             "translation_requests": sum(p.startswith("translations/requests/") for p in files),
             "effective_view_sha256": digest(views), "taxonomy_version": TAXONOMY["version"]}
+    if any(p.startswith("execution/") for p in files):
+        from .execution_state import Ledger
+        ledger = Ledger(root)
+        records = ledger.records()
+        all_attempts = {attempt["attempt_id"]: row for row in records for attempt in row["attempts"]}
+        tasks = {row["task_id"]: row for row in records}
+        task_fields = {"version", "task_id", "identity", "problem_key", "task_type", "created_at", "updated_at", "attempts",
+                       "input_problem", "state", "attempt_id", "response_sha256", "result_sha256", "error", "request_sha256", "http_status", "elapsed_seconds"}
+        for row in records:
+            if not set(row) <= task_fields or row["problem_key"] not in known_keys:
+                raise ValueError("执行记录字段或题目身份不兼容")
+            if row["state"] == "completed":
+                if not row.get("result_sha256") or not row.get("response_sha256"):
+                    raise ValueError("完成任务缺少结果摘要")
+                ledger.artifact("results", row["task_id"], row["result_sha256"])
+                ledger.artifact("responses", row["attempt_id"], row["response_sha256"])
+        for path, data in files.items():
+            if path.startswith("execution/responses/"):
+                value = parse(data)
+                if (set(value) != {"version", "task_id", "attempt_id", "response"}
+                        or value["attempt_id"] != Path(path).stem or value["attempt_id"] not in all_attempts
+                        or all_attempts[value["attempt_id"]]["task_id"] != value["task_id"]
+                        or set(value["response"]) != {"content", "model", "usage", "finish_reason", "refused", "request_id", "elapsed_seconds"}):
+                    raise ValueError("执行响应违反字段白名单或绑定损坏")
+            if path.startswith("execution/results/"):
+                value = parse(data)
+                if (set(value) != {"version", "task_id", "identity", "prediction", "result"}
+                        or value["task_id"] != Path(path).stem or value["task_id"] not in tasks
+                        or value["identity"] != tasks[value["task_id"]]["identity"]):
+                    raise ValueError("执行结果违反字段白名单或绑定损坏")
+        counts["execution_tasks"] = len(records)
+    return counts
 
 
 def backup_root(value=None):

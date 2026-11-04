@@ -1,6 +1,7 @@
 import createDOMPurify from 'dompurify';
 import katex from 'katex';
 import renderMathInElement from 'katex/contrib/auto-render';
+import { renderStatementMarkdown } from './statement-math.js';
 
 const allowedClasses = new Set([
   'header',
@@ -24,7 +25,7 @@ const allowedClasses = new Set([
   'lang-ja',
 ]);
 const mathOptions = {
-  output: 'mathml',
+  output: 'htmlAndMathml',
   trust: false,
   throwOnError: false,
   maxExpand: 1000,
@@ -148,10 +149,12 @@ export function renderProblemContent(detail, doc = document) {
       else node.removeAttribute('class');
     }
   } else {
-    const pre = doc.createElement('pre');
-    pre.className = 'problem-plain';
-    pre.textContent = detail.statement_text || '';
-    statement.append(pre);
+    const text = detail.statement_text || '';
+    if (/\\[A-Za-z]+|\$[^$]+\$|```|~~~|^\s*(?:#{1,6} |[-*+] )|\b[A-Za-z](?:['′]+|[_^](?:\{|[A-Za-z0-9]))/m.test(text)) {
+      statement.innerHTML = renderStatementMarkdown(text, doc);
+    } else {
+      const plain = doc.createElement('pre'); plain.textContent = text; statement.append(plain);
+    }
   }
 
   const samples = Array.isArray(detail.samples) ? detail.samples : [];
@@ -184,11 +187,15 @@ export function renderProblemContent(detail, doc = document) {
         button.dataset.sampleIndex = String(index);
         button.dataset.sampleKind = kind;
         button.textContent = `复制样例 ${index + 1} ${label}`;
-        pre.after(button);
+        const heading=pre.previousElementSibling;
+        if (heading?.matches('h1,h2,h3,h4,h5,h6,.title')) {
+          heading.querySelectorAll('button[data-statement-sample],.statement-sample-copy-status').forEach(node=>node.remove());
+          heading.classList.add('statement-sample-heading');heading.append(button);
+        } else pre.before(button);
       }
     });
   }
-  // KaTeX only produces MathML, with commands that can embed URLs/HTML disabled.
+  // Local KaTeX layout plus accessible MathML; commands embedding URLs/HTML stay disabled.
   renderMathInElement(statement, mathOptions);
   if (detail.platform === 'atcoder') {
     for (const variable of statement.querySelectorAll('var')) {

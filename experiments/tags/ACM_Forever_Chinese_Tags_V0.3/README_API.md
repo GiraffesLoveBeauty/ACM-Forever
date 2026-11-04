@@ -1,5 +1,9 @@
 # V0.3 API 标签标注工具
 
+> 7G 执行安全更新：真实调用现必须经 `execute_processing.py` 的绑定计划、发送前重检和任务锁。
+> 原标注/翻译 CLI 的执行模式已委托该入口；旧 `--output` / `--retry-failed` / `--reviews` 不能用于真实执行。
+> `--resume` 不再是防重复计费的唯一条件，完成结果始终优先复用。当前用法及未知请求处理见 `README_SAFE_EXECUTION.md`。
+
 本工具独立于论坛与数据库，复用 `label_pipeline.py` 的 prepare、merge_one 和 evaluate。
 不改动现有词表、映射、提示词及原始数据。当前交付仅经过离线/Mock 测试，未验证真实模型访问权限、计费和标注质量。
 

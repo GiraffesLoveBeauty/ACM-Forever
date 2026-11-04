@@ -4,7 +4,9 @@ import { useRoute } from 'vue-router';
 import { auth, date, useRequests } from '../lib/api.js';
 import { originalProblemUrl, renderProblemContent } from '../lib/problem-content.js';
 import PdfPreview from '../components/PdfPreview.vue';
+import SecondaryProcessingPanel from '../components/SecondaryProcessingPanel.vue';
 import { problemReturn } from '../lib/member-problems.js';
+import { copyStatementSample } from '../lib/statement-samples.js';
 
 const route = useRoute(),
   request = useRequests();
@@ -101,6 +103,7 @@ async function copySample(index, kind, button) {
   }
 }
 function copyEmbedded(event) {
+  if (event.target.closest?.('button[data-statement-sample="true"]')) return copyStatementSample(event);
   const button = event.target.closest?.('button[data-sample-index][data-sample-kind]');
   if (button && event.currentTarget.contains(button))
     copySample(Number(button.dataset.sampleIndex), button.dataset.sampleKind, button);
@@ -141,6 +144,7 @@ watch(() => [route.query.platform, route.query.problem_id], load, { immediate: t
       <button class="btn" @click="load">重试</button>
     </section>
     <template v-else-if="detail">
+      <SecondaryProcessingPanel :key="`${detail.platform}:${detail.problem_id}`" :platform="detail.platform" :problem-id="detail.problem_id" />
       <p id="problem-message" class="muted">
         <template v-if="detail.content_available"
           >已采集{{ pdf ? ' PDF' : '' }}题面<span v-if="!pdf"> · {{ samples.length }} 组样例</span
@@ -193,11 +197,13 @@ watch(() => [route.query.platform, route.query.problem_id], load, { immediate: t
               <p>{{ sample[kind + '_note'] }}</p>
             </template>
             <template v-else>
-              <h3>样例 {{ index + 1 }} · {{ kind === 'input' ? '输入' : '输出' }}</h3>
+              <div class="statement-sample-heading">
+                <h3>样例 {{ index + 1 }} · {{ kind === 'input' ? '输入' : '输出' }}</h3>
+                <button class="btn problem-copy" @click="copySample(index, kind)">
+                  复制样例 {{ index + 1 }} {{ kind === 'input' ? '输入' : '输出' }}
+                </button>
+              </div>
               <pre>{{ sample[kind] }}</pre>
-              <button class="btn problem-copy" @click="copySample(index, kind)">
-                复制样例 {{ index + 1 }} {{ kind === 'input' ? '输入' : '输出' }}
-              </button>
             </template>
           </div>
           <div v-if="sampleFiles[index].length" class="problem-sample-attachments">

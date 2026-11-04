@@ -26,6 +26,19 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
+      path: '/tag-management.html',
+      redirect: (to) => ({
+        path: '/admin.html',
+        query: { ...to.query, section: 'problems', action: 'manual' },
+      }),
+      meta: { admin: true, title: '算法标签管理' },
+    },
+    {
+      path: '/processing-demo.html',
+      component: () => import('./views/ProcessingDemo.vue'),
+      meta: { title: '标签与翻译验收' },
+    },
+    {
       path: '/',
       alias: '/index.html',
       component: () => import('./views/Forum.vue'),

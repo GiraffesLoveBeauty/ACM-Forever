@@ -1,0 +1,125 @@
+"""Conservative HTML-to-Markdown using the backend's existing parsing tree, offline."""
+import importlib.util
+import re
+import sys
+from functools import lru_cache
+from urllib.parse import urljoin, urlsplit
+
+from label_pipeline import BASE
+
+
+@lru_cache(maxsize=1)
+def parser_module():
+    path = BASE.parents[2] / "feat/api/acm_api/problem_content.py"
+    name = "_acm_tag_statement_tree"
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    # Execute the existing source without producing backend __pycache__ files.
+    exec(compile(path.read_text(encoding="utf-8-sig"), str(path), "exec"), module.__dict__)
+    return module
+
+
+def newline(text):
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def html_statement(raw, source_url="", language="en"):
+    module = parser_module()
+    mismatched = []
+    class CheckedTreeParser(module.TreeParser):
+        def handle_endtag(self, tag):
+            if tag not in module.VOID_TAGS and self.stack[-1].tag != tag:
+                mismatched.append(tag)
+            super().handle_endtag(tag)
+    parser = CheckedTreeParser()
+    parser.feed(raw)
+    parser.close()
+    issues = [] if len(parser.stack) == 1 and not mismatched else ["unbalanced_html"]
+    root = parser.root
+    # Reuse known statement containers and language selectors, never include navigation.
+    containers = [n for n in root.walk() if n.attrs.get("id") == "task-statement" or
+                  "problem-statement" in (n.attrs.get("class") or "").split()]
+    if containers:
+        root = containers[0]
+    elif any(n.tag in {"html", "body"} for n in root.walk()):
+        issues.append("unknown_html_container")
+    choices = [(lang, n) for n in root.walk() for lang in ("en", "ja")
+               if "lang-" + lang in (n.attrs.get("class") or "").split()]
+    if choices:
+        language, root = next(((lang, n) for lang, n in choices if lang == language), choices[0])
+
+    def link(value):
+        url = urljoin(source_url or "", value or "")
+        try:
+            parsed = urlsplit(url)
+            valid = (parsed.scheme in {"http", "https"} and parsed.hostname and not parsed.username
+                     and not parsed.password and parsed.port is None and not re.search(r"[\x00-\x20()]", url))
+        except ValueError:
+            valid = False
+        if not valid:
+            issues.append("unsafe_or_unresolved_html_link")
+            return None
+        return url
+
+    def render(node):
+        if isinstance(node, str):
+            return re.sub(r"\s+", " ", node)
+        tag = node.tag
+        if any(name.lower().startswith(("mathjax", "katex")) for name in (node.attrs.get("class") or "").split()):
+            issues.append("rendered_math_requires_review")
+        if tag == "script":
+            if str(node.attrs.get("type", "")).startswith("math/tex"):
+                fence = "$$" if "mode=display" in node.attrs["type"].replace(" ", "") else "$"
+                return fence + "".join(c for c in node.children if isinstance(c, str)) + fence
+            return ""
+        if tag in {"style", "noscript"}:
+            return ""
+        if tag in {"svg", "canvas", "iframe", "object", "embed", "math", "video", "audio", "form", "input", "button", "select"}:
+            issues.append("unsupported_" + tag)
+        if tag == "pre":
+            # Same CF test-example-line convention as parse_codeforces().
+            lines = [n for n in node.walk() if "test-example-line" in (n.attrs.get("class") or "").split()]
+            text = "\n".join(n.text() for n in lines) + "\n" if lines else node.text()
+            text = newline(text)
+            fence = "`" * max(3, 1 + max((len(x) for x in re.findall(r"`+", text)), default=0))
+            return "\n\n" + fence + "\n" + text + ("" if text.endswith("\n") else "\n") + fence + "\n\n"
+        body = "".join(render(c) for c in node.children)
+        if tag == "img":
+            issues.append("image_requires_review")
+            url = link(node.attrs.get("src"))
+            alt = (node.attrs.get("alt") or "图片").replace("[", "\\[").replace("]", "\\]")
+            return f"![{alt}]({url})" if url else "[图片链接待检查]"
+        if tag == "a":
+            url = link(node.attrs.get("href"))
+            return f"[{body}]({url})" if url else body
+        if tag == "br":
+            return "\n"
+        if tag == "code":
+            fence = "`" * max(1, 1 + max((len(x) for x in re.findall(r"`+", body)), default=0))
+            return fence + body + fence
+        if tag == "var":
+            return "$" + body + "$"
+        if tag in {"sup", "sub"}:
+            return ("^" if tag == "sup" else "_") + "{" + body + "}"
+        if tag in {"strong", "b"}:
+            return "**" + body + "**"
+        if tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+            return "\n\n" + "#" * int(tag[1]) + " " + body.strip() + "\n\n"
+        if tag in {"th", "td"}:
+            if node.attrs.get("colspan", "1") != "1" or node.attrs.get("rowspan", "1") != "1":
+                issues.append("complex_table")
+            return " " + body.strip() + " |"
+        if tag == "li":
+            return "\n- " + body.strip() + "\n"
+        if tag in module.BLOCK_TAGS:
+            return "\n\n" + ("|" if tag == "tr" else "") + body.strip("\n") + "\n\n"
+        return body
+
+    # Avoid whitespace cleanup inside fenced code/sample blocks.
+    text = render(root).strip()
+    if not text:
+        issues.append("empty_html")
+    if re.search(r"captcha|access denied|just a moment|sign in to continue", text, re.I):
+        issues.append("possible_error_page")
+    return {"text": text, "language": language, "issues": sorted(set(issues))}

@@ -111,6 +111,15 @@ async function page(component = Problems) {
     ],
     '/admin.html?section=problems',
   );
+  // Collection moved behind an explicit tab; preserve the existing collection regression coverage.
+  const collectionTab = find(
+    mounted.root,
+    (n) => n.type === 'button' && textOf(n).trim() === '采集与数据库工具',
+  )[0];
+  if (collectionTab) {
+    await collectionTab.props.onClick();
+    await settle();
+  }
   return mounted;
 }
 function element(id) {

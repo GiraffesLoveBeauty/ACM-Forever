@@ -28,7 +28,7 @@ async function submit() {
         method: 'POST',
         body: {
           username: identifier.value,
-          ...(/^\d{4,12}$/.test(identifier.value) ? { qq_id: identifier.value } : {}),
+          ...(/^(?:1|\d{4,12})$/.test(identifier.value) ? { qq_id: identifier.value } : {}),
           password: password.value,
         },
       });

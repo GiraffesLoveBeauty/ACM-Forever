@@ -60,7 +60,7 @@ class Repository:
             raise ValueError("目录快照校验失败")
         return {r["problem_key"]: r for r in metadata}, {r["problem_key"]: r for r in labels}
 
-    def import_records(self, raw_problems, annotations=()):
+    def import_records(self, raw_problems, annotations=(), *, expected_generation=None):
         from tag_management.service import auto_record
         problems = [normalize(row) for row in raw_problems]
         if len({r["problem_key"] for r in problems}) != len(problems):
@@ -78,6 +78,9 @@ class Repository:
                 raise ValueError("只能激活有效自动标签，失败记录仍应保留在原运行历史")
             supplied[key] = deepcopy(row)
         with self.lock.locked():
+            folder = self.current()
+            if expected_generation is not None and (folder.name if folder else "") != expected_generation:
+                raise ValueError("持久目录已变化，拒绝写入过期处理结果")
             previous, labels = self.snapshot()
             for key, p in incoming.items():
                 old = previous.get(key)

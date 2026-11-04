@@ -71,7 +71,19 @@ def metadata(config, item, fingerprint, profile_id):
 
 
 def run(input_path, config, *, platform="all", limit=None, output=None, cache_root=None,
-        resume=False, reviews_path=None, retry_failed=False, client=None, sleep=time.sleep):
+        resume=False, reviews_path=None, retry_failed=False, client=None, sleep=time.sleep,
+        execute=False, plan=None, data_root=None):
+    # The old output-scoped runner remains an injected-offline-client test harness only.
+    # Real APIClient.call and the HTTP hook independently reject missing executor capabilities.
+    if client is None or not getattr(client, "offline_transport", True):
+        from problem_processing.adapter import read_problems
+        from problem_processing.executor import execute_batch
+        if reviews_path or retry_failed:
+            raise ValueError("真实执行不允许旧重试或独立审核路径")
+        values = read_problems(input_path)
+        values = [r for r in values if platform == "all" or r.get("platform", str(r.get("problem_key", "")).split(":")[0]) == platform]
+        return execute_batch(values, "annotation", root=data_root, config=config, execute=execute, plan=plan,
+                             client=client, limit=limit)
     rows, input_errors, duplicates = load_inputs(input_path, platform, limit, load_reviews(reviews_path))
     profile = profile_for(config, input_path, platform)
     profile_id = digest(profile)

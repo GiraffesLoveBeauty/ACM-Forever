@@ -4,6 +4,8 @@
 
 适用范围：当前用户提供的 Codeforces、AtCoder 爬虫 JSON。牛客待获取实际数据结构后扩展。
 
+新题库输入协议见 [README_INPUT_ADAPTER.md](README_INPUT_ADAPTER.md)；真实本地导出到增量规划的只读联调见 [README_CRAWLER_INTEGRATION.md](README_CRAWLER_INTEGRATION.md)。这些入口不采集题目、不连接数据库、不执行 AI。
+
 ## 和 V0.2 最大的区别（用户已确认的 B 方案）
 
 - 维持 **100 个具体中文算法标签**，如「线段树」「优先队列」「树状数组」「并查集」「贪心」。

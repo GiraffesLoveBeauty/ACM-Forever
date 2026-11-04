@@ -141,12 +141,12 @@ test('member filters and return sources exclude owner/admin state and external U
   assert(!('owner_qq_id' in normalized));
   assert.equal(memberFilters({ page: ['2'], scope: 'unsafe' }).page, 2);
   for (const platform of [undefined, '', 'unknown'])
-    assert.equal(memberFilters({ platform }).platform, 'codeforces');
+    assert.equal(memberFilters({ platform }).platform, 'all');
   assert.equal(memberFilters({ platform: 'atcoder' }).platform, 'atcoder');
   assert.equal(problemReturn('/home.html'), '/home.html');
   assert.equal(
     problemReturn('/problem-bank.html?scope=solved&page=3&qq_id=99999999'),
-    '/problem-bank.html?scope=solved&platform=codeforces&page=3',
+    '/problem-bank.html?scope=solved&platform=all&page=3',
   );
   assert.equal(
     problemReturn(
@@ -391,20 +391,17 @@ for (const role of ['member', 'admin', 'root']) {
     assert.equal(mounted.router.currentRoute.value.fullPath, '/my-problems.html');
     assert(calls.some(({ url }) => url.startsWith('/api/me/problems?')));
     const list = calls.find(({ url }) => url.startsWith('/api/me/problems?'));
-    assert.equal(new URL(list.url, 'https://acm.test').searchParams.get('platform'), 'codeforces');
-    assert(!textOf(mounted.root).includes('全部平台'));
+    assert.equal(new URL(list.url, 'https://acm.test').searchParams.get('platform'), 'all');
+    assert(textOf(mounted.root).includes('全部平台'));
     assert(
       !calls.some(({ url }) => url.startsWith('/api/admin/') || url.startsWith('/api/problems?')),
     );
     await click(links('查看题面')[0]);
     const back = links('返回题库')[0];
     await realRouter.push(back.props.href);
-    assert.equal(realRouter.currentRoute.value.fullPath, '/my-problems.html?platform=codeforces');
+    assert.equal(realRouter.currentRoute.value.fullPath, '/my-problems.html?platform=all');
     await click(back);
-    assert.equal(
-      mounted.router.currentRoute.value.fullPath,
-      '/my-problems.html?platform=codeforces',
-    );
+    assert.equal(mounted.router.currentRoute.value.fullPath, '/my-problems.html?platform=all');
   });
 
   test(`${role} Home complete AC link stays in personal problems during filtering and statement round trips`, async () => {
@@ -418,22 +415,22 @@ for (const role of ['member', 'admin', 'root']) {
     await click(buttons('下一页')[0]);
     assert.equal(
       mounted.router.currentRoute.value.fullPath,
-      '/my-problems.html?scope=solved&platform=codeforces&page=2',
+      '/my-problems.html?scope=solved&platform=all&page=2',
     );
     await click(links('查看题面')[0]);
     assert.equal(
       links('返回题库')[0].props.href,
-      '/my-problems.html?scope=solved&platform=codeforces&page=2',
+      '/my-problems.html?scope=solved&platform=all&page=2',
     );
     await click(links('返回题库')[0]);
     assert.equal(
       mounted.router.currentRoute.value.fullPath,
-      '/my-problems.html?scope=solved&platform=codeforces&page=2',
+      '/my-problems.html?scope=solved&platform=all&page=2',
     );
     await click(buttons('清除筛选')[0]);
     assert.equal(
       mounted.router.currentRoute.value.fullPath,
-      '/my-problems.html?scope=solved&platform=codeforces',
+      '/my-problems.html?scope=solved&platform=all',
     );
     await click(buttons('收藏')[0]);
     assert(

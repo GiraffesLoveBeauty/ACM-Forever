@@ -4,6 +4,8 @@
 .venv/
 cache/
 outputs/
+# Private acceptance pages and actual offline-test summaries.
+/demo_generated/
 __pycache__/
 *.py[cod]
 .pytest_cache/

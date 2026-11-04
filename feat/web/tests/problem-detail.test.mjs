@@ -31,7 +31,13 @@ const saved = (extra = {}) => ({
   samples: [sample],
   ...extra,
 });
-let dom, mounted, calls, copied, responseData, responseStatus, holdId, held;
+test('original plain-text statement shares subscript rendering with the translation',()=>{
+  const root=dom.window.document.createElement('div');
+  root.innerHTML=renderProblemContent({platform:'atcoder',statement_text:"Permutation P_1 to P'_N.",samples:[]},dom.window.document).html;
+  assert.deepEqual([...root.querySelectorAll('math annotation')].map(n=>n.textContent),['P_1',"P'_N"]);
+  assert.equal(root.querySelectorAll('.katex-html').length,2);
+});
+let dom, mounted, calls, copied, responseData, responseStatus, holdId, held, secondaryMissing, secondaryOverrides;
 let pdfOpened, pdfRendered, pdfDestroyed, pdfHold, pdfDelayed, pdfFailure;
 const renderer = {
   openPdf(src) {
@@ -102,12 +108,26 @@ beforeEach(() => {
   holdId = '';
   responseData = saved();
   responseStatus = 200;
+  secondaryMissing = false;
+  secondaryOverrides = {};
   setAuth(
     { authenticated: true, qq_id: '12345678', role: 'member', csrf_token: 'fixture-csrf' },
     true,
   );
   globalThis.fetch = async (url, options = {}) => {
     calls.push({ url, options });
+    if (url.startsWith('/api/secondary/problems/') && secondaryMissing)
+      return response({message:'该题暂无二次处理结果'},404);
+    if (url.startsWith('/api/secondary/problems/')) return response({
+      problem_key: 'codeforces:1843:A', taxonomy_version: '0.3-draft', model: 'fixture-model',
+      auto_tags: [{id:'enumeration',name_zh:'枚举',source:'ai'}],
+      effective_tags: [{id:'enumeration',name_zh:'枚举',source:'ai',tag_kind:'specific'}],
+      review_status:'auto', manual_history_count:0, manual_added_ids:[], manual_removed_ids:[],
+      needs_review_reasons:[], annotation_status:'success', content_hash:'fixture-content',
+      source_links:['https://codeforces.com/contest/1843/problem/A'],
+      translation_status:'missing', translation_active:false, translation_task_states:[],
+      ...secondaryOverrides,
+    });
     if (holdId && url.endsWith('/' + holdId))
       return new Promise((resolve) =>
         held.push(() => resolve(response(saved({ problem_id: holdId, problem_name: 'Stale' })))),
@@ -165,6 +185,48 @@ function parsed(detail) {
   return { container, ...result };
 }
 
+for (const role of ['admin','root']) test(`new crawler-only problem keeps translation management entry for ${role}`, async () => {
+  secondaryMissing=true;
+  setAuth({authenticated:true,qq_id:'1',role,csrf_token:'fixture'},true);
+  await page();
+  const content=textOf(mounted.root);
+  assert.ok(content.includes('这道题尚未进行二次处理'));
+  assert.ok(!content.includes('二次处理数据暂不可用'));
+  const link=find(mounted.root,n=>n.type==='a' && textOf(n).includes('后台管理'))[0];
+  assert.ok(link);
+  assert.ok(link.props.href.includes('action=translation'));
+  assert.ok(link.props.href.includes('problem_id=cf_1843A'));
+  assert.ok(calls.every(c=>!c.options.method || c.options.method==='GET'));
+});
+
+test('unprocessed problem shows a normal empty state without admin actions for member',async()=>{
+  secondaryMissing=true;
+  await page();
+  assert.ok(textOf(mounted.root).includes('这道题尚未进行二次处理'));
+  assert.equal(find(mounted.root,n=>n.type==='a' && textOf(n).includes('后台管理')).length,0);
+});
+
+test('refresh loads newly saved labels and translation without issuing an AI request',async()=>{
+  await page();
+  secondaryOverrides={
+    effective_tags:[{id:'construction',name_zh:'构造',source:'ai',tag_kind:'specific'},
+      {id:'bit_operations',name_zh:'位运算',source:'ai',tag_kind:'specific'}],
+    translation_status:'auto',translation_active:true,translated_title:'模拟题中文标题',
+    translation_validation_mode:'parse_only',
+    translated_statement:'## 题目描述\n\n模拟中文译文。',
+  };
+  await find(mounted.root,n=>n.type==='button' && textOf(n)==='刷新标签与译文')[0].props.onClick();
+  await settle();
+  const content=textOf(mounted.root);
+  assert.ok(content.includes('构造'));assert.ok(content.includes('位运算'));
+  assert.ok(content.includes('模拟题中文标题'));
+  assert.ok(content.includes('未进行本地内容一致性校验'));
+  const article=find(mounted.root,n=>typeof n.props.innerHTML==='string' && n.props.innerHTML.includes('模拟中文译文'));
+  assert.equal(article.length,1);
+  assert.equal(calls.filter(c=>c.url.startsWith('/api/secondary/problems/')).length,2);
+  assert.ok(calls.every(c=>!c.options.method || c.options.method==='GET'));
+});
+
 test('CF samples stay embedded, retain whitespace/literal markup and receive copy controls', () => {
   const { container, samplesEmbedded } = parsed(saved());
   assert.equal(samplesEmbedded, true);
@@ -187,6 +249,7 @@ test('AtCoder sample headings and var formulas render without duplicating sample
   assert.equal(samplesEmbedded, true);
   assert.equal(container.querySelectorAll('var math').length, 1);
   assert.equal(container.querySelectorAll('pre')[0].textContent, sample.input);
+  assert.equal(container.querySelector('h3.statement-sample-heading button').dataset.sampleIndex,'0');
 });
 
 test('statement HTML cannot inject scripts, actions, global styles or fake copy controls', () => {
@@ -305,7 +368,10 @@ test('local viewer reads member detail, shows saved content and exposes a separa
   assert.equal(element('problem-samples'), undefined);
   assert.ok(textOf(mounted.root).includes('已采集题面'));
   assert.equal(document.title, 'Saved Example · ACM Forever');
-  assert.equal(calls.length, 1, 'viewing never starts collection or calls an external OJ');
+  assert.equal(calls.length, 2, 'reads local problem and local secondary results only');
+  assert.ok(calls.every(call => call.url.startsWith('/api/') && (!call.options.method || call.options.method === 'GET')));
+  assert.ok(textOf(mounted.root).includes('自动生效 · 未人工确认'));
+  assert.ok(textOf(mounted.root).includes('当前没有已激活的真实中文译文'));
   const button = statement.querySelector('button');
   await element('problem-statement').props.onClick({ target: button, currentTarget: statement });
   await settle();
@@ -344,7 +410,7 @@ test('catalog-only detail stays local, can reload and never automatically crawls
   )[0].props.onClick();
   await settle();
   assert.ok(element('problem-statement'));
-  assert.equal(calls.length, 2);
+  assert.equal(calls.filter(call => !call.url.startsWith('/api/secondary/')).length, 2);
   assert.ok(calls.every((call) => !call.options.method || call.options.method === 'GET'));
 });
 

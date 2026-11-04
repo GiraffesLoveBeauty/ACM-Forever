@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """Default is dry-run. --execute is an explicit network/billing opt-in."""
 import argparse
-import json
 import sys
-from annotation_api.config import Config
-from annotation_api.runner import preview, run
+from annotation_api.runner import preview
 
 
 def parser():
@@ -18,10 +16,13 @@ def parser():
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--execute", action="store_true")
+    mode.add_argument("--mock", action="store_true")
+    p.add_argument("--data-root")
+    p.add_argument("--plan")
     p.add_argument("--resume", action="store_true")
     p.add_argument("--retry-failed", action="store_true", help="Explicitly retry cached known failures; never unknown delivery")
     p.add_argument("--reviews", help="Optional authoritative human review JSONL")
-    p.add_argument("--max-retries", type=int, default=2)
+    p.add_argument("--max-retries", type=int, default=0)
     p.add_argument("--timeout", type=float, default=60)
     p.add_argument("--request-interval", type=float, default=1)
     p.add_argument("--max-output-tokens", type=int)
@@ -31,14 +32,21 @@ def parser():
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
-        if not args.execute:
-            result = preview(args.input, args.platform, args.limit, args.reviews)
-            return 1 if result["input_error_count"] else 0
-        config = Config.from_args(args)
-        result = run(args.input, config, platform=args.platform, limit=args.limit,
-                     output=args.output, resume=args.resume, reviews_path=args.reviews, retry_failed=args.retry_failed)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 1 if result["failed_count"] or result["input_error_count"] or result["stopped_reason"] else 0
+        if args.execute or args.mock:
+            if args.retry_failed or args.reviews or args.output:
+                raise ValueError("安全执行使用持久目录和人工覆盖，不接受旧输出路径、重试或独立审核文件")
+            from execute_processing import main as guarded_main
+            command = ["--task", "annotation", "--input", args.input, "--platform", args.platform,
+                       "--limit", str(args.limit or 1), "--provider", args.provider, "--max-retries", str(args.max_retries),
+                       "--timeout", str(args.timeout), "--request-interval", str(args.request_interval),
+                       "--mock" if args.mock else "--execute"]
+            for flag, value in (("--model", args.model), ("--data-root", args.data_root), ("--plan", args.plan),
+                                ("--max-output-tokens", args.max_output_tokens)):
+                if value is not None:
+                    command.extend([flag, str(value)])
+            return guarded_main(command)
+        result = preview(args.input, args.platform, args.limit, args.reviews)
+        return 1 if result["input_error_count"] else 0
     except (ValueError, OSError) as exc:
         # Local error messages are controlled; never print SDK exception payloads.
         print(f"Local configuration/storage error ({type(exc).__name__}); check paths, manifest and configuration.", file=sys.stderr)
