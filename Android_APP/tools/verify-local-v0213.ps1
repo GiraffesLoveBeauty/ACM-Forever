@@ -1,4 +1,4 @@
-param([string[]]$Modes=@('imports','drafts','settings','polish','navigation','localthemes','web','spacefeatures','appearance','community','login'))
+param([string[]]$Modes=@('lifecycle','imports','drafts','settings','polish','navigation','localthemes','web','spacefeatures','appearance','community','login'))
 $ErrorActionPreference='Stop'
 $buildRoot=Join-Path $env:TEMP 'acmforever-build-v0.2.0'
 $adb=Join-Path $buildRoot 'sdk\platform-tools\adb.exe'

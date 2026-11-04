@@ -5,7 +5,7 @@ $repoRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $qa=Join-Path $repoRoot 'app\app\build\qa-v0213'
 $dist=Join-Path $repoRoot 'dist'
 $env:JAVA_HOME=Join-Path $buildRoot 'jdk17-verified-v021\jdk-17.0.20.1+1'
-$modes=@('imports','drafts','settings','polish','navigation','localthemes','web','spacefeatures','appearance','community','login')
+$modes=@('lifecycle','imports','drafts','settings','polish','navigation','localthemes','web','spacefeatures','appearance','community','login')
 foreach($mode in $modes){$result=Get-Content -LiteralPath (Join-Path $qa "$mode.txt") -Raw;if($result -notmatch 'PASS:' -or $result -match 'FAIL:'){throw "Unverified UI mode: $mode"}}
 $source=Join-Path $repoRoot 'app\app\src'
 foreach($file in Get-ChildItem -LiteralPath $source -Recurse -File){$relative=[IO.Path]::GetRelativePath($source,$file.FullName);$copy=Join-Path $buildCopy "app\src\$relative";if((Get-FileHash -LiteralPath $file.FullName).Hash -ne (Get-FileHash -LiteralPath $copy).Hash){throw "Stale build: $relative"}}
@@ -18,7 +18,7 @@ foreach($file in Get-ChildItem -LiteralPath (Join-Path $buildCopy 'app\build\tes
     $tests += [int]$suite.testsuite.tests;$failures += [int]$suite.testsuite.failures;$errors += [int]$suite.testsuite.errors
     Copy-Item -LiteralPath $file.FullName -Destination $qa -Force
 }
-if($tests -lt 65 -or $failures -ne 0 -or $errors -ne 0){throw 'Unit tests did not pass'}
+if($tests -lt 67 -or $failures -ne 0 -or $errors -ne 0){throw 'Unit tests did not pass'}
 $lint=Join-Path $buildCopy 'app\build\intermediates\lint_intermediate_text_report\debug\lintReportDebug\lint-results-debug.txt'
 $lintText=Get-Content -LiteralPath $lint -Raw
 if($lintText -notmatch '0 errors, (\d+) warnings'){throw 'Lint errors or missing result'}
@@ -36,7 +36,7 @@ try {
     if($history.currentVersionCode -ne 27 -or $history.entries[0].versionName -ne '0.2.13'){throw 'APK contains stale history'}
     foreach($dex in $archive.Entries | Where-Object {$_.FullName -match '^classes\d*\.dex$'}){
         $stream=$dex.Open();$memory=New-Object IO.MemoryStream
-        try{$stream.CopyTo($memory);$strings=[Text.Encoding]::ASCII.GetString($memory.ToArray());if($strings -match 'LocalSettingsUiSmoke|ReaderSmoke|DraftSwitchUiSmoke|MarkdownImportUiSmoke|updates\.test\.invalid|draft-switch\.test\.invalid|imports\.test\.invalid'){throw 'Test-only code or fixtures found in main APK'}}finally{$stream.Dispose();$memory.Dispose()}
+        try{$stream.CopyTo($memory);$strings=[Text.Encoding]::ASCII.GetString($memory.ToArray());if($strings -match 'LocalSettingsUiSmoke|ReaderSmoke|DraftSwitchUiSmoke|MarkdownImportUiSmoke|LifecycleNetworkUiSmoke|updates\.test\.invalid|draft-switch\.test\.invalid|imports\.test\.invalid|lifecycle\.test\.invalid'){throw 'Test-only code or fixtures found in main APK'}}finally{$stream.Dispose();$memory.Dispose()}
     }
 } finally {$archive.Dispose()}
 $signature=& (Join-Path $buildRoot 'sdk\build-tools\35.0.0\apksigner.bat') verify --verbose --print-certs $apk

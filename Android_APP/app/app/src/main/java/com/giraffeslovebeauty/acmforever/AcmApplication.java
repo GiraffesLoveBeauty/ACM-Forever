@@ -25,7 +25,10 @@ public class AcmApplication extends Application {
         try {
             String base=ApiClient.checkedBaseUrl(preferences.getString("api_base_url",""));
             api.setBaseUrl(base.isEmpty()?getString(R.string.default_api_base_url):base);
-        } catch(IllegalArgumentException e){api.setBaseUrl(getString(R.string.default_api_base_url));}
+        } catch(IllegalArgumentException e){
+            preferences.edit().remove("api_base_url").apply();
+            api.setBaseUrl(getString(R.string.default_api_base_url));
+        }
         api.setNetworkAvailable(this::networkAvailable);
         api.setSessionChanged(() -> {
             drafts.bind(api.isLoggedIn()?api.getBaseUrl()+"/"+api.accountKey():"",api.sessionGeneration());

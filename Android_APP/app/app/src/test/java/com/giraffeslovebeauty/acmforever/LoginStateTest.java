@@ -54,6 +54,25 @@ public class LoginStateTest {
         assertFalse(api.exportSession().isEmpty());
     }
 
+    @Test public void applicationInitializesSavedApiOriginOnce() {
+        TestApplication configured=new TestApplication();
+        configured.preferences.edit().putString("api_base_url","https://saved.test.invalid/").apply();
+        configured.onCreate();
+        assertEquals("https://saved.test.invalid",configured.api().getBaseUrl());
+        assertEquals("https://saved.test.invalid/",configured.preferences.getString("api_base_url",""));
+        assertSame(configured.api(),configured.api());
+    }
+
+    @Test public void applicationRemovesInvalidSavedApiOrigin() {
+        TestApplication configured=new TestApplication();
+        configured.preferences.edit().putString("api_base_url","https://saved.test.invalid/api").apply();
+        configured.onCreate();
+        assertFalse(configured.preferences.contains("api_base_url"));
+        // Android's resource stub returns null here; initialization still must discard
+        // the invalid persisted origin before it can be reused by any Activity.
+        assertEquals("",configured.api().getBaseUrl());
+    }
+
     @Test public void manualLoginKeepsSharedClientAndNeverStoresPassword() {
         assertFalse(application.preferences.getBoolean("save_password", false));
         assertFalse(application.preferences.contains("password_cipher"));

@@ -156,14 +156,8 @@ public final class MainActivity extends Activity {
         cloud = application.drafts();
         api = application.api();
         preferences = getSharedPreferences("acmforever_settings", MODE_PRIVATE);
-        String defaultBase = getString(R.string.default_api_base_url);
-        try {
-            String savedBase = ApiClient.checkedBaseUrl(preferences.getString("api_base_url", ""));
-            api.setBaseUrl(savedBase.isEmpty() ? defaultBase : savedBase);
-        } catch (IllegalArgumentException ignored) {
-            preferences.edit().remove("api_base_url").apply();
-            api.setBaseUrl(defaultBase);
-        }
+        // Application configures the shared client once. Recreating a screen must not
+        // acquire its request monitor while an existing network operation is pending.
 
         navigationOwner=api.sessionGeneration();externalRoot=getIntent().getBooleanExtra("external_navigation",false)||getIntent().hasExtra("web_problem_id")||getIntent().hasExtra("club_post_id")||getIntent().hasExtra("cloud_draft_id");
         getIntent().putExtra("external_navigation",externalRoot);
