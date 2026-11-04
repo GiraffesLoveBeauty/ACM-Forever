@@ -4,20 +4,20 @@
 
 ## 服务器服务管理
 
-仓库部署工作流安装的是 **WYJ 用户的 systemd 用户级服务**。通过 SSH 登录服务器后，以 WYJ 账号执行以下命令；使用 `systemctl --user` 和 `journalctl --user`。
+仓库部署工作流通过公网 SSH 部署到 `root@118.178.192.81`，安装 **系统级 systemd 服务**。以 root 登录新服务器后执行以下命令；使用 `systemctl` 和 `journalctl`。首次部署、密钥配置及旧服务器迁移见 [新服务器部署说明](public-server-deployment.md)。
 
 ```sh
 # 服务状态与最近日志
-systemctl --user status acm-forever-webui.service --no-pager
-journalctl --user -u acm-forever-webui.service -n 100 --no-pager
+systemctl status acm-forever-webui.service --no-pager
+journalctl -u acm-forever-webui.service -n 100 --no-pager
 
 # 持续查看日志，Ctrl+C 结束查看
-journalctl --user -u acm-forever-webui.service -f
+journalctl -u acm-forever-webui.service -f
 
 # 启动、停止、重启：按需要分别执行
-systemctl --user start acm-forever-webui.service
-systemctl --user stop acm-forever-webui.service
-systemctl --user restart acm-forever-webui.service
+systemctl start acm-forever-webui.service
+systemctl stop acm-forever-webui.service
+systemctl restart acm-forever-webui.service
 
 # HTTP 与数据库健康检查
 curl --fail --show-error --max-time 5 http://127.0.0.1:8088/health
@@ -27,20 +27,20 @@ curl --fail --show-error --max-time 5 http://127.0.0.1:8088/health
 
 | 项目 | 默认位置 |
 | --- | --- |
-| 服务代码与工作目录 | `/home/WYJ/acm-forever-feat` |
-| Python | `/home/WYJ/acm-forever-data/venv/bin/python` |
-| 服务环境文件 | `/home/WYJ/acm-forever-data/.env` |
-| 数据库配置 | `ACM_DATABASE_PATH`，部署建议值为 `/home/WYJ/acm-forever-data/acm_forever.db` |
+| 服务代码与工作目录 | `/root/acm-forever-feat` |
+| Python | `/root/acm-forever-data/venv/bin/python` |
+| 服务环境文件 | `/root/acm-forever-data/.env` |
+| 数据库配置 | `ACM_DATABASE_PATH`，部署建议值为 `/root/acm-forever-data/acm_forever.db` |
 | 监听地址 | `127.0.0.1:8088`，由 `ACM_API_HOST` / `ACM_API_PORT` 调整 |
 
-`systemctl --user cat acm-forever-webui.service` 可查看实际的服务定义、工作目录和环境文件位置。服务环境文件不会自动加载到 SSH 终端；下面的数据库工具显式指定数据库路径。
+`systemctl cat acm-forever-webui.service` 可查看实际的服务定义、工作目录和环境文件位置。服务环境文件不会自动加载到 SSH 终端；下面的数据库工具显式指定数据库路径。
 
 ## 查看数据库数据
 
 需要安装 `sqlite3` 命令行工具。将示例路径替换成服务实际使用的 `ACM_DATABASE_PATH`，以只读模式打开：
 
 ```sh
-sqlite3 -readonly /home/WYJ/acm-forever-data/acm_forever.db
+sqlite3 -readonly /root/acm-forever-data/acm_forever.db
 ```
 
 进入 SQLite 交互界面后，按需执行：
@@ -77,18 +77,18 @@ GROUP BY status;
 服务器只部署 `feat/` 的内容，因此在部署目录使用 `api.*` 模块路径：
 
 ```sh
-cd /home/WYJ/acm-forever-feat
+cd /root/acm-forever-feat
 
 # 只读诊断：数据库完整性、外键、图片引用及磁盘空间
-/home/WYJ/acm-forever-data/venv/bin/python -m api.acm_api.maintenance diagnose \
-  --database /home/WYJ/acm-forever-data/acm_forever.db
+/root/acm-forever-data/venv/bin/python -m api.acm_api.maintenance diagnose \
+  --database /root/acm-forever-data/acm_forever.db
 
 # 查看诊断、备份、校验和恢复子命令
-/home/WYJ/acm-forever-data/venv/bin/python -m api.acm_api.maintenance --help
+/root/acm-forever-data/venv/bin/python -m api.acm_api.maintenance --help
 
 # 需要补齐表结构时执行；保留已有数据，正常启动也会自动初始化
-/home/WYJ/acm-forever-data/venv/bin/python -m api.init_db \
-  --database /home/WYJ/acm-forever-data/acm_forever.db
+/root/acm-forever-data/venv/bin/python -m api.init_db \
+  --database /root/acm-forever-data/acm_forever.db
 ```
 
 若服务设置了 `ACM_MARKDOWN_UPLOAD_DIR`，诊断和备份也要传入对应的 `--markdown-dir /实际目录`。完整源码仓库根目录下，模块路径分别为 `feat.api.acm_api.maintenance` 和 `feat.api.init_db`。

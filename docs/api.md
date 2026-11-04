@@ -307,7 +307,7 @@ print(task["status"], task["progress"], task["result"])
 
 成功的题面 HTML（包含样例章节）、纯文本及 `samples` JSON 数组存于 `crawler_problems` 的同一行，没有独立样例表。样例保留输入输出的空格与换行，CF 的逐行 div 和旧版 br 排版会还原为换行。AtCoder 空白处理详见 [采集说明](crawler-samples.md#样例直接保存在题目中)。同时原子更新现有 `recommendations`，使 `GET /api/problems` 和成员题库列表能够展示新题。AtCoder 官方列表不提供估算难度和算法标签，新题的这些信息为空，已有数据在刷新时保留；CF 保存元数据中的 Rating 与 tags，缺失 Rating 为 null。下载、解析或数据库写入失败时保留已有题面与样例，并在已有题目行中记录最近失败。
 
-服务启动会自动建表；也可先在部署目录运行 `python3 -m api.init_db --database /home/WYJ/acm-forever-data/acm_forever.db`，详见 [服务端初始化说明](../feat/api/README.md#单独初始化数据库与题目采集)。
+服务启动会自动建表；也可先在部署目录运行 `python3 -m api.init_db --database /root/acm-forever-data/acm_forever.db`，详见 [服务端初始化说明](../feat/api/README.md#单独初始化数据库与题目采集)。
 
 ## 已下线的 Web 功能
 
