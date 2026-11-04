@@ -22,6 +22,8 @@ PR 复用主线 Web 会话、CSRF 和业务 API，仅为公开成员身份/资�
 
 论坛列表和详情也通过 `api.publicPostsPath(suffix)` 选择移动接口，保留分类、搜索、分页及详情的 `comment_id` 查询参数。只有移动读取接口补充 `author_public_member_id`；发帖、评论、点赞等写操作继续复用现有 Web API。旧服务器能力接口返回 404/405 或明确不支持时，仍用普通接口读取正文，不伪造公开身份。
 
+云端草稿由 Application 在进程内持有。编辑 A 后从草稿列表选择 B，返回旧编辑页时完整同步当前 B 的标题、正文、分类、ID 和草稿代次，并重建输入控件；A 在进入列表前先保存。旧控件的写入和旧页面的 flush 必须匹配绑定代次，迟到的读取、保存、提交、删除及 Markdown 导入不能改写新选草稿。评论 6628388380 的 P1 已用旧构建复现，并补充真实三 Activity 返回与写入记录回归。
+
 缺少接口、无网络、服务器错误、未登录和暂无内容独立处理。已成功请求的页面先显示缓存再后台刷新；持续失败可关闭红色提示，重连成功绿色提示 3 秒关闭。没有缓存时显示真实错误，不伪造业务数据。测试通过不代表生产接口已经部署。
 
 ## 更新渠道与说明
@@ -50,9 +52,9 @@ cd Android_APP/app
 ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
 ```
 
-Windows 现有离线工具链可运行 `Android_APP/tools/build-local-v0213.ps1`、`verify-local-v0213.ps1` 和 `package-local-v0213.ps1`，分别构建、运行九组模拟器检查及核验实际包。脚本使用 `%TEMP%/acmforever-build-v0.2.0` 下已安装的工具和模拟器，不能视为从零安装脚本。调试密钥放 `Android_APP/dist/signing/debug.keystore`；缺少原密钥的机器会生成不同调试签名，不能覆盖已有包。
+Windows 现有离线工具链可运行 `Android_APP/tools/build-local-v0213.ps1`、`verify-local-v0213.ps1` 和 `package-local-v0213.ps1`，分别构建、运行十组模拟器检查及核验实际包。脚本使用 `%TEMP%/acmforever-build-v0.2.0` 下已安装的工具和模拟器，不能视为从零安装脚本。调试密钥放 `Android_APP/dist/signing/debug.keystore`；缺少原密钥的机器会生成不同调试签名，不能覆盖已有包。
 
-`android-ci.yml` 在 App/相关工作流的 PR 变更时执行发布清单 Python 测试和 Android JVM/Lint/构建。`api-tests.yml` 执行 Vue 构建、后端合同和 Web 单测。模拟器九组测试目前是本机验收，不谎称已加入 Actions。
+`android-ci.yml` 在 App/相关工作流的 PR 变更时执行发布清单 Python 测试和 Android JVM/Lint/构建。`api-tests.yml` 执行 Vue 构建、后端合同和 Web 单测。模拟器十组测试目前是本机验收，不谎称已加入 Actions。
 
 ## 正式发布操作（本轮不执行）
 
@@ -76,9 +78,10 @@ Windows 现有离线工具链可运行 `Android_APP/tools/build-local-v0213.ps1`
 | 旧 `UpdateManager.java:303` 生命周期问题 | 旧类仍保留，未把旧实现本身标作修复；Gradle 已将其排除，当前 APK 使用 Application 持有的 `AppUpdates`，Activity 弱引用、解绑和存活检查负责界面回调；更新页面回归覆盖当前流程 |
 | `ApiClient` 排行榜绕过移动接口 | 已按能力选接口，兼容分页保持同一接口；单测和模拟器验证公开身份、资料、帖子及返回榜单 |
 | review 5766008716 的论坛列表/详情 P2 | 两处读取改为 `publicPostsPath`；单测覆盖移动及旧服务器，模拟器分别从列表和详情点击作者、获取资料和帖子后返回，并验证通知 `comment_id` 保留 |
+| [评论 6628388380](https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6628388380) 的恢复编辑页草稿串写 P1 | 恢复时完整同步草稿及控件，CloudDrafts 拒绝旧代次写入/flush；新增 4 项单测和三 Activity 模拟器回归，旧构建先失败、修复后通过，主动触发旧 A 输入回调也不能写入 B |
 
 ## 验证记录
 
 debug 与 release 构建分支均完成单测/Lint/打包及实际清单生成检查；release 分支仅借本机调试密钥验证签名配置，没有正式签名制品发布。最终本机结果见 [安装说明-v0.2.13.md（实际 APK 与回归结果）](../Android_APP/docs/安装说明-v0.2.13.md)。生产更新源、正式私钥构建、远端 APK 下载与真机安装仍需发布验收，本机模拟响应不作为这些流程已通过的证据。
 
-排行榜 review 修复后、论坛修复前的 `fb8f77305a1d1da079d3bbcc5492f95661809038`，API、Android、browser 三项 CI 均已成功。本轮论坛修复将单测增加到 61 项，回归与实际 APK 结果见本版安装说明；新提交的远端检查需按其 head 另行核对。
+草稿修复前的 `a640520971ece41ae84e3180bd5bb64aae911c9c`，API、Android、browser 三项 CI 均已成功。本轮草稿修复将 debug/release 单测各增加到 65 项，十组界面回归和实际 APK 结果见本版安装说明；论坛作者主页与 Activity 重建会话再次通过。新提交的远端检查需按其 head 另行核对。
