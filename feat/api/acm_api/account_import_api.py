@@ -9,8 +9,17 @@ from quart import Blueprint, Response, current_app, jsonify, request
 from . import account_import_service as service
 from .account_import_excel import MAX_FILE_BYTES, MAX_ROWS, MIME, TEMPLATE_VERSION, report_bytes, template_bytes
 from .backend_api import _session_identity, _temporary_password_ttl_hours, admin_required, get_db
+from .database import get_setting, set_setting
 
 account_import_api = Blueprint("account_import_api", __name__, url_prefix="/api/admin/account-imports")
+
+
+async def import_enabled(db):
+    # Read on every request so a saved switch applies across workers and restarts.
+    saved = await get_setting(db, "account_import_enabled")
+    if saved is not None:
+        return saved == "true"
+    return bool(current_app.config.get("ACCOUNT_IMPORT_ENABLED", True))
 
 
 def endpoint(*, enabled=True):
@@ -22,8 +31,8 @@ def endpoint(*, enabled=True):
             try:
                 identity = await _session_identity()
                 await service.actor_snapshot(db, identity)
-                if enabled and not current_app.config.get("ACCOUNT_IMPORT_ENABLED", False):
-                    raise service.ImportError("Excel导入尚未启用，请联系管理员。", "import_disabled", 503)
+                if enabled and not await import_enabled(db):
+                    raise service.ImportError("Excel导入已关闭，请在导入页面开启后重试。", "import_disabled", 503)
                 return await func(db, identity, *args, **kwargs)
             except service.AccountCreationError as exc:
                 return jsonify({"success": False, "code": exc.code, "message": str(exc)}), exc.status
@@ -45,7 +54,19 @@ async def private_response(response):
 async def capabilities(db, identity):
     async with db.execute("SELECT DISTINCT status FROM users WHERE status IS NOT NULL AND TRIM(status)<>'' LIMIT 100") as cursor:
         statuses = [v["status"] for v in await cursor.fetchall()]
-    return jsonify({"enabled": bool(current_app.config.get("ACCOUNT_IMPORT_ENABLED", False)), "template_version": TEMPLATE_VERSION, "max_file_bytes": MAX_FILE_BYTES, "max_rows": MAX_ROWS, "chunk_size": service.CHUNK_SIZE, "preview_ttl_seconds": service.PREVIEW_SECONDS, "execution_ttl_seconds": service.EXECUTION_SECONDS, "temporary_password_ttl_hours": _temporary_password_ttl_hours(), "statuses": statuses})
+    return jsonify({"enabled": await import_enabled(db), "template_version": TEMPLATE_VERSION, "max_file_bytes": MAX_FILE_BYTES, "max_rows": MAX_ROWS, "chunk_size": service.CHUNK_SIZE, "preview_ttl_seconds": service.PREVIEW_SECONDS, "execution_ttl_seconds": service.EXECUTION_SECONDS, "temporary_password_ttl_hours": _temporary_password_ttl_hours(), "statuses": statuses})
+
+
+@account_import_api.patch("/settings")
+@endpoint(enabled=False)
+async def update_settings(db, identity):
+    data = await request.get_json(silent=True)
+    if not isinstance(data, dict) or set(data) != {"enabled"} or not isinstance(data["enabled"], bool):
+        raise service.ImportError("开关设置只接受布尔字段enabled。", "invalid_settings", 400)
+    await db.execute("BEGIN IMMEDIATE")
+    await service.actor_snapshot(db, identity)
+    await set_setting(db, "account_import_enabled", "true" if data["enabled"] else "false")
+    return jsonify({"enabled": data["enabled"]})
 
 
 def workbook_response(content, filename):

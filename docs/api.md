@@ -346,7 +346,7 @@ print(task["status"], task["progress"], task["result"])
 
 成功的题面 HTML（包含样例章节）、纯文本及 `samples` JSON 数组存于 `crawler_problems` 的同一行，没有独立样例表。样例保留输入输出的空格与换行，CF 的逐行 div 和旧版 br 排版会还原为换行。AtCoder 空白处理详见 [采集说明](crawler-samples.md#样例直接保存在题目中)。同时原子更新现有 `recommendations`，使 `GET /api/problems` 和成员题库列表能够展示新题。AtCoder 官方列表不提供估算难度和算法标签，新题的这些信息为空，已有数据在刷新时保留；CF 保存元数据中的 Rating 与 tags，缺失 Rating 为 null。下载、解析或数据库写入失败时保留已有题面与样例，并在已有题目行中记录最近失败。
 
-服务启动会自动建表；也可先在部署目录运行 `python3 -m api.init_db --database /home/WYJ/acm-forever-data/acm_forever.db`，详见 [服务端初始化说明](../feat/api/README.md#单独初始化数据库与题目采集)。
+服务启动会自动建表；也可先在部署目录运行 `python3 -m api.init_db --database /root/acm-forever-data/acm_forever.db`，详见 [服务端初始化说明](../feat/api/README.md#单独初始化数据库与题目采集)。
 
 ## 已下线的 Web 功能
 
@@ -596,11 +596,12 @@ CF 持久 job 成员捕获 epoch，closed 分项不能被晚到成功覆盖；�
 
 ## Excel 批量开户与 OJ 资料导入
 
-管理入口 `/admin.html?section=accounts&tab=import`。部署设置 `ACM_ACCOUNT_IMPORT_ENABLED=true` 后允许新上传及执行，默认关闭。全部接口要求具名个人 Web `admin/root`，旧共享 root、普通成员和匿名请求不能使用。写接口沿用 Cookie 与 `X-CSRF-Token`；表格不能指定角色、密码或 QQBot 管理员。
+管理入口 `/admin.html?section=accounts&tab=import`。默认允许新上传及执行，页面顶部提供全站开关。设置持久化到 `settings.account_import_enabled`，对后续请求立即生效并跨进程、服务重启保留。尚未保存页面设置时才采用环境变量 `ACM_ACCOUNT_IMPORT_ENABLED`，其默认值为 `true`；已保存的页面设置优先。全部接口要求具名个人 Web `admin/root`，旧共享 root、普通成员和匿名请求不能使用。写接口沿用 Cookie 与 `X-CSRF-Token`；表格不能指定角色、密码或 QQBot 管理员。
 
 | 方法与路径 | 功能 |
 | --- | --- |
-| `GET /api/admin/account-imports/capabilities` | 开关、模板版本、5 MiB/200 行限制、每段 10 人和有效期 |
+| `GET /api/admin/account-imports/capabilities` | 当前有效开关、模板版本、5 MiB/200 行限制、每段 10 人和有效期 |
+| `PATCH /api/admin/account-imports/settings` | 仅接受 `{ "enabled": true/false }`，保存全站开关并返回 `{ "enabled": true/false }`；关闭状态下仍可调用以重新开启 |
 | `GET /api/admin/account-imports/template` | 下载 `account-import-v1.xlsx` |
 | `POST /api/admin/account-imports/preview` | 仅一个 multipart `file`，不接受其他表单字段；201 返回预检摘要 |
 | `GET /api/admin/account-imports/{id}` | 无密码摘要、冻结范围、恢复标识及当前处理段 |
@@ -609,7 +610,7 @@ CF 持久 job 成员捕获 epoch，closed 分项不能被晚到成功覆盖；�
 | `POST /api/admin/account-imports/{id}/cancel` | 空对象请求，停止未处理行，保留已创建账号 |
 | `GET /api/admin/account-imports/{id}/report` | 无密码、强制字符串单元格的 `.xlsx` 报告，到期返回 410 |
 
-关闭开关后仍可查询、取消及下载未过期报告。默认只有同一账号代际的操作者可访问；root 只读审计其他操作者批次，不能接管提交。凭据版本变化后旧批次只读。
+开关设置只接受一个真正的 JSON 布尔字段 `enabled`；字符串、数值、空对象和额外字段均返回 `400 invalid_settings`。必须使用具名 Web `admin/root` 及有效 CSRF，普通成员、匿名和旧共享 root 不能修改。关闭后模板下载、新上传及后续提交返回 `503 import_disabled`；正在处理的一段可能完成，已创建账号不撤销。关闭开关后仍可查询、取消及下载未过期报告。默认只有同一账号代际的操作者可访问；root 只读审计其他操作者批次，不能接管提交。凭据版本变化后旧批次只读。
 
 首次确认只接受以下字段：
 
@@ -622,7 +623,7 @@ CF 持久 job 成员捕获 epoch，closed 分项不能被晚到成功覆盖；�
 }
 ```
 
-有新 OJ 写入时必须确认对应关系。所选行只能来自该批次且可执行，已有成员只补开户；错误、占用、已有/停用/注销账号不覆盖。确认时重新检查成员快照、绑定占用和管理员权限。
+有新 OJ 写入时必须确认对应关系。所选行只能来自该批次且可执行，已有成员只补开户，已有/停用/注销账号不覆盖。OJ 可留空；OJ 格式/类型错误、同表重复、预检或执行时已占用均仅跳过该平台绑定，写入逐行 `warnings`，不阻止合法 QQ 开户。QQ 必须为 4–12 位非零开头数字且同表不重复；其他安全与生命周期限制不变。确认时重新检查成员快照、绑定占用和管理员权限。
 
 继续请求只接受：
 
@@ -639,9 +640,9 @@ CF 持久 job 成员捕获 epoch，closed 分项不能被晚到成功覆盖；�
 
 同幂等键同请求正在处理返回 202；结束后重放返回无密码结果；同键不同内容返回 409。换幂等键不能绕过处理段互斥或冻结范围。刷新恢复不自动继续写入。
 
-创建响应的 `credentials` 只含本请求新创建账号的 `row_id/qq_id/name/temporary_password/expires_at`。`credentials_replayed=false`；摘要、行、报告和重放均不提供明文。服务器不持久保存可恢复密码，也不能保证客户端收到原始响应。响应丢失后先查成功名单，再走已有受控重新发放入口，不能盲目重置。
+创建响应的 `credentials` 只含本请求新创建账号的 `row_id/qq_id/name/real_name/username/temporary_password/expires_at`。`real_name` 为新成员的导入姓名或已有成员档案姓名（可空），`name` 仍为昵称，`username` 为 Web 登录账号（当前等于 QQ）。`credentials_replayed=false`；摘要、行、报告和重放均不提供明文。服务器不持久保存可恢复密码，也不能保证客户端收到原始响应。响应丢失后先查成功名单，再走已有受控重新发放入口，不能盲目重置。
 
-所有导入响应 `Cache-Control: no-store`，下载设置 Excel MIME、固定文件名和 `nosniff`。表格报告不含密码、公式或外链；凭据文本仅在当前浏览器内存生成。
+所有导入响应 `Cache-Control: no-store`，下载设置 Excel MIME、固定文件名和 `nosniff`。表格报告不含密码、公式或外链；凭据文本及 `account-import-credentials.xlsx` 仅在当前浏览器内存生成；Excel 包含 `QQ号/姓名/账号/初始密码` 四个文本列，汇总本页实际领取的成功凭据，不新增可再次下载明文的服务端接口。
 
 关键错误码：`named_admin_required/actor_changed`（403）、`batch_not_found`（404）、`idempotency_conflict/batch_busy/selection_changed/account_changed`（409）、`batch_expired/report_expired`（410）、`file_size`（413）、`invalid_workbook/unsafe_content/resource_limit/parse_timeout`（422）、`parse_busy/hash_busy/capacity_limit`（429）、`import_disabled`（503）。字段或选择格式错误返回 400。行级冲突放入对应行结果，不将其他已创建行回滚。
 

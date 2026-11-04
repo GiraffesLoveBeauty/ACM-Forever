@@ -241,7 +241,7 @@ async def preview(db, identity, content, parsed, ttl_hours):
             errors.append("同表QQ重复，所有重复行均不执行")
         if member:
             ignored = [label for label, field, _ in COLUMNS[1:] if payload[field] and payload[field] != str(member.get(field) or "")]
-            payload = {"qq_id": qq_id, "name": member["name"]}
+            payload = {"qq_id": qq_id, "name": member["name"], "real_name": member.get("real_name") or ""}
             if ignored:
                 warnings.append("已有成员只补开户，忽略表内资料和OJ，不改原档案")
         else:
@@ -254,11 +254,16 @@ async def preview(db, identity, content, parsed, ttl_hours):
                     try:
                         payload[field] = binding_service.normalize_account(platform, payload[field])
                     except binding_service.BindingError as exc:
-                        errors.append(f"{binding_service.LABELS[platform]}：{exc}")
-                    if payload[field].casefold() in occupancy[field]:
-                        errors.append(f"{binding_service.LABELS[platform]}账号已被占用")
-                    if oj_duplicates[field][payload[field].casefold()] > 1:
-                        errors.append(f"同表{binding_service.LABELS[platform]}账号重复")
+                        warnings.append(f"{binding_service.LABELS[platform]}：已跳过绑定（{exc}）")
+                        payload[field] = ""
+                    if payload[field] and payload[field].casefold() in occupancy[field]:
+                        warnings.append(f"{binding_service.LABELS[platform]}账号已被占用，已跳过绑定")
+                        payload[field] = ""
+                    if payload[field] and oj_duplicates[field][payload[field].casefold()] > 1:
+                        warnings.append(f"同表{binding_service.LABELS[platform]}账号重复，已跳过绑定")
+                        payload[field] = ""
+                    if not payload[field]:
+                        ignored.append(next(label for label, key, _ in COLUMNS if key == field))
             if any(payload.get(field) for _, field, _ in COLUMNS[5:]):
                 warnings.append("OJ由管理员录入，尚未核验本人归属，尚未同步")
         if action == "blocked_closed":
@@ -371,11 +376,22 @@ async def commit(db, identity, batch_id, data):
                 await db.execute("BEGIN IMMEDIATE")
                 await _lease_valid(db, batch, chunk, identity, now)
                 payload = json.loads(current["payload_json"])
+                warnings = json.loads(current["warnings_json"])
+                ignored = json.loads(current["ignored_json"])
+                if current["action"] == "create_member_and_account":
+                    # The write lock makes the occupancy recheck and creation atomic.
+                    # Optional OJ bindings must never turn a valid QQ into a failed account.
+                    for platform in binding_service.LABELS:
+                        _, field, _ = binding_service.platform_spec(platform)
+                        if payload.get(field) and await row(db, f"SELECT 1 FROM users WHERE LOWER(TRIM({field}))=LOWER(?) LIMIT 1", (payload[field],)):
+                            payload[field] = ""
+                            warnings.append(f"{binding_service.LABELS[platform]}账号在预检后被占用，已跳过绑定")
+                            ignored.append(next(label for label, key, _ in COLUMNS if key == field))
                 await create_import_account(db, payload, current["action"], current["snapshot_hash"], password_hash, actor=identity["qq_id"], batch_id=batch_id, now=now, expires_at=expires)
                 await _lease_valid(db, batch, chunk, identity, int(time.time()))
-                await db.execute("UPDATE account_import_rows SET status='created',chunk_id=?,result_code='created',created_account_at=?,attempt_count=attempt_count+1 WHERE id=?", (chunk["id"], now, row_id))
+                await db.execute("UPDATE account_import_rows SET status='created',chunk_id=?,result_code='created',created_account_at=?,payload_json=?,warnings_json=?,ignored_json=?,attempt_count=attempt_count+1 WHERE id=?", (chunk["id"], now, encode(payload), encode(warnings), encode(ignored), row_id))
                 await db.commit()
-                credentials.append({"row_id": row_id, "qq_id": current["qq_id"], "name": payload["name"], "temporary_password": password, "expires_at": expires})
+                credentials.append({"row_id": row_id, "qq_id": current["qq_id"], "name": payload["name"], "real_name": payload.get("real_name", ""), "username": current["qq_id"], "temporary_password": password, "expires_at": expires})
             except (AccountCreationError, sqlite3.IntegrityError) as exc:
                 await db.rollback()
                 if isinstance(exc, AccountCreationError) and exc.code in {"actor_changed", "lease_lost", "named_admin_required"}:

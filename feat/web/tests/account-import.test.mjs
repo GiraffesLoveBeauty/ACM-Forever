@@ -4,6 +4,7 @@ import { JSDOM } from 'jsdom';
 import { h } from 'vue';
 import { RouterView } from 'vue-router';
 import { api, setAuth } from '../src/lib/api.js';
+import { readStoredWorkbook } from './helpers/xlsx.mjs';
 import { cleanupCompiled, find, loadSfc, mount, settle, textOf } from './helpers/vue-harness.mjs';
 const Import = (await import(await loadSfc('src/admin/AccountImport.vue'))).default;
 const Preview = (
@@ -30,6 +31,8 @@ const credential = {
   row_id: 'row-0',
   qq_id: '10000084',
   name: '合成成员',
+  real_name: '合成姓名',
+  username: '10000084',
   temporary_password: 'Synthetic-secret!84',
   expires_at: 1900000000,
 };
@@ -58,7 +61,16 @@ const keys = [
 const original = new Map(
   keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]),
 );
-let dom, mounted, calls, serverBatch, serverRows, commit, guard, releases;
+let dom,
+  mounted,
+  calls,
+  serverBatch,
+  serverRows,
+  serverEnabled,
+  saveSettings,
+  commit,
+  guard,
+  releases;
 beforeEach(() => {
   dom = new JSDOM('<!doctype html><body></body>', {
     url: 'http://127.0.0.1/admin.html?section=accounts&tab=import',
@@ -74,6 +86,11 @@ beforeEach(() => {
   calls = [];
   serverBatch = batch();
   serverRows = [row(0)];
+  serverEnabled = true;
+  saveSettings = async (options) => {
+    serverEnabled = JSON.parse(options.body).enabled;
+    return json({ enabled: serverEnabled });
+  };
   guard = null;
   releases = [];
   setAuth(
@@ -91,7 +108,8 @@ beforeEach(() => {
   globalThis.fetch = async (url, options = {}) => {
     calls.push({ url, options });
     if (url.endsWith('/capabilities'))
-      return json({ enabled: true, max_rows: 200, max_file_bytes: 5 * 1024 * 1024 });
+      return json({ enabled: serverEnabled, max_rows: 200, max_file_bytes: 5 * 1024 * 1024 });
+    if (url.endsWith('/settings')) return saveSettings(options);
     if (url.endsWith('/commit')) return json(await commit(options));
     if (url.includes('/rows?')) return json({ items: serverRows, total: serverRows.length });
     if (url.endsWith('/' + id)) return json(serverBatch);
@@ -265,6 +283,36 @@ test('credentials remain text and failed clipboard copy has a manual fallback', 
   assert.match(textarea.props.value, /Synthetic-secret!84/);
   assert.equal(find(mounted.root, (n) => n.type === 'input')[0].props.type, 'password');
 });
+test('Excel export uses only received credentials locally without a server request', async (t) => {
+  let blob, anchor;
+  t.mock.method(URL, 'createObjectURL', (value) => {
+    blob = value;
+    return 'blob:synthetic';
+  });
+  const create = document.createElement.bind(document);
+  t.mock.method(document, 'createElement', (tag, ...args) => {
+    if (tag === 'a') return (anchor = { click() {} });
+    return create(tag, ...args);
+  });
+  const Component = { render: () => h(Results, { credentials: [credential], missing: 1 }) };
+  await open(Component, '/admin.html');
+  const before = calls.length;
+  await click(buttons('导出开户 Excel')[0]);
+  assert.equal(anchor.download, 'account-import-credentials.xlsx');
+  assert.equal(calls.length, before);
+  const { rows } = await readStoredWorkbook(blob);
+  assert.deepEqual(rows, [
+    ['QQ号', '姓名', '账号', '初始密码'],
+    ['10000084', '合成姓名', '10000084', credential.temporary_password],
+  ]);
+  assert.match(textOf(mounted.root), /本页未领取其初始密码/);
+});
+test('restored results with missing passwords cannot export fabricated credentials', async () => {
+  const Component = { render: () => h(Results, { credentials: [], missing: 2 }) };
+  await open(Component, '/admin.html');
+  assert.equal(buttons('导出开户 Excel').length, 0);
+  assert.match(textOf(mounted.root), /服务端不重放密码/);
+});
 test('blob downloads use the same API session and CSRF handling', async () => {
   const data = await api('/admin/account-imports/template', { responseType: 'blob' });
   assert.ok(data instanceof Blob);
@@ -297,4 +345,140 @@ test('an earlier batch response cannot restore credentials after the recovery UR
     0,
   );
   assert.equal(mounted.router.currentRoute.value.query.import_id, undefined);
+});
+
+const importSwitch = () => find(mounted.root, (n) => n.props.role === 'switch')[0];
+const settingsCalls = () => calls.filter((c) => c.url.endsWith('/settings'));
+
+test('disabled imports keep a visible switch that enables upload without creating accounts', async () => {
+  serverEnabled = false;
+  await open(Import, '/admin.html?section=accounts&tab=import');
+  assert.equal(importSwitch().props['aria-checked'], false);
+  assert.equal(find(mounted.root, (n) => n.type === 'input' && n.props.type === 'file').length, 0);
+  await click(importSwitch());
+  assert.equal(importSwitch().props['aria-checked'], true);
+  assert.equal(find(mounted.root, (n) => n.type === 'input' && n.props.type === 'file').length, 1);
+  assert.equal(settingsCalls()[0].options.method, 'PATCH');
+  assert.deepEqual(JSON.parse(settingsCalls()[0].options.body), { enabled: true });
+  assert.equal(settingsCalls()[0].options.headers['X-CSRF-Token'], 'synthetic-csrf');
+  assert.equal(calls.filter((c) => /\/(preview|commit)$/.test(c.url)).length, 0);
+});
+
+test('confirmed closing survives remount and can be reopened without auto-submitting a preview', async () => {
+  await open();
+  await selectPage();
+  await click(importSwitch());
+  assert.equal(importSwitch().props['aria-checked'], false);
+  assert.equal(buttons('确认创建所选账号')[0].props.disabled, true);
+  assert.match(textOf(mounted.root), /已有批次仍可查询结果/);
+  assert.deepEqual(JSON.parse(settingsCalls()[0].options.body), { enabled: false });
+  mounted.unmount();
+  await open();
+  assert.equal(importSwitch().props['aria-checked'], false);
+  await click(importSwitch());
+  assert.equal(importSwitch().props['aria-checked'], true);
+  assert.equal(calls.filter((c) => c.url.endsWith('/commit')).length, 0);
+});
+
+test('cancelling closure keeps the confirmed switch and sends no write', async () => {
+  globalThis.confirm = () => false;
+  await open();
+  await click(importSwitch());
+  assert.equal(importSwitch().props['aria-checked'], true);
+  assert.equal(settingsCalls().length, 0);
+});
+
+test('failed setting save keeps the old state and allows an explicit retry', async () => {
+  saveSettings = async () => json({ message: '设置保存失败，请重试。' }, 503);
+  await open();
+  await click(importSwitch());
+  assert.equal(importSwitch().props['aria-checked'], true);
+  assert.equal(importSwitch().props.disabled, false);
+  assert.match(textOf(mounted.root), /设置保存失败/);
+  assert.equal(settingsCalls().length, 1);
+});
+
+test('saving locks the switch and upload actions and ignores double clicks', async () => {
+  let release;
+  const held = new Promise((done) => {
+    release = done;
+  });
+  releases.push(release);
+  saveSettings = async () => {
+    await held;
+    return json({ enabled: false });
+  };
+  await open();
+  const saving = importSwitch().props.onClick({ button: 0, preventDefault() {} });
+  await settle();
+  assert.equal(importSwitch().props.disabled, true);
+  assert.equal(buttons('下载 Excel 模板')[0].props.disabled, true);
+  assert.match(textOf(importSwitch()), /正在保存/);
+  await click(importSwitch());
+  assert.equal(settingsCalls().length, 1);
+  release();
+  await saving;
+  await settle();
+  assert.equal(importSwitch().props['aria-checked'], false);
+});
+
+test('an active creation locks the global switch until its result is known', async () => {
+  let release;
+  const held = new Promise((done) => {
+    release = done;
+  });
+  releases.push(release);
+  commit = async () => {
+    await held;
+    return batch({ status: 'completed' });
+  };
+  await open();
+  await selectPage();
+  const creating = buttons('确认创建所选账号')[0].props.onClick({ button: 0, preventDefault() {} });
+  await settle();
+  assert.equal(importSwitch().props.disabled, true);
+  await click(importSwitch());
+  assert.equal(settingsCalls().length, 0);
+  release();
+  await creating;
+});
+
+test('a late switch save cannot restore controls after logout', async () => {
+  let release;
+  const held = new Promise((done) => {
+    release = done;
+  });
+  releases.push(release);
+  saveSettings = async () => {
+    await held;
+    return json({ enabled: false });
+  };
+  await open();
+  const saving = importSwitch().props.onClick({ button: 0, preventDefault() {} });
+  await settle();
+  setAuth({ authenticated: false }, true);
+  await settle();
+  release();
+  await saving;
+  await settle();
+  assert.equal(importSwitch(), undefined);
+});
+
+test('another administrator closing imports is reflected after a rejected commit without retrying', async () => {
+  const fetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    if (url.endsWith('/commit')) {
+      calls.push({ url, options });
+      return json({ code: 'import_disabled', message: 'Excel 导入已关闭。' }, 503);
+    }
+    return fetch(url, options);
+  };
+  await open();
+  await selectPage();
+  await click(buttons('确认创建所选账号')[0]);
+  assert.equal(importSwitch().props['aria-checked'], false);
+  assert.equal(buttons('确认创建所选账号')[0].props.disabled, true);
+  assert.match(textOf(mounted.root), /Excel 导入已关闭/);
+  assert.doesNotMatch(textOf(mounted.root), /本次请求结果尚未确认/);
+  assert.equal(calls.filter((c) => c.url.endsWith('/commit')).length, 1);
 });

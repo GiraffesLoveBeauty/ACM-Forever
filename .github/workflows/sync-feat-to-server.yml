@@ -1,6 +1,6 @@
 # Required repository secrets:
-# - TS_AUTHKEY: Tailscale auth key for the GitHub Actions runner.
-# - ACM_FOREVER_SERVER_SSH_KEY: private SSH key authorized for WYJ@100.91.79.54.
+# - ACM_FOREVER_SERVER_SSH_KEY: private SSH key authorized for root@118.178.192.81.
+# - ACM_FOREVER_SERVER_FINGERPRINT: trusted SHA256 fingerprint of the server's SSH host key.
 name: Sync feat directory to server
 
 on:
@@ -11,6 +11,12 @@ on:
       - 'feat/**'
       - '.github/workflows/sync-feat-to-server.yml'
   workflow_dispatch:
+    inputs:
+      start_service:
+        description: 'Start the service after deployment (leave off until data migration is complete)'
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
@@ -20,8 +26,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  SERVER_HOST: 100.91.79.54
-  SERVER_USER: WYJ
+  SERVER_HOST: 118.178.192.81
+  SERVER_USER: root
   SERVER_PORT: 22
   ARCHIVE_NAME: acm-forever-feat.tar.gz
 
@@ -29,10 +35,25 @@ jobs:
   sync:
     name: Sync feat directory
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ACM_DEPLOY_START_SERVICE: ${{ github.event_name != 'workflow_dispatch' || inputs.start_service }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Check deployment credentials
+        shell: bash
+        env:
+          SERVER_SSH_KEY: ${{ secrets.ACM_FOREVER_SERVER_SSH_KEY }}
+          SERVER_FINGERPRINT: ${{ secrets.ACM_FOREVER_SERVER_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SERVER_SSH_KEY" ] || [ -z "$SERVER_FINGERPRINT" ]; then
+            echo "::error::Set ACM_FOREVER_SERVER_SSH_KEY and ACM_FOREVER_SERVER_FINGERPRINT in repository Actions secrets."
+            exit 1
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -50,12 +71,6 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
 
-      - name: Connect to Tailscale
-        uses: tailscale/github-action@v3
-        with:
-          authkey: ${{ secrets.TS_AUTHKEY }}
-          tags: tag:ci
-
       - name: Verify server connection
         shell: bash
         run: |
@@ -67,7 +82,7 @@ jobs:
             fi
             sleep 5
           done
-          echo "Unable to reach ${SERVER_HOST}:${SERVER_PORT} through Tailscale."
+          echo "::error::Unable to reach ${SERVER_HOST}:${SERVER_PORT} over public SSH. Check the server security group and firewall."
           exit 1
 
       - name: Package feat directory
@@ -84,9 +99,10 @@ jobs:
           host: ${{ env.SERVER_HOST }}
           username: ${{ env.SERVER_USER }}
           key: ${{ secrets.ACM_FOREVER_SERVER_SSH_KEY }}
+          fingerprint: ${{ secrets.ACM_FOREVER_SERVER_FINGERPRINT }}
           port: ${{ env.SERVER_PORT }}
           source: ${{ env.ARCHIVE_NAME }}
-          target: /tmp/
+          target: /root/
           overwrite: true
           timeout: 60s
           command_timeout: 5m
@@ -97,17 +113,46 @@ jobs:
           host: ${{ env.SERVER_HOST }}
           username: ${{ env.SERVER_USER }}
           key: ${{ secrets.ACM_FOREVER_SERVER_SSH_KEY }}
+          fingerprint: ${{ secrets.ACM_FOREVER_SERVER_FINGERPRINT }}
           port: ${{ env.SERVER_PORT }}
           timeout: 60s
-          command_timeout: 5m
-          script_stop: true
+          command_timeout: 15m
+          envs: ACM_DEPLOY_START_SERVICE
           script: |
             set -eu
 
-            target="/home/WYJ/acm-forever-feat"
-            archive="/tmp/acm-forever-feat.tar.gz"
-            stage="$(mktemp -d /home/WYJ/.acm-forever-feat.stage.XXXXXX)"
-            backup="/home/WYJ/.acm-forever-feat.backup.$$"
+            if [ "$(id -u)" -ne 0 ]; then
+              echo "Deployment must run as root."
+              exit 1
+            fi
+            for executable in python3 curl tar systemctl; do
+              if ! command -v "$executable" >/dev/null 2>&1; then
+                echo "Missing server dependency: $executable. See docs/public-server-deployment.md."
+                exit 1
+              fi
+            done
+
+            target="/root/acm-forever-feat"
+            archive="/root/acm-forever-feat.tar.gz"
+            data_dir="/root/acm-forever-data"
+            env_file="$data_dir/.env"
+            service_dir="/etc/systemd/system"
+            start_service="${ACM_DEPLOY_START_SERVICE:-true}"
+            case "$start_service" in
+              true|false) ;;
+              *) echo "Invalid ACM_DEPLOY_START_SERVICE value."; exit 1 ;;
+            esac
+            if [ "$start_service" = true ] && [ ! -s "$env_file" ]; then
+              echo "Create $env_file and restore the database/uploads before starting the service."
+              exit 1
+            fi
+            if [ "$start_service" = false ] && systemctl is-active --quiet acm-forever-webui.service; then
+              echo "The service is already running. Enable start_service for a normal deployment."
+              exit 1
+            fi
+
+            stage="$(mktemp -d /root/.acm-forever-feat.stage.XXXXXX)"
+            backup="/root/.acm-forever-feat.backup.$$"
             had_previous=0
 
             cleanup() {
@@ -127,6 +172,14 @@ jobs:
             test -s "$archive"
             tar -tzf "$archive" >/dev/null
             tar -xzf "$archive" -C "$stage"
+            test -s "$stage/web/dist/index.html"
+            test -s "$stage/api/deploy/acm-forever-webui.service"
+
+            mkdir -p "$data_dir" "$service_dir"
+            if [ ! -x "$data_dir/venv/bin/python" ]; then
+              python3 -m venv "$data_dir/venv"
+            fi
+            "$data_dir/venv/bin/python" -m pip install -r "$stage/api/requirements.txt"
 
             if [ -e "$target" ]; then
               mv "$target" "$backup"
@@ -135,33 +188,28 @@ jobs:
             mv "$stage" "$target"
             echo "Synced feat directory to $target"
 
-            env_file="/home/WYJ/acm-forever-data/.env"
             service_source="$target/api/deploy/acm-forever-webui.service"
-            service_dir="/home/WYJ/.config/systemd/user"
-            if [ -f "$env_file" ] && [ -f "$service_source" ]; then
-              mkdir -p /home/WYJ/acm-forever-data "$service_dir"
-              if [ ! -x /home/WYJ/acm-forever-data/venv/bin/python ]; then
-                python3 -m venv /home/WYJ/acm-forever-data/venv
-              fi
-              /home/WYJ/acm-forever-data/venv/bin/pip install -r "$target/api/requirements.txt"
-              install -m 0644 "$service_source" "$service_dir/acm-forever-webui.service"
-              systemctl --user daemon-reload
-              systemctl --user enable acm-forever-webui.service
-              systemctl --user restart acm-forever-webui.service
-              for attempt in $(seq 1 20); do
-                if systemctl --user is-active --quiet acm-forever-webui.service \
-                  && curl --fail --silent --show-error --max-time 3 \
-                    http://127.0.0.1:8088/health >/dev/null; then
-                  echo "ACM-Forever WebUI is healthy on port 8088."
-                  break
-                fi
-                if [ "$attempt" -eq 20 ]; then
-                  echo "ACM-Forever WebUI failed to become healthy. Recent service log:"
-                  journalctl --user -u acm-forever-webui.service -n 60 --no-pager
-                  exit 1
-                fi
-                sleep 2
-              done
-            else
-              echo "WebUI service not started: create $env_file before enabling deployment startup."
+            install -m 0644 "$service_source" "$service_dir/acm-forever-webui.service"
+            systemctl daemon-reload
+            if [ "$start_service" = false ]; then
+              echo "Code, dependencies and systemd unit installed. Service startup was explicitly disabled."
+              echo "Restore the database/uploads, configure $env_file, then rerun with start_service enabled."
+              exit 0
             fi
+
+            systemctl enable acm-forever-webui.service
+            systemctl restart acm-forever-webui.service
+            for attempt in $(seq 1 20); do
+              if systemctl is-active --quiet acm-forever-webui.service \
+                && curl --fail --silent --show-error --max-time 3 \
+                  http://127.0.0.1:8088/health >/dev/null; then
+                echo "ACM-Forever WebUI is healthy on port 8088."
+                break
+              fi
+              if [ "$attempt" -eq 20 ]; then
+                echo "ACM-Forever WebUI failed to become healthy. Recent service log:"
+                journalctl -u acm-forever-webui.service -n 60 --no-pager
+                exit 1
+              fi
+              sleep 2
+            done

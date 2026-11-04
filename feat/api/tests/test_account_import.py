@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, patch
 
 import aiosqlite
 from openpyxl import load_workbook
+from openpyxl.packaging.custom import StringProperty
 from werkzeug.datastructures import FileStorage
 
 from feat.api.app import create_app
@@ -54,10 +55,40 @@ class WorkbookTests(unittest.TestCase):
 
     def test_numeric_precision_types_and_scientific_notation(self):
         data = parse_workbook(workbook([["10000084", "", "", "", "", 123], [True], ["1e8"], ["10000085", "", "", "", "", "", 10**16]]))
-        self.assertTrue(data[0]["errors"])
+        self.assertFalse(data[0]["errors"])
+        self.assertIn("已跳过绑定", " ".join(data[0]["warnings"]))
         self.assertTrue(data[1]["errors"])
         self.assertEqual(data[2]["payload"]["qq_id"], "1e8")  # QQ validation is shared by the service.
-        self.assertTrue(data[3]["errors"])
+        self.assertFalse(data[3]["errors"])
+        self.assertEqual(data[3]["payload"]["luogu_id"], "")
+        self.assertIn("已跳过绑定", " ".join(data[3]["warnings"]))
+
+    def test_office_metadata_and_empty_directories_are_accepted(self):
+        book = load_workbook(io.BytesIO(workbook([["10000084"]])))
+        book.custom_doc_props.append(StringProperty(name="KSOProductBuildVer", value="Synthetic-only"))
+        output = io.BytesIO(); book.save(output)
+        with zipfile.ZipFile(output, "a") as archive:
+            for name in ("_rels/", "docProps/", "xl/", "xl/_rels/", "xl/theme/", "xl/worksheets/"):
+                archive.writestr(name, b"")
+        parsed = parse_workbook(output.getvalue())
+        self.assertEqual(parsed[0]["payload"]["qq_id"], "10000084")
+        self.assertFalse(parsed[0]["errors"])
+
+    def test_metadata_compatibility_does_not_allow_unsafe_entries(self):
+        for name, content in [("_rels/", b"not empty"), ("xl/unexpected/", b""), ("docProps/custom.xml", b'<!DOCTYPE x [<!ENTITY e "unsafe">]><x>&e;</x>'), ("docProps/custom.xml", b'<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties"><property><blob/></property></Properties>')]:
+            with self.subTest(name=name, content=content):
+                output = io.BytesIO(workbook([["10000084"]]))
+                with zipfile.ZipFile(output, "a") as archive:
+                    archive.writestr(name, content)
+                with self.assertRaises(ExcelError):
+                    parse_workbook(output.getvalue())
+        book = load_workbook(io.BytesIO(workbook([["10000084"]])))
+        book.custom_doc_props.append(StringProperty(name="KSOProductBuildVer", value="Synthetic-only"))
+        output = io.BytesIO(); book.save(output)
+        for target in (b'TargetMode="External" Target="https://invalid.example/"', b'Target="../docProps/custom.xml"', b'Target="xl/workbook.xml"'):
+            unsafe = rewrite(output.getvalue(), lambda name, raw: raw.replace(b'Target="docProps/custom.xml"', target) if name == '_rels/.rels' else raw)
+            with self.assertRaises(ExcelError):
+                parse_workbook(unsafe)
 
     def test_formula_and_external_relationship_rejected(self):
         for content in [workbook([["10000084", "=1+1"]]), rewrite(workbook([["10000084"]]), lambda name, raw: raw.replace(b'Target="styles.xml"', b'TargetMode="External" Target="https://invalid.example/"') if name == 'xl/_rels/workbook.xml.rels' else raw)]:
@@ -153,6 +184,8 @@ class AccountImportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0]['name'],'10000084')
         result = await self.execute(batch,rows)
         self.assertEqual(result['summary']['created'],1)
+        self.assertEqual(result['credentials'][0]['real_name'], '合成姓名')
+        self.assertEqual(result['credentials'][0]['username'], '10000084')
         password = result['credentials'][0]['temporary_password']
         self.assertIsNone(validate_password(password))
         db = await self.db()
@@ -174,13 +207,15 @@ class AccountImportTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_existing_member_only_receives_account_preserving_all_evidence(self):
         db = await self.db()
-        await db.execute("INSERT INTO users(qq_id,name,school,cf_handle) VALUES('10000084','原昵称','原学校','Original84')")
+        await db.execute("INSERT INTO users(qq_id,name,real_name,school,cf_handle) VALUES('10000084','原昵称','原姓名','原学校','Original84')")
         await db.execute("INSERT INTO submissions(user_qq_id,platform,problem_id,submit_time) VALUES('10000084','codeforces','cf_1A',100)")
         await db.commit(); before = dict(await imports.row(db,"SELECT * FROM users WHERE qq_id='10000084'")); await db.close()
         batch, rows = await self.preview([['10000084','新昵称','新姓名','其他','新学校','Other84']])
         self.assertIn('昵称',rows[0]['ignored_fields'])
         self.assertEqual(rows[0]['action'],'create_web_account_only')
-        await self.execute(batch,rows)
+        result = await self.execute(batch,rows)
+        self.assertEqual(result['credentials'][0]['real_name'], '原姓名')
+        self.assertEqual(result['credentials'][0]['username'], '10000084')
         db = await self.db()
         self.assertEqual(dict(await imports.row(db,"SELECT * FROM users WHERE qq_id='10000084'")),before)
         self.assertEqual((await imports.row(db,"SELECT COUNT(*) n FROM submissions WHERE user_qq_id='10000084'"))['n'],1)
@@ -192,7 +227,45 @@ class AccountImportTests(unittest.IsolatedAsyncioTestCase):
         await db.execute("UPDATE web_accounts SET is_active=0 WHERE qq_id='10000004'")
         await db.commit(); await db.close()
         _, rows = await self.preview([['10000084'],['10000084'],['10000001'],['10000004'],['10000085','','','','','occupied'],['10000086','','','','','Duplicate'],['10000087','','','','','duplicate']])
-        self.assertEqual([r['status'] for r in rows],['invalid','invalid','skipped','blocked','invalid','invalid','invalid'])
+        self.assertEqual([r['status'] for r in rows],['invalid','invalid','skipped','blocked','ready','ready','ready'])
+        for value in rows[4:]:
+            self.assertEqual(value['bindings'], {})
+            self.assertTrue(any('已跳过绑定' in w for w in value['warnings']))
+
+    async def test_bad_optional_oj_fields_do_not_block_qq_only_accounts(self):
+        batch, rows = await self.preview([
+            ['10000084', '合成昵称', '合成姓名', '', '', 'Has\u2006Space', 'not_uid', 'not_uid', True, 123],
+            ['10000085', '', '', '', '', 'Valid85', 12345, 10**16, 'bad handle', 'valid85'],
+            ['10000086'],
+        ])
+        self.assertTrue(all(r['can_submit'] and not r['errors'] for r in rows))
+        self.assertEqual(rows[0]['bindings'], {})
+        self.assertEqual(len([w for w in rows[0]['warnings'] if '已跳过绑定' in w]), 5)
+        self.assertEqual(rows[1]['bindings'], {'cf_handle':'Valid85', 'luogu_id':'12345', 'cjlu_username':'valid85'})
+        result = await self.execute(batch, rows)
+        self.assertEqual(result['summary']['created'], 3)
+        self.assertEqual(len(result['credentials']), 3)
+        self.assertEqual(result['credentials'][1]['real_name'], '')
+        db = await self.db()
+        user = await imports.row(db, "SELECT * FROM users WHERE qq_id='10000084'")
+        self.assertTrue(all(not user[field] for field in ('cf_handle','luogu_id','nowcoder_id','atcoder_handle','cjlu_username')))
+        self.assertEqual((await imports.row(db, "SELECT COUNT(*) n FROM binding_provenance WHERE qq_id='10000085'"))['n'], 3)
+        await db.close()
+        report = await self.client.get(PREFIX+'/'+batch['id']+'/report')
+        book = load_workbook(io.BytesIO(await report.get_data()), data_only=False)
+        self.assertIn('已跳过绑定', str(book.active['G2'].value))
+
+    async def test_occupied_and_duplicate_oj_fields_are_ignored_not_accounts(self):
+        db = await self.db()
+        await db.execute("UPDATE users SET cf_handle='Occupied' WHERE qq_id='10000004'")
+        await db.commit(); await db.close()
+        batch, rows = await self.preview([['10000084','','','','','occupied'], ['10000085','','','','','Duplicate'], ['10000086','','','','','duplicate']])
+        result = await self.execute(batch, rows)
+        self.assertEqual(result['summary']['created'], 3)
+        db = await self.db()
+        self.assertEqual((await imports.row(db,"SELECT COUNT(*) n FROM users WHERE qq_id IN ('10000084','10000085','10000086') AND cf_handle IS NOT NULL"))['n'], 0)
+        self.assertEqual((await imports.row(db,"SELECT cf_handle FROM users WHERE qq_id='10000004'"))['cf_handle'], 'Occupied')
+        await db.close()
 
     async def test_invalid_qq_and_orphan_evidence_do_not_create(self):
         batch, rows = await self.preview([['1e8'],['0000'],['10000084']])
@@ -228,9 +301,24 @@ class AccountImportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final['summary']['created'],12)
         self.assertEqual(len(final['credentials']),2)
 
-    async def test_concurrent_batches_cannot_duplicate_qq_or_oj(self):
+    async def test_concurrent_oj_occupation_skips_only_binding_not_qq_account(self):
         a,ra = await self.preview([['10000084','','','','','Race84']])
         b,rb = await self.preview([['10000085','','','','','race84']])
+        results = await asyncio.gather(self.execute(a,ra),self.execute(b,rb))
+        self.assertEqual(sum(r['summary']['created'] for r in results),2)
+        self.assertEqual(sum(r['summary']['conflict'] for r in results),0)
+        db = await self.db()
+        self.assertEqual((await imports.row(db,"SELECT COUNT(*) n FROM users WHERE LOWER(cf_handle)='race84'"))['n'],1)
+        self.assertEqual((await imports.row(db,"SELECT COUNT(*) n FROM binding_provenance WHERE qq_id IN ('10000084','10000085')"))['n'],1)
+        await db.close()
+        all_rows = []
+        for value in (a, b):
+            all_rows += (await (await self.client.get(PREFIX+'/'+value['id']+'/rows')).get_json())['items']
+        self.assertEqual(sum(any('预检后被占用' in w for w in r['warnings']) for r in all_rows),1)
+
+    async def test_concurrent_batches_still_cannot_duplicate_qq(self):
+        a, ra = await self.preview([['10000084']])
+        b, rb = await self.preview([['10000084']])
         results = await asyncio.gather(self.execute(a,ra),self.execute(b,rb))
         self.assertEqual(sum(r['summary']['created'] for r in results),1)
         self.assertEqual(sum(r['summary']['conflict'] for r in results),1)
@@ -533,6 +621,125 @@ class AccountImportTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(response.status_code, 409, await response.get_json())
                 self.assertEqual((await response.get_json())['code'], 'already_bound')
                 upstream.assert_not_awaited()
+
+    async def capabilities_after_restart(self):
+        restarted = create_app()
+        try:
+            client = restarted.test_client()
+            response = await client.post('/api/auth/login', json={'qq_id': '10000001', 'password': PASSWORD})
+            self.assertEqual(response.status_code, 200)
+            response = await client.get(PREFIX + '/capabilities')
+            self.assertEqual(response.status_code, 200)
+            return await response.get_json()
+        finally:
+            executor = restarted.extensions.get('account_password_executor')
+            if executor:
+                executor.close()
+
+    async def test_import_is_enabled_by_default_without_environment_setting(self):
+        with patch.dict(os.environ):
+            os.environ.pop('ACM_ACCOUNT_IMPORT_ENABLED', None)
+            self.assertTrue((await self.capabilities_after_restart())['enabled'])
+        db = await self.db()
+        self.assertIsNone(await imports.row(db, "SELECT value FROM settings WHERE key='account_import_enabled'"))
+        await db.close()
+
+    async def test_environment_remains_the_unsaved_default(self):
+        for value in ('false', '0', 'off', 'no'):
+            with self.subTest(value=value), patch.dict(os.environ, {'ACM_ACCOUNT_IMPORT_ENABLED': value}):
+                self.assertFalse((await self.capabilities_after_restart())['enabled'])
+
+    async def test_switch_is_global_persistent_and_can_be_reenabled(self):
+        response = await self.client.patch(PREFIX + '/settings', json={'enabled': False}, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(await response.get_json(), {'enabled': False})
+        self.assertEqual(response.headers['Cache-Control'], 'no-store')
+        other, _ = await self.login('10000002')
+        self.assertFalse((await (await other.get(PREFIX + '/capabilities')).get_json())['enabled'])
+        self.assertEqual((await other.get(PREFIX + '/template')).status_code, 503)
+        self.assertFalse((await self.capabilities_after_restart())['enabled'])
+        db = await self.db()
+        self.assertEqual((await imports.row(db, "SELECT value FROM settings WHERE key='account_import_enabled'"))['value'], 'false')
+        await db.close()
+        root, headers = await self.login('10000003')
+        response = await root.patch(PREFIX + '/settings', json={'enabled': True}, headers=headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(await response.get_json(), {'enabled': True})
+        self.assertTrue((await (await other.get(PREFIX + '/capabilities')).get_json())['enabled'])
+        self.assertEqual((await other.get(PREFIX + '/template')).status_code, 200)
+        with patch.dict(os.environ, {'ACM_ACCOUNT_IMPORT_ENABLED': 'false'}):
+            self.assertTrue((await self.capabilities_after_restart())['enabled'])
+
+    async def test_disabled_switch_blocks_writes_but_preserves_results_reports_and_cancel(self):
+        batch, rows = await self.preview([['10000084']])
+        response = await self.client.patch(PREFIX + '/settings', json={'enabled': False}, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        for suffix in ('', '/rows', '/report'):
+            response = await self.client.get(PREFIX + '/' + batch['id'] + suffix)
+            self.assertEqual(response.status_code, 200)
+        response = await self.client.post(PREFIX + '/preview', headers=self.headers)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual((await response.get_json())['code'], 'import_disabled')
+        response = await self.client.post(PREFIX + '/' + batch['id'] + '/commit', json=self.intent(rows), headers=self.headers)
+        self.assertEqual(response.status_code, 503)
+        db = await self.db()
+        self.assertIsNone(await imports.row(db, "SELECT * FROM web_accounts WHERE qq_id='10000084'"))
+        await db.close()
+        response = await self.client.post(PREFIX + '/' + batch['id'] + '/cancel', json={}, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+
+    async def test_switch_requires_named_admin_and_csrf(self):
+        anonymous = self.app.test_client()
+        response = await anonymous.patch(PREFIX + '/settings', json={'enabled': False})
+        self.assertEqual(response.status_code, 401)
+        member, headers = await self.login('10000004')
+        response = await member.patch(PREFIX + '/settings', json={'enabled': False}, headers=headers)
+        self.assertEqual(response.status_code, 403)
+        for headers in ({}, {'X-CSRF-Token': 'wrong'}):
+            response = await self.client.patch(PREFIX + '/settings', json={'enabled': False}, headers=headers)
+            self.assertEqual(response.status_code, 403)
+        self.app.config['PLUGIN_CONFIG'].update(webui_legacy_admin_login=True, webui_admin_username='synthetic-legacy', webui_admin_password_hash='', webui_admin_password=PASSWORD)
+        legacy = self.app.test_client()
+        response = await legacy.post('/api/auth/login', json={'username': 'synthetic-legacy', 'password': PASSWORD})
+        self.assertEqual(response.status_code, 200)
+        headers = {'X-CSRF-Token': (await response.get_json())['csrf_token']}
+        response = await legacy.patch(PREFIX + '/settings', json={'enabled': False}, headers=headers)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual((await response.get_json())['code'], 'named_admin_required')
+        self.assertTrue((await (await self.client.get(PREFIX + '/capabilities')).get_json())['enabled'])
+
+    async def test_switch_rejects_non_boolean_or_extra_fields_without_saving(self):
+        for value in ({}, {'enabled': 'false'}, {'enabled': 0}, {'enabled': None}, [], False, {'enabled': False, 'role': 'root'}):
+            with self.subTest(value=value):
+                response = await self.client.patch(PREFIX + '/settings', json=value, headers=self.headers)
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual((await response.get_json())['code'], 'invalid_settings')
+        response = await self.client.patch(PREFIX + '/settings', data='{"enabled":', headers={**self.headers, 'Content-Type': 'application/json'})
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue((await (await self.client.get(PREFIX + '/capabilities')).get_json())['enabled'])
+
+    async def test_closed_and_demoted_admins_cannot_change_switch(self):
+        other, headers = await self.login('10000002')
+        db = await self.db()
+        await db.execute("UPDATE web_accounts SET role='member' WHERE qq_id='10000002'")
+        await db.execute("UPDATE users SET account_state='closed', account_epoch=account_epoch+1, closed_at=? WHERE qq_id='10000001'", (int(time.time()),))
+        await db.commit()
+        await db.close()
+        response = await other.patch(PREFIX + '/settings', json={'enabled': False}, headers=headers)
+        self.assertEqual(response.status_code, 403)
+        response = await self.client.patch(PREFIX + '/settings', json={'enabled': False}, headers=self.headers)
+        self.assertEqual(response.status_code, 401)
+        db = await self.db()
+        self.assertIsNone(await imports.row(db, "SELECT value FROM settings WHERE key='account_import_enabled'"))
+        await db.close()
+
+    async def test_switch_rechecks_actor_under_write_lock(self):
+        with patch.object(imports, 'actor_snapshot', side_effect=[{}, imports.ImportError('身份已变化', 'actor_changed', 403)]):
+            response = await self.client.patch(PREFIX + '/settings', json={'enabled': False}, headers=self.headers)
+        self.assertEqual(response.status_code, 403)
+        db = await self.db()
+        self.assertIsNone(await imports.row(db, "SELECT value FROM settings WHERE key='account_import_enabled'"))
+        await db.close()
 
     async def test_feature_switch_keeps_existing_results_readable(self):
         batch,_=await self.preview([['10000084']])
