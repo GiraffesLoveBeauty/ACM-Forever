@@ -28,6 +28,7 @@ from .acm_api.cf_practice import PracticeQuery
 from .acm_api.cf_practice_api import cf_practice_api
 from .acm_api.cf_practice_jobs import PracticeJobs
 from .service_runtime import SyncEngine, WebTaskManager, create_web_challenge
+from .acm_api.event_log import install as install_event_logging
 
 
 def _safe_web_next(value, fallback="/index.html"):
@@ -384,6 +385,7 @@ def create_app():
     app.register_blueprint(cf_practice_api, url_prefix="/api")
     app.sync_engine = sync_engine
     app.task_manager = task_manager
+    install_event_logging(app, public_pages=_PUBLIC_PAGES)
     return app
 
 

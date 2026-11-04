@@ -12,6 +12,7 @@ from .acm_api.database import connect_db, isolated_connection
 from .acm_api.binding_service import platform_spec
 from .acm_api.problem_sync import ProblemSync
 from .acm_api.sync_service import SyncMixin
+from .acm_api.event_log import emit
 
 
 class SyncEngine(SyncMixin):
@@ -143,6 +144,38 @@ class WebTaskManager:
         self.tasks = {}
         self.problem_sync = ProblemSync(sync_engine.db_path)
 
+    async def _logged_task(self, operation, item, *args, **kwargs):
+        fields = {"task_id": item["id"], "task_kind": item.get("kind", "后台任务")}
+        emit("task.started", "后台任务开始执行", **fields)
+        final_status = None
+        try:
+            return await operation(*args, **kwargs)
+        except asyncio.CancelledError:
+            final_status = "cancelled"
+            raise
+        except Exception:
+            final_status = "failed"
+            raise
+        finally:
+            status = final_status or item.get("status")
+
+            def failed(value):
+                if isinstance(value, dict):
+                    return ("error" in value or any(type(value.get(key)) is int and value[key] > 0
+                                                   for key in ("failure_count", "failed_count"))
+                            or any(failed(v) for v in value.values()))
+                return type(value) is int and value < 0 and value != -2
+
+            if status == "failed":
+                level, message = "error", "后台任务执行失败，请在同步任务页面查看结果"
+            elif status in {"cancelled", "interrupted"}:
+                level, message = "warning", "后台任务已取消或中断"
+            elif status == "completed" and not failed(item.get("result")):
+                level, message = "info", "后台任务已结束，请在同步任务页面查看各平台结果"
+            else:
+                level, message = "warning", "后台任务已结束，部分操作未完成，请查看任务结果"
+            emit("task.finished", message, level, **fields)
+
     def submit_problem_sync(self, options):
         for item in self.tasks.values():
             if item.get("kind") == "题目采集" and item["status"] in {"queued", "running"}:
@@ -156,7 +189,7 @@ class WebTaskManager:
             "progress": {"done": 0, "total": 0},
         }
         self.tasks[task_id] = item
-        item["_task"] = asyncio.create_task(self.problem_sync.run(options, item))
+        item["_task"] = asyncio.create_task(self._logged_task(self.problem_sync.run, item, options, item))
         return {"id": task_id, "merged": False}
 
     async def submit_account_sync(self, qq_id, platforms, days=0, *, expected_epoch=None):
@@ -196,7 +229,7 @@ class WebTaskManager:
         }
         self.tasks[task_id] = item
         item["_task"] = asyncio.create_task(
-            self.sync_engine.sync_account(str(qq_id), normalized, item, days=days)
+            self._logged_task(self.sync_engine.sync_account, item, str(qq_id), normalized, item, days=days)
         )
         return {"id": task_id}
 
@@ -234,7 +267,7 @@ class WebTaskManager:
         }
         self.tasks[task_id] = item
         item["_task"] = asyncio.create_task(
-            self.sync_engine.sync_all_accounts(item, days=days)
+            self._logged_task(self.sync_engine.sync_all_accounts, item, item, days=days)
         )
         return {"id": task_id}
 
