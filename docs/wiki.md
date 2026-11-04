@@ -125,8 +125,8 @@ Wiki 采用匿名公开阅读、admin/root 在现有后台维护的策略。Wiki
 `main` 中的 `feat/**` 改动会触发部署。以下是待运维执行的发布准备，开发验证不表示已部署。
 
 1. 在隔离环境使用实际备份副本演练升级与恢复；由另一位成员评审 PR。
-2. 设置 `ACM_DATABASE_PATH` 到代码同步目录之外，例如 `/home/WYJ/acm-forever-data/acm_forever.db`。
-3. 配置 `ACM_MARKDOWN_UPLOAD_DIR=/home/WYJ/acm-forever-data/uploads/markdown`；省略时默认数据库同级 `uploads/markdown`。不要放进 `web/dist` 或镜像同步目录。
+2. 设置 `ACM_DATABASE_PATH` 到代码同步目录之外，例如 `/root/acm-forever-data/acm_forever.db`。
+3. 配置 `ACM_MARKDOWN_UPLOAD_DIR=/root/acm-forever-data/uploads/markdown`；省略时默认数据库同级 `uploads/markdown`。不要放进 `web/dist` 或镜像同步目录。
 4. 配置 `ACM_PUBLIC_BASE_URL=https://实际站点域名`，只接受协议和主机（可带端口），不带路径、用户名、查询。外部站点未配置时 MD 下载返回 503；仅 loopback 开发环境可回退本机地址。
 5. 安装更新后的 `feat/api/requirements.txt`（含 Pillow），前端执行 `pnpm install --frozen-lockfile`、`pnpm build`。
 6. 核对反向代理允许至少 6 MB 请求；服务总请求上限为 6 MB，Wiki/共享图片接口单图仍为 2 MB，论坛图片接口单图为 5 MB。仅代理 API 图片路径，不把图片目录作为静态目录匿名公开。

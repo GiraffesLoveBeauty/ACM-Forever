@@ -32,17 +32,17 @@ python -m api
 
 ## 数据库与部署
 
-设置 `ACM_DATABASE_PATH` 指向持久化 SQLite 文件。本仓库的 GitHub Actions 会将 `feat/` 同步到服务器 `/home/WYJ/acm-forever-feat`，因此生产数据库必须放在该同步目录之外，例如：
+设置 `ACM_DATABASE_PATH` 指向持久化 SQLite 文件。本仓库的 GitHub Actions 会将 `feat/` 同步到服务器 `/root/acm-forever-feat`，因此生产数据库必须放在该同步目录之外，例如：
 
 ```text
-/home/WYJ/acm-forever-data/acm_forever.db
+/root/acm-forever-data/acm_forever.db
 ```
 
 `.db`、WAL 文件、`.env` 和密钥均被忽略，不会随代码同步。备份数据库时应一并考虑 SQLite WAL 状态，建议停服后备份或使用 SQLite 在线备份方式。
 
 帖子封面与正文图片保存在数据库同级的 `uploads/forum/`，备份、迁移时须与数据库一起保留。首次启动会自动为旧数据库添加封面字段及图片元数据、引用表。安装更新后的 `requirements.txt`，其中 Pillow 处理图片，Mistune 解析正文图片引用（不把代码示例当作公开图片）。反向代理请求体上限应至少为 6 MB；图片 API 接受最大 5 MB 的静态 PNG/JPEG/WebP，服务端校验并重编码为 WebP。草稿图片仅本人及合法引用者可读，提交后供管理员审核，发布后才向访客开放；账号限额、引用和存储细节见 [帖子图片 API](../../docs/api.md#帖子封面与正文图片)。
 
-GitHub Actions 会在 `/home/WYJ/acm-forever-data/.env` 已存在时安装依赖并启动用户级 systemd 服务 `acm-forever-webui`。首次部署前，在服务器创建该环境文件，至少设置 `ACM_API_HOST`、`ACM_DATABASE_PATH`、`ACM_WEBUI_SECRET_KEY` 和 `ACM_BOT_API_TOKEN`。数据库路径应设为 `/home/WYJ/acm-forever-data/acm_forever.db`。需要通过服务器网卡访问时，将 `ACM_API_HOST` 设为 `0.0.0.0` 并在防火墙限制可访问来源；经 HTTPS 反向代理时设置 `ACM_WEBUI_COOKIE_SECURE=true`。系统服务定义位于 `deploy/acm-forever-webui.service`。首次配置还需由服务器管理员运行 `sudo loginctl enable-linger WYJ`，让用户级服务在 SSH 断开后和服务器重启后继续运行。
+GitHub Actions 通过公网 SSH 连接 `root@118.178.192.81`，安装系统级 systemd 服务 `acm-forever-webui`，不再依赖 Tailscale 或用户级 linger。正常部署需要 `/root/acm-forever-data/.env` 存在；手动运行默认不启动服务，可先部署代码和依赖，迁移数据库与图片并配置环境文件，再勾选 `start_service` 运行。环境文件至少设置 `ACM_API_HOST`、`ACM_DATABASE_PATH`、`ACM_WEBUI_SECRET_KEY` 和 `ACM_BOT_API_TOKEN`，数据库指向已迁移的数据文件。经 HTTPS 反向代理时保持 `ACM_API_HOST=127.0.0.1` 并设置 `ACM_WEBUI_COOKIE_SECURE=true`。服务定义位于 `deploy/acm-forever-webui.service`，安装到 `/etc/systemd/system/`，使用 `systemctl` 管理。依赖安装、SSH Secrets、首次迁移及域名切换步骤见 [新服务器部署说明](../../docs/public-server-deployment.md)。
 
 服务器当前实际使用的数据库路径、服务运行状态和梓喵接入情况，应以服务器环境文件与运行检查为准，不能仅凭仓库代码推断。若要把旧数据库切换到本服务，先停止会写入旧库的服务并制作可恢复备份（包含 WAL 状态），再设置 `ACM_DATABASE_PATH`、启动 API 并核对关键数据；确认 Web 与梓喵都经 API 正常读写后，再按运维流程停用旧写入路径。不要在没有备份和核验的情况下覆盖生产数据库。
 
@@ -53,8 +53,8 @@ GitHub Actions 会在 `/home/WYJ/acm-forever-data/.env` 已存在时安装依赖
 安装 API 依赖后，可以在服务器部署目录执行初始化，无需启动 HTTP 服务，也无需设置 Web 会话密钥：
 
 ```bash
-cd /home/WYJ/acm-forever-feat
-python3 -m api.init_db --database /home/WYJ/acm-forever-data/acm_forever.db
+cd /root/acm-forever-feat
+python3 -m api.init_db --database /root/acm-forever-data/acm_forever.db
 ```
 
 省略 `--database` 时读取 `ACM_DATABASE_PATH`，未配置时使用当前目录的 `./data/acm_forever.db`。命令初始化服务所需的表结构与默认设置，可重复运行，保留已有业务数据；root 账号仍由服务启动时的配置创建。正常启动也会自动执行相同的表结构初始化。
@@ -72,7 +72,7 @@ CF 支持没有样例的题目及直接返回 PDF 的题面。PDF 原文件存�
 比赛进度按真实开始时间倒序排列。启动或初始化会补齐 `crawler_contests` 表，初始化仍只建立表结构；已有题库升级后，在 API 部署目录执行以下命令补全比赛名称与开始时间：
 
 ```bash
-python3 -m api.sync_contests --database /home/WYJ/acm-forever-data/acm_forever.db --platform all
+python3 -m api.sync_contests --database /root/acm-forever-data/acm_forever.db --platform all
 ```
 
 省略数据库参数时读取 `ACM_DATABASE_PATH`。命令仅更新比赛元数据，保留题目、题面、样例和用户记录。CF 数据来自 [`contest.list` 的 `startTimeSeconds`](https://codeforces.com/apiHelp/objects#Contest)，AtCoder 使用 [AtCoder Problems 文档](https://github.com/kenkoooo/AtCoderProblems/blob/master/doc/api.md) 中的 `contests.json` 数据集。也可用已下载的原始 JSON 离线导入，例如 `--platform codeforces --input /path/to/codeforces-contests.json`；AtCoder 同理，`--input` 须指定单个平台。

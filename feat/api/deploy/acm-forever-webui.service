@@ -4,11 +4,12 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/WYJ/acm-forever-feat
-EnvironmentFile=/home/WYJ/acm-forever-data/.env
-ExecStart=/home/WYJ/acm-forever-data/venv/bin/python -m api
+User=root
+WorkingDirectory=/root/acm-forever-feat
+EnvironmentFile=/root/acm-forever-data/.env
+ExecStart=/root/acm-forever-data/venv/bin/python -m api
 Restart=on-failure
 RestartSec=5
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target
