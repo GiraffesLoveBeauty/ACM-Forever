@@ -534,6 +534,125 @@ class AccountImportTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await response.get_json())['code'], 'already_bound')
                 upstream.assert_not_awaited()
 
+    async def capabilities_after_restart(self):
+        restarted = create_app()
+        try:
+            client = restarted.test_client()
+            response = await client.post('/api/auth/login', json={'qq_id': '10000001', 'password': PASSWORD})
+            self.assertEqual(response.status_code, 200)
+            response = await client.get(PREFIX + '/capabilities')
+            self.assertEqual(response.status_code, 200)
+            return await response.get_json()
+        finally:
+            executor = restarted.extensions.get('account_password_executor')
+            if executor:
+                executor.close()
+
+    async def test_import_is_enabled_by_default_without_environment_setting(self):
+        with patch.dict(os.environ):
+            os.environ.pop('ACM_ACCOUNT_IMPORT_ENABLED', None)
+            self.assertTrue((await self.capabilities_after_restart())['enabled'])
+        db = await self.db()
+        self.assertIsNone(await imports.row(db, "SELECT value FROM settings WHERE key='account_import_enabled'"))
+        await db.close()
+
+    async def test_environment_remains_the_unsaved_default(self):
+        for value in ('false', '0', 'off', 'no'):
+            with self.subTest(value=value), patch.dict(os.environ, {'ACM_ACCOUNT_IMPORT_ENABLED': value}):
+                self.assertFalse((await self.capabilities_after_restart())['enabled'])
+
+    async def test_switch_is_global_persistent_and_can_be_reenabled(self):
+        response = await self.client.patch(PREFIX + '/settings', json={'enabled': False}, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(await response.get_json(), {'enabled': False})
+        self.assertEqual(response.headers['Cache-Control'], 'no-store')
+        other, _ = await self.login('10000002')
+        self.assertFalse((await (await other.get(PREFIX + '/capabilities')).get_json())['enabled'])
+        self.assertEqual((await other.get(PREFIX + '/template')).status_code, 503)
+        self.assertFalse((await self.capabilities_after_restart())['enabled'])
+        db = await self.db()
+        self.assertEqual((await imports.row(db, "SELECT value FROM settings WHERE key='account_import_enabled'"))['value'], 'false')
+        await db.close()
+        root, headers = await self.login('10000003')
+        response = await root.patch(PREFIX + '/settings', json={'enabled': True}, headers=headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(await response.get_json(), {'enabled': True})
+        self.assertTrue((await (await other.get(PREFIX + '/capabilities')).get_json())['enabled'])
+        self.assertEqual((await other.get(PREFIX + '/template')).status_code, 200)
+        with patch.dict(os.environ, {'ACM_ACCOUNT_IMPORT_ENABLED': 'false'}):
+            self.assertTrue((await self.capabilities_after_restart())['enabled'])
+
+    async def test_disabled_switch_blocks_writes_but_preserves_results_reports_and_cancel(self):
+        batch, rows = await self.preview([['10000084']])
+        response = await self.client.patch(PREFIX + '/settings', json={'enabled': False}, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        for suffix in ('', '/rows', '/report'):
+            response = await self.client.get(PREFIX + '/' + batch['id'] + suffix)
+            self.assertEqual(response.status_code, 200)
+        response = await self.client.post(PREFIX + '/preview', headers=self.headers)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual((await response.get_json())['code'], 'import_disabled')
+        response = await self.client.post(PREFIX + '/' + batch['id'] + '/commit', json=self.intent(rows), headers=self.headers)
+        self.assertEqual(response.status_code, 503)
+        db = await self.db()
+        self.assertIsNone(await imports.row(db, "SELECT * FROM web_accounts WHERE qq_id='10000084'"))
+        await db.close()
+        response = await self.client.post(PREFIX + '/' + batch['id'] + '/cancel', json={}, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+
+    async def test_switch_requires_named_admin_and_csrf(self):
+        anonymous = self.app.test_client()
+        response = await anonymous.patch(PREFIX + '/settings', json={'enabled': False})
+        self.assertEqual(response.status_code, 401)
+        member, headers = await self.login('10000004')
+        response = await member.patch(PREFIX + '/settings', json={'enabled': False}, headers=headers)
+        self.assertEqual(response.status_code, 403)
+        for headers in ({}, {'X-CSRF-Token': 'wrong'}):
+            response = await self.client.patch(PREFIX + '/settings', json={'enabled': False}, headers=headers)
+            self.assertEqual(response.status_code, 403)
+        self.app.config['PLUGIN_CONFIG'].update(webui_legacy_admin_login=True, webui_admin_username='synthetic-legacy', webui_admin_password_hash='', webui_admin_password=PASSWORD)
+        legacy = self.app.test_client()
+        response = await legacy.post('/api/auth/login', json={'username': 'synthetic-legacy', 'password': PASSWORD})
+        self.assertEqual(response.status_code, 200)
+        headers = {'X-CSRF-Token': (await response.get_json())['csrf_token']}
+        response = await legacy.patch(PREFIX + '/settings', json={'enabled': False}, headers=headers)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual((await response.get_json())['code'], 'named_admin_required')
+        self.assertTrue((await (await self.client.get(PREFIX + '/capabilities')).get_json())['enabled'])
+
+    async def test_switch_rejects_non_boolean_or_extra_fields_without_saving(self):
+        for value in ({}, {'enabled': 'false'}, {'enabled': 0}, {'enabled': None}, [], False, {'enabled': False, 'role': 'root'}):
+            with self.subTest(value=value):
+                response = await self.client.patch(PREFIX + '/settings', json=value, headers=self.headers)
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual((await response.get_json())['code'], 'invalid_settings')
+        response = await self.client.patch(PREFIX + '/settings', data='{"enabled":', headers={**self.headers, 'Content-Type': 'application/json'})
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue((await (await self.client.get(PREFIX + '/capabilities')).get_json())['enabled'])
+
+    async def test_closed_and_demoted_admins_cannot_change_switch(self):
+        other, headers = await self.login('10000002')
+        db = await self.db()
+        await db.execute("UPDATE web_accounts SET role='member' WHERE qq_id='10000002'")
+        await db.execute("UPDATE users SET account_state='closed', account_epoch=account_epoch+1, closed_at=? WHERE qq_id='10000001'", (int(time.time()),))
+        await db.commit()
+        await db.close()
+        response = await other.patch(PREFIX + '/settings', json={'enabled': False}, headers=headers)
+        self.assertEqual(response.status_code, 403)
+        response = await self.client.patch(PREFIX + '/settings', json={'enabled': False}, headers=self.headers)
+        self.assertEqual(response.status_code, 401)
+        db = await self.db()
+        self.assertIsNone(await imports.row(db, "SELECT value FROM settings WHERE key='account_import_enabled'"))
+        await db.close()
+
+    async def test_switch_rechecks_actor_under_write_lock(self):
+        with patch.object(imports, 'actor_snapshot', side_effect=[{}, imports.ImportError('身份已变化', 'actor_changed', 403)]):
+            response = await self.client.patch(PREFIX + '/settings', json={'enabled': False}, headers=self.headers)
+        self.assertEqual(response.status_code, 403)
+        db = await self.db()
+        self.assertIsNone(await imports.row(db, "SELECT value FROM settings WHERE key='account_import_enabled'"))
+        await db.close()
+
     async def test_feature_switch_keeps_existing_results_readable(self):
         batch,_=await self.preview([['10000084']])
         self.app.config['ACCOUNT_IMPORT_ENABLED']=False
