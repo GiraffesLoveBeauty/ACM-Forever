@@ -54,6 +54,8 @@ def actor_fields():
     identity = getattr(g, "log_identity", None)
     if not identity:
         return {"actor": "未验证身份的访问者"}
+    if identity.get("role") == "service":
+        return {"actor": "已认证的 Bot 服务", "role": "service"}
     if identity.get("legacy"):
         actor = "旧版管理员"
     else:
@@ -171,8 +173,6 @@ def install(app, public_pages=()):
             message = action + "已受理，后台任务尚未完成"
         else:
             message = action + "成功"
-        if route.startswith("/internal/") and status < 400:
-            actor = {"actor": "已认证的 Bot 服务", "role": "service"}
         trusted = app.config.get("PLUGIN_CONFIG", {}).get("webui_trusted_proxies", [])
         if isinstance(trusted, str):
             trusted = trusted.replace("，", ",").split(",")

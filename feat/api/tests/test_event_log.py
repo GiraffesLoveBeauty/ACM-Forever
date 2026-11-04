@@ -15,6 +15,7 @@ from quart import Quart
 from feat.api.acm_api import event_log, log_viewer
 from feat.api.acm_api.auth_service import hash_password
 from feat.api.acm_api.backend_api import _LOGIN_ATTEMPTS
+from feat.api.acm_api.bot_api import bot_api
 from feat.api.acm_api.database import connect_db
 from feat.api.app import create_app
 from feat.api.service_runtime import WebTaskManager
@@ -154,6 +155,70 @@ class RequestEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("数据库", item["message"])
         self.assertIn("WAL", item["hint"])
         self.assertEqual(item["request_id"], response.headers["X-Request-ID"])
+
+
+class BotAuthenticationEventTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.app = Quart(__name__)
+        self.app.config.update(PROPAGATE_EXCEPTIONS=False, BOT_API_TOKEN="private-test-bot-token")
+        self.app.register_blueprint(bot_api, url_prefix="/internal/v1")
+        event_log.install(self.app)
+        self.client = self.app.test_client()
+        self.headers = {"Authorization": "Bearer private-test-bot-token"}
+
+    async def test_automatic_options_does_not_authenticate_even_with_valid_header(self):
+        with self.assertLogs("acm.events", level="INFO") as captured:
+            for headers in ({}, self.headers):
+                response = await self.client.options("/internal/v1/health", headers=headers)
+                self.assertEqual(response.status_code, 200)
+        for item in events(captured):
+            self.assertEqual(item["actor"], "未验证身份的访问者")
+            self.assertNotIn("role", item)
+
+    async def test_verified_service_identity_is_kept_on_parameter_error(self):
+        with self.assertLogs("acm.events", level="INFO") as captured:
+            success = await self.client.get("/internal/v1/health", headers=self.headers)
+            invalid = await self.client.get(
+                "/internal/v1/users?limit=not-an-integer&token=private-query", headers=self.headers,
+            )
+        self.assertEqual((success.status_code, invalid.status_code), (200, 400))
+        items = events(captured)
+        self.assertEqual([item["level"] for item in items], ["info", "warning"])
+        for item in items:
+            self.assertEqual(item["actor"], "已认证的 Bot 服务")
+            self.assertEqual(item["role"], "service")
+        self.assertNotIn("private-test-bot-token", json.dumps(items))
+        self.assertNotIn("private-query", json.dumps(items))
+
+    async def test_verified_identity_does_not_leak_to_rejected_requests(self):
+        with self.assertLogs("acm.events", level="INFO") as captured:
+            await self.client.get("/internal/v1/health", headers=self.headers)
+            for headers in ({}, {"Authorization": "Bearer wrong-private-token"},
+                            {"Authorization": "Basic private-test-bot-token"}):
+                response = await self.client.get("/internal/v1/health", headers=headers)
+                self.assertEqual(response.status_code, 401)
+            self.app.config["BOT_API_TOKEN"] = ""
+            response = await self.client.get("/internal/v1/health", headers=self.headers)
+            self.assertEqual(response.status_code, 503)
+        items = events(captured)
+        self.assertEqual(items[0]["role"], "service")
+        for item in items[1:]:
+            self.assertEqual(item["actor"], "未验证身份的访问者")
+            self.assertNotIn("role", item)
+        self.assertNotIn("private-test-bot-token", json.dumps(items))
+        self.assertNotIn("wrong-private-token", json.dumps(items))
+
+    async def test_verified_service_identity_is_kept_on_server_error(self):
+        with patch("feat.api.acm_api.bot_api._db", side_effect=sqlite3.OperationalError("database is locked")):
+            with self.assertLogs("acm.events", level="INFO") as captured:
+                response = await self.client.get("/internal/v1/users", headers=self.headers)
+        self.assertEqual(response.status_code, 500)
+        item = events(captured)[0]
+        self.assertEqual(item["actor"], "已认证的 Bot 服务")
+        self.assertEqual(item["role"], "service")
+        self.assertEqual(item["level"], "error")
+        self.assertEqual(item["error_type"], "OperationalError")
+        self.assertNotIn("private-test-bot-token", json.dumps(item))
 
 
 class AuthenticationEventTests(unittest.IsolatedAsyncioTestCase):

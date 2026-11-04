@@ -12,6 +12,7 @@ from .cf_client import cf_request
 from .database import validate_submission_data
 from .account_lifecycle_service import AccountLifecycleError, require_active_user
 from .difficulty import challenge_filter, challenge_time_limit, neighboring_difficulties, normalize_platform
+from .event_log import remember_identity
 from .training_logic import score_candidate
 
 from .binding_service import BINDING_FIELDS as _BINDING_FIELDS, apply_binding, snapshot
@@ -42,6 +43,7 @@ def service_required(func):
         supplied = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
         if not supplied or not hmac.compare_digest(supplied, expected):
             return jsonify({"success": False, "message": "Unauthorized."}), 401
+        remember_identity({"role": "service"})
         qq_id = (request.view_args or {}).get("qq_id")
         request.lifecycle_snapshot = None
         if qq_id:
