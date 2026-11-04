@@ -1,6 +1,7 @@
 <script setup>
 import { ref, watch, onBeforeUnmount } from 'vue';
 import { date, notify } from '../../lib/api.js';
+import { credentialsWorkbook } from '../../lib/account-import-credentials.js';
 const props = defineProps({
   credentials: { type: Array, default: () => [] },
   missing: { type: Number, default: 0 },
@@ -22,9 +23,15 @@ watch(
 );
 function text() {
   return [
-    'QQ\t昵称\t初始密码\t有效至',
+    'QQ号\t姓名\t账号\t初始密码\t有效至',
     ...props.credentials.map((r) =>
-      [r.qq_id, r.name, r.temporary_password, date(r.expires_at)].join('\t'),
+      [
+        r.qq_id,
+        r.real_name || '',
+        r.username || r.qq_id,
+        r.temporary_password,
+        date(r.expires_at),
+      ].join('\t'),
     ),
   ].join('\r\n');
 }
@@ -38,15 +45,22 @@ async function copy() {
     if (current === revision) fallback.value = content;
   }
 }
-function download() {
-  const url = URL.createObjectURL(
-    new Blob(['\ufeff' + text()], { type: 'text/plain;charset=utf-8' }),
-  );
+function save(blob, filename) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'account-import-credentials.txt';
+  a.download = filename;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function download() {
+  save(
+    new Blob(['\ufeff' + text()], { type: 'text/plain;charset=utf-8' }),
+    'account-import-credentials.txt',
+  );
+}
+function downloadExcel() {
+  save(credentialsWorkbook(props.credentials), 'account-import-credentials.xlsx');
 }
 </script>
 <template>
@@ -63,26 +77,31 @@ function download() {
     <template v-if="credentials.length"
       ><p>
         本页已领取
-        {{ credentials.length }} 份。离开或刷新后清除，请及时转交。下载文件含初始密码，请妥善保管。
+        {{ credentials.length }} 份，登录账号为 QQ 号。离开或刷新后清除，请及时导出 Excel
+        并转交。下载文件含初始密码，请妥善保管。
       </p>
       <div class="credential-actions">
         <button type="button" class="btn" :aria-pressed="visible" @click="visible = !visible">
           {{ visible ? '隐藏初始密码' : '显示初始密码' }}</button
         ><button type="button" class="btn" @click="copy">复制已领取凭据</button
+        ><button type="button" class="btn primary" @click="downloadExcel">
+          导出开户 Excel（含初始密码）</button
         ><button type="button" class="btn" @click="download">下载凭据文本（含初始密码）</button>
       </div>
       <div class="admin-table-wrap">
         <table class="admin-table">
           <thead>
             <tr>
-              <th>QQ / 昵称</th>
+              <th>QQ号 / 姓名</th>
+              <th>登录账号</th>
               <th>初始密码</th>
               <th>有效至</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="row in credentials" :key="row.row_id">
-              <td>{{ row.qq_id }}<br />{{ row.name }}</td>
+              <td>{{ row.qq_id }}<br />{{ row.real_name || '未填写姓名' }}</td>
+              <td>{{ row.username || row.qq_id }}</td>
               <td>
                 <input
                   :type="visible ? 'text' : 'password'"

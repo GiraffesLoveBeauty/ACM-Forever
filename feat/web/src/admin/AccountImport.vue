@@ -439,7 +439,10 @@ onBeforeUnmount(() => {
     <form v-if="capabilities?.enabled" class="admin-panel import-upload" @submit.prevent="upload">
       <div>
         <h3>使用标准模板</h3>
-        <p>QQ 必填，支持五个平台账号标识。已有成员只补开户，保留原资料和绑定。</p>
+        <p>
+          合法 QQ 必填，OJ 账号可留空；格式错误、重复或已占用的 OJ
+          账号跳过绑定，不影响开户。已有成员只补开户，保留原资料和绑定。
+        </p>
         <button
           type="button"
           class="btn"
