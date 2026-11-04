@@ -49,7 +49,12 @@ def journal_event(item):
     if access:
         status = int(access.group(1))
         level = "error" if status >= 500 else "warning" if status >= 400 else "info"
-    elif re.search(r'\b(?:ERROR|CRITICAL|Traceback)\b|\b\w*(?:Error|Exception):', message):
+    elif re.search(r'\b(?:ERROR|CRITICAL|Traceback)\b|\b\w*(?:Error|Exception):', message) or any(
+        failure in message for failure in (
+            "修改 Web 账号密码失败", "创建 Web 账号失败", "批量创建 Web 成员账号失败",
+            "更新 Web 账号失败", "重发 Web 临时密码失败", "验证 Web 会话时读取账号失败",
+        )
+    ):
         level = "error"
     elif re.search(r'\bWARNING\b|时出错|请求失败|抓取失败|同步失败|验证失败|未授权|Unauthorized|Forbidden|超时', message):
         level = "warning"

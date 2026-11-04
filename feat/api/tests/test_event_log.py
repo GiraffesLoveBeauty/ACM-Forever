@@ -48,6 +48,12 @@ class ViewerTests(unittest.TestCase):
         self.assertEqual(item["level"], "error")
         legacy = log_viewer.journal_event({"MESSAGE": '[INFO] "GET /health 1.1" 500 265 "-" "curl"'})
         self.assertEqual(legacy["level"], "error")
+        for failure in ["修改 Web 账号密码失败", "创建 Web 账号失败", "批量创建 Web 成员账号失败",
+                        "更新 Web 账号失败", "重发 Web 临时密码失败", "验证 Web 会话时读取账号失败"]:
+            with self.subTest(failure=failure):
+                legacy = log_viewer.journal_event({"MESSAGE": failure})
+                self.assertEqual(legacy["level"], "error")
+        self.assertEqual(log_viewer.journal_event({"MESSAGE": "任务完成，0 个失败"})["level"], "info")
         upstream = log_viewer.journal_event({"MESSAGE": "处理洛谷用户 123 第 1 页时出错: 401, message='Unauthorized', url='https://www.luogu.com.cn/record/list?user=private-query'"})
         self.assertEqual(upstream["level"], "warning")
         self.assertIn("洛谷同步请求未获授权", upstream["message"])
