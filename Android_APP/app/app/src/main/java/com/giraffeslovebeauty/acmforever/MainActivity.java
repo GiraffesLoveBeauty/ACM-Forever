@@ -124,6 +124,7 @@ public final class MainActivity extends Activity {
     private boolean composeBusy;
     private long composeRevision;
     private long composeSavedRevision;
+    private long composeGeneration=-1,markdownOwner=-1,markdownGeneration=-1;
     private boolean leaveComposeOnce;
     private TextView composeStatus;
     private boolean loginBusy;
@@ -194,7 +195,11 @@ public final class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();openingSpace=false;
-        if(navigationOwner!=api.sessionGeneration()){navigation.clear();navigationOwner=api.sessionGeneration();syncCloudEditor();loadScreen();}
+        if(navigationOwner!=api.sessionGeneration()){navigation.clear();navigationOwner=api.sessionGeneration();refreshComposer();if(!"compose".equals(screen))loadScreen();}
+        else{
+            CloudDrafts.State draft=cloud.state();
+            if(composeGeneration!=draft.generation||(draft.category>0&&composeCategoryId!=draft.category)||!composeTitle.equals(draft.title)||!composeBody.equals(draft.body))refreshComposer();
+        }
 
         if(root!=null&&appearanceSeen!=AppAppearance.revision(this)){
             pendingScroll=pageScroll==null?0:pageScroll.getScrollY();syncAppearance();pageRefresh.close();ModalDialogs.close(this);buildShell();search.setText(query);updateSearchHeader();loadScreen();
@@ -296,12 +301,13 @@ public final class MainActivity extends Activity {
         }
         if(requestCode==IMPORT_MARKDOWN && resultCode==RESULT_OK && data!=null && data.getData()!=null){
             android.net.Uri selected=data.getData();
+            long owner=markdownOwner,generation=markdownGeneration;
             io.execute(()->{try(InputStream input=getContentResolver().openInputStream(selected);ByteArrayOutputStream out=new ByteArrayOutputStream()){
                 if(input==null)throw new IllegalStateException("无法读取文件");byte[] buf=new byte[4096];int count;
                 while((count=input.read(buf))!=-1){if(out.size()+count>100000)throw new IllegalArgumentException("Markdown 文件过大");out.write(buf,0,count);}
                 String text=new String(out.toByteArray(),StandardCharsets.UTF_8);if(text.startsWith("\uFEFF"))text=text.substring(1);
                 if(text.length()>20000)throw new IllegalArgumentException("正文最多20000字");final String markdown=text;
-                present(()->{if(isFinishing()||isDestroyed())return;composeBody=markdown;composerChanged();loadScreen();});
+                present(()->{if(isFinishing()||isDestroyed())return;if(owner!=api.sessionGeneration()||generation!=cloud.generation()||!currentComposer(generation)){actionNotice.show("导入",new IllegalStateException("账号或草稿已切换，请重新导入"));return;}composeBody=markdown;composerChanged();loadScreen();});
             }catch(Exception e){present(()->failureDialog(e));}});return;
         }
         if (requestCode != PICK_AVATAR || resultCode != RESULT_OK || data == null || data.getData() == null) return;
@@ -1438,6 +1444,7 @@ public final class MainActivity extends Activity {
         content.removeAllViews();
         syncCloudEditor();
         offerDraftRecovery();
+        final long editorGeneration=composeGeneration;
         heading("WRITE / COMMUNITY", "发布话题", "草稿自动保存到账号，与网页版同步。");
         if (!api.isLoggedIn()) status("可先编辑内容；提交前需要登录成员账号。");
         if (categories.length() == 0) { status("暂无可用分类，请稍后重试。"); return; }
@@ -1462,9 +1469,9 @@ public final class MainActivity extends Activity {
         category.setSelection(selected);
         category.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                if (composeCategoryId != ids[position]) { composeCategoryId = ids[position]; composerChanged(); }
+                if (composeCategoryId != ids[position]&&currentComposer(editorGeneration)) { composeCategoryId = ids[position]; composerChanged(); }
             }
-            @Override public void onNothingSelected(AdapterView<?> parent) { composeCategoryId = 0; }
+            @Override public void onNothingSelected(AdapterView<?> parent) { }
         });
         box.addView(category, new LinearLayout.LayoutParams(-1, dp(48)));
         space(box, 12);
@@ -1474,7 +1481,7 @@ public final class MainActivity extends Activity {
         title.setHint("例如：二分答案的边界怎么判断？");
         title.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(120)});
         title.setText(composeTitle);
-        title.addTextChangedListener(watch(value -> { composeTitle = value; composerChanged(); }));
+        title.addTextChangedListener(watch(value -> { if(currentComposer(editorGeneration)){composeTitle = value; composerChanged();} }));
         box.addView(title);
         space(box, 12);
         box.addView(label("正文（5–20000 字）", 13, TEXT, true));
@@ -1487,7 +1494,7 @@ public final class MainActivity extends Activity {
         body.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(20000)});
         body.setText(composeBody);
         body.setContentDescription("发帖正文输入");
-        body.addTextChangedListener(watch(value -> { composeBody = value; composerChanged(); }));
+        body.addTextChangedListener(watch(value -> { if(currentComposer(editorGeneration)){composeBody = value; composerChanged();} }));
         box.addView(body, new LinearLayout.LayoutParams(-1, -2));
         space(box,12);
         WrapLayout format = new WrapLayout(this);format.setContentDescription("发帖格式工具");
@@ -1502,7 +1509,7 @@ public final class MainActivity extends Activity {
         box.addView(format,new LinearLayout.LayoutParams(-1,-2));space(box,14);
         WrapLayout tools=new WrapLayout(this);tools.setContentDescription("发帖草稿工具");box.addView(tools,new LinearLayout.LayoutParams(-1,-2));
         Button image=action("插入图片",false);compactTool(image);image.setContentDescription("插入发帖图片");image.setOnClickListener(v->choosePostImage());tools.addView(image);
-        Button importMd=action("导入 .md",false);compactTool(importMd);importMd.setOnClickListener(v->{if(composeBusy)return;Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT);picker.setType("text/*");picker.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(picker,IMPORT_MARKDOWN);});tools.addView(importMd);
+        Button importMd=action("导入 .md",false);compactTool(importMd);importMd.setOnClickListener(v->{if(composeBusy||!currentComposer(editorGeneration))return;markdownOwner=api.sessionGeneration();markdownGeneration=editorGeneration;Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT);picker.setType("text/*");picker.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(picker,IMPORT_MARKDOWN);});tools.addView(importMd);
         Button draftList=action("云端草稿",false);compactTool(draftList);draftList.setOnClickListener(v->showCloudDraftList());tools.addView(draftList);
         Button preview = action("预览正文", false);
         preview.setContentDescription("预览发帖正文");
@@ -1510,11 +1517,12 @@ public final class MainActivity extends Activity {
         composeStatus = label(cloud.state().status, 12, MUTED, false);
         box.addView(composeStatus);
         Button save = action("保存草稿", false);
-        compactTool(save);save.setOnClickListener(v -> { if (requireLogin("compose")) saveComposer(null); });tools.addView(save);
+        compactTool(save);save.setOnClickListener(v -> { if (currentComposer(editorGeneration)&&requireLogin("compose")) saveComposer(null); });tools.addView(save);
         if (composeDraftId > 0) {
+            final int draftId=composeDraftId;
             Button remove = action("删除当前草稿", false);
-            remove.setOnClickListener(v -> new ModalDialogs.Builder(this).setTitle("删除草稿？").setMessage("删除后无法恢复。")
-                    .setNegativeButton("取消", null).setPositiveButton("删除", (d, w) -> mutate(remove, () -> api.deleteDraft(composeDraftId), () -> { clearComposer(); loadScreen(); })).show());
+            remove.setOnClickListener(v -> {if(!currentComposer(editorGeneration))return;new ModalDialogs.Builder(this).setTitle("删除草稿？").setMessage("删除后无法恢复。")
+                    .setNegativeButton("取消", null).setPositiveButton("删除", (d, w) -> {if(currentComposer(editorGeneration))mutate(remove, () -> api.deleteDraft(draftId), () -> { if(editorGeneration==cloud.generation())clearComposer();else syncCloudEditor();loadScreen(); });}).show();});
             compactTool(remove);tools.addView(remove);
         }
         space(box, 10);
@@ -1522,6 +1530,7 @@ public final class MainActivity extends Activity {
 
         Button submit = action("提交审核", true);
         submit.setOnClickListener(view -> {
+            if(!currentComposer(editorGeneration))return;
             String postTitle = title.getText().toString().trim();
             String postBody = body.getText().toString().trim();
             if (postTitle.codePointCount(0, postTitle.length()) < 4 || postTitle.codePointCount(0, postTitle.length()) > 120) { message("标题需要 4–120 字。"); return; }
@@ -1537,12 +1546,12 @@ public final class MainActivity extends Activity {
                 submit.setEnabled(false);
                 setControlsEnabled(box,false);
                 composeBusy = true;
-                CloudDrafts.State snapshot=cloud.state();int draftId = composeDraftId;long owner=api.sessionGeneration();
+                CloudDrafts.State snapshot=cloud.state();int draftId = composeDraftId;long owner=api.sessionGeneration(),generation=composeGeneration;
                 io.execute(() -> {
                     try {
                         JSONObject result = api.submitDraft(owner,draftId,snapshot.editVersion);int submitted=result.getInt("id");
                         present(() -> {
-                            composeBusy = false; clearComposer(); show("forum");openWebFeature("progress",submitted);
+                            composeBusy = false;if(generation!=cloud.generation()){refreshComposer();return;}clearComposer(); show("forum");openWebFeature("progress",submitted);
                         });
                     } catch (Exception e) { present(() -> { composeBusy = false; submit.setEnabled(true);setControlsEnabled(box,true);failureDialog(e); }); }
                 });
@@ -1562,26 +1571,38 @@ public final class MainActivity extends Activity {
     private void compactTool(Button tool){tool.setTextSize(12);tool.setMinWidth(0);tool.setMinimumWidth(0);tool.setMinHeight(dp(44));tool.setMinimumHeight(dp(44));tool.setPadding(dp(10),dp(6),dp(10),dp(6));}
 
     private void composerChanged() {
-        composeRevision++;cloud.update(composeCategoryId,composeTitle,composeBody);
+        if(!cloud.update(composeGeneration,composeCategoryId,composeTitle,composeBody)){refreshComposer();return;}
+        composeRevision++;
         try {preferences.edit().putString(recoveryKey(),new JSONObject().put("id",composeDraftId).put("title",composeTitle).put("body",composeBody).put("category_id",composeCategoryId).toString()).apply();}catch(Exception ignored){}
         if(composeStatus!=null)composeStatus.setText("等待自动保存…");
     }
     private void syncCloudEditor(){
         cloud.bind(api.isLoggedIn()?api.getBaseUrl()+"/"+api.accountKey():"",api.sessionGeneration());
-        CloudDrafts.State state=cloud.state();composeDraftId=state.id;composeCategoryId=state.category;composeTitle=state.title;composeBody=state.body;
+        CloudDrafts.State state=cloud.state();composeGeneration=state.generation;composeDraftId=state.id;composeCategoryId=state.category;composeTitle=state.title;composeBody=state.body;
         if(!state.dirty)composeSavedRevision=composeRevision;
+    }
+    private void refreshComposer(){
+        if(isFinishing()||isDestroyed())return;
+        syncCloudEditor();
+        if("compose".equals(screen)){composeStatus=null;composeBodyInput=null;ModalDialogs.close(this);loadScreen();}
+    }
+    private boolean currentComposer(long generation){
+        if(generation==composeGeneration&&generation==cloud.generation())return true;
+        refreshComposer();return false;
     }
     private void clearComposer(){
         if(api.isLoggedIn())preferences.edit().remove(recoveryKey()).apply();
-        cloud.reset();composeTitle="";composeBody="";composeCategoryId=0;composeDraftId=0;composeRevision=0;composeSavedRevision=0;composeStatus=null;
+        cloud.reset();syncCloudEditor();composeRevision=0;composeSavedRevision=0;composeStatus=null;
     }
     private void saveComposer(Runnable afterSave){
         if(composeBusy||!requireLogin("compose"))return;
-        cloud.update(composeCategoryId,composeTitle,composeBody);composeBusy=true;setControlsEnabled(content,false);
-        cloud.flush(error->present(()->{
+        long generation=composeGeneration;
+        if(!cloud.update(generation,composeCategoryId,composeTitle,composeBody)){popupLoading=false;refreshComposer();return;}
+        composeBusy=true;setControlsEnabled(content,false);
+        cloud.flush(generation,error->present(()->{
             composeBusy=false;if(isFinishing()||isDestroyed())return;
             setControlsEnabled(content,true);
-            CloudDrafts.State state=cloud.state();composeDraftId=state.id;
+            CloudDrafts.State state=cloud.state();if(state.generation!=generation||composeGeneration!=generation){popupLoading=false;refreshComposer();return;}composeDraftId=state.id;
             if(error!=null){popupLoading=false;if(composeStatus!=null)composeStatus.setText(state.status);failureDialog(error);return;}
             composeSavedRevision=composeRevision;preferences.edit().remove(recoveryKey()).apply();if(composeStatus!=null)composeStatus.setText(state.status);
             if(afterSave!=null)afterSave.run();
@@ -1591,9 +1612,10 @@ public final class MainActivity extends Activity {
         if(composeBusy||actionBusy||!requireLogin("compose"))return;
         saveBeforeSwitch(()->{
             if(id==0){clearComposer();show("compose");return;}
-            int serial=requestSerial;actionBusy=true;
+            int serial=requestSerial;long generation=composeGeneration,owner=api.sessionGeneration();actionBusy=true;
             io.execute(()->{try{JSONObject draft=api.getObject("/api/forum/drafts/"+id);present(()->{
                 actionBusy=false;if(serial!=requestSerial||isFinishing()||isDestroyed())return;
+                if(owner!=api.sessionGeneration()||generation!=cloud.generation()){refreshComposer();return;}
                 cloud.load(draft);syncCloudEditor();show("compose");
             });}catch(Exception e){present(()->{actionBusy=false;if(serial==requestSerial)failureDialog(e);});}});
         });
@@ -1607,11 +1629,11 @@ public final class MainActivity extends Activity {
     }
     private final Runnable draftTicker=new Runnable(){public void run(){
         if(isFinishing()||isDestroyed())return;
-        if("compose".equals(screen)&&composeStatus!=null){CloudDrafts.State state=cloud.state();composeDraftId=state.id;composeStatus.setText(state.status);if(!state.dirty){composeSavedRevision=composeRevision;if(api.isLoggedIn()&&state.id>0)preferences.edit().remove(recoveryKey()).apply();}}
+        if("compose".equals(screen)&&composeStatus!=null){CloudDrafts.State state=cloud.state();if(state.generation!=composeGeneration)refreshComposer();else{composeDraftId=state.id;composeStatus.setText(state.status);if(!state.dirty){composeSavedRevision=composeRevision;if(api.isLoggedIn()&&state.id>0)preferences.edit().remove(recoveryKey()).apply();}}}
         ui.postDelayed(this,700);
     }};
     @Override protected void onStart(){super.onStart();ui.removeCallbacks(draftTicker);ui.post(draftTicker);}
-    @Override protected void onStop(){ui.removeCallbacks(draftTicker);if("compose".equals(screen)&&api.isLoggedIn())cloud.flush(null);super.onStop();}
+    @Override protected void onStop(){ui.removeCallbacks(draftTicker);if("compose".equals(screen)&&api.isLoggedIn())cloud.flush(composeGeneration,null);super.onStop();}
     private void setControlsEnabled(View view,boolean enabled){view.setEnabled(enabled);if(view instanceof android.view.ViewGroup){android.view.ViewGroup group=(android.view.ViewGroup)view;for(int i=0;i<group.getChildCount();i++)setControlsEnabled(group.getChildAt(i),enabled);}}
     private String recoveryKey(){return "cloud_recovery_v021_"+android.util.Base64.encodeToString((api.getBaseUrl()+"\n"+api.accountKey()).getBytes(StandardCharsets.UTF_8),android.util.Base64.NO_WRAP);}
     private void offerDraftRecovery(){
@@ -1619,7 +1641,7 @@ public final class MainActivity extends Activity {
         String key=recoveryKey();if(key.equals(recoveryOffered)||!preferences.contains(key))return;recoveryOffered=key;
         new ModalDialogs.Builder(this).setTitle("恢复未保存内容？").setMessage("本机保留了此账号上次未确认保存的编辑内容。恢复后会另存为新云端草稿，避免覆盖网页中的修改。")
             .setNegativeButton("暂不恢复",null).setNeutralButton("丢弃备份",(d,w)->preferences.edit().remove(key).apply())
-            .setPositiveButton("恢复为新草稿",(d,w)->{try{JSONObject draft=new JSONObject(preferences.getString(key,"{}"));cloud.reset();composeTitle=draft.optString("title");composeBody=draft.optString("body");composeCategoryId=draft.optInt("category_id");composeDraftId=0;composerChanged();loadScreen();}catch(Exception e){failureDialog(e);}}).show();
+            .setPositiveButton("恢复为新草稿",(d,w)->{try{JSONObject draft=new JSONObject(preferences.getString(key,"{}"));cloud.reset();syncCloudEditor();composeTitle=draft.optString("title");composeBody=draft.optString("body");composeCategoryId=draft.optInt("category_id");composeDraftId=0;composerChanged();loadScreen();}catch(Exception e){failureDialog(e);}}).show();
     }
     private void restoreWebSession(){
         if(api.isLoggedIn()||sessionRestoreAttempted||!preferences.getBoolean("auto_login",false)){loadScreen();return;}

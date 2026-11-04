@@ -11,9 +11,10 @@ final class CloudDrafts {
     interface Backend { JSONObject save(long session, int id, int category, String title, String body, int version) throws Exception; }
     interface Completion { void done(Exception error); }
     static final class State {
+        final long generation;
         final int id, category, editVersion, sourcePostId; final String title, body, status; final boolean dirty, saving;
-        State(int id,int category,String title,String body,String status,boolean dirty,boolean saving,int editVersion,int sourcePostId) {
-            this.id=id;this.category=category;this.title=title;this.body=body;this.status=status;this.dirty=dirty;this.saving=saving;this.editVersion=editVersion;this.sourcePostId=sourcePostId;
+        State(int id,int category,String title,String body,String status,boolean dirty,boolean saving,int editVersion,int sourcePostId,long generation) {
+            this.id=id;this.category=category;this.title=title;this.body=body;this.status=status;this.dirty=dirty;this.saving=saving;this.editVersion=editVersion;this.sourcePostId=sourcePostId;this.generation=generation;
         }
     }
     private final ScheduledExecutorService queue=Executors.newSingleThreadScheduledExecutor();
@@ -28,16 +29,17 @@ final class CloudDrafts {
         if(!this.owner.equals(owner)||this.session!=session){this.owner=owner;this.session=session;reset();}
     }
     synchronized void reset(){epoch++;if(timer!=null)timer.cancel(false);id=0;category=0;editVersion=0;sourcePostId=0;title="";body="";revision=0;saved=0;saving=false;status="尚未编辑";}
-    synchronized State state(){return new State(id,category,title,body,status,revision!=saved,saving,editVersion,sourcePostId);}
+    synchronized State state(){return new State(id,category,title,body,status,revision!=saved,saving,editVersion,sourcePostId,epoch);}
     synchronized long generation(){return epoch;}
     synchronized void load(JSONObject draft){reset();id=draft.optInt("id");category=draft.optInt("category_id");editVersion=draft.optInt("edit_version");sourcePostId=draft.optInt("source_post_id");title=draft.optString("title");body=draft.optString("body");status="云端草稿已加载";}
-    synchronized void update(int category,String title,String body){
-        if(this.category==category&&this.title.equals(title)&&this.body.equals(body))return;
+    synchronized boolean update(long expected,int category,String title,String body){
+        if(epoch!=expected)return false;
+        if(this.category==category&&this.title.equals(title)&&this.body.equals(body))return true;
         this.category=category;this.title=title;this.body=body;revision++;status="等待自动保存…";
         if(timer!=null)timer.cancel(false);
-        long expected=epoch; timer=queue.schedule(()->save(expected,null),900,TimeUnit.MILLISECONDS);
+        timer=queue.schedule(()->save(expected,null),900,TimeUnit.MILLISECONDS);return true;
     }
-    void flush(Completion completion){long expected;synchronized(this){expected=epoch;if(timer!=null)timer.cancel(false);}queue.execute(()->save(expected,completion));}
+    void flush(long expected,Completion completion){synchronized(this){if(epoch==expected&&timer!=null)timer.cancel(false);}queue.execute(()->save(expected,completion));}
     void close(){queue.shutdownNow();}
     private void save(long expected,Completion completion){
         Exception failure=null;
