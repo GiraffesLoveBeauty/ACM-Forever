@@ -20,6 +20,8 @@ PR 复用主线 Web 会话、CSRF 和业务 API，仅为公开成员身份/资�
 
 排行榜先读取移动能力：支持 `public_member_ids` 时使用 `/api/mobile/v1/leaderboard`，否则使用 `/api/community/leaderboard`。零 AC 兼容分页在同一次查询中保持接口一致，避免丢失公开成员 ID。榜单成员可通过现有移动资料/帖子接口打开公开主页；旧服务器没有公开身份时不伪造 ID。review 5765456345 指出旧请求绕过了这一步，本轮已修复并补充回归。
 
+论坛列表和详情也通过 `api.publicPostsPath(suffix)` 选择移动接口，保留分类、搜索、分页及详情的 `comment_id` 查询参数。只有移动读取接口补充 `author_public_member_id`；发帖、评论、点赞等写操作继续复用现有 Web API。旧服务器能力接口返回 404/405 或明确不支持时，仍用普通接口读取正文，不伪造公开身份。
+
 缺少接口、无网络、服务器错误、未登录和暂无内容独立处理。已成功请求的页面先显示缓存再后台刷新；持续失败可关闭红色提示，重连成功绿色提示 3 秒关闭。没有缓存时显示真实错误，不伪造业务数据。测试通过不代表生产接口已经部署。
 
 ## 更新渠道与说明
@@ -62,8 +64,21 @@ Windows 现有离线工具链可运行 `Android_APP/tools/build-local-v0213.ps1`
 
 只推 PR 分支不会部署；PR 含 `feat/api/**`，合并 main 将触发服务器同步，必须先由运维备份数据库、WAL、环境配置并确认迁移和恢复方案。本轮不合并、不发布 Release、不操作生产服务器。
 
+## 历史评审逐项核对
+
+2026-11-04 按当前代码和回归核对；“新 review 没再提”不作为修复依据。
+
+| 评审问题 | 当前实现与证据 |
+| --- | --- |
+| 旧 `MainActivity` URL 编码 API 33 重载 | 已替换为 `UrlEncoding.form()`，调用 API 26 可用的 `URLEncoder.encode(value, "UTF-8")`；编码回归覆盖中文及特殊字符，Lint 检查最低 API 兼容性 |
+| 未启用自动登录时 Activity 重建丢会话 | `MainActivity` 从 `AcmApplication` 取得同一 `ApiClient`；新增模拟器实际 `recreate()` 回归，核对关闭自动登录时 Cookie/CSRF 会话对象和代次保留。该保证不包含关闭自动登录后的进程重启 |
+| 远端注销失败跳过本地清理 | `ApiClient.logout()` 的 `finally` 清会话并调用清理回调；断网、500、正常及重复退出的单测覆盖本地密码、持久会话和自动登录选项；模拟器另测断网退出 |
+| 旧 `UpdateManager.java:303` 生命周期问题 | 旧类仍保留，未把旧实现本身标作修复；Gradle 已将其排除，当前 APK 使用 Application 持有的 `AppUpdates`，Activity 弱引用、解绑和存活检查负责界面回调；更新页面回归覆盖当前流程 |
+| `ApiClient` 排行榜绕过移动接口 | 已按能力选接口，兼容分页保持同一接口；单测和模拟器验证公开身份、资料、帖子及返回榜单 |
+| review 5766008716 的论坛列表/详情 P2 | 两处读取改为 `publicPostsPath`；单测覆盖移动及旧服务器，模拟器分别从列表和详情点击作者、获取资料和帖子后返回，并验证通知 `comment_id` 保留 |
+
 ## 验证记录
 
 debug 与 release 构建分支均完成单测/Lint/打包及实际清单生成检查；release 分支仅借本机调试密钥验证签名配置，没有正式签名制品发布。最终本机结果见 [安装说明-v0.2.13.md（实际 APK 与回归结果）](../Android_APP/docs/安装说明-v0.2.13.md)。生产更新源、正式私钥构建、远端 APK 下载与真机安装仍需发布验收，本机模拟响应不作为这些流程已通过的证据。
 
-排行榜 review 修复后，debug/release 各 59 项单测、Lint、构建及九组模拟器回归通过，实际 APK 清单重新核验成功。修复前 `7d97aa59` 的 API、Android、browser CI 已成功；这些结果不代替新 head 的远端检查。
+排行榜 review 修复后、论坛修复前的 `fb8f77305a1d1da079d3bbcc5492f95661809038`，API、Android、browser 三项 CI 均已成功。本轮论坛修复将单测增加到 61 项，回归与实际 APK 结果见本版安装说明；新提交的远端检查需按其 head 另行核对。
