@@ -19,6 +19,8 @@
 
 ## 文档
 
+- [issue-85-member-profile.md（成员资料筛选与可恢复编辑）](docs/issue-85-member-profile.md)
+
 - [TCrB-AI项目工程规范.md（AI 项目工程协作规范 · 讨论稿）](docs/TCrB-AI项目工程规范.md)
 - [api.md（API 调用指南）](docs/api.md)
 - [android-app.md（Android v0.2.15、更新渠道、构建与发布）](docs/android-app.md)
