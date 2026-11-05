@@ -48,6 +48,13 @@ async def run(port):
                     "INSERT INTO web_accounts(qq_id,password_hash,role,must_change_password,is_active,created_at,updated_at) "
                     "VALUES(?,?,?,0,1,?,?)", (qq, encoded, role, now, now),
                 )
+            for number in range(26):
+                await db.execute(
+                    "INSERT INTO users(qq_id,name,real_name,school,status,cf_handle,atcoder_handle,luogu_id,nowcoder_id,cjlu_username) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (str(21000000 + number), f"资料夹具{number:02}", None if number % 2 else f"合成姓名{number:02}",
+                     "测试学校甲" if number % 2 else "测试学校乙", "测试现役" if number % 3 else "测试集训",
+                     f"ProfileCF_{number}", f"ProfileAC_{number}", str(81000 + number), str(91000 + number), f"ProfileCampus_{number}"),
+                )
             for number in range(1, 31):
                 body = "## 思路\n\n仅用于自动化测试的内容。"
                 if number == 30:

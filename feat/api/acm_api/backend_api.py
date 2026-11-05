@@ -42,7 +42,7 @@ from .account_lifecycle_service import (
     protect_last_root, web_account, web_account_available, user_lifecycle,
 )
 from .account_registration_service import register_again
-from . import binding_service
+from . import binding_service, member_profile_service
 from .binding_service import clear_platform_records as _clear_platform_records
 
 LOG = logging.getLogger("acm_api")
@@ -1086,29 +1086,56 @@ async def api_register_user():
         await db.close()
 
 
+@api.errorhandler(member_profile_service.ProfileError)
+async def member_profile_error(error):
+    return jsonify({"success": False, "code": error.code, "message": str(error), **error.details}), error.status
+
+
+@api.after_request
+async def private_member_profiles(response):
+    if request.path.startswith("/api/admin/members"):
+        response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
 @api.route("/admin/members", methods=["GET"])
 @admin_required
 async def api_admin_members():
-    try:
-        page = max(1, int(request.args.get("page", 1)))
-        size = max(1, min(100, int(request.args.get("page_size", 20))))
-    except (TypeError, ValueError):
-        return jsonify({"success": False, "message": "分页参数必须为整数。"}), 400
-    search = _field(request.args, "search", 100)
-    fields = ("qq_id", "name", "school", "status", "cf_handle", "luogu_id", "nowcoder_id", "atcoder_handle", "cjlu_username")
-    where = " WHERE u.account_state='active' AND (" + " OR ".join(f"LOWER(COALESCE(u.{field},'')) LIKE ?" for field in fields) + ")" if search else " WHERE u.account_state='active'"
-    values = ["%" + search.lower() + "%"] * len(fields) if search else []
     db = await get_db()
     try:
-        async with db.execute("SELECT COUNT(*) FROM users u" + where, values) as cursor:
-            total = (await cursor.fetchone())[0]
-        async with db.execute(
-            "SELECT " + ",".join("u." + field for field in fields) + ",a.role,a.is_active "
-            "FROM users u LEFT JOIN web_accounts a ON a.qq_id=u.qq_id" + where +
-            " ORDER BY u.name COLLATE NOCASE,u.qq_id LIMIT ? OFFSET ?", values + [size, (page - 1) * size],
-        ) as cursor:
-            items = [dict(row) for row in await cursor.fetchall()]
-        return jsonify({"items": items, "total": total, "page": page, "page_size": size})
+        return jsonify(await member_profile_service.listing(db, request.args))
+    finally:
+        await db.close()
+
+
+@api.route("/admin/members/options", methods=["GET"])
+@admin_required
+async def api_member_profile_options():
+    db = await get_db()
+    try:
+        config = current_app.config.get("PLUGIN_CONFIG", {})
+        return jsonify(await member_profile_service.options(
+            db, request.web_identity, secret=current_app.secret_key,
+            deployment=str(Path(current_app.config["DB_PATH"]).resolve()),
+            legacy_username=config.get("webui_admin_username") or os.environ.get("ACM_WEBUI_ADMIN_USERNAME", "")))
+    finally:
+        await db.close()
+
+
+@api.route("/admin/members/<qq_id>", methods=["GET", "PATCH"])
+@admin_required
+async def api_member_profile(qq_id):
+    if not _valid_qq(qq_id):
+        return jsonify({"success": False, "code": "invalid_qq", "message": "QQ 号必须为 4–12 位数字。"}), 400
+    db = await get_db()
+    try:
+        if request.method == "GET":
+            return jsonify(await member_profile_service.snapshot(db, qq_id))
+        data = await request.get_json(silent=True)
+        result, status = await member_profile_service.patch(
+            db, request.web_identity, qq_id, data,
+            current_app.config.get("PLUGIN_CONFIG", {}).get("_account_sync_submitter"))
+        return jsonify(result), status
     finally:
         await db.close()
 
