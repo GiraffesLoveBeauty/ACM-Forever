@@ -1,4 +1,4 @@
-"""Administrator-triggered collection of public AtCoder and Codeforces problems."""
+"""Collect public AtCoder and Codeforces problems."""
 
 import asyncio
 import hashlib
@@ -11,11 +11,13 @@ import aiosqlite
 
 from .problem_bank import record_problem_failure, save_problem, save_metadata_batch
 from .problem_content import parse_atcoder, parse_atcoder_tasks, parse_codeforces
+from .problem_tracker import problem_id_key
 from .cf_client import CFUnavailable, cf_page, cf_request, problem_url
 from .cf_practice import normalize_problem
 from .contest_metadata import contest_metadata, refresh_contests, save_contests
 
 ATCODER_CATALOG_URL = "https://kenkoooo.com/atcoder/resources/problems.json"
+DAILY_STATEMENT_LIMIT = 100
 
 
 def sync_options(data):
@@ -151,6 +153,40 @@ def cf_catalog_metadata(problems):
     return items
 
 
+async def _scheduled_pending(db, platform, items):
+    """Collect new statements first, then rotate through older failed attempts."""
+    completed = set()
+    attempted = {}
+    async with db.execute(
+        "SELECT problem_id,last_attempt_at,last_fetch_status='ok' AND "
+        "(COALESCE(length(statement_html),0)>0 OR COALESCE(length(statement_text),0)>0 "
+        "OR COALESCE(length(statement_pdf),0)>0) AS has_statement "
+        "FROM crawler_problems WHERE platform=?",
+        (platform,),
+    ) as cursor:
+        for problem_id, last_attempt_at, has_statement in await cursor.fetchall():
+            key = problem_id_key(platform, problem_id)
+            if has_statement:
+                completed.add(key)
+            if last_attempt_at:
+                attempted[key] = max(attempted.get(key, ""), last_attempt_at)
+    async with db.execute(
+        "SELECT contest_id,start_time FROM crawler_contests WHERE platform=?",
+        (platform,),
+    ) as cursor:
+        starts = {contest_id: start_time or 0 for contest_id, start_time in await cursor.fetchall()}
+
+    def priority(item):
+        last_attempt = attempted.get(problem_id_key(platform, item["problem_id"]), "")
+        contest_id = item["contest_id"]
+        # CF contest numbers give a useful fallback when date metadata is unavailable.
+        contest_number = int(contest_id) if platform == "codeforces" else 0
+        return bool(last_attempt), last_attempt, -starts.get(contest_id, 0), -contest_number
+
+    pending = [item for item in items if problem_id_key(platform, item["problem_id"]) not in completed]
+    return sorted(pending, key=priority)
+
+
 class ProblemSync:
     def __init__(self, db_path):
         self.db_path = db_path
@@ -174,6 +210,7 @@ class ProblemSync:
     async def run(self, options, task):
         task.update(status="running", started_at=int(time.time()))
         full = options["scope"] == "platform"
+        scheduled = full and options.get("scheduled", False)
         result = {
             "contest_id": options["contest_id"], "discovered_count": 0, "scope_count": 0,
             "selected_count": 0, "skipped_count": 0, "remaining_count": 0,
@@ -227,14 +264,18 @@ class ProblemSync:
                     raise ValueError("比赛题目列表中不存在题号：" + ", ".join(sorted(unknown)))
                 items = [item for item in items if not requested or item["problem_id"] in requested]
                 result["scope_count"] = len(items)
-                async with db.execute(
-                    "SELECT problem_id FROM crawler_problems WHERE platform=? "
-                    "AND last_fetch_status='ok' AND (statement_html IS NOT NULL OR statement_pdf IS NOT NULL) AND requested_language=?",
-                    (options["platform"], options["language"]),
-                ) as cursor:
-                    completed = {row[0] for row in await cursor.fetchall()} if not options["refresh"] else set()
-                pending = [item for item in items if item["problem_id"] not in completed]
-                selected = pending if full else pending[:options["limit"]]
+                if scheduled:
+                    pending = await _scheduled_pending(db, options["platform"], items)
+                    selected = pending[:DAILY_STATEMENT_LIMIT]
+                else:
+                    async with db.execute(
+                        "SELECT problem_id FROM crawler_problems WHERE platform=? "
+                        "AND last_fetch_status='ok' AND (statement_html IS NOT NULL OR statement_pdf IS NOT NULL) AND requested_language=?",
+                        (options["platform"], options["language"]),
+                    ) as cursor:
+                        completed = {row[0] for row in await cursor.fetchall()} if not options["refresh"] else set()
+                    pending = [item for item in items if item["problem_id"] not in completed]
+                    selected = pending if full else pending[:options["limit"]]
                 result.update(skipped_count=len(items) - len(pending), selected_count=len(selected),
                               remaining_count=len(pending) if full else len(pending) - len(selected))
                 batch_size = options["batch_size"] if full else max(1, len(selected))
@@ -263,7 +304,7 @@ class ProblemSync:
                             result["failure_details_truncated"] = True
                     task["progress"]["done"] += 1
                     if full:
-                        result["remaining_count"] = len(selected) - task["progress"]["done"]
+                        result["remaining_count"] = len(pending) - task["progress"]["done"]
                     if task["progress"]["done"] % batch_size == 0 or task["progress"]["done"] == len(selected):
                         result["completed_batches"] += 1
                 task["status"] = (

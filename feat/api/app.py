@@ -90,7 +90,7 @@ async def _write_admins(db_path, root_ids, admins, identity):
         await db.close()
 
 
-def create_app():
+def create_app(*, daily_problem_sync=False):
     app = Quart(__name__, static_folder=None)
 
     @app.errorhandler(AccountLifecycleError)
@@ -218,6 +218,8 @@ def create_app():
         await closure_cleanup.start()
         await maintenance_once(app)
         app.extensions["account_import_maintenance"] = asyncio.create_task(maintenance_loop(app))
+        if daily_problem_sync:
+            task_manager.start_daily_problem_sync()
 
     @app.after_serving
     async def close_service():
@@ -402,4 +404,4 @@ _RETIRED_PAGES = {"reviews.html", "submissions.html", "workspace.html"}
 _LEGACY_ADMIN_PAGES = {"member.html": "members", "problem-bank.html": "problems", "tasks.html": "tasks", "settings.html": "settings", "forum-moderation.html": "moderation", "cf-practice.html": "cf-practice"}
 
 
-app = create_app()
+app = create_app(daily_problem_sync=_bool_env("ACM_DAILY_PROBLEM_SYNC_ENABLED", True))

@@ -14,10 +14,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from feat.api.acm_api.auth_service import hash_password
+from feat.api.acm_api.contest_metadata import save_contests
 from feat.api.acm_api.database import connect_db
 from feat.api.acm_api.problem_bank import save_metadata_batch, save_problem
-from feat.api.acm_api.problem_content import parse_atcoder_tasks, parse_codeforces
-from feat.api.acm_api.problem_sync import ATCODER_CATALOG_URL, cf_catalog_metadata, sync_options
+from feat.api.acm_api.problem_content import parse_atcoder, parse_atcoder_tasks, parse_codeforces
+from feat.api.acm_api.problem_sync import ATCODER_CATALOG_URL, atcoder_catalog_metadata, cf_catalog_metadata, sync_options
 from feat.api.app import create_app
 
 
@@ -349,7 +350,6 @@ class ProblemSyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_existing_database_gets_pdf_column_without_losing_html_or_samples(self):
         metadata = {'platform': 'atcoder', 'problem_id': 'abc370_a', 'contest_id': 'abc370',
                     'problem_name': 'Old body', 'problem_url': 'https://atcoder.jp/contests/abc370/tasks/abc370_a'}
-        from feat.api.acm_api.problem_content import parse_atcoder
         db = await connect_db(self.db_path)
         try:
             await save_problem(db, metadata, {**parse_atcoder(BODY, metadata['problem_url']),
@@ -622,7 +622,8 @@ class ProblemSyncTests(unittest.IsolatedAsyncioTestCase):
             invalid = [{"scope": "all"}, {"scope": []}, {"scope": "platform", "limit": 10},
                        {"scope": "platform", "contest_id": "abc370"}, {"scope": "platform", "problem_ids": []},
                        {"scope": "platform", "batch_size": True}, {"scope": "platform", "batch_size": 101},
-                       {"scope": "platform", "batch_size": 0}, {"contest_id": "abc370", "batch_size": 10}]
+                       {"scope": "platform", "batch_size": 0}, {"contest_id": "abc370", "batch_size": 10},
+                       {"scope": "platform", "scheduled": True}]
             for payload in invalid:
                 self.assertEqual((await client.post("/api/admin/problems/sync", json=payload, headers=headers)).status_code, 400)
             self.assertEqual(self.app.task_manager.tasks, {})
@@ -646,6 +647,58 @@ class ProblemSyncTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(task["result"]["success_count"], 0)
             self.assertEqual(len(await self.query("SELECT * FROM recommendations")), 3)
             self.assertEqual({row["contest_id"] for row in await self.query("SELECT * FROM crawler_problems")}, {"abc370", "abc371", "abc372"})
+
+    async def test_daily_platform_sync_refreshes_catalog_and_limits_newest_statements(self):
+        older, saved = CATALOG[:2]
+        newest = [
+            {"id": f"abc372_{index}", "contest_id": "abc372", "name": f"Latest {index}"}
+            for index in range(100)
+        ]
+        catalog = [older, *newest, {**saved, "name": "Renamed in catalog"}]
+        previous = atcoder_catalog_metadata([saved])[0]
+        source_url = previous["problem_url"] + "?lang=ja"
+        content = parse_atcoder(BODY.replace(b"lang-en", b"lang-ja"), source_url, "ja")
+        db = await connect_db(self.db_path)
+        try:
+            await save_problem(db, previous, {
+                **content, "requested_language": "ja", "source_url": source_url, "sha256": "original-body",
+            })
+            await save_contests(db, [
+                {"platform": "atcoder", "contest_id": item["contest_id"],
+                 "contest_name": item["name"], "start_time": start}
+                for start, item in enumerate(CATALOG, start=1)
+            ])
+        finally:
+            await db.close()
+
+        async def download(http, url):
+            return json.dumps(catalog).encode() if url == ATCODER_CATALOG_URL else BODY
+
+        sync = self.app.task_manager.problem_sync
+        options = {**sync_options({"platform": "atcoder", "scope": "platform"}), "scheduled": True}
+        task = {}
+        with patch.object(sync, "download", side_effect=download) as fetch:
+            await sync.run(options, task)
+        self.assertEqual(task["status"], "completed", task["result"])
+        self.assertEqual(task["result"]["metadata_count"], 102)
+        self.assertEqual(task["result"]["skipped_count"], 1)
+        self.assertEqual(task["result"]["success_count"], 100)
+        self.assertEqual(task["result"]["remaining_count"], 1)
+        urls = [call.args[1] for call in fetch.await_args_list]
+        self.assertEqual(urls[0], ATCODER_CATALOG_URL)
+        self.assertCountEqual(urls[1:], [
+            f"https://atcoder.jp/contests/abc372/tasks/{item['id']}?lang=en"
+            for item in newest
+        ])
+        self.assertEqual(len(await self.query("SELECT problem_id FROM recommendations")), 102)
+        rows = await self.query(
+            "SELECT problem_name,statement_html,requested_language,statement_sha256 FROM crawler_problems WHERE problem_id=?",
+            (saved["id"],),
+        )
+        self.assertEqual(rows, [{
+            "problem_name": "Renamed in catalog", "statement_html": content["statement_html"],
+            "requested_language": "ja", "statement_sha256": "original-body",
+        }])
 
     async def test_cf_full_platform_uses_problemset_and_excludes_gym(self):
         problems = [{"contestId": contest, "index": "A", "name": "Example", "rating": 800, "tags": ["math"]}
