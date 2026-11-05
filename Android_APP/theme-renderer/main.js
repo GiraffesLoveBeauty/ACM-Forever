@@ -22,6 +22,7 @@ window.applyTheme=(config)=>{
   document.documentElement.dataset.designTemplate=config.design;
   document.documentElement.dataset.customTheme='true';
   document.documentElement.dataset.theme=config.dark?'dark':'light';
+  document.body.dataset.theme=config.dark?'dark':'light';
   document.body.dataset.mobileScene=config.scene;
   for(const [key,value] of Object.entries(deriveTokens(config.profile,config.dark)))document.body.style.setProperty(key,value);
 };

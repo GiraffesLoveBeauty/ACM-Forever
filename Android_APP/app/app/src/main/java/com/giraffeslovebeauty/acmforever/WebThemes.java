@@ -35,9 +35,19 @@ final class WebThemes {
         LinkedHashMap<String,JSONObject> items=new LinkedHashMap<>();for(JSONArray list:new JSONArray[]{existing,incoming})for(int i=0;i<list.length();i++){JSONObject item=list.getJSONObject(i);items.put(item.getString("id"),item);}if(items.size()>MAX_SCHEMES)throw new JSONException("本机最多保存 12 套导入主题");JSONArray out=new JSONArray();for(JSONObject item:items.values())out.put(item);return out;
     }
     static JSONObject profile(JSONObject preset,boolean dark)throws JSONException{
-        if(preset.has("theme"))return validate(preset.getJSONObject("theme")).getJSONObject(dark?"dark":"light");
-        JSONArray values=preset.getJSONArray(dark?"dark":"light");JSONObject colors=new JSONObject();for(int i=0;i<BASE.length;i++)colors.put(BASE[i],color(values.get(i)));return new JSONObject().put("colors",colors).put("overrides",new JSONObject());
+        JSONObject profile;
+        if(preset.has("theme"))profile=validate(preset.getJSONObject("theme")).getJSONObject(dark?"dark":"light");
+        else{JSONArray values=preset.getJSONArray(dark?"dark":"light");JSONObject colors=new JSONObject();for(int i=0;i<BASE.length;i++)colors.put(BASE[i],color(values.get(i)));profile=new JSONObject().put("colors",colors).put("overrides",new JSONObject());}
+        // Portable themes receive a new ID. Freeze ID-dependent defaults in both modes.
+        if("industrial".equals(preset.optString("id"))){
+            JSONObject colors=profile.getJSONObject("colors"),custom=profile.getJSONObject("overrides");
+            ThemePalette palette=new ThemePalette(argb(colors.get("primary")),argb(colors.get("background")),argb(colors.get("surface")),argb(colors.get("accent")),dark,true,overrides(profile));
+            int[] resolved={palette.text,palette.muted,palette.line,palette.brand,palette.onSelected,palette.hero};
+            for(int i=0;i<OVERRIDES.length;i++)if(!custom.has(OVERRIDES[i]))custom.put(OVERRIDES[i],String.format(Locale.ROOT,"#%06x",resolved[i]&0xffffff));
+        }
+        return profile;
     }
+    private static int argb(Object value)throws JSONException{return (int)(0xff000000L|Long.parseLong(color(value).substring(1),16));}
     static int[] overrides(JSONObject profile)throws JSONException{
         JSONObject source=profile.optJSONObject("overrides");int[] result=new int[6];if(source!=null)for(int i=0;i<OVERRIDES.length;i++)if(source.has(OVERRIDES[i]))result[i]=(int)(0xff000000L|Long.parseLong(color(source.get(OVERRIDES[i])).substring(1),16));return result;
     }
