@@ -1,6 +1,16 @@
-# 打一辈子爱臭美 / ACMforever v0.2.14
+# 打一辈子爱臭美 / ACMforever v0.2.16
 
-当前工程及发布说明以 [android-app.md（Android v0.2.14、更新渠道、构建与发布）](../docs/android-app.md) 为准。以下旧版条目保留其当时状态。
+当前工程及发布说明以 [android-app.md（Android v0.2.16、更新渠道、构建与发布）](../docs/android-app.md) 为准。以下旧版条目保留其当时状态。
+
+## v0.2.16
+
+全局搜索、设备端模块排序与历史、原生便捷管理、自站优先并以 GitHub 备用的更新。既有接口复用，缺少的模块显示真实错误；不改网页或业务后端。
+
+- [修改标准与接口关联](../docs/android-modification-standard.md)
+- [本轮范围与验收](../docs/android-v0.2.16.md)
+- [自站配置、Tag 发布及恢复](../docs/android-self-hosted-release-v0.2.16.md)
+
+本轮先提交 PR 交别人 review，确认后才合并/创建Tag；APK不进源码Git。
 
 ## v0.2.14
 

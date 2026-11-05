@@ -21,7 +21,10 @@
 
 - [TCrB-AI项目工程规范.md（AI 项目工程协作规范 · 讨论稿）](docs/TCrB-AI项目工程规范.md)
 - [api.md（API 调用指南）](docs/api.md)
-- [android-app.md（Android v0.2.15、更新渠道、构建与发布）](docs/android-app.md)
+- [android-app.md（Android v0.2.16、更新渠道、构建与发布）](docs/android-app.md)
+- [android-v0.2.16.md（全局搜索、便捷管理与本轮验收）](docs/android-v0.2.16.md)
+- [android-modification-standard.md（App修改标准、模块关联与缺失接口）](docs/android-modification-standard.md)
+- [android-self-hosted-release-v0.2.16.md（自站更新、运维配置与Tag发布）](docs/android-self-hosted-release-v0.2.16.md)
 - [android-tag-release-v0.2.14.md（Android Tag 自动发布、签名配置与 App 更新）](docs/android-tag-release-v0.2.14.md)
 - [android-release-fix-v0.2.15.md（草稿发布修复与重新首发 · 待评审）](docs/android-release-fix-v0.2.15.md)
 - [android-release-api-plan-v0.2.14.md（已被 Tag 发布替代的自有服务器方案）](docs/android-release-api-plan-v0.2.14.md)
