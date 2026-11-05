@@ -74,18 +74,28 @@ export function matchesSubmission(record, current) {
     })
   );
 }
+// Capture exactly what is validated and confirmed, before any worker can yield.
+export function prepareProfileBatch(records) {
+  return records.map((source) => {
+    const record = JSON.parse(JSON.stringify(source));
+    return { source, record, payload: profilePayload(record) };
+  });
+}
 // Each request is an independent transaction. Never replay an uncertain binding write.
 export async function saveProfileBatch(
-  records,
-  { request, active = () => true, status, success, conflict, limit = 3 },
+  submissions,
+  { request, active = () => true, valid = () => true, status, success, conflict, limit = 3 },
 ) {
   let index = 0,
     authorized = true;
-  const totals = { saved: 0, failed: 0, conflicts: 0 };
+  const totals = { saved: 0, failed: 0, conflicts: 0, cancelled: 0 };
   async function worker() {
-    while (authorized && active() && index < records.length) {
-      const source = records[index++],
-        record = JSON.parse(JSON.stringify(source));
+    while (authorized && active() && index < submissions.length) {
+      const { source, record, payload } = submissions[index++];
+      if (!valid(source, record)) {
+        totals.cancelled++;
+        continue;
+      }
       if (!Object.keys(record.changes).length) continue;
       const errors = validateProfile(record);
       if (Object.keys(errors).length) {
@@ -97,7 +107,7 @@ export async function saveProfileBatch(
       try {
         const result = await request('/admin/members/' + encodeURIComponent(record.qq_id), {
           method: 'PATCH',
-          body: profilePayload(record),
+          body: payload,
         });
         if (!active()) return;
         totals.saved++;
@@ -145,6 +155,6 @@ export async function saveProfileBatch(
       }
     }
   }
-  await Promise.all(Array.from({ length: Math.min(limit, records.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(limit, submissions.length) }, worker));
   return { ...totals, authorizationLost: !authorized };
 }

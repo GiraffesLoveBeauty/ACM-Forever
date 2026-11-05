@@ -10,6 +10,7 @@ import {
   sameGeneration,
   matchesSubmission,
   saveProfileBatch,
+  prepareProfileBatch,
 } from '../lib/member-profiles.js';
 import {
   profileBase,
@@ -20,6 +21,7 @@ import {
   profileDraftStore,
   forkProfileDraft,
   clearSavedDraft,
+  rebaseSavedDraft,
 } from '../lib/member-profile-drafts.js';
 export function useMemberProfiles() {
   const route = useRoute(),
@@ -145,15 +147,18 @@ export function useMemberProfiles() {
       ? drafts[row.qq_id].changes[key]
       : row[key] || '';
   }
-  function input(row, key, text) {
-    const record = ensure(row);
-    if (record.state === 'saving') return;
+  function editRecord(record, key, text) {
     changeDraft(record, key, text);
     record.fieldErrors = {};
     record.error = '';
-    if (!record.current && !['blocked', 'uncertain'].includes(record.state))
+    if (!record.current && !['saving', 'queued', 'blocked', 'uncertain'].includes(record.state))
       record.state = 'pending';
     persist(record);
+  }
+  function input(row, key, text) {
+    const record = ensure(row);
+    if (record.state === 'saving') return;
+    editRecord(record, key, text);
   }
   function dirtyField(row, key) {
     return editing.value && Object.hasOwn(drafts[row.qq_id]?.changes || {}, key);
@@ -166,6 +171,7 @@ export function useMemberProfiles() {
       {
         pending: '待保存',
         saving: '保存中',
+        queued: '排队中',
         saved: '成功',
         failed: '保存失败',
         conflict: '需要核对',
@@ -241,7 +247,7 @@ export function useMemberProfiles() {
   function selectStatus(status) {
     const record = drawerRecord.value;
     record.drawer = null;
-    input(record.base, 'status', status);
+    editRecord(record, 'status', status);
     drawerQQ.value = null;
   }
   function cancelDrawer() {
@@ -311,6 +317,8 @@ export function useMemberProfiles() {
     }
     for (const source of record.sources || []) store.remove(source.key, source.revision);
     delete drafts[record.qq_id];
+    if (drawerQQ.value === record.qq_id) drawerQQ.value = null;
+    if (conflictQQ.value === record.qq_id) conflictQQ.value = null;
     refreshCandidates();
   }
   function discardAll() {
@@ -348,27 +356,24 @@ export function useMemberProfiles() {
     pendingOpen.value = true;
   }
   function onSuccess(record, submitted, result) {
-    if (record.revision !== submitted.revision) return;
-    const pendingDrawer = record.drawer;
-    if (clearSavedDraft(store, record, submitted)) {
-      record.base = profileBase(result.member);
-      record.changes = {};
-      record.sources = [];
-      record.state = 'saved';
-      record.current = null;
-      record.drawer = pendingDrawer;
-      record.persisted = true;
-      if (pendingDrawer) {
-        record.revision++;
-        persist(record);
-      }
-      record.error = (result.warnings || []).join(' ');
-      record.fieldErrors = {};
-    } else {
+    if (draftKey(record) !== draftKey(submitted)) return;
+    if (record.revision === submitted.revision && !clearSavedDraft(store, record, submitted)) {
       record.state = 'saved';
       record.error = '服务端已保存，但本地草稿未清理，请核对后清理。';
       storageError.value = record.error;
+      return;
     }
+    const sources = record.sources;
+    rebaseSavedDraft(record, submitted, result.member);
+    record.sources = [];
+    record.state = 'pending';
+    record.current = null;
+    record.error = (result.warnings || []).join(' ');
+    record.fieldErrors = {};
+    if (persist(record)) {
+      for (const source of submitted.sources || []) store.remove(source.key, source.revision);
+    } else record.sources = sources;
+    record.state = Object.keys(record.changes).length ? 'pending' : 'saved';
     if (result.warnings?.length) notify(result.warnings.join(' '));
   }
   async function saveAll(single = null) {
@@ -379,10 +384,11 @@ export function useMemberProfiles() {
     );
     const skipped = targets.length - rows.length;
     const eligible = [];
-    for (const record of rows) {
-      const errors = validateProfile(record);
-      if (Object.keys(errors).length) onStatus(record, 'failed', '请检查标出的字段。', errors);
-      else eligible.push(record);
+    for (const submission of prepareProfileBatch(rows)) {
+      const errors = validateProfile(submission.record);
+      if (Object.keys(errors).length)
+        onStatus(submission.source, 'failed', '请检查标出的字段。', errors);
+      else eligible.push(submission);
     }
     const invalid = rows.length - eligible.length;
     const deferred = invalid + skipped;
@@ -391,7 +397,7 @@ export function useMemberProfiles() {
       message.value = '没有可直接保存的修改，请检查字段错误、冲突或待确认结果。';
       return;
     }
-    const bindings = eligible.flatMap((record) =>
+    const bindings = eligible.flatMap(({ record }) =>
       bindingChanges(record).map(
         ([key, text]) =>
           `QQ ${record.qq_id} · ${profileFields[key]}：${record.base[key] || '未绑定'} → ${normalized(text) || '解绑'}`,
@@ -415,17 +421,20 @@ export function useMemberProfiles() {
       return;
     saving.value = true;
     flush();
+    for (const { source } of eligible) onStatus(source, 'queued');
     try {
       const totals = await saveProfileBatch(eligible, {
         request: api,
         active,
+        valid: (record, submitted) =>
+          drafts[record.qq_id] === record && draftKey(record) === draftKey(submitted),
         status: onStatus,
         success: onSuccess,
         conflict: onConflict,
         limit: 3,
       });
       if (!active()) return;
-      message.value = `成功 ${totals.saved} 人，失败 ${totals.failed + invalid} 人，冲突 ${totals.conflicts} 人。${skipped ? ` 另 ${skipped} 人未提交，草稿保留。` : ''}${totals.authorizationLost ? '权限已变化，已停止后续保存。' : ''}`;
+      message.value = `成功 ${totals.saved} 人，失败 ${totals.failed + invalid} 人，冲突 ${totals.conflicts} 人。${skipped ? ` 另 ${skipped} 人未提交，草稿保留。` : ''}${totals.cancelled ? ` 已取消排队 ${totals.cancelled} 人。` : ''}${totals.authorizationLost ? '权限已变化，已停止后续保存。' : ''}`;
       pendingOpen.value = true;
       refreshCandidates();
       if (totals.saved) {
@@ -434,6 +443,7 @@ export function useMemberProfiles() {
           message.value += ' 列表已按当前条件刷新，不再符合筛选的成员会移出列表。';
       }
     } finally {
+      for (const { source } of eligible) if (source.state === 'queued') onStatus(source, 'pending');
       saving.value = false;
     }
   }

@@ -1,4 +1,4 @@
-import { profileFields, normalized } from './member-profiles.js';
+import { profileFields, ojFields, normalized } from './member-profiles.js';
 const prefix = 'acm-member-profile:';
 export const draftVersion = 1;
 export const editSessionId = () =>
@@ -180,4 +180,25 @@ export function clearSavedDraft(store, current, submitted) {
   if (!result.ok || !result.removed) return false;
   for (const source of submitted.sources || []) store.remove(source.key, source.revision);
   return true;
+}
+
+// A successful snapshot becomes the new base; only input made after it stays dirty.
+export function rebaseSavedDraft(record, submitted, member) {
+  const changes = {};
+  const value = (draft, key) =>
+    Object.hasOwn(draft.changes, key) ? draft.changes[key] : draft.base[key];
+  const comparable = (key, raw) =>
+    ojFields[key] ? normalized(raw).toLowerCase() : normalized(raw);
+  for (const key of Object.keys(profileFields)) {
+    const latest = value(record, key);
+    if (
+      comparable(key, latest) !== comparable(key, value(submitted, key)) &&
+      comparable(key, latest) !== comparable(key, member[key])
+    )
+      changes[key] = String(latest ?? '');
+  }
+  record.base = profileBase(member);
+  record.changes = changes;
+  record.revision++;
+  record.updated_at = Date.now();
 }

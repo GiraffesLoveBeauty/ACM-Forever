@@ -184,3 +184,137 @@ test('OJ cancel does not write, confirmed unbind preserves campus OJ and clears 
   await expect(page.getByRole('button', { name: '恢复草稿', exact: true })).toHaveCount(0);
   await noOverflow(page);
 });
+
+async function holdProfileWrites(page, pauseFourth = false) {
+  let release, releaseFourth;
+  const first = new Promise((resolve) => (release = resolve));
+  const fourth = new Promise((resolve) => (releaseFourth = resolve));
+  const sent = [];
+  const handler = async (route) => {
+    if (route.request().method() === 'PATCH') {
+      sent.push({ url: route.request().url(), body: route.request().postDataJSON() });
+      if (sent.length <= 3) await first;
+      else if (pauseFourth && sent.length === 4) await fourth;
+    }
+    await route.continue();
+  };
+  await page.route('**/api/admin/members/*', handler);
+  return {
+    sent,
+    release,
+    releaseFourth,
+    async close() {
+      release();
+      releaseFourth();
+      await page.unroute('**/api/admin/members/*', handler);
+    },
+  };
+}
+async function editQueuedMembers(page, info, start) {
+  const ids = Array.from({ length: 4 }, (_, index) => qq(info, start + index));
+  await open(
+    page,
+    '&search=资料夹具' + (start === 8 && info.project.name === 'mobile' ? '&page=2' : ''),
+  );
+  const before = await Promise.all(
+    ids.map(async (id) => (await page.request.get('/api/admin/members/' + id)).json()),
+  );
+  await edit(page);
+  for (const member of before)
+    await page.getByLabel(`${member.qq_id} 昵称`, { exact: true }).fill(member.name + '_队列保存');
+  return { ids, before };
+}
+
+test('queued OJ and drawer input require a new save, preserving server bindings until confirmed', async ({
+  page,
+}, info) => {
+  const { ids, before } = await editQueuedMembers(page, info, 4);
+  const id = ids[3],
+    batch = await holdProfileWrites(page, true),
+    confirmations = [];
+  page.on('dialog', async (dialog) => {
+    confirmations.push(dialog.message());
+    await dialog.accept();
+  });
+  try {
+    await page.getByRole('button', { name: '保存全部（4）', exact: true }).click();
+    await expect.poll(() => batch.sent.length).toBe(3);
+    const nextCF = `QueueCF_${id}`,
+      nextStatus = `${info.project.name}后续身份`;
+    await page.getByLabel(`${id} Codeforces`, { exact: true }).fill(nextCF);
+    await page.getByLabel(`${id} 身份`, { exact: true }).click();
+    const drawer = page.getByRole('dialog', { name: '选择成员身份' });
+    await drawer.getByRole('button', { name: '＋ 新建身份', exact: true }).click();
+    batch.release();
+    await expect.poll(() => batch.sent.length).toBe(4);
+    await drawer.getByLabel('新身份名称', { exact: true }).fill(nextStatus);
+    expect(batch.sent[3].body).not.toHaveProperty('cf_handle');
+    expect(batch.sent[3].body.confirm_bindings).toBe(false);
+    expect(confirmations).toHaveLength(0);
+    batch.releaseFourth();
+    await expect(page.getByText('成功 4 人', { exact: false })).toBeVisible();
+    await drawer.getByRole('button', { name: '关闭身份选择器' }).click();
+    await expect(page.getByLabel(`${id} 昵称`, { exact: true })).toBeEnabled();
+    await expect(page.getByLabel(`${id} Codeforces`, { exact: true })).toHaveValue(nextCF);
+    const saved = await (await page.request.get('/api/admin/members/' + id)).json();
+    expect(saved.cf_handle).toBe(before[3].cf_handle);
+    expect(saved.cf_binding_version).toBe(before[3].cf_binding_version);
+    expect(saved.cjlu_binding_version).toBe(before[3].cjlu_binding_version);
+    const pending = await page.evaluate(
+      (qqId) =>
+        Object.keys(localStorage)
+          .filter((key) => key.startsWith('acm-member-profile:'))
+          .map((key) => JSON.parse(localStorage.getItem(key)))
+          .find((record) => record.qq_id === qqId),
+      id,
+    );
+    expect(pending.base.profile_revision).toBe(saved.profile_revision);
+    expect(pending.changes).toEqual({ cf_handle: nextCF });
+    expect(pending.drawer.text).toBe(nextStatus);
+    await page.getByLabel(`${id} 身份`, { exact: true }).click();
+    await expect(drawer.getByLabel('新身份名称', { exact: true })).toHaveValue(nextStatus);
+    await drawer.getByRole('button', { name: '创建并应用', exact: true }).click();
+    await screenshot(page, 'queue-later-input', info);
+    await page.getByRole('button', { name: '保存全部（1）', exact: true }).click();
+    await expect(page.getByText('成功 1 人', { exact: false })).toBeVisible();
+    expect(confirmations).toHaveLength(1);
+    expect(confirmations[0]).toContain(`${before[3].cf_handle} → ${nextCF}`);
+    expect(batch.sent[4].body.cf_handle).toBe(nextCF);
+    expect(batch.sent[4].body.confirm_bindings).toBe(true);
+    const final = await (await page.request.get('/api/admin/members/' + id)).json();
+    expect(final.cf_handle).toBe(nextCF);
+    expect(final.status).toBe(nextStatus);
+    expect(final.cf_binding_version).toBe(before[3].cf_binding_version + 1);
+    await noOverflow(page);
+  } finally {
+    await batch.close();
+  }
+});
+
+test('discarding a queued member prevents its request and leaves no recoverable discarded change', async ({
+  page,
+}, info) => {
+  const { ids, before } = await editQueuedMembers(page, info, 8);
+  const id = ids[3],
+    batch = await holdProfileWrites(page);
+  try {
+    await page.getByRole('button', { name: '保存全部（4）', exact: true }).click();
+    await expect.poll(() => batch.sent.length).toBe(3);
+    await page.getByRole('button', { name: '查看待保存', exact: true }).click();
+    const member = page.locator('.profile-pending article').filter({ hasText: id });
+    await expect(member).toContainText('排队中');
+    page.once('dialog', (dialog) => dialog.accept());
+    await member.getByRole('button', { name: '放弃此草稿', exact: true }).click();
+    await expect(member).toHaveCount(0);
+    batch.release();
+    await expect(page.getByText('已取消排队 1 人', { exact: false })).toBeVisible();
+    expect(batch.sent).toHaveLength(3);
+    const after = await (await page.request.get('/api/admin/members/' + id)).json();
+    expect(after.name).toBe(before[3].name);
+    expect(after.profile_revision).toBe(before[3].profile_revision);
+    await page.reload();
+    await expect(page.getByRole('button', { name: '恢复草稿', exact: true })).toHaveCount(0);
+  } finally {
+    await batch.close();
+  }
+});

@@ -8,13 +8,17 @@ import {
   profileDraftStore,
   forkProfileDraft,
   clearSavedDraft,
+  rebaseSavedDraft,
 } from '../src/lib/member-profile-drafts.js';
 import {
   profilePayload,
   validateProfile,
-  saveProfileBatch,
+  saveProfileBatch as savePreparedProfileBatch,
+  prepareProfileBatch,
   matchesSubmission,
 } from '../src/lib/member-profiles.js';
+const saveProfileBatch = (records, options) =>
+  savePreparedProfileBatch(prepareProfileBatch(records), options);
 const scope = 'a'.repeat(64),
   otherScope = 'b'.repeat(64);
 const member = (qq = '20000001') => ({
@@ -304,4 +308,43 @@ test('late responses after leaving or switching owners do not clear any draft', 
     }),
   );
   assert.equal(saved, 0);
+});
+
+test('successful snapshot rebases later edits including a return to the original value', () => {
+  const { store } = fixture(),
+    record = draft();
+  const submitted = prepareProfileBatch([record])[0].record;
+  changeDraft(record, 'school', record.base.school);
+  changeDraft(record, 'name', '后续昵称');
+  record.drawer = { creating: true, text: '未确认身份' };
+  const current = { ...member(), school: '新学校', profile_revision: 'd'.repeat(64) };
+  rebaseSavedDraft(record, submitted, current);
+  assert.deepEqual(record.changes, { name: '后续昵称', school: '学校甲' });
+  assert.equal(record.base.school, '新学校');
+  assert.equal(record.base.profile_revision, 'd'.repeat(64));
+  assert.equal(record.drawer.text, '未确认身份');
+  assert.equal(store.save(record).ok, true);
+  assert.equal(profilePayload(record).profile_revision, current.profile_revision);
+});
+
+test('prepared payload and binding confirmation do not change with the queued draft', async () => {
+  const record = draft();
+  changeDraft(record, 'cf_handle', 'ConfirmedCF');
+  const submissions = prepareProfileBatch([record]);
+  changeDraft(record, 'cf_handle', 'LaterCF');
+  record.base.profile_revision = 'e'.repeat(64);
+  const payloads = [];
+  await savePreparedProfileBatch(
+    submissions,
+    callbacks({
+      request: async (_path, options) => {
+        payloads.push(options.body);
+        return { member: member() };
+      },
+    }),
+  );
+  assert.equal(payloads[0].cf_handle, 'ConfirmedCF');
+  assert.equal(payloads[0].profile_revision, 'c'.repeat(64));
+  assert.equal(payloads[0].confirm_bindings, true);
+  assert.equal(payloads[0].expected_bindings.cf_handle, 'OldCF');
 });

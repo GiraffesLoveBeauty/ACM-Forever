@@ -309,3 +309,196 @@ test('partial failure removes only the successful member draft', async () => {
   mounted = null;
   assert.equal(stored().length, 1);
 });
+
+async function queuedSave({ pauseFourth = false } = {}) {
+  users.push(user('20000003', '昵称丙'), user('20000004', '昵称丁'));
+  let release, releaseFourth;
+  const gate = new Promise((resolve) => (release = resolve));
+  const fourthGate = new Promise((resolve) => (releaseFourth = resolve));
+  const sent = [],
+    confirmations = [],
+    originalFetch = globalThis.fetch;
+  globalThis.confirm = (message) => {
+    confirmations.push(message);
+    return true;
+  };
+  globalThis.fetch = async (url, options = {}) => {
+    if (options.method === 'PATCH') {
+      sent.push({ url, body: JSON.parse(options.body) });
+      if (sent.length <= 3) await gate;
+      else if (pauseFourth && sent.length === 4) await fourthGate;
+    }
+    return originalFetch(url, options);
+  };
+  await open();
+  await click('进入编辑模式');
+  for (const row of users) await edit(row.qq_id, '昵称', '已提交昵称' + row.qq_id);
+  const button = nodes('button').find((node) => textOf(node).trim() === '保存全部（4）');
+  const saving = button.props.onClick({ preventDefault() {} });
+  await settle();
+  assert.equal(sent.length, 3);
+  return { sent, confirmations, release, releaseFourth, saving };
+}
+
+test('queued OJ edits stay out of the confirmed batch and require a later confirmation', async () => {
+  const batch = await queuedSave();
+  try {
+    await edit('20000004', 'Codeforces', 'UnconfirmedCF');
+    batch.release();
+    await batch.saving;
+    await settle();
+    assert.equal(batch.confirmations.length, 0);
+    assert.equal(Object.hasOwn(batch.sent[3].body, 'cf_handle'), false);
+    assert.equal(batch.sent[3].body.confirm_bindings, false);
+    assert.equal(users[3].cf_handle, 'CF_20000004');
+    const pending = stored().find((record) => record.qq_id === '20000004');
+    assert.deepEqual(pending.changes, { cf_handle: 'UnconfirmedCF' });
+    assert.equal(pending.base.name, '已提交昵称20000004');
+    assert.equal(pending.base.profile_revision, 'c'.repeat(64));
+    await click('保存全部（1）');
+    assert.equal(batch.confirmations.length, 1);
+    assert.ok(batch.confirmations[0].includes('CF_20000004 → UnconfirmedCF'));
+    assert.equal(batch.sent[4].body.cf_handle, 'UnconfirmedCF');
+    assert.equal(batch.sent[4].body.confirm_bindings, true);
+    assert.equal(stored().length, 0);
+  } finally {
+    batch.release();
+    batch.releaseFourth();
+    await batch.saving;
+  }
+});
+
+test('discarding a queued member cancels its unsent PATCH and leaves the server untouched', async () => {
+  const batch = await queuedSave();
+  try {
+    await click('查看待保存');
+    const article = nodes('article').find((node) => textOf(node).includes('20000004'));
+    const discard = find(
+      article,
+      (node) => node.type === 'button' && textOf(node).trim() === '放弃此草稿',
+    )[0];
+    assert.ok(!discard.props.disabled);
+    await discard.props.onClick({ preventDefault() {} });
+    await settle();
+    assert.equal(
+      stored().some((record) => record.qq_id === '20000004'),
+      false,
+    );
+    batch.release();
+    await batch.saving;
+    await settle();
+    assert.equal(batch.sent.length, 3);
+    assert.equal(users[3].name, '昵称丁');
+    assert.ok(textOf(mounted.root).includes('已取消排队 1 人'));
+  } finally {
+    batch.release();
+    batch.releaseFourth();
+    await batch.saving;
+  }
+});
+
+test('identity input during an in-flight save remains recoverable and the row unlocks on success', async () => {
+  const batch = await queuedSave({ pauseFourth: true });
+  try {
+    const trigger = nodes('button').find((node) => node.props['aria-label'] === '20000004 身份');
+    await trigger.props.onClick();
+    await settle();
+    await click('＋ 新建身份');
+    batch.release();
+    await settle();
+    assert.equal(batch.sent.length, 4);
+    const name = nodes('input').find((node) => Object.hasOwn(node.props, 'data-new-status'));
+    name.props['onUpdate:modelValue']('保存期间的身份输入');
+    name.props.onInput();
+    await settle();
+    batch.releaseFourth();
+    await batch.saving;
+    await settle();
+    const close = nodes('button').find((node) => node.props['aria-label'] === '关闭身份选择器');
+    await close.props.onClick();
+    await settle();
+    const inputs = nodes('input').filter((node) =>
+      node.props['aria-label']?.startsWith('20000004 '),
+    );
+    assert.equal(inputs.length, 7);
+    assert.ok(inputs.every((node) => !node.props.disabled));
+    assert.equal(textOf(mounted.root).includes('保存中'), false);
+    const pending = stored().find((record) => record.qq_id === '20000004');
+    assert.deepEqual(pending.changes, {});
+    assert.equal(pending.drawer.text, '保存期间的身份输入');
+    assert.equal(pending.base.profile_revision, 'c'.repeat(64));
+    await edit('20000004', '学校', '继续编辑学校');
+    assert.equal(
+      stored().find((record) => record.qq_id === '20000004').changes.school,
+      '继续编辑学校',
+    );
+  } finally {
+    batch.release();
+    batch.releaseFourth();
+    await batch.saving;
+  }
+});
+
+test('recreating a discarded queued draft does not revive its old submission', async () => {
+  const batch = await queuedSave();
+  try {
+    await click('查看待保存');
+    const article = nodes('article').find((node) => textOf(node).includes('20000004'));
+    const discard = find(
+      article,
+      (node) => node.type === 'button' && textOf(node).trim() === '放弃此草稿',
+    )[0];
+    await discard.props.onClick({ preventDefault() {} });
+    await edit('20000004', '学校', '放弃后新输入');
+    batch.release();
+    await batch.saving;
+    await settle();
+    assert.equal(batch.sent.length, 3);
+    assert.equal(users[3].name, '昵称丁');
+    assert.deepEqual(stored().find((record) => record.qq_id === '20000004').changes, {
+      school: '放弃后新输入',
+    });
+    await click('保存全部（1）');
+    assert.equal(Object.hasOwn(batch.sent[3].body, 'name'), false);
+    assert.equal(users[3].name, '昵称丁');
+    assert.equal(users[3].school, '放弃后新输入');
+  } finally {
+    batch.release();
+    batch.releaseFourth();
+    await batch.saving;
+  }
+});
+
+test('applying identity from an open drawer during a save becomes the next pending revision', async () => {
+  const batch = await queuedSave({ pauseFourth: true });
+  try {
+    const trigger = nodes('button').find((node) => node.props['aria-label'] === '20000004 身份');
+    await trigger.props.onClick();
+    await settle();
+    await click('＋ 新建身份');
+    batch.release();
+    await settle();
+    const name = nodes('input').find((node) => Object.hasOwn(node.props, 'data-new-status'));
+    name.props['onUpdate:modelValue']('请求期间应用身份');
+    name.props.onInput();
+    const form = nodes('form').find((node) => textOf(node).includes('创建并应用'));
+    assert.ok(form);
+    await form.props.onSubmit({ preventDefault() {} });
+    await settle();
+    batch.releaseFourth();
+    await batch.saving;
+    await settle();
+    assert.equal(Object.hasOwn(batch.sent[3].body, 'status'), false);
+    assert.equal(users[3].status, '现役');
+    assert.deepEqual(stored().find((record) => record.qq_id === '20000004').changes, {
+      status: '请求期间应用身份',
+    });
+    await click('保存全部（1）');
+    assert.equal(users[3].status, '请求期间应用身份');
+    assert.equal(stored().length, 0);
+  } finally {
+    batch.release();
+    batch.releaseFourth();
+    await batch.saving;
+  }
+});
