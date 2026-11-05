@@ -250,5 +250,142 @@ class TagReleaseTests(unittest.TestCase):
             run.assert_not_called()
 
 
+class GitHubDraftAdapterTests(unittest.TestCase):
+    def test_tag_lookup_404_falls_back_to_authenticated_draft_list(self):
+        github = release.GitHub("GiraffesLoveBeauty/ACM-Forever")
+        draft = {"id": 11, "tag_name": "v0.2.14", "draft": True, "assets": []}
+        def api(path, **kwargs):
+            if path == "/releases/tags/v0.2.14":
+                return None
+            if path == "/releases?per_page=100&page=1":
+                return [draft]
+            raise AssertionError(path)
+        with patch.object(github, "api", side_effect=api):
+            self.assertEqual(github.release("v0.2.14"), draft)
+
+    def test_draft_list_is_paginated_and_matches_tag_exactly(self):
+        github = release.GitHub("GiraffesLoveBeauty/ACM-Forever")
+        other = {"id": 1, "tag_name": "v0.2.140", "draft": True}
+        wanted = {"id": 2, "tag_name": "v0.2.14", "draft": True}
+        with patch.object(github, "api", side_effect=[None, [other] * 100, [wanted]]) as api:
+            self.assertEqual(github.release("v0.2.14"), wanted)
+            self.assertEqual(api.call_args_list[-1].args, ("/releases?per_page=100&page=2",))
+
+    def test_ambiguous_drafts_stop_instead_of_overwriting_one(self):
+        github = release.GitHub("GiraffesLoveBeauty/ACM-Forever")
+        rows = [{"id": n, "tag_name": "v0.2.14", "draft": True} for n in (1, 2)]
+        with patch.object(github, "api", side_effect=[None, rows]), self.assertRaises(ValueError):
+            github.release("v0.2.14")
+
+    def test_published_tag_lookup_is_preferred_and_missing_tag_returns_none(self):
+        github = release.GitHub("GiraffesLoveBeauty/ACM-Forever")
+        published = {"id": 1, "tag_name": "v0.2.14", "draft": False}
+        with patch.object(github, "api", return_value=published) as api:
+            self.assertEqual(github.release("v0.2.14"), published)
+            self.assertEqual(api.call_count, 1)
+        with patch.object(github, "api", side_effect=[None, []]):
+            self.assertIsNone(github.release("v0.2.14"))
+
+    def test_upload_addresses_draft_id_and_replaces_only_matching_attachment(self):
+        github = release.GitHub("GiraffesLoveBeauty/ACM-Forever")
+        draft = {"id": 11, "draft": True, "assets": [{"id": 22, "name": "update.json"}]}
+        path = Path("update.json")
+        with patch.object(github, "release", return_value=draft), patch.object(github, "run") as run:
+            github.upload("v0.2.14", [path])
+            self.assertEqual(run.call_args_list[0].args, ("api", "--method", "DELETE",
+                "repos/" + github.repository + "/releases/assets/22"))
+            self.assertEqual(run.call_args_list[1].args, ("api", "--method", "POST",
+                "https://uploads.github.com/repos/" + github.repository + "/releases/11/assets?name=update.json",
+                "--header", "Content-Type: application/octet-stream", "--input", str(path)))
+
+    def test_binary_download_failure_removes_partial_output(self):
+        github = release.GitHub("GiraffesLoveBeauty/ACM-Forever")
+        draft = {"id": 11, "draft": True, "assets": [{"id": 22, "name": "update.json"}]}
+        def failed(args, **kwargs):
+            kwargs["stdout"].write(b"partial")
+            return subprocess.CompletedProcess(args, 1)
+        with tempfile.TemporaryDirectory() as temp, patch.object(github, "release", return_value=draft), \
+                patch.object(release.subprocess, "run", side_effect=failed):
+            target = Path(temp) / "update.json"
+            with self.assertRaises(RuntimeError):
+                github.download("v0.2.14", target.name, target.parent)
+            self.assertFalse(target.exists())
+
+    def test_publish_addresses_id_and_refuses_a_published_release(self):
+        github = release.GitHub("GiraffesLoveBeauty/ACM-Forever")
+        published = {"tag_name": "v0.2.14", "draft": False}
+        with patch.object(github, "release", return_value={"id": 11, "draft": True}), \
+                patch.object(github, "api", return_value=published) as api:
+            github.publish("v0.2.14")
+            self.assertEqual(api.call_args.args, ("/releases/11", "--method", "PATCH",
+                "--field", "draft=false", "--field", "prerelease=false", "--raw-field", "make_latest=true"))
+        with patch.object(github, "release", return_value=published), patch.object(github, "api") as api:
+            with self.assertRaises(ValueError):
+                github.publish("v0.2.14")
+            api.assert_not_called()
+
+    def test_complete_real_adapter_handles_hidden_draft_and_immutable_rerun(self):
+        github = release.GitHub("GiraffesLoveBeauty/ACM-Forever")
+        tag, filename, data = "v0.2.15", "acmforever-0.2.15-debug.apk", b"synthetic fixture"
+        manifest = {"packageName": release.PACKAGE, "versionName": "0.2.15", "versionCode": 29,
+            "minSdk": 26, "channel": "debug", "signingCertificateSha256": "1" * 64,
+            "notes": "Synthetic test notes", "sha256": hashlib.sha256(data).hexdigest(), "sizeBytes": len(data),
+            "apkUrl": "https://github.com/" + github.repository + "/releases/download/" + tag + "/" + filename}
+        state = {"release": None, "assets": {}, "writes": [], "downloads": []}
+        prefix = "repos/" + github.repository
+        def process(args, **kwargs):
+            if args[1:3] == ["release", "create"]:
+                state["release"] = {"id": 11, "tag_name": tag, "draft": True, "assets": []}
+                state["writes"].append("create")
+                return subprocess.CompletedProcess(args, 0, "", "")
+            self.assertEqual(args[1], "api")
+            endpoint = next(a for a in args if a.startswith(("repos/", "https://uploads.github.com/")))
+            method = args[args.index("--method") + 1] if "--method" in args else "GET"
+            current = state["release"]
+            if endpoint == prefix:
+                value = {"private": False}
+            elif endpoint == prefix + "/releases/latest":
+                value = current if current is not None and not current["draft"] else None
+            elif endpoint == prefix + "/releases/tags/" + tag:
+                value = current if current is not None and not current["draft"] else None
+            elif endpoint == prefix + "/releases?per_page=100&page=1":
+                value = [current] if current is not None else []
+            elif endpoint.startswith("https://uploads.github.com/" + prefix + "/releases/11/assets?name="):
+                self.assertEqual(method, "POST")
+                path = Path(args[args.index("--input") + 1])
+                asset_id = len(state["assets"]) + 1
+                state["assets"][asset_id] = path.read_bytes()
+                value = {"id": asset_id, "name": path.name}
+                current["assets"].append(value)
+                state["writes"].append("upload:" + path.name)
+            elif endpoint.startswith(prefix + "/releases/assets/"):
+                asset_id = int(endpoint.rsplit("/", 1)[1])
+                self.assertEqual(args[-2:], ["--header", "Accept: application/octet-stream"])
+                kwargs["stdout"].write(state["assets"][asset_id])
+                state["downloads"].append(asset_id)
+                return subprocess.CompletedProcess(args, 0)
+            elif endpoint == prefix + "/releases/11":
+                self.assertEqual(method, "PATCH")
+                self.assertEqual(len(state["downloads"]), 3)
+                current["draft"] = False
+                state["writes"].append("publish")
+                value = current
+            else:
+                raise AssertionError(args)
+            return subprocess.CompletedProcess(args, 0 if value is not None else 1,
+                json.dumps(value) if value is not None else "", "" if value is not None else "gh: Not Found (HTTP 404)")
+        with tempfile.TemporaryDirectory() as temp, patch.object(release.subprocess, "run", side_effect=process):
+            directory = Path(temp)
+            (directory / filename).write_bytes(data)
+            (directory / (filename + ".sha256")).write_text(manifest["sha256"] + "  " + filename, encoding="ascii")
+            (directory / "update.json").write_text(json.dumps(manifest), encoding="utf-8")
+            self.assertIn("Published", release.publish(github, tag, directory, "a" * 40))
+            self.assertEqual(state["writes"], ["create", "upload:" + filename,
+                "upload:" + filename + ".sha256", "upload:update.json", "publish"])
+            before = list(state["writes"])
+            self.assertIn("Already published", release.publish(github, tag, directory, "a" * 40))
+            self.assertEqual(state["writes"], before)
+
+
 if __name__ == "__main__":
     unittest.main()

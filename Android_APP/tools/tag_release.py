@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+from urllib.parse import quote
 
 PACKAGE = "com.giraffeslovebeauty.acmforever"
 
@@ -57,8 +58,8 @@ class GitHub:
             raise RuntimeError("GitHub operation failed; check Actions permissions, repository and asset availability")
         return result.stdout
 
-    def api(self, suffix, missing=False):
-        result = self.run("api", "repos/" + self.repository + suffix, missing=missing)
+    def api(self, suffix, *args, missing=False):
+        result = self.run("api", "repos/" + self.repository + suffix, *args, missing=missing)
         return None if result is None else json.loads(result)
 
     def repository_info(self):
@@ -68,7 +69,22 @@ class GitHub:
         return self.api("/releases/latest", missing=True)
 
     def release(self, tag):
-        return self.api("/releases/tags/" + tag, missing=True)
+        current = self.api("/releases/tags/" + quote(tag, safe=""), missing=True)
+        if current is not None:
+            return current
+        # Drafts may have an untagged HTML URL and return 404 from the tag lookup,
+        # even though the authenticated releases list contains their tag_name.
+        found, page = None, 1
+        while True:
+            rows = self.api("/releases?per_page=100&page=" + str(page))
+            for row in rows:
+                if row.get("tag_name") == tag and row.get("draft"):
+                    if found is not None:
+                        raise ValueError("Multiple drafts match this tag; resolve them before publishing")
+                    found = row
+            if len(rows) < 100:
+                return found
+            page += 1
 
     def create(self, tag, title, notes):
         # --verify-tag prevents gh from silently creating a tag at the default branch.
@@ -78,14 +94,38 @@ class GitHub:
         current = self.release(tag)
         if current is None or not current.get("draft"):
             raise ValueError("Only an unpublished draft may receive or replace assets")
-        self.run("release", "upload", tag, *map(str, paths), "--repo", self.repository, "--clobber")
+        # Address the draft and its attachments by ID, never by its tag URL.
+        for path in paths:
+            for asset in current.get("assets", []):
+                if asset.get("name") == path.name:
+                    self.run("api", "--method", "DELETE", "repos/" + self.repository
+                             + "/releases/assets/" + str(asset["id"]))
+            self.run("api", "--method", "POST", "https://uploads.github.com/repos/" + self.repository
+                     + "/releases/" + str(current["id"]) + "/assets?name=" + quote(path.name, safe=""),
+                     "--header", "Content-Type: application/octet-stream", "--input", str(path))
 
     def download(self, tag, filename, directory):
-        self.run("release", "download", tag, "--repo", self.repository, "--pattern", filename, "--dir", str(directory))
-        return directory / filename
+        current = self.release(tag)
+        asset = next((a for a in (current or {}).get("assets", []) if a.get("name") == filename), None)
+        if asset is None:
+            raise ValueError("Release attachment is missing: " + filename)
+        target = directory / filename
+        with target.open("wb") as output:
+            result = subprocess.run(["gh", "api", "repos/" + self.repository + "/releases/assets/" + str(asset["id"]),
+                "--header", "Accept: application/octet-stream"], stdout=output, stderr=subprocess.PIPE)
+        if result.returncode:
+            target.unlink(missing_ok=True)
+            raise RuntimeError("Release attachment download failed; check Actions permissions and availability")
+        return target
 
     def publish(self, tag):
-        self.run("release", "edit", tag, "--repo", self.repository, "--draft=false", "--prerelease=false", "--latest")
+        current = self.release(tag)
+        if current is None or not current.get("draft"):
+            raise ValueError("Only an unpublished draft may be published")
+        result = self.api("/releases/" + str(current["id"]), "--method", "PATCH",
+                          "--field", "draft=false", "--field", "prerelease=false", "--raw-field", "make_latest=true")
+        if result.get("draft") is not False or result.get("tag_name") != tag:
+            raise ValueError("Published Release response differs from the selected draft")
 
 
 def read_manifest(github, release, directory):

@@ -1,7 +1,22 @@
 {
   "schemaVersion": 1,
-  "currentVersionCode": 28,
+  "currentVersionCode": 29,
   "entries": [
+    {
+      "versionName": "0.2.15",
+      "recordDate": "2026-11-05",
+      "summary": "修复 GitHub 草稿发布查询，重新准备可在线更新的首发版本。",
+      "changes": [
+        "草稿 Release 按 Tag 查询返回 404 时，从授权列表精确匹配草稿，避免首发在上传前中断。",
+        "草稿附件通过 Release 和附件 ID 上传、回读及公开，继续逐件核对 APK、校验文件和更新清单。",
+        "保留 0.2.14 Tag，不重写已有版本；本版递增到 versionCode 29，沿用既有调试签名和 GitHub 更新来源。"
+      ],
+      "notes": [
+        "只有本版经评审合并并创建 v0.2.15 Tag、Action 发布成功后，在线更新源才会生效。",
+        "自动检查默认开启，发现新版后由用户确认下载，安装继续由 Android 系统确认。",
+        "同签名覆盖安装保留本机账号选项、加密凭据、主题和背景；卸载或清除数据会删除这些内容。"
+      ]
+    },
     {
       "versionName": "0.2.14",
       "recordDate": "2026-11-05",
