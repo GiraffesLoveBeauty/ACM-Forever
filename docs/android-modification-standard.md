@@ -13,6 +13,7 @@ Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/a
 | `SearchActivity`、`SearchModules` | 全局搜索、模块顺序、添加/移除、历史记录 | 公开 ID 能力、本人接口范围、缓存及模块独立失败 |
 | `MobilePageActivity` | 搜索与便捷管理的页面壳、缓存读取、串行后台操作 | 页面代次、会话代次、槽位绑定、只重试读操作 |
 | `AdminQuickActivity`、`AdminApiPolicy` | 手机便捷管理和 API 白名单 | 服务端角色重验证、CSRF、审核版本、敏感内容禁止通用缓存 |
+| `ChallengeDifficulty` | 管理员单题训练的难度选项和默认值 | 与 `acm_api/difficulty.py` 的有效值及网页训练默认值一致；切换平台同步难度，空选项不得发送请求 |
 | `WebFeaturesActivity` | 通知/投稿进度/比赛进度/Wiki | Wiki 站内练习相对链接进入原生题面，外链 HTTPS 校验 |
 | `ClubActivity`、`TrainingReminder` | 题单、讨论、错题、复习、打卡和本地提醒 | 缺失接口保留真实报错，通知授权、返回来源页 |
 | `CloudDrafts` 与主页面编辑器 | 云端多草稿和自动保存 | 账号+草稿代次；切换草稿、返回旧页、迟到写入、Markdown 导入归属 |
@@ -66,7 +67,7 @@ Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/a
 | 举报处理 | `GET /api/forum/moderation/reports`、`POST …/reports/{id}` | resolve/dismiss 仅处理举报记录，不自动删除原话题 |
 | 同步任务 | `GET /api/tasks`、`POST /api/tasks/{id}/cancel` | 只允许取消仍可取消的任务；失败不自动重复写 |
 | 成员查询 | `GET /api/admin/members`、`GET /api/member/{qq}` | 搜索、分页和只读资料；不进入通用响应缓存 |
-| 生成训练/挑战历史 | `POST /api/challenge/start`、`GET /api/challenge/list` | 指定成员、平台、标签/难度；一次生成一题，不是普通成员的三档训练流程 |
+| 生成训练/挑战历史 | `POST /api/challenge/start`、`GET /api/challenge/list` | 指定成员、平台及有效难度，标签可空；默认 CF 1000、AtCoder 800、洛谷“普及-”、牛客“2星”，切换平台重置对应选项，提交前校验；一次生成一题，不是普通成员的三档训练流程 |
 | 指定成员复盘 | `GET/PUT /api/contest/reviews` | 精确携带成员与比赛、题目；六态与网页一致 |
 | 比赛播报 | `GET/PUT /api/settings/contest-report` | 北京时间 HH:MM；修改/关闭前确认全站影响 |
 
