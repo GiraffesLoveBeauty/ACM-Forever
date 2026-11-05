@@ -39,8 +39,8 @@
 
 本机路径：`Android_APP/dist/acmforever-0.2.16-debug.apk`（不提交Git）。
 
-- 大小：2,099,736字节。
-- SHA-256：`91791634e6adee62f8d7c215e2d5265b22cb7cf5d1aec8836cff681cafaeb724`。
+- 大小：2,427,113字节。
+- SHA-256：`c09974e9b6f8c5498f36e63f38a0ca868041c4dca863f26b6fb24746c2ad140f`。
 - 签名SHA-256：`88c9f163cbf379aeca7bc110f66c542a838d0d8e3970f24fd96582bec8e93fe4`。
 - 源码复制/构建脚本：`Android_APP/tools/build-local-v0216.ps1`；严格包核验：`package-local-v0216.ps1`。脚本使用本机已有工具链，不是从零安装器。
 - 同签名覆盖0.2.15可保留设置；卸载会删除本机数据。已装code30的设备不会收到同code30的更新提示。
