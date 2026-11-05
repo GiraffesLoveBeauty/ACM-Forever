@@ -200,7 +200,7 @@
     }
   ],
   "version": 1,
-  "revision": "be6223a05d433b2147ace9b1f1f101728c431f1e",
+  "revision": "1c89408122e99986b22efe9fd14e07e49f1c1757",
   "sources": {
     "feat/web/src/lib/theme-colors.js": "df41ad5381193295317e074e14cbf86dd3856f2835580f5c22b7bc98bd042822",
     "feat/web/src/lib/design-template.js": "401767e6ee19c4511824f7ebaf7dc2edc60c108eb8f0711691995e2be2c5fb37"

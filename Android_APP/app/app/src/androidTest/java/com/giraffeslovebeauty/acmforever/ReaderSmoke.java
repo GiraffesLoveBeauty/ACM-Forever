@@ -29,6 +29,8 @@ public final class ReaderSmoke extends Instrumentation {
     private boolean settingsMode;
     @Override public void onCreate(Bundle arguments){super.onCreate(arguments);mode=arguments==null?"":arguments.getString("mode","");settingsMode=arguments!=null&&"settings".equals(arguments.getString("mode"));communityMode=arguments!=null&&"community".equals(arguments.getString("mode"));loginMode=arguments!=null&&"login".equals(arguments.getString("mode"));designMode=arguments!=null&&"design".equals(arguments.getString("mode"));appearanceMode=arguments!=null&&"appearance".equals(arguments.getString("mode"));webMode=arguments!=null&&"web".equals(arguments.getString("mode"));start();}
     @Override public void onStart(){
+        if("themetransfer".equals(mode)){ThemeTransferUiSmoke.run(this);return;}
+        if("globalsearchadmin".equals(mode)){GlobalSearchAdminUiSmoke.run(this);return;}
         if("startupupdates".equals(mode)){StartupUpdatesUiSmoke.run(this);return;}
         if("lifecycle".equals(mode)){LifecycleNetworkUiSmoke.run(this);return;}
         if("imports".equals(mode)){MarkdownImportUiSmoke.run(this);return;}

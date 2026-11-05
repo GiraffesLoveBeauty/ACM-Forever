@@ -24,6 +24,9 @@ jobs:
       - name: Test release contracts and publication failures
         run: python -m unittest discover -s Android_APP/tests -p 'test_*release*.py' -v
 
+      - name: Verify original official theme resources
+        run: python -m unittest discover -s Android_APP/tests -p 'test_theme_renderer*.py' -v
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

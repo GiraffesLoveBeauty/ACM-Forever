@@ -38,13 +38,11 @@ public final class BackgroundCropActivity extends Activity {
         });
     }
     private void save(){
-        if(saving||image==null)return;Bitmap selected;
-        try{selected=crop.export();}catch(Exception e){status.setText(e.getMessage());return;}
+        if(saving||image==null)return;float[] selected=crop.selection();for(int i=0;i<4;i++)selected[i]=Math.max(0,Math.min(1,selected[i]/(i%2==0?image.getWidth():image.getHeight())));
         saving=true;apply.setEnabled(false);reset.setEnabled(false);crop.setEnabled(false);status.setText("正在保存到本机…");
         files.execute(()->{
-            try{ProfileCover.save(this,selected);runOnUiThread(()->{saving=false;if(isDestroyed())return;setResult(RESULT_OK);finish();});}
+            try{ProfileCover.saveOriginal(this,getIntent().getData(),selected);runOnUiThread(()->{saving=false;if(isDestroyed())return;setResult(RESULT_OK);finish();});}
             catch(Exception e){runOnUiThread(()->{saving=false;if(isDestroyed())return;apply.setEnabled(true);reset.setEnabled(true);crop.setEnabled(true);status.setText("背景保存失败："+e.getMessage());});}
-            finally{selected.recycle();}
         });
     }
     @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);if(image!=null)state.putFloatArray("selection",crop.selection());}

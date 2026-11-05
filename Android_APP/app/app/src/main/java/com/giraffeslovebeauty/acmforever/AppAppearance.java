@@ -39,6 +39,7 @@ final class AppAppearance {
     static void window(Activity activity){
         window(activity.getWindow());
         View bars=activity.findViewById(android.R.id.content);if(bars!=null){View surface=bars.findViewWithTag("system_bar_surface");if(surface!=null)surface.setBackgroundColor(MobileStyle.PANEL);}
+        if(bars!=null){View frame=bars.findViewWithTag("theme_content_frame");if(frame instanceof android.widget.FrameLayout)paintBackdrop((android.widget.FrameLayout)frame);}
     }
     static void window(android.view.Window window){
         window.setStatusBarColor(MobileStyle.PANEL);window.setNavigationBarColor(MobileStyle.PANEL);
@@ -60,15 +61,20 @@ final class AppAppearance {
         if(android.os.Build.VERSION.SDK_INT>=30)window.setDecorFitsSystemWindows(false);
         else window.getDecorView().setSystemUiVisibility(window.getDecorView().getSystemUiVisibility()|View.SYSTEM_UI_FLAG_LAYOUT_STABLE|View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN|View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
         android.widget.FrameLayout frame=new android.widget.FrameLayout(context);frame.setTag("system_bar_surface");frame.setBackgroundColor(MobileStyle.PANEL);body.setFitsSystemWindows(false);
-        frame.addView(body,new android.widget.FrameLayout.LayoutParams(-1,-1));
+        android.widget.FrameLayout layers=new android.widget.FrameLayout(context);layers.setTag("theme_content_frame");body.setTag(body.getTag()==null?"theme_body":body.getTag());layers.addView(body,new android.widget.FrameLayout.LayoutParams(-1,-1));frame.addView(layers,new android.widget.FrameLayout.LayoutParams(-1,-1));paintBackdrop(layers);
         frame.setOnApplyWindowInsetsListener((view,insets)->{
             int left,top,right,bottom;
             if(android.os.Build.VERSION.SDK_INT>=30){android.graphics.Insets bars=insets.getInsets(android.view.WindowInsets.Type.systemBars()|android.view.WindowInsets.Type.displayCutout());left=bars.left;top=bars.top;right=bars.right;bottom=Math.max(bars.bottom,insets.getInsets(android.view.WindowInsets.Type.ime()).bottom);}
             else{left=insets.getSystemWindowInsetLeft();top=insets.getSystemWindowInsetTop();right=insets.getSystemWindowInsetRight();bottom=insets.getSystemWindowInsetBottom();}
-            android.widget.FrameLayout.LayoutParams bounds=(android.widget.FrameLayout.LayoutParams)body.getLayoutParams();
-            if(bounds.leftMargin!=left||bounds.topMargin!=top||bounds.rightMargin!=right||bounds.bottomMargin!=bottom){bounds.setMargins(left,top,right,bottom);body.setLayoutParams(bounds);}return insets;
+            android.widget.FrameLayout.LayoutParams bounds=(android.widget.FrameLayout.LayoutParams)layers.getLayoutParams();
+            if(bounds.leftMargin!=left||bounds.topMargin!=top||bounds.rightMargin!=right||bounds.bottomMargin!=bottom){bounds.setMargins(left,top,right,bottom);layers.setLayoutParams(bounds);}return insets;
         });
         return frame;
+    }
+    private static void paintBackdrop(android.widget.FrameLayout layers){
+        View body=layers.getChildAt(layers.getChildCount()-1);OfficialThemeView backdrop=layers.getChildAt(0) instanceof OfficialThemeView?(OfficialThemeView)layers.getChildAt(0):null;
+        if(OfficialThemeView.background(layers.getContext())){if(backdrop==null){backdrop=new OfficialThemeView(layers.getContext(),"background");layers.addView(backdrop,0,new android.widget.FrameLayout.LayoutParams(-1,-1));}backdrop.setVisibility(View.VISIBLE);backdrop.refresh();body.setBackgroundColor(Color.TRANSPARENT);}
+        else if(backdrop!=null){backdrop.setVisibility(View.GONE);body.setBackground(ProfileCover.drawable(layers.getContext()));}
     }
     static void paintFields(View view){
         if(view instanceof android.widget.EditText){android.widget.EditText field=(android.widget.EditText)view;field.setTextColor(MobileStyle.TEXT);field.setHintTextColor(MobileStyle.MUTED);field.setBackgroundTintList("appearance_field_surface".equals(field.getTag())?null:android.content.res.ColorStateList.valueOf(MobileStyle.BRAND));}

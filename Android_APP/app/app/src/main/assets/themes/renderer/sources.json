@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "textLineEndings": "LF",
+  "sources": {
+    "Android_APP/theme-renderer/index.html": "b224a0f0fb17cf551e4258d0922ebf760d59f0f40907771dd2a1e05972e43eee",
+    "Android_APP/theme-renderer/main.js": "bc82fc734f386be996c9caef662667e6fecbebd007d0aca8361d9d86bcea9dac",
+    "Android_APP/theme-renderer/mobile.css": "b1b960a577fa8da9a41f89304eb086fcbf7aff94b3a0520b1c4b38680344cf92",
+    "Android_APP/theme-renderer/vite.config.mjs": "70ed12b2ac2e1dab5e1f41a776e388c4c5150dd273a51b90f45995e5086fc87a",
+    "feat/api/acm_api/public/assets/app.css": "0c436367c936c69d4d4e4acac788e6fd21f506abc6df5b4c8f191b475dd9396d",
+    "feat/api/acm_api/public/assets/community-art.css": "6f9b9aad65bfb7067d0641a48b8956dc853beddd54a69d9510d05392635641a7",
+    "feat/api/acm_api/public/assets/endfield-theme.css": "73ad64f0937045fdbd80c6a594924604f1806e0406eae4bec9bae8352a853dbd",
+    "feat/api/acm_api/public/assets/forum-graph.css": "f7ca1be178dadc4c87d0abf798b4bc24440d6211eca16e5d297ffbc97cba356f",
+    "feat/api/acm_api/public/assets/hero-halftone.svg": "0c6f85174a3527110c54087a1238e8f579a1c5fb4c5495c1ad1ccacd3b2bfc12",
+    "feat/web/pnpm-lock.yaml": "8904353d250d9fbeaf7c929cf77691b7ead037b295c0fc94fd394c823feddfca",
+    "feat/web/src/angel-city-theme.css": "bacaeefb72afeff34d434be890ce62fd1a818ebfd764ad59e5165b96240028ed",
+    "feat/web/src/assets/fonts/fusion-pixel/fusion-pixel-12px-proportional-zh_hans.otf.woff2": "b67eb7aa592622e5bc1152b800d32404bb887a1e3a2e669b0c2a873d388590d6",
+    "feat/web/src/assets/fonts/fusion-pixel/OFL.txt": "bc518cf64b8032c07690f33cc270c35c179255a6ac8efa7c165ebae7e8f76a63",
+    "feat/web/src/assets/fonts/fusion-pixel/README.md": "f9f1880752d9c947d57468d2a1fe941487a17000817c6605ace78ded550e9fc8",
+    "feat/web/src/assets/minecraft/dirt.svg": "c0698f72537169fa5422133e5fbda500f65d3f5b4495d24148cc4d346ebc258d",
+    "feat/web/src/components/AngelCityArt.vue": "3b085ae199c21e9cd643aba1b545453f3d225e67b410cb8136bc5cebf952e03e",
+    "feat/web/src/components/CommunityArt.vue": "e523475c5c1fcaff46200dda4894ebfd3cf1454cdd54c88cd1a8bfee00265327",
+    "feat/web/src/components/GraphArt.vue": "aaa0b05072de73687439c723de12bd940ef6b65fb871bb1fc73022fe94ada852",
+    "feat/web/src/components/MinecraftArt.vue": "4e1ac3930d108e437092d700ce9df0ed9580f4985e8c3eb31d9ba1edc1bbebf2",
+    "feat/web/src/components/MinecraftJourney.vue": "cab4aa353e42f5e25915f7ce6e104edd5250ef1b7bfab340898dfef59c027642",
+    "feat/web/src/components/MinecraftPodium.vue": "cf39101a58960ffdda7fed8e8f321c566e10d868a7f4d8b56339171c5d5ec3df",
+    "feat/web/src/lib/design-template.js": "401767e6ee19c4511824f7ebaf7dc2edc60c108eb8f0711691995e2be2c5fb37",
+    "feat/web/src/lib/theme-colors.js": "df41ad5381193295317e074e14cbf86dd3856f2835580f5c22b7bc98bd042822",
+    "feat/web/src/minecraft-theme.css": "ebdaf2bd17e360b4d8d34b16f5ce018a0de50e8355a9000dd5b97a18a3b53112",
+    "feat/web/src/phase-theme.css": "229c92dcb8bf191f0ad2d409e3e2457abc01dd4f86e750a15a68c5c8aa9311e4",
+    "feat/web/src/style.css": "1040981efa4bef40f952dab47872bc26191973ddf6ffde1330a03ad3bdeeb8bd"
+  }
+}
