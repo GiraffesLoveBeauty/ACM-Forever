@@ -1,6 +1,6 @@
-# Android 修改标准与模块关联（v0.2.18）
+# Android 修改标准与模块关联（v0.2.19）
 
-状态：本轮实现说明，待跨人评审；2026-11-05。以实际代码与测试结果为准。适用工程 `Android_APP/app/`，不改变仓库协作规范。
+状态：本轮实现说明，待跨人评审；2026-11-06。以实际代码与测试结果为准。适用工程 `Android_APP/app/`，不改变仓库协作规范。
 
 ## 目录与修改入口
 
@@ -10,9 +10,9 @@ Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/a
 | --- | --- | --- |
 | `AcmApplication`、`ApiClient`、`SessionVault` | 进程共享会话、CSRF、权限、缓存和加密凭据 | 退出、切账号/服务、Activity 重建、禁止主线程等待网络锁 |
 | `MainActivity`、`NavigationStack` | 首页/排名/题库/发帖/个人中心/账号设置及原生详情 | `external_navigation`、详情返回、草稿归属、搜索入口防重 |
-| `SearchActivity`、`SearchModules` | 全局搜索、模块顺序、添加/移除、历史记录 | 公开 ID 能力、本人接口范围、缓存及模块独立失败 |
-| `MobilePageActivity` | 搜索与便捷管理的页面壳、缓存读取、串行后台操作 | 页面代次、会话代次、槽位绑定、只重试读操作 |
-| `AdminQuickActivity`、`AdminApiPolicy` | 手机便捷管理和 API 白名单 | 服务端角色重验证、CSRF、审核版本、敏感内容禁止通用缓存 |
+| `SearchActivity`、`SearchModules`、`ModuleOrderView` | 全局搜索、整卡纵向拖拽/缩放与让位、模块顺序、添加/移除、历史记录 | 公开 ID 能力、本人接口范围、缓存及模块独立失败 |
+| `MobilePageActivity`、`PullRefreshLayout`、`PageRefresh` | 搜索与便捷管理的页面壳、缓存读取、串行后台操作 | 页面代次、会话代次、槽位绑定；下拉只重复注册的读取，排序长按不能被父滚动抢占，不得刷新草稿或重放写操作 |
+| `AdminQuickActivity`、`AdminApiPolicy`、`AdminMemberEdits` | 手机便捷管理和 API 白名单 | 服务端角色重验证、CSRF、审核版本、敏感内容禁止通用缓存 |
 | `ChallengeDifficulty` | 管理员单题训练的难度选项和默认值 | 与 `acm_api/difficulty.py` 的有效值及网页训练默认值一致；切换平台同步难度，空选项不得发送请求 |
 | `WebFeaturesActivity` | 通知/投稿进度/比赛进度/Wiki | Wiki 站内练习相对链接进入原生题面，外链 HTTPS 校验 |
 | `ClubActivity`、`TrainingReminder` | 题单、讨论、错题、复习、打卡和本地提醒 | 缺失接口保留真实报错，通知授权、返回来源页 |
@@ -47,7 +47,7 @@ Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/a
 
 ## 仍缺的业务接口与不需要接口的部分
 
-基准为 main `f30cf10` 的代码核查，不是服务器部署证明。其余缺失能力保留第二优先级，本轮不新增业务后端。
+基准为 main `f30b33cf` 的代码核查，不是服务器部署证明。其余缺失能力保留第二优先级，本轮不新增业务后端。
 
 | 能力 | App 既有占位路径 | 网页已有基础 / 尚缺部分 |
 | --- | --- | --- |
@@ -64,19 +64,20 @@ Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/a
 
 ## 便捷管理权限与契约
 
-账号设置仅在服务端会话确认为 `admin/root` 时显示入口。页面进入、重新可见及写操作前在后台验证会话；实际 API 仍由服务器鉴权。普通成员即使启动内部 Activity 也不能看到管理数据。
+账号设置仅在服务端会话确认为 `admin/root` 时显示入口。页面进入、重新可见及每次管理读写前在后台验证会话；实际 API 仍由服务器鉴权。普通成员即使启动内部 Activity 也不能看到管理数据。
 
 | 手机操作 | 既有接口 | 关键约束 |
 | --- | --- | --- |
 | 话题审核 | `GET /api/forum/moderation/posts`、`POST …/posts/{id}` | 通过/退回携带当前 `content_version`；退回原因必填，冲突刷新后重审 |
 | 举报处理 | `GET /api/forum/moderation/reports`、`POST …/reports/{id}` | resolve/dismiss 仅处理举报记录，不自动删除原话题 |
 | 同步任务 | `GET /api/tasks`、`POST /api/tasks/{id}/cancel` | 只允许取消仍可取消的任务；失败不自动重复写 |
-| 成员查询 | `GET /api/admin/members`、`GET /api/member/{qq}` | 搜索、分页和只读资料；不进入通用响应缓存 |
+| 成员管理 | `GET /api/admin/members/options`、`GET /api/admin/members`、`GET/PATCH /api/admin/members/{qq}`、`GET /api/member/{qq}` | 关键词/学校/身份筛选、完整卡片；整卡进入详情，资料修改带账号代际及资料版本，绑定变更确认旧绑定/版本及清理影响；数字0/1和布尔启停标志兼容，敏感资料不进通用缓存 |
+| 成员登录账号 | `POST /api/admin/web-accounts/{qq}/reset-password`、`PATCH /api/admin/web-accounts/{qq}` | 初始密码、启停和Root角色操作；管理账号仅Root可操作，服务端保护最后Root。密码不进实例状态、日志或缓存，操作后重新验证会话 |
 | 生成训练/挑战历史 | `POST /api/challenge/start`、`GET /api/challenge/list` | 指定成员、平台及有效难度，标签可空；默认 CF 1000、AtCoder 800、洛谷“普及-”、牛客“2星”，切换平台重置对应选项，提交前校验；一次生成一题，不是普通成员的三档训练流程 |
 | 指定成员复盘 | `GET/PUT /api/contest/reviews` | 精确携带成员与比赛、题目；六态与网页一致 |
 | 比赛播报 | `GET/PUT /api/settings/contest-report` | 北京时间 HH:MM；修改/关闭前确认全站影响 |
 
-批量开户、Excel/CSV、重置密码、角色授权、OJ 绑定变更、题库采集、CF 选题、Wiki 编辑与复杂全局设置留在 Web。完整后台外链打开系统浏览器，需单独登录，不向浏览器传 Cookie、密码或 Token。管理页面没有在生产执行试写。
+按本轮需求，手机便捷管理增加单个成员的资料/四个OJ绑定、密码和账号启停；Root可改角色。普通成员自身绑定仍转Web。批量开户、Excel/CSV、校OJ、题库采集、CF 选题、Wiki 编辑与复杂全局设置留在 Web。完整后台外链打开系统浏览器，需单独登录，不向浏览器传 Cookie、密码或 Token。管理页面没有在生产执行试写。
 
 ## 不可破坏的关联
 
@@ -93,7 +94,14 @@ Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/a
 - 先读仓库 README、[协作规范](TCrB-AI项目工程规范.md)和本文件，核对最新 `main`、Git 差异与实际运行入口。
 - 用既有公开/本人/管理 API，缺失时明确挂空；新增后端接口或改变业务契约先告知用户并约定范围。
 - 版本同时更新 `build.gradle` 与 `assets/releases/history.json`。同渠道必须沿用签名且 versionCode 递增。
-- 单元测试、Lint、构建及受影响的真实 Activity 流程通过后再打包；回归见 [本轮实施与验收](android-v0.2.18.md)。不要把测试夹具当线上数据。
+- 单元测试、Lint、构建及受影响的真实 Activity 流程通过后再打包；回归见 [本轮实施与验收](android-v0.2.19.md)。不要把测试夹具当线上数据。
 - 只暂存本任务路径，检查敏感信息、`git diff --cached --check`，源码与文档分别提交；PR 写清测试与尚未部署的配置。新增文档在根 README 添加入口。
 
 当前GitHub发布配置见 [Tag发布](android-tag-release-v0.2.14.md)。自站更新另开PR；原讨论保留在 [PR #100](https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/100)。
+
+## v0.2.19新增关联
+
+- `ModuleOrderView`负责实际卡片纵向移动、90%缩放和让位动画；仅松手保存顺序，取消/离开恢复，禁止系统任意横移拖影。删除与添加继续改同一`SearchModules.KEY`。
+- `PullRefreshLayout`只触发`PageRefresh`登记的读取；不能调用发帖/审核/改密等提交函数。新增页面必须考虑滚动顶部判定、长按、输入、无障碍和会话代次。
+- `AppUpdates`将尝试时间与成功时间分开，六小时依据成功结果，失败一分钟防抖；更新页进入即手动检查，同次Activity重建不重复。GitHub发布、自站PR及下载校验链不变。
+- 官方横幅背景与交互画布分层，使用原CSS装饰；不要再覆盖模板内部图谱/地形的不同尺寸。详情见[android-v0.2.19.md（本轮范围、权限与验收）](android-v0.2.19.md)。
