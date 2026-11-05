@@ -1,6 +1,6 @@
-# ACMforever Android v0.2.13
+# ACMforever Android v0.2.14
 
-状态：PR #48 待评审版本，2026-11-04。包名 `com.giraffeslovebeauty.acmforever`，版本 `0.2.13` / code `27`，minSdk 26、target/compile SDK 35。当前交付为本机调试签名 APK。
+状态：0.2.14 的 Tag 自动发布与客户端更新提交本次 PR 评审，2026-11-05。PR #48 已合并，本轮从最新 main `d4ffe6b` 建立新主题分支。包名 `com.giraffeslovebeauty.acmforever`，版本 `0.2.14` / code `28`，minSdk 26、target/compile SDK 35。当前交付为本机调试签名 APK；本轮不创建发布 Tag、发布 Release、合并或部署。
 
 ## 范围与目录
 
@@ -12,7 +12,9 @@
 
 运行资源包括用户提供的分层角色图、既有剪影和平台标志，来源记录位于 `Android_APP/docs/artwork-v2/` 与各版美工文档。搜索旁加号沿用用户指定的参考资源，完整参考素材库未打包；代码仓库不代替第三方资源授权。原 0.1.x 管理/浏览器/更新壳作为历史代码保留，当前 Gradle 排除其类及 `assets/admin/`。
 
-## 后端整合与迁移
+## 后端整合与迁移（PR #48 历史）
+
+本节记录已合入的 0.2.13/PR #48，不是本次 PR 新增的后端改动。本次只改 Android、发布工作流、测试和文档。
 
 PR 复用主线 Web 会话、CSRF 和业务 API，仅为公开成员身份/资料/帖子补 `/api/mobile/v1/*`，并为公开排行榜增加可选 `period=today`、`positive_only=1`。详见 [api.md（移动端契约与排行榜）](api.md)。浏览器评论用例改为按创建接口返回 ID 等待对应节点，避免桌面/手机视口共享临时库时误选旧评论；注销重开户测试在请求 API 切换账号前停止管理员页面刷新，避免旧响应覆盖新 Cookie；不改网页产品代码。本次在旧 PR 最新 head 上整合 main `afb5f0d119cf1dc5bdab3869e05568389b223a8f`，保留通知、Markdown、Wiki、论坛修订与账号生命周期功能。
 
@@ -34,20 +36,24 @@ PR 复用主线 Web 会话、CSRF 和业务 API，仅为公开成员身份/资�
 
 ## 更新渠道与说明
 
-- `assets/releases/history.json` 保存 27 版更新日志，检查更新页离线可读，构建时检查当前版本一致。早期没有详细记录的版本明确标作存档。
-- 调试包默认使用当前 API 根地址的 `/api/mobile/v1/releases/latest?channel=debug`，此自有服务器发布接口尚待实现。
-- 正式包默认使用资源 `default_update_manifest_url` 的 GitHub Release `releases/latest/download/update.json`；用户可以覆盖为独立 HTTPS 清单地址，留空恢复当前渠道默认地址。
+- `assets/releases/history.json` 保存 28 版更新日志，检查更新页离线可读，构建时检查当前版本一致。早期没有详细记录的版本明确标作存档。
+- 调试包和正式包默认使用资源 `default_update_manifest_url` 的公开 GitHub Release `releases/latest/download/update.json`，不依赖业务 API；自有服务器安装包 API 方案已被替代，无需后端新增接口。
+- 用户可覆盖为独立 HTTPS 清单地址，留空恢复 GitHub 默认地址。新清单包含 channel，不同渠道被拒绝；旧的无 channel 清单仍兼容，实际 APK 签名校验继续保留。
 - 清单至多跟随五次 HTTPS 跳转，每次拒绝 HTTP 降级、URL 凭据和 fragment，大小上限 32 KiB；不附业务登录 Cookie。
 - 客户端校验包名、版本、minSdk、大小和 SHA-256；下载后再次核对实际 APK 包信息与当前签名。签名不符、旧包、错误哈希不会进入安装步骤。最长 APK 150 MiB。
-- 自动检查与仅 Wi-Fi 自动下载均为可选，自动检查间隔至少 6 小时。系统下载继续执行，安装始终由用户在 Android 安装器确认。
+- 自动检查默认开启，已保存的关闭选项继续生效。已移除 Wi-Fi 自动下载选项及旧版保存值。自动检查间隔至少 6 小时，每进程启动仅发起一次，返回页面或重建不重复检查。
+- 启动第 5 步：会话处理完成后发起后台更新检查，再加载主页内容；网络请求并发，不等待清单成功才显示主页。缺失接口或断网不阻塞启动，也不伪报最新版。
+- 手动检查已是最新时弹出“已是最新版本”和“确认”按钮。发现新版时在弹窗中间显示版本号和可滚动更新说明，下方使用等大“下载安装包”和 50% 透明度红色“取消更新”按钮；关闭、返回或取消后继续使用主页。旋转时重建待处理提示，重复点击不叠窗或重复下载。
+- 点击下载进入猫娘下载页，显示真实系统下载进度和校验状态。所有网络均需点击下载才会开始。
+- 返回后系统下载继续执行；校验成功显示安装入口，失败显示真实错误和重试。安装始终由用户在 Android 安装器确认。
 
 ## 当前调试安装包怎样分发
 
-本次 PR 只上传源码，不把 APK 提交进 Git。当前安装包在独立整合工作区的 `Android_APP/dist/acmforever-0.2.13-debug.apk`，可先直接发送给成员手动覆盖安装。
+不把 APK 提交进 Git。当前本地体验包位于独立整合工作区的 `Android_APP/dist/acmforever-0.2.14-debug.apk`，实际核验见 [安装说明-v0.2.14.md](../Android_APP/docs/安装说明-v0.2.14.md)。对外分发包由负责人推送 Tag 后的 Action 编译并自动附加到 Release，无需手工上传。
 
-若要让已安装的调试包在 App 内更新，需要单独上传同调试签名的新 APK 到 HTTPS 文件服务，并同步发布其真实 JSON 清单；在“检查更新 → 设置发布地址”填入这个固定清单地址。每次先上传/核验版本 APK，最后更新清单，保持旧安装包地址仍可访问。APK 文件可由自有服务器或单独的 GitHub Release asset 托管，但 GitHub PR 的源码地址不能当下载清单使用。当前默认的 debug 自有服务器 API 尚未实施，因此只推 PR 不会使手机收到新版本。
+本仓库已公开。跨人评审合并、配置既有签名 Secret 后，负责人创建 `v0.2.14` Tag，Action 才会构建、核验并公开完整 Release。只推 PR 不会使手机收到新版。首次 Release 前清单 404 如实报错；旧 debug 包首次迁移需手动安装本版或设置 GitHub 清单地址。
 
-客户端只提示 `versionCode` 严格更大的版本。本次整合继续沿用 `0.2.13` / code `27`，若手机已装同 code 的旧本地包，应手动覆盖；后续发布必须递增 code 并补日志。正式签名与当前调试签名不同，不能覆盖安装，首次切换正式版需重装；此后保持正式密钥即可连续更新。
+客户端只提示 `versionCode` 严格更大的版本。本次为 `0.2.14` / code `28`，已安装旧本地 code28 也不会自动提示另一个 code28；首次验收用 code27 → code28。后续继续递增 code 并补日志。正式签名与当前调试签名不同，首次切换正式版需重装；之后保持正式密钥连续更新。单一 latest 更新流不提供 debug/release 同时分发。
 
 ## 构建与 CI
 
@@ -58,19 +64,19 @@ cd Android_APP/app
 ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
 ```
 
-Windows 现有离线工具链可运行 `Android_APP/tools/build-local-v0213.ps1`、`verify-local-v0213.ps1` 和 `package-local-v0213.ps1`，分别构建、运行十二组模拟器检查及核验实际包。脚本使用 `%TEMP%/acmforever-build-v0.2.0` 下已安装的工具和模拟器，不能视为从零安装脚本。调试密钥放 `Android_APP/dist/signing/debug.keystore`；缺少原密钥的机器会生成不同调试签名，不能覆盖已有包。
+Windows 现有离线工具链可运行 `Android_APP/tools/build-local-v0214.ps1`、`verify-local-v0214.ps1` 和 `package-local-v0214.ps1`，分别构建、运行十三组模拟器检查及核验实际包。脚本使用 `%TEMP%/acmforever-build-v0.2.0` 下已安装的工具和模拟器，不能视为从零安装脚本。调试密钥放 `Android_APP/dist/signing/debug.keystore`；缺少原密钥的机器会生成不同调试签名，不能覆盖已有包。
 
-`android-ci.yml` 在 App/相关工作流的 PR 变更时执行发布清单 Python 测试和 Android JVM/Lint/构建。`api-tests.yml` 执行 Vue 构建、后端合同和 Web 单测。模拟器十二组测试目前是本机验收，不谎称已加入 Actions。
+`android-ci.yml` 在 App/相关工作流的 PR 变更时执行 Python 发布合同/失败重试测试和 Android JVM/Lint/构建。`api-tests.yml` 按既有触发范围执行 Vue 构建、后端合同和 Web 单测。十三组模拟器测试目前是本机验收，没有加入 Actions。
 
-## 正式发布操作（本轮不执行）
+## Tag 发布操作（本轮不执行）
 
-远端已有 `android-release.yml`，本次保留并修正工具链/清单生成。发布前必须由维护者配置 `ANDROID_RELEASE_KEYSTORE_BASE64`、`ANDROID_RELEASE_KEY_ALIAS`、`ANDROID_RELEASE_KEYSTORE_PASSWORD` 和 `ANDROID_RELEASE_KEY_PASSWORD`，长期保管正式签名，不使用本机调试密钥代替。
+详见 [android-tag-release-v0.2.14.md（完整步骤、签名配置与失败处理）](android-tag-release-v0.2.14.md)。`android-release.yml` 改为 `push` Tag 触发，默认 debug；需先配置 `ANDROID_DEBUG_KEYSTORE_BASE64` 为既有密钥，实际证书固定核对。未来正式渠道另外配置长期正式签名及证书变量。
 
-正式发布顺序：完成跨人 review 与上线验收 → 按仓库规则合并 → 为批准源码建立与 APK 一致的 `vX.Y.Z` tag → 发布非 prerelease 的 GitHub Release。工作流检出该 tag，运行单测/Lint、构建正式签名包，核验签名和 aapt 实际包信息，比较 APK 内置日志与源码，再生成 `acmforever-X.Y.Z.apk`、`.sha256` 和 `update.json`，先附加 APK/校验文件，再附加 update.json 到该 Release。Release 正文作为远端更新说明，空正文使用本版内置日志。
+发布顺序：跨人 review 和适用检查 → 非提交者合入 main → 负责人推送版本 Tag → Action 检查 main/版本/日志、测试并签名构建 → 生成 APK/校验文件/清单 → 草稿上传 → 三附件逐一回读比对 → 公开为 latest。版本 code 必须更大，同渠道证书固定；已公开附件不覆盖，失败保留草稿可重跑。说明来自本版内置日志，Release 正文同时包含源提交。
 
-发布工具拒绝 tag、包名、版本、minSdk、内置日志不一致及超限说明，计算真实文件大小/哈希并在复制后再次验证。失败时停止，不能发布伪清单。清单被客户端读取成功，才表示远端更新来源可用。GitHub 下载在目标手机网络下能否访问仍需发布后的真实设备验证。
+发布工具拒绝 tag、包名、版本、minSdk、渠道、固定签名、内置日志不一致及超限说明，核验实际大小/哈希。真实 Tag 发布和目标手机网络下载、覆盖安装仍需负责人发布后的验收；本地测试不表示已经上线。
 
-只推 PR 分支不会部署；PR 含 `feat/api/**`，合并 main 将触发服务器同步，必须先由运维备份数据库、WAL、环境配置并确认迁移和恢复方案。本轮不合并、不发布 Release、不操作生产服务器。
+本次 PR 不含 `feat/**` 或服务器同步工作流变更；推主题分支及合并本次 PR 均不触发原服务器同步。发布仅由 Tag push 触发，本轮不触发。
 
 ## 历史评审逐项核对
 
@@ -90,6 +96,10 @@ Windows 现有离线工具链可运行 `Android_APP/tools/build-local-v0213.ps1`
 | [review 5768177626 的网络锁 P2](https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#discussion_r4467398917) | 删除 MainActivity 重复 setBaseUrl，启动配置/非法偏好清理由 Application 统一完成；旧代码在 GET 挂起时重建失败，修复后 GET 和自动保存挂起期间均完成真实 Activity 重建及主线程心跳，保留会话/草稿和保存结果；另增 2 项配置单测 |
 
 ## 验证记录
+
+0.2.14 本次：69 项 JVM 单测、30 项 Python 发布合同测试、十三组模拟器回归通过；Lint 0 错误/53 警告，actionlint 与 Bash 语法检查通过。使用实际 APK 验证签名、版本、日志和清单生成，未触发真正的 Tag 发布。最终大小、哈希和边界见 [安装说明-v0.2.14.md](../Android_APP/docs/安装说明-v0.2.14.md)。
+
+以下为 PR #48/0.2.13 的历史证据，不代替本次 PR 当前 head 的检查结果。
 
 debug 与 release 构建分支均完成单测/Lint/打包及实际清单生成检查；release 分支仅借本机调试密钥验证签名配置，没有正式签名制品发布。最终本机结果见 [安装说明-v0.2.13.md（实际 APK 与回归结果）](../Android_APP/docs/安装说明-v0.2.13.md)。生产更新源、正式私钥构建、远端 APK 下载与真机安装仍需发布验收，本机模拟响应不作为这些流程已通过的证据。
 

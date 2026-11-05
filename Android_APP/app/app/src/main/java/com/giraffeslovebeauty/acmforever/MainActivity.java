@@ -201,7 +201,7 @@ public final class MainActivity extends Activity {
         }
         if (returnFromAdmin) { returnFromAdmin = false; loadScreen(); }
         if(headerAvatar!=null)refreshHeaderAvatar(true);
-        openingUpdates=false;application.updates().attach(this,null);application.updates().maybeCheck();
+        openingUpdates=false;application.updates().attach(this,null);
     }
 
     @Override protected void onPause(){if(application!=null)application.updates().detach(this);super.onPause();}
@@ -1640,7 +1640,7 @@ public final class MainActivity extends Activity {
             .setPositiveButton("恢复为新草稿",(d,w)->{try{JSONObject draft=new JSONObject(preferences.getString(key,"{}"));cloud.reset();syncCloudEditor();composeTitle=draft.optString("title");composeBody=draft.optString("body");composeCategoryId=draft.optInt("category_id");composeDraftId=0;composerChanged();loadScreen();}catch(Exception e){failureDialog(e);}}).show();
     }
     private void restoreWebSession(){
-        if(api.isLoggedIn()||sessionRestoreAttempted||!preferences.getBoolean("auto_login",false)){loadScreen();return;}
+        if(api.isLoggedIn()||sessionRestoreAttempted||!preferences.getBoolean("auto_login",false)){loadAfterSession();return;}
         sessionRestoreAttempted=true;String destination=screen;showLoginWaiting();
         java.lang.ref.WeakReference<MainActivity> owner=new java.lang.ref.WeakReference<>(this);
         application.restoreSavedLogin().whenComplete((restored,failure)->{
@@ -1650,9 +1650,16 @@ public final class MainActivity extends Activity {
                 current.finishLoginWaiting();
                 current.sessionRestoreFailure=failure instanceof java.util.concurrent.CompletionException&&failure.getCause() instanceof Exception?(Exception)failure.getCause():failure instanceof Exception?(Exception)failure:null;
                 current.screen=Boolean.TRUE.equals(restored)?destination:"account";
-                current.syncCloudEditor();current.updateSearchHeader();current.refreshNav();current.loadScreen();
+                current.syncCloudEditor();current.updateSearchHeader();current.refreshNav();current.loadAfterSession();
             });
         });
+    }
+
+    private void loadAfterSession(){
+        // Startup step 5: dispatch once after session recovery and before page requests.
+        // The check stays asynchronous, so an unavailable release server cannot block home.
+        if(!externalRoot)application.updates().startupCheck();
+        loadScreen();
     }
 
     private TextWatcher watch(java.util.function.Consumer<String> onChange) {

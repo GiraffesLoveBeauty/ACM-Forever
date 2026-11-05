@@ -13,7 +13,7 @@ public final class UpdateActivity extends Activity {
     private LinearLayout body,banner;
     private TextView status,notes,error,source;
     private Button check,download,install,cancel;
-    private CheckBox automatic,wifi;
+    private CheckBox automatic;
     private boolean painting;
     private int dp(int n){return MobileStyle.dp(this,n);}
     @Override public void onCreate(Bundle state){
@@ -26,12 +26,10 @@ public final class UpdateActivity extends Activity {
         ImageButton close=new ImageButton(this);MobileStyle.flat(close);close.setBackgroundColor(Color.TRANSPARENT);close.setImageDrawable(AppIcons.get(this,"close",0xffaf2424));close.setContentDescription("关闭更新错误提示");close.setOnClickListener(v->updates.dismissError());banner.addView(close,new LinearLayout.LayoutParams(dp(48),dp(48)));LinearLayout.LayoutParams bannerBounds=new LinearLayout.LayoutParams(-1,-2);bannerBounds.setMargins(dp(12),dp(16),dp(12),dp(8));root.addView(banner,bannerBounds);
         ScrollView scroll=new ScrollView(this);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));body=new SpacedLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(dp(16),dp(16),dp(16),dp(24));scroll.addView(body);
         LinearLayout current=card();current.addView(text("ACMforever "+updates.currentName(),20));status=text("",16);status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);current.addView(status);notes=text("",14);current.addView(notes);
-        check=button(current,"检查更新",()->updates.check(true));download=button(current,"下载新版安装包",()->updates.download(false));install=button(current,"安装新版",()->updates.install(this));cancel=button(current,"取消下载",updates::cancelDownload);
+        check=button(current,"检查更新",()->updates.check(true));download=button(current,"下载新版安装包",()->updates.openDownload(this));install=button(current,"安装新版",()->updates.install(this));cancel=button(current,"取消下载",updates::cancelDownload);
         LinearLayout options=card();options.addView(text("自动更新选项",18));automatic=new CheckBox(this);automatic.setText("启动时自动检查更新");automatic.setMinHeight(dp(48));options.addView(automatic);
-        wifi=new CheckBox(this);wifi.setText("仅 Wi-Fi 自动下载新版");wifi.setMinHeight(dp(48));options.addView(wifi);
-        options.addView(text("自动检查最多每 6 小时一次；下载由系统继续执行。下载后需在此确认安装，账号和本机设置可随同签名更新保留。",12));
+        options.addView(text("自动检查默认开启，启动时在会话处理后发起，最多每 6 小时一次。发现新版始终先询问，点击下载安装包后进入猫娘下载页。下载后需确认系统安装，同签名更新保留账号和本机设置。",12));
         automatic.setOnCheckedChangeListener((b,value)->{if(!painting){updates.automatic(value);if(value)updates.check(false);}});
-        wifi.setOnCheckedChangeListener((b,value)->{if(!painting){updates.automaticDownload(value);if(value)updates.check(false);}});
         LinearLayout publishing=card();publishing.addView(text("版本发布地址",16));source=text("",12);source.setTextIsSelectable(true);publishing.addView(source);button(publishing,"设置发布地址",this::editSource);
         releaseHistory();
         refresh();AppAppearance.paintFields(root);
@@ -59,7 +57,7 @@ public final class UpdateActivity extends Activity {
         if(isFinishing()||isDestroyed())return;painting=true;
         try{status.setText(updates.status());error.setText(updates.error());banner.setVisibility(updates.error().isEmpty()?View.GONE:View.VISIBLE);notes.setText(updates.notes());notes.setVisibility(updates.notes().isEmpty()?View.GONE:View.VISIBLE);
             check.setEnabled(!updates.busy());download.setText(updates.downloadLabel());download.setVisibility(updates.available()&&!updates.ready()?View.VISIBLE:View.GONE);download.setEnabled(!updates.busy());install.setVisibility(updates.ready()?View.VISIBLE:View.GONE);cancel.setVisibility(updates.downloading()?View.VISIBLE:View.GONE);
-            automatic.setChecked(updates.automatic());wifi.setChecked(updates.automaticDownload());source.setText(updates.endpoint());
+            automatic.setChecked(updates.automatic());source.setText(updates.endpoint());
         }finally{painting=false;}
     }
     private void editSource(){
