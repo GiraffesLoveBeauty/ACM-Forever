@@ -40,9 +40,12 @@ final class StartupUpdatesUiSmoke {
             URL.setURLStreamHandlerFactory(protocol->"https".equals(protocol)?new URLStreamHandler(){protected URLConnection openConnection(URL url)throws IOException{if(!"startup-updates.test.invalid".equals(url.getHost()))throw new IOException("External traffic forbidden");return new Fixture(url);}}:null);
             prefs.edit().putString("api_base_url","https://startup-updates.test.invalid").remove("app_update_automatic").remove("app_update_attempt").remove("app_update_url").putBoolean("app_update_wifi_download",true).putBoolean("auto_login",false).apply();
             api.setBaseUrl("https://startup-updates.test.invalid");api.setNetworkAvailable(()->true);
-            updates=app.updates();version=updates.currentVersion()+1;
+            // Keep the synthetic HTTPS transport independent of emulator host connectivity.
+            java.util.concurrent.atomic.AtomicBoolean online=new java.util.concurrent.atomic.AtomicBoolean(false);
+            updates=new AppUpdates(context,api,online::get);java.lang.reflect.Field updateOwner=AcmApplication.class.getDeclaredField("updates");updateOwner.setAccessible(true);updateOwner.set(app,updates);version=updates.currentVersion()+1;
             check(updates.endpoint().equals(context.getString(R.string.default_update_manifest_url)),"debug updates use GitHub Release independently of business API");
             main(()->updates.source("https://startup-updates.test.invalid/api/mobile/v1/releases/latest?channel=debug"));
+            main(()->updates.check(true));await(()->!updates.busy(),"offline check completes");check("无网络".equals(updates.error())&&checks.get()==0,"offline check never calls transport");online.set(true);prefs.edit().remove("app_update_attempt").commit();
             check(updates.automatic(),"automatic check defaults on");check(!prefs.contains("app_update_wifi_download"),"legacy auto-download setting removed");main(()->updates.automatic(false));check(!updates.automatic(),"explicit off respected");prefs.edit().remove("app_update_automatic").apply();
             api.login("90000001","Synthetic-Test!");String session=api.exportSession();api.logout();
             prefs.edit().putBoolean("auto_login",true).apply();check(app.vault().save(api.getBaseUrl(),session),"store test session");
@@ -72,8 +75,11 @@ final class StartupUpdatesUiSmoke {
             }finally{test.removeMonitor(monitor);}
             version=updates.currentVersion();main(()->updates.check(true));await(()->has("已是最新版本"),"latest result popup");screenshot("latest-confirm-v0214.png");click("确认");main(()->check(!ModalDialogs.isShowing(activity),"latest confirmed"));
             response=404;main(()->updates.check(true));await(()->!updates.busy(),"missing endpoint completes");check(updates.error().equals("无API接口"),"missing API reported honestly");main(()->check(!ModalDialogs.isShowing(activity),"failed update leaves home usable"));
-            output.putString("stream","PASS: default on and saved off; session-before-update startup; one check per process; version/notes and equal buttons with red alpha 50%; popup restored on recreation; cancellation; duplicate download taps open one cat page; real DownloadManager task, visible failure, retry and cancellation; latest-version confirmation; legacy Wi-Fi auto-download removed; missing API releases home.\n");result=Activity.RESULT_OK;
-        }catch(Throwable failure){output.putString("stream","FAIL: "+android.util.Log.getStackTraceString(failure));}
+            // Failed first checks must not suppress retries for six hours; success is tracked separately.
+            response=200;version=updates.currentVersion();prefs.edit().remove("app_update_success").remove("app_update_checked_build").putLong("app_update_attempt",System.currentTimeMillis()-61000).commit();int retryBefore=checks.get();main(updates::maybeCheck);await(()->!updates.busy()&&checks.get()==retryBefore+1,"failed check can retry after short debounce");check(prefs.getLong("app_update_success",0)>0,"successful check persisted independently");main(updates::maybeCheck);Thread.sleep(150);check(checks.get()==retryBefore+1,"successful automatic checks retain six-hour interval");
+            activity=open(UpdateActivity.class);await(()->has("已是最新版本"),"opening update page forces a check despite recent successful auto check");check(checks.get()==retryBefore+2,"manual page entry checked once");click("确认");
+            output.putString("stream","PASS: default on and saved off; session-before-update startup; one check per process; version/notes and equal buttons with red alpha 50%; popup restored on recreation; cancellation; duplicate download taps open one cat page; real DownloadManager task, visible failure, retry and cancellation; latest-version confirmation; legacy Wi-Fi auto-download removed; missing API releases home; failed-check retry and successful six-hour throttle; update page entry forces a manual check.\n");result=Activity.RESULT_OK;
+        }catch(Throwable failure){output.putString("stream","FAIL: "+android.util.Log.getStackTraceString(failure)+"\nChecks="+checks.get()+", recovered="+sessionRecovered+", update="+(updates==null?"not created":updates.status())+"\n");try{screenshot("startup-updates-failure.png");}catch(Exception ignored){}}
         finally{
             sessionRelease.countDown();
             if(updates!=null)main(()->updates.cancelDownload());

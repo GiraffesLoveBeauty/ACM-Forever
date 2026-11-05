@@ -30,7 +30,7 @@ final class OfficialThemeView extends WebView {
         });
         loadUrl(ORIGIN+PREFIX+"index.html");
     }
-    @Override public boolean onTouchEvent(android.view.MotionEvent event){return !"background".equals(scene)&&super.onTouchEvent(event);}
+    @Override public boolean onTouchEvent(android.view.MotionEvent event){return !"background".equals(scene)&&!"banner-background".equals(scene)&&super.onTouchEvent(event);}
     static boolean background(Context c){android.content.SharedPreferences p=AppAppearance.prefs(c);return "web".equals(p.getString("theme_source","acm"))&&"solid".equals(p.getString("bg_mode","solid"))&&"theme".equals(p.getString("bg_source","custom"));}
     void refresh(){
         if(!loaded)return;try{

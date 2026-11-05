@@ -27,12 +27,12 @@ abstract class MobilePageActivity extends Activity {
         AppAppearance.load(this);AppAppearance.window(this);api=((AcmApplication)getApplication()).api();
         root=column();root.setFitsSystemWindows(true);root.setBackground(ProfileCover.drawable(this));AppAppearance.content(this,root);
         LinearLayout header=row();header.setBackgroundColor(MobileStyle.CHROME);header.setPadding(dp(10),dp(8),dp(12),dp(8));header.addView(button("返回",this::onBackPressed));title=text(heading,21);header.addView(title,new LinearLayout.LayoutParams(0,-2,1));root.addView(header);
-        refresh=new PageRefresh(this,root,1);notice=new ActionNotice(this,root,2);scroll=new ScrollView(this);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));body=column();body.setPadding(dp(14),dp(16),dp(14),dp(24));scroll.addView(body);
+        refresh=new PageRefresh(this,root,1);notice=new ActionNotice(this,root,2);scroll=new ScrollView(this);root.addView(PullRefreshLayout.forPage(this,scroll,refresh,()->!writing),new LinearLayout.LayoutParams(-1,0,1));body=column();body.setPadding(dp(14),dp(16),dp(14),dp(24));scroll.addView(body);
     }
     protected void resetPage(String heading){serial++;refresh.reset(serial);refresh.userAction();notice.hide();title.setText(heading);body.removeAllViews();}
     protected void error(LinearLayout slot,Exception failure){slot.removeAllViews();ErrorModule.style(slot);if(slot.getContentDescription()!=null)slot.addView(text(slot.getContentDescription().toString(),17));TextView message=text(FailureState.title(failure),14);message.setTextColor(ErrorModule.ink());slot.addView(message);}
     protected void read(String path,LinearLayout slot,boolean admin,Display display){
-        read(()->admin?api.adminRequest("GET",path,null):api.get(path),slot,!admin,display);
+        read(()->{if(!admin)return api.get(path);synchronized(api){api.refreshSession();return api.adminRequest("GET",path,null);}},slot,!admin,display);
     }
     protected void read(Callable<Object> request,LinearLayout slot,boolean cache,Display display){
         int token=serial;long owner=api.sessionGeneration();final boolean[] loaded={false};final Object binding=new Object();slot.setTag(binding);
@@ -48,9 +48,12 @@ abstract class MobilePageActivity extends Activity {
         io.execute(()->{api.beginReplay();try{Object cached=request.call();runOnUiThread(()->{if(token==serial&&owner==api.sessionGeneration()&&!isDestroyed()&&slot.getTag()==binding){refresh.cached(token);show.accept(cached);}});}catch(Exception ignored){}finally{api.endReplay();}runOnUiThread(()->{if(token==serial&&!isDestroyed())network.run();});});
     }
     protected void write(String method,String path,JSONObject payload,boolean admin,Runnable done){
+        writeResult(method,path,payload,admin,value->done.run());
+    }
+    protected void writeResult(String method,String path,JSONObject payload,boolean admin,Display done){
         if(writing)return;writing=true;int token=serial;long owner=api.sessionGeneration();notice.hide();
-        io.execute(()->{Exception failure=null;try{synchronized(api){if(owner!=api.sessionGeneration())throw new IllegalArgumentException("登录账号已切换");if(admin)api.refreshSession();if(owner!=api.sessionGeneration())throw new IllegalArgumentException("登录账号已切换");if(admin)api.adminRequest(method,path,payload);else api.writeObject(method,path,payload);}}catch(Exception e){failure=e;}
-            Exception issue=failure;runOnUiThread(()->{writing=false;if(isDestroyed()||token!=serial)return;if(owner!=api.sessionGeneration()){resetPage("登录已失效");error(card(body),new ApiClient.ApiException(401,"登录账号已切换，请返回重新登录",false));return;}if(issue!=null)notice.show("操作",issue);else done.run();});});
+        io.execute(()->{Exception failure=null;Object response=null;try{synchronized(api){if(owner!=api.sessionGeneration())throw new IllegalArgumentException("登录账号已切换");if(admin)api.refreshSession();if(owner!=api.sessionGeneration())throw new IllegalArgumentException("登录账号已切换");response=admin?api.adminRequest(method,path,payload):api.writeObject(method,path,payload);}}catch(Exception e){failure=e;}
+            Exception issue=failure;Object result=response;runOnUiThread(()->{writing=false;if(isDestroyed()||token!=serial)return;if(owner!=api.sessionGeneration()){resetPage("登录已失效");error(card(body),new ApiClient.ApiException(401,"登录账号已切换，请返回重新登录",false));return;}if(issue!=null)notice.show("操作",issue);else try{done.show(result);}catch(Exception e){notice.show("处理结果",e);}});});
     }
     protected JSONObject json(String key,Object value){try{return new JSONObject().put(key,value);}catch(Exception e){throw new IllegalArgumentException(e);}}
     @Override protected void onResume(){super.onResume();opening=false;}

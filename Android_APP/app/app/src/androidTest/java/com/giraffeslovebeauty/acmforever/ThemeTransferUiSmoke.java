@@ -18,6 +18,13 @@ final class ThemeTransferUiSmoke {
     private final Instrumentation test;private final Context app;private Activity activity;private final List<String> created=new ArrayList<>();
     private ThemeTransferUiSmoke(Instrumentation test){this.test=test;app=test.getTargetContext();}
     static void run(Instrumentation test){new ThemeTransferUiSmoke(test).run();}
+    static void runLayout(Instrumentation test,String preset){new ThemeTransferUiSmoke(test).runLayout(preset);}
+    private void runLayout(String preset){
+        SharedPreferences prefs=AppAppearance.prefs(app);Map<String,?> before=new HashMap<>(prefs.getAll());Bundle result=new Bundle();int outcome=Activity.RESULT_CANCELED;
+        try{check(Arrays.asList("original","phase","angel-city","minecraft").contains(preset),"known official layout");officialLayouts(prefs,new String[]{preset});result.putString("stream","PASS: "+preset+" light/dark original CSS, graph bounds, separate text/art columns and original node interaction.\n");outcome=Activity.RESULT_OK;}
+        catch(Throwable error){result.putString("stream","FAIL: "+android.util.Log.getStackTraceString(error));try{shot("official-layout-failure-v0219.png");}catch(Exception ignored){}}
+        finally{if(activity!=null)main(()->activity.finish());for(String id:created){try{LocalThemes.delete(app,id);}catch(Exception ignored){}}restore(prefs,before);AppAppearance.load(app);}test.finish(outcome,result);
+    }
     private void run(){
         SharedPreferences prefs=AppAppearance.prefs(app),registry=app.getSharedPreferences("local_theme_library",0);Map<String,?> before=new HashMap<>(prefs.getAll()),oldRegistry=new HashMap<>(registry.getAll());File background=new File(app.getFilesDir(),"profile-cover.jpg"),original=new File(app.getCacheDir(),"transfer-source.png");byte[] oldImage=read(background);Bundle result=new Bundle();int outcome=Activity.RESULT_CANCELED;
         try{
@@ -30,6 +37,7 @@ final class ThemeTransferUiSmoke {
             Map<String,?> sourceSettings=LocalThemes.prefs(app,saved).getAll(),targetSettings=LocalThemes.prefs(app,imported).getAll();for(Iterator<String> keys=pack.settings.keys();keys.hasNext();){String key=keys.next();check(sourceSettings.get(key).equals(targetSettings.get(key)),"setting round trip: "+key);}
             LocalThemes.apply(app,saved);int[] expected=pixels(app);LocalThemes.apply(app,imported);check(Arrays.equals(expected,pixels(app)),"image crop, colors and transparency render identically after import");
             prefs.edit().putString("theme_source","acm").putInt("theme_primary",Color.RED).commit();open(AppearanceActivity.class,null);click("主题选择");main(()->{View library=find("主题库"),local=find("本地导入");check(local!=null&&local.getTop()>=library.getBottom(),"local import is below theme library");});main(()->activity.onBackPressed());click("我的主题");clickDescription("主题缩略图 未命名1");await(()->prefs.getInt("theme_primary",0)==0xff83b8e5,"thumbnail applies saved theme");
+            await(()->{try{java.lang.reflect.Field saving=AppearanceActivity.class.getDeclaredField("saving");saving.setAccessible(true);return !saving.getBoolean(activity);}catch(Exception e){throw new AssertionError(e);}},"theme application finishes before opening settings");
             Instrumentation.ActivityMonitor monitor=test.addMonitor(AppearanceActivity.class.getName(),null,false);clickDescription("设置主题 未命名1");Activity editor=test.waitForMonitorWithTimeout(monitor,5000);test.removeMonitor(monitor);check(editor!=null,"saved editor opens");activity=editor;test.waitForIdleSync();main(()->{View rename=find("重命名"),share=find("分享"),delete=find("删除");check(share!=null&&share.getTop()>=rename.getBottom()&&delete.getTop()>=share.getBottom()&&find("导出")==null,"share replaces export between rename and delete");});
             Intent attachment=share();Uri exported=attachment.getParcelableExtra(Intent.EXTRA_STREAM);check(exported!=null&&"content".equals(exported.getScheme()),"share uses a content attachment");
             check("application/zip".equals(attachment.getType())&&(attachment.getFlags()&Intent.FLAG_GRANT_READ_URI_PERMISSION)!=0&&(attachment.getFlags()&Intent.FLAG_GRANT_WRITE_URI_PERMISSION)==0,"read-only ZIP share grant");
@@ -69,7 +77,10 @@ final class ThemeTransferUiSmoke {
         long until=SystemClock.uptimeMillis()+3000;while(result.get()==null&&SystemClock.uptimeMillis()<until)Thread.sleep(20);if(result.get()==null)throw new AssertionError("theme JavaScript callback");Object decoded=new JSONTokener(result.get()).nextValue();return decoded instanceof String?new JSONObject((String)decoded):new JSONObject();
     }
     private void officialLayouts(SharedPreferences prefs)throws Exception{
-        for(String preset:new String[]{"original","phase","angel-city","minecraft"})for(boolean dark:new boolean[]{false,true}){
+        officialLayouts(prefs,new String[]{"original","phase","angel-city","minecraft"});
+    }
+    private void officialLayouts(SharedPreferences prefs,String[] presets)throws Exception{
+        for(String preset:presets)for(boolean dark:new boolean[]{false,true}){
             prefs.edit().putString("theme_source","web").putString("theme_preset",preset).putBoolean("theme_dark",dark).putString("bg_mode","solid").putString("bg_source","theme").commit();String id=LocalThemes.save(app);created.add(id);open(ThemePreviewActivity.class,id);
             OfficialThemeView[] art={null};await(()->{art[0]=(OfficialThemeView)description("官方主题原始素材 graph");return art[0]!=null;},"graph host");
             String script="(()=>{const g=document.querySelector('.algorithm-graph'),r=g?.getBoundingClientRect(),nodes=[...document.querySelectorAll('.graph-node-hit')];return {design:document.documentElement.dataset.designTemplate,mode:document.body.dataset.theme,ready:!!g&&nodes.length===12,fit:!!r&&r.left>=-1&&r.top>=-1&&r.right<=innerWidth+1&&r.bottom<=innerHeight+1,nodesFit:nodes.length===12&&nodes.every(n=>{let b=n.getBoundingClientRect();return b.left>=-1&&b.top>=-1&&b.right<=innerWidth+1&&b.bottom<=innerHeight+1;}),background:getComputedStyle(document.body).backgroundColor};})()";

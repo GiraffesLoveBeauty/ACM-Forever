@@ -30,7 +30,7 @@ public final class SpaceActivity extends Activity {
         root=column();root.setFitsSystemWindows(true);root.setBackground(ProfileCover.drawable(this));AppAppearance.content(this,root);
         LinearLayout header=new SpacedLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);header.setPadding(dp(12),dp(8),dp(12),dp(8));header.setBackgroundColor(MobileStyle.CHROME);header.addView(button("返回",this::finish));header.addView(text(title(),21),new LinearLayout.LayoutParams(0,-2,1));header.addView(button("刷新",this::load));root.addView(header);
         refresh=new PageRefresh(this,root,1);notice=new ActionNotice(this,root,2);
-        scroll=new ScrollView(this);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));LinearLayout body=column();body.setPadding(dp(14),dp(16),dp(14),dp(24));scroll.addView(body);
+        scroll=new ScrollView(this);root.addView(PullRefreshLayout.forPage(this,scroll,refresh,()->!ModalDialogs.isShowing(this)),new LinearLayout.LayoutParams(-1,0,1));LinearLayout body=column();body.setPadding(dp(14),dp(16),dp(14),dp(24));scroll.addView(body);
         LinearLayout intro=card(body);TextView heading=text(title(),24);AppIcons.on(heading,drafts()?"drafts":bookmarks()?"bookmark":"forum",MobileStyle.BRAND,28);intro.addView(heading);
         intro.addView(text(drafts()?"多份草稿 · 编辑中自动保存到云端":bookmarks()?"收藏的话题与讨论，随时继续阅读":"查看审核状态，管理自己的投稿",13));
         count=text("正在加载…",12);intro.addView(count);

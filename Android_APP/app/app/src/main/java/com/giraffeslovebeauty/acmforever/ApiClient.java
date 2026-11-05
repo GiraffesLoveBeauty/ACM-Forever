@@ -162,6 +162,7 @@ final class ApiClient {
     boolean requiresPasswordChange() { return mustChangePassword; }
 
     boolean isAdministrator() { return isLoggedIn() && ("admin".equals(role) || "root".equals(role)); }
+    boolean isRoot() { return isLoggedIn() && "root".equals(role); }
 
     synchronized JSONObject refreshSession() throws Exception {
         if(isReplay())return new JSONObject();

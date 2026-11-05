@@ -36,6 +36,7 @@ final class AppIcons {
             int save=c.save();c.translate(getBounds().left,getBounds().top);c.scale(getBounds().width()/32f,getBounds().height()/32f);p.setStyle(Paint.Style.STROKE);
             if(accent){Paint wash=new Paint(Paint.ANTI_ALIAS_FLAG);wash.setColor((MobileStyle.ACCENT&0x00ffffff)|0x24000000);c.drawRoundRect(1,1,31,31,9,9,wash);}
             switch(name){
+                case "add":p.setStyle(Paint.Style.FILL);Path plus=new Path();plus.moveTo(13,4);plus.lineTo(19,4);plus.lineTo(19,13);plus.lineTo(28,13);plus.lineTo(28,19);plus.lineTo(19,19);plus.lineTo(19,28);plus.lineTo(13,28);plus.lineTo(13,19);plus.lineTo(4,19);plus.lineTo(4,13);plus.lineTo(13,13);plus.close();c.drawPath(plus,p);break;
                 case "tools":line(c,16,8,16,30);line(c,5,19,27,19);badge(c);break;
                 case "forum":c.drawRoundRect(2,3,30,25,7,7,p);line(c,8,25,6,30,15,25);kitty(c,7,4,19);break;
                 case "rank":line(c,8,3,24,3,23,17,19,22,13,22,9,17,8,3);c.drawArc(2,5,12,17,90,180,false,p);c.drawArc(20,5,30,17,270,180,false,p);line(c,16,22,16,28);line(c,10,29,22,29);kitty(c,10,4,12);break;
