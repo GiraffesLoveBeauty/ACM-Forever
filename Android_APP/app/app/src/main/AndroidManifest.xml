@@ -15,6 +15,8 @@
         android:usesCleartextTraffic="false">
         <receiver android:name=".TrainingReminder" android:exported="false"><intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter></receiver>
         <activity android:name=".AppearanceActivity" android:exported="false" />
+        <activity android:name=".SearchActivity" android:exported="false" />
+        <activity android:name=".AdminQuickActivity" android:exported="false" />
         <activity android:name=".ThemePreviewActivity" android:exported="false" />
         <activity android:name=".SpaceActivity" android:exported="false" />
         <activity android:name=".BackgroundCropActivity" android:exported="false" />

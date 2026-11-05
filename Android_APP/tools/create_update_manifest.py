@@ -69,6 +69,8 @@ def manifest_for(apk, metadata, history, *, tag, repository, server, notes, chan
     result = {**metadata, "apkUrl": server.rstrip("/") + "/" + repository
               + "/releases/download/" + tag + "/" + filename,
               "sha256": digest.hexdigest(), "sizeBytes": size, "notes": notes, "channel": channel}
+    if server.rstrip("/") != "https://github.com":
+        result["apkFallbackUrls"] = ["https://github.com/" + repository + "/releases/download/" + tag + "/" + filename]
     if certificate is not None:
         result["signingCertificateSha256"] = certificate
     if len(json.dumps(result, ensure_ascii=False).encode("utf-8")) > 32768:

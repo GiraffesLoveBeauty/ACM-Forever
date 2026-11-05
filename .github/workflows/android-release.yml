@@ -21,6 +21,7 @@ jobs:
     env:
       RELEASE_TAG: ${{ github.ref_name }}
       RELEASE_CHANNEL: ${{ vars.ANDROID_RELEASE_CHANNEL || 'debug' }}
+      DOWNLOAD_ORIGIN: https://acm.cjluacmpanle.top
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,6 +43,27 @@ jobs:
 
       - name: Test release contracts and publication failures
         run: python -m unittest discover -s Android_APP/tests -p 'test_*release*.py' -v
+
+      - name: Configure pinned SSH mirror transport
+        env:
+          ANDROID_MIRROR_HOST: ${{ vars.ANDROID_MIRROR_HOST }}
+          ANDROID_MIRROR_USER: ${{ vars.ANDROID_MIRROR_USER }}
+          ANDROID_MIRROR_PORT: ${{ vars.ANDROID_MIRROR_PORT || '22' }}
+          ANDROID_MIRROR_ROOT: ${{ vars.ANDROID_MIRROR_ROOT }}
+          MIRROR_SSH_KEY: ${{ secrets.ANDROID_MIRROR_SSH_KEY }}
+          MIRROR_KNOWN_HOSTS: ${{ secrets.ANDROID_MIRROR_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$MIRROR_SSH_KEY" && test -n "$MIRROR_KNOWN_HOSTS"
+          printf '%s\n' "$MIRROR_SSH_KEY" > "$RUNNER_TEMP/android-mirror.key"
+          printf '%s\n' "$MIRROR_KNOWN_HOSTS" > "$RUNNER_TEMP/android-mirror.known_hosts"
+          export ANDROID_MIRROR_KEY_FILE="$RUNNER_TEMP/android-mirror.key"
+          export ANDROID_MIRROR_HOSTS_FILE="$RUNNER_TEMP/android-mirror.known_hosts"
+          PYTHONPATH=Android_APP/tools python -c 'import os; from mirror_release import SSHMirror; SSHMirror(os.environ["GITHUB_REPOSITORY"], os.environ["DOWNLOAD_ORIGIN"])'
+          for key in ANDROID_MIRROR_HOST ANDROID_MIRROR_USER ANDROID_MIRROR_PORT ANDROID_MIRROR_ROOT ANDROID_MIRROR_KEY_FILE ANDROID_MIRROR_HOSTS_FILE; do
+            printf '%s=%s\n' "$key" "${!key}" >> "$GITHUB_ENV"
+          done
 
       - uses: actions/setup-java@v4
         with:
@@ -105,7 +127,7 @@ jobs:
             --apk "Android_APP/app/app/build/outputs/apk/$RELEASE_CHANNEL/app-$RELEASE_CHANNEL.apk" \
             --aapt "$ANDROID_HOME/build-tools/35.0.0/aapt" \
             --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner" \
-            --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY" --server "$GITHUB_SERVER_URL" \
+            --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY" --server "$DOWNLOAD_ORIGIN" \
             --channel "$RELEASE_CHANNEL" --certificate "$EXPECTED_CERTIFICATE" \
             --output-dir "$RUNNER_TEMP/release-assets"
 
@@ -115,8 +137,8 @@ jobs:
         run: |
           python Android_APP/tools/tag_release.py publish --tag "$RELEASE_TAG" \
             --directory "$RUNNER_TEMP/release-assets" --repository "$GITHUB_REPOSITORY" \
-            --source-commit "$GITHUB_SHA"
+            --source-commit "$GITHUB_SHA" --download-origin "$DOWNLOAD_ORIGIN" --mirror
 
-      - name: Remove temporary signing key
+      - name: Remove temporary signing and mirror keys
         if: always()
-        run: rm -f -- "$RUNNER_TEMP/acmforever-signing.jks"
+        run: rm -f -- "$RUNNER_TEMP/acmforever-signing.jks" "$RUNNER_TEMP/android-mirror.key" "$RUNNER_TEMP/android-mirror.known_hosts"
