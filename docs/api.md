@@ -14,6 +14,45 @@
 
 不要把服务端 Token 写进网页、App、桌面程序或公开仓库。客户端应用应由自己的服务端调用内部接口，再只向客户端提供所需数据。`/internal/v1/*` 不接受 Web 登录 Cookie 代替 Bearer Token。
 
+## 公开排行榜的当日统计与分页
+
+复用 `GET /api/community/leaderboard` 及 `GET /api/mobile/v1/leaderboard`，新增两个可选查询参数：
+
+- `period=today`：北京时间当天 00:00（包含）到次日 00:00（不包含），覆盖 `days` 的滚动窗口；不传时保留原有 `days` 语义。未知 period 返回 400。
+- `positive_only=1`：按所选 platforms 的 `total_count > 0` 过滤，然后搜索、计算 total 和分页。不传时保持原网页包含零 AC 成员的行为。
+- `page_size` 支持 5–100；App 提供 5、10、20、100。page 非整数、小于 1 或超过总页数均返回第 1 页，空榜按 1 页处理。
+
+响应保留 rows/total/page/page_size 等原字段，补充 `period`、布尔 `positive_only`、`timezone`、`start_time/end_time`。当日响应 timezone 为 `Asia/Shanghai`，时间戳为当日边界；普通周期对应新增时间字段为 null。平台计数仍为区间内去重题数，不返回逐题记录或私密身份字段。新增参数不涉及数据库结构变更。
+
+App 通过响应字段确认服务器支持当日统计；旧服务器忽略 period 时显示“无API接口”，不会将最近 24 小时或近 7 日当作当日数据。其他周期兼容旧服务器：读取完整公开分页后先过滤零 AC，再计算本地分页与排名，避免仅过滤当前页造成总页数错误。
+
+## Android App 专用接口（v1）
+
+`/api/mobile/v1/*` 在现有 API 服务中提供，沿用相同监听地址与数据库。手机通过 HTTPS 请求后端，数据库连接与服务端密钥由后端管理。它补充移动端需要的公开身份和资料，原 Web API 的路径及响应保持兼容。
+
+| 方法与路径 | 权限与返回 |
+| --- | --- |
+| `GET /api/mobile/v1/capabilities` | 公开；返回 `api_version: 1` 和 `features` 能力对象 |
+| `GET /api/mobile/v1/leaderboard` | 公开；参数及统计口径与 `/api/community/leaderboard` 相同，rows 增加稳定 `public_member_id` |
+| `GET /api/mobile/v1/forum/posts` | 公开；沿用论坛的 `q/category/sort/page/page_size`，rows 增加 `author_public_member_id` |
+| `GET /api/mobile/v1/forum/posts/<id>` | 公开；仅已发布话题及评论，帖子和评论均增加 `author_public_member_id` |
+| `GET /api/mobile/v1/members/<public_member_id>` | 公开；用户名、头像、身份、座右铭、五个平台生涯通过题数及合计；不存在返回 404 |
+| `GET /api/mobile/v1/members/<public_member_id>/posts` | 公开；仅该成员已发布的话题，返回 `rows/total/page/page_size`，支持原论坛筛选及分页 |
+| `GET /api/mobile/v1/me/public-profile` | 登录成员；返回本人的公开资料与稳定 ID，用于 App 定位自身主页 |
+| `PUT /api/mobile/v1/me/public-profile` | 登录成员 + CSRF；只允许正文 `{"motto":"座右铭"}`，只能编辑会话本人 |
+
+能力字段为 `public_member_ids/member_profiles/member_posts/own_public_profile/edit_motto`。客户端复用已有 API，缺少的公开身份及主页功能使用这些增量接口。能力接口 404/405 时公开论坛与排名回退原 API；相应新功能未提供时，在对应内容区域显示红色“无API接口”。断网显示“无网络”，另区分未配置服务器、超时、401/403/428、服务器错误及某个成员/帖子不存在。错误方框保留内容区域高度，成功空列表显示暂无内容；不提供演示数据或接口记录菜单。
+
+公开资料包含 `public_member_id/name/avatar_url/status/motto/platform_counts/total_count`，另保留 `cf_count/luogu_count/nowcoder_count/atcoder_count/cjlu_count` 统计别名。平台键是 `codeforces/luogu/nowcoder/atcoder/cjlu`，通过题数按各平台题目 ID 去重，`total_count` 为五个平台的合计。公开用户名使用社区昵称；旧排行榜仍按现有规则展示昵称或 CF handle。App 通过稳定 ID 关联，不能依昵称或头像匹配。
+
+公开响应不包含 QQ、真实姓名、学校、OJ 绑定字段、逐题记录、收藏、草稿和未发布帖子。公开 ID 为随机生成的 32 字符标识，不是认证凭据。首次数据库初始化创建 `mobile_public_profiles` 表，为 active 成员分配 ID；已有用户和做题数据保持原值。新增成员在后续初始化或移动端列表/本人资料请求时补充分配，同一账号代际重复执行保留已有 ID 和座右铭。
+
+公开身份绑定 `users.account_epoch`。旧移动资料表缺少该列时增量添加，原 ID 视为第一代身份；账号注销后旧公开主页及帖子列表返回 404，保留的论坛内容不再提供可点击的公开作者 ID。同 QQ 重新开户生成全新公开 ID、清空旧座右铭，旧帖子不归入新主页。此迁移与主线账号注销、重新开户规则配套，不能单独回退移动身份检查而继续提供新账号功能。上线前备份 SQLite 主库与 WAL，并验证同代幂等、注销匿名和同 QQ 新建账号。
+
+座右铭必须为字符串，去首尾空白后最多 100 个 Unicode 字符，空字符串清除；多余字段或无效类型返回 400。认证复用 `/api/auth/login`、`/api/auth/me`、`/api/auth/logout`：未登录/停用/失效会话返回 401、CSRF 失败返回 403、初始密码未修改返回 428。不支持通过公开成员路径 PUT 编辑他人。
+
+新增接口没有使内网地址自动公开。Tailscale 内网部署需要手机也有该内网访问权限；提供公网入口时由运维配置 HTTPS 和访问控制。上线前备份实际数据库（含 WAL 状态）并验证增量初始化，发布流程沿用仓库评审与运维要求。
+
 ## 服务地址
 
 本地默认地址为 `http://127.0.0.1:8088`。部署后将 `ACM_API_BASE_URL` 设置为实际可访问的服务根地址，例如 `https://your-domain.example`；不要在 URL 后追加 `/api` 或 `/internal/v1`，示例会自行拼接路径。
@@ -143,9 +182,13 @@ response.raise_for_status()
 
 ### 本人 AC 与站内题面
 
-`GET /api/me/problems?scope=solved` 从会话读取 QQ，客户端的 `qq_id/owner_qq_id` 不改变归属。以平台和题号去重，返回 `ac_at`（Unix 秒），按最近 AC 时间倒序，再按平台、题号稳定排序。`platform/tag/state=favorite/page/page_size` 与总数使用相同条件；`tag` 同时匹配题名、题号和标签。本人范围默认每页 20、上限 100，默认全站目录仍为 500、上限 500。返回 `items/total/returned/page/page_size`；无效 `scope` 或非整数分页参数返回 400。
+成员题库将 Codeforces 的 `100A`、`cf_100A` 及大小写别名视为同一题。标签选项、列表和比赛进度按同一优先级取非空标签；本人 AC 与收藏也跨这些别名合并。AtCoder 仍按原题号精确区分。
 
-`GET /api/me/problems/tracker` 为个人题库的比赛进度矩阵提供数据，member / admin / root 均只读取会话本人，客户端身份参数不改变归属。支持 `platform`（空、`codeforces`、`atcoder`）、`tag`（比赛 ID / 题号 / 题名 / 标签）、`scope=all|solved`、`state=favorite`、`page` 和 `page_size`（默认 20、上限 50）。无效参数返回 400；未登录或未完成首次改密沿用本人接口权限。
+`GET /api/me/problems?scope=solved` 从会话读取 QQ，客户端的 `qq_id/owner_qq_id` 不改变归属。以平台和题号去重，返回 `ac_at`（Unix 秒），按最近 AC 时间倒序，再按平台、题号稳定排序。`platform/tag/problem_tag/state=favorite/page/page_size` 与总数使用相同条件；`tag` 同时匹配题名、题号和标签，独立的 `problem_tag` 按完整标签忽略大小写匹配（最长 100 字符，超长返回 400），兼容逗号等分隔的旧标签及 JSON 标签数组，不把 `math` 匹配为 `mathematics`，`%`、`_` 不作为通配符。标签与搜索、收藏、本人 AC 范围共同生效，先筛选再统计与分页。本人范围默认每页 20、上限 100，默认全站目录仍为 500、上限 500。返回 `items/total/returned/page/page_size`；无效 `scope` 或非整数分页参数返回 400。
+
+`GET /api/me/problems/tags?platform=codeforces` 返回 `tags: string[]`，供题库标签下拉框使用，沿用成员登录和首次改密限制。下拉选项、列表展示及标签筛选使用同一份有效标签：按已采集目录 → 推荐目录 → 会话本人的 AC 元数据取第一份非空标签，空字符串和 JSON 空数组均允许回退；不读取其他成员独有的提交标签，也不混入被优先来源替代的旧标签。比赛进度采用相同优先顺序。平台可为空或 `codeforces/atcoder/luogu/nowcoder/cjlu`，无效平台返回 400。按完整标签忽略大小写去重并排序，排除空白和超过 100 字符的标签；列表不受当前题目页码、搜索或收藏筛选限制，不联网或触发采集。
+
+`GET /api/me/problems/tracker` 为个人题库的比赛进度矩阵提供数据，member / admin / root 均只读取会话本人，客户端身份参数不改变归属。支持 `platform`（空、`codeforces`、`atcoder`）、`tag`（比赛 ID / 题号 / 题名 / 标签）、`problem_tag`（完整标签，规则同题目列表）、`scope=all|solved`、`state=favorite`、`page` 和 `page_size`（默认 20、上限 50）。组合筛选须由同一道题满足，选中比赛后仍保留该场全部已收录题目。无效参数返回 400；未登录或未完成首次改密沿用本人接口权限。
 
 返回 `items/total/page/page_size`，`total` 为比赛数量。每个比赛含 `platform/contest_id/contest_name/start_time/total_count/solved_count/attempted_count/problems`；题目含 `platform/problem_id/problem_index/problem_name/problem_rating/status/ac_at/last_submit_at/is_favorite`。`status` 为 `solved`（已 AC）、`attempted`（有提交记录且未 AC）、`unseen`（未记录），时间为 Unix 秒。`start_time` 为真实比赛开始时间，未收录时为 null；默认按开始时间倒序，未知时间在后，同时间以平台和自然比赛 ID 稳定排序，再进行分页。AC 证据优先于之后的失败提交；收藏和提交状态只关联本人。按自然题序排列 D1 / D2 等题目，筛选先选择比赛，再返回该场全部已入库题目，分页不会切开比赛。前端每页完整展开 20 场，使用页面纵向滚动。仅使用本地目录、比赛缓存和提交数据，不调用 OJ 或触发采集；未记录不代表原站没有提交，目录和尝试记录均可能尚未同步完整。
 
@@ -307,7 +350,7 @@ print(task["status"], task["progress"], task["result"])
 
 成功的题面 HTML（包含样例章节）、纯文本及 `samples` JSON 数组存于 `crawler_problems` 的同一行，没有独立样例表。样例保留输入输出的空格与换行，CF 的逐行 div 和旧版 br 排版会还原为换行。AtCoder 空白处理详见 [采集说明](crawler-samples.md#样例直接保存在题目中)。同时原子更新现有 `recommendations`，使 `GET /api/problems` 和成员题库列表能够展示新题。AtCoder 官方列表不提供估算难度和算法标签，新题的这些信息为空，已有数据在刷新时保留；CF 保存元数据中的 Rating 与 tags，缺失 Rating 为 null。下载、解析或数据库写入失败时保留已有题面与样例，并在已有题目行中记录最近失败。
 
-服务启动会自动建表；也可先在部署目录运行 `python3 -m api.init_db --database /home/WYJ/acm-forever-data/acm_forever.db`，详见 [服务端初始化说明](../feat/api/README.md#单独初始化数据库与题目采集)。
+服务启动会自动建表；也可先在部署目录运行 `python3 -m api.init_db --database /root/acm-forever-data/acm_forever.db`，详见 [服务端初始化说明](../feat/api/README.md#单独初始化数据库与题目采集)。
 
 ## 已下线的 Web 功能
 
@@ -584,7 +627,7 @@ CF 持久 job 成员捕获 epoch，closed 分项不能被晚到成功覆盖；�
 }
 ```
 
-有新 OJ 写入时必须确认对应关系。所选行只能来自该批次且可执行，已有成员只补开户；错误、占用、已有/停用/注销账号不覆盖。确认时重新检查成员快照、绑定占用和管理员权限。
+有新 OJ 写入时必须确认对应关系。所选行只能来自该批次且可执行，已有成员只补开户，已有/停用/注销账号不覆盖。OJ 可留空；OJ 格式/类型错误、同表重复、预检或执行时已占用均仅跳过该平台绑定，写入逐行 `warnings`，不阻止合法 QQ 开户。QQ 必须为 4–12 位非零开头数字且同表不重复；其他安全与生命周期限制不变。确认时重新检查成员快照、绑定占用和管理员权限。
 
 继续请求只接受：
 
@@ -601,9 +644,9 @@ CF 持久 job 成员捕获 epoch，closed 分项不能被晚到成功覆盖；�
 
 同幂等键同请求正在处理返回 202；结束后重放返回无密码结果；同键不同内容返回 409。换幂等键不能绕过处理段互斥或冻结范围。刷新恢复不自动继续写入。
 
-创建响应的 `credentials` 只含本请求新创建账号的 `row_id/qq_id/name/temporary_password/expires_at`。`credentials_replayed=false`；摘要、行、报告和重放均不提供明文。服务器不持久保存可恢复密码，也不能保证客户端收到原始响应。响应丢失后先查成功名单，再走已有受控重新发放入口，不能盲目重置。
+创建响应的 `credentials` 只含本请求新创建账号的 `row_id/qq_id/name/real_name/username/temporary_password/expires_at`。`real_name` 为新成员的导入姓名或已有成员档案姓名（可空），`name` 仍为昵称，`username` 为 Web 登录账号（当前等于 QQ）。`credentials_replayed=false`；摘要、行、报告和重放均不提供明文。服务器不持久保存可恢复密码，也不能保证客户端收到原始响应。响应丢失后先查成功名单，再走已有受控重新发放入口，不能盲目重置。
 
-所有导入响应 `Cache-Control: no-store`，下载设置 Excel MIME、固定文件名和 `nosniff`。表格报告不含密码、公式或外链；凭据文本仅在当前浏览器内存生成。
+所有导入响应 `Cache-Control: no-store`，下载设置 Excel MIME、固定文件名和 `nosniff`。表格报告不含密码、公式或外链；凭据文本及 `account-import-credentials.xlsx` 仅在当前浏览器内存生成；Excel 包含 `QQ号/姓名/账号/初始密码` 四个文本列，汇总本页实际领取的成功凭据，不新增可再次下载明文的服务端接口。
 
 关键错误码：`named_admin_required/actor_changed`（403）、`batch_not_found`（404）、`idempotency_conflict/batch_busy/selection_changed/account_changed`（409）、`batch_expired/report_expired`（410）、`file_size`（413）、`invalid_workbook/unsafe_content/resource_limit/parse_timeout`（422）、`parse_busy/hash_busy/capacity_limit`（429）、`import_disabled`（503）。字段或选择格式错误返回 400。行级冲突放入对应行结果，不将其他已创建行回滚。
 

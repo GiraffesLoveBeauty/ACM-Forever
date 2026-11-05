@@ -6,7 +6,7 @@ import { h } from 'vue';
 import { RouterView } from 'vue-router';
 import { setAuth } from '../src/lib/api.js';
 import { adminFilters } from '../src/lib/admin.js';
-import { memberFilters, problemReturn } from '../src/lib/member-problems.js';
+import { memberFilters, memberQuery, problemReturn } from '../src/lib/member-problems.js';
 import { cleanupCompiled, find, loadSfc, mount, settle, textOf } from './helpers/vue-harness.mjs';
 const Home = (await import(await loadSfc('src/views/Home.vue'))).default;
 const Header = (await import(await loadSfc('src/components/Header.vue'))).default;
@@ -75,6 +75,10 @@ beforeEach(() => {
     if (failed) return response({ message: '合成网络错误' }, 503);
     if (url === '/api/me/profile') return response(profile);
     if (url.startsWith('/api/forum/mine/')) return response([]);
+    if (url.startsWith('/api/me/problems/tags?')) {
+      const platform = new URL(url, 'https://acm.test').searchParams.get('platform');
+      return response({ tags: platform === 'atcoder' ? ['dp', 'graphs'] : ['math', 'greedy'] });
+    }
     if (url.startsWith('/api/me/problems?'))
       return response({
         items: [
@@ -122,6 +126,21 @@ const click = async (node) => {
   await node.props.onClick({ button: 0, preventDefault() {} });
   await settle();
 };
+const labeledControl = (label, type = 'select') => {
+  const wrapper = find(
+    mounted.root,
+    (node) => node.type === 'label' && textOf(node).startsWith(label),
+  )[0];
+  assert(wrapper, `filter label exists: ${label}`);
+  return find(wrapper, (node) => node.type === type)[0];
+};
+const submitFilters = async () => {
+  await find(mounted.root, (node) => node.type === 'form')[0].props.onSubmit({
+    preventDefault() {},
+  });
+  await settle();
+};
+const queryOf = (url) => new URL(url, 'https://acm.test').searchParams;
 const routes = [
   { path: '/home.html', component: Home },
   { path: '/problem-bank.html', component: Problems },
@@ -199,13 +218,14 @@ test('MemberProblems reads URL filters and never inherits administrator owner se
   mounted = await mount(
     Problems,
     routes,
-    '/problem-bank.html?scope=solved&platform=codeforces&tag=member&page=2',
+    '/problem-bank.html?scope=solved&platform=codeforces&tag=member&problem_tag=math&page=2',
   );
   const call = calls.find((item) => item.url.startsWith('/api/me/problems?'));
   const query = new URL(call.url, 'https://acm.test').searchParams;
   assert.equal(query.get('scope'), 'solved');
   assert.equal(query.get('page'), '2');
   assert.equal(query.get('tag'), 'member');
+  assert.equal(query.get('problem_tag'), 'math');
   assert.equal(query.has('owner_qq_id'), false);
   assert(textOf(mounted.root).includes('本人已 AC'));
   assert(!textOf(mounted.root).includes('题库管理'));
@@ -217,12 +237,13 @@ test('MemberProblems failure provides retry without an empty-data claim', async 
   assert(textOf(mounted.root).includes('题目加载失败'));
   assert(!textOf(mounted.root).includes('暂未同步到匹配'));
   failed = false;
-  await click(buttons('重试')[0]);
+  await click(buttons('重试').find((node) => textOf(node) === '重试'));
   assert(textOf(mounted.root).includes('列表题目'));
 });
 
-test('statement round trip preserves solved scope, search, platform and page', async () => {
-  const path = '/problem-bank.html?scope=solved&platform=codeforces&tag=member&page=2';
+test('statement round trip preserves solved scope, search, exact tag, platform and page', async () => {
+  const path =
+    '/problem-bank.html?scope=solved&platform=codeforces&tag=member&problem_tag=math&page=2';
   mounted = await mount(View, routes, path);
   await click(links('查看题面')[0]);
   assert.equal(mounted.router.currentRoute.value.path, '/problem.html');
@@ -231,6 +252,133 @@ test('statement round trip preserves solved scope, search, platform and page', a
   await click(back);
   assert.equal(mounted.router.currentRoute.value.fullPath, path);
   assert(calls.filter((item) => item.url.startsWith('/api/me/problems?')).length >= 2);
+});
+
+test('exact tag filters normalize independently of keyword search and survive safe return URLs', () => {
+  const normalized = memberFilters({ tag: 'keyword', problem_tag: '  Math  ' });
+  assert.equal(normalized.tag, 'keyword');
+  assert.equal(normalized.problem_tag, 'Math');
+  assert.equal(memberFilters({ problem_tag: ['math'] }).problem_tag, '');
+  assert.equal(memberFilters({ problem_tag: 'x'.repeat(101) }).problem_tag.length, 100);
+  assert(!('problem_tag' in memberQuery({ problem_tag: '' })));
+  const back = queryOf(problemReturn('/my-problems.html?problem_tag=Math&owner_qq_id=99999999'));
+  assert.equal(back.get('problem_tag'), 'Math');
+  assert(!back.has('owner_qq_id'));
+});
+
+test('tag dropdown submits independently with search and favorites and resets pagination', async () => {
+  mounted = await mount(
+    View,
+    routes,
+    '/my-problems.html?scope=solved&platform=codeforces&tag=member&page=2',
+  );
+  assert.deepEqual(labeledControl('标签').options.map(textOf), ['全部标签', 'math', 'greedy']);
+  labeledControl('标签').props['onUpdate:modelValue']('greedy');
+  labeledControl('收藏').props['onUpdate:modelValue']('favorite');
+  await submitFilters();
+  const query = queryOf(calls.filter(({ url }) => url.startsWith('/api/me/problems?')).at(-1).url);
+  assert.equal(query.get('tag'), 'member');
+  assert.equal(query.get('problem_tag'), 'greedy');
+  assert.equal(query.get('state'), 'favorite');
+  assert.equal(query.get('scope'), 'solved');
+  assert.equal(query.get('page'), '1');
+  assert(!query.has('owner_qq_id'));
+  await click(buttons('清除筛选')[0]);
+  assert(!queryOf(mounted.router.currentRoute.value.fullPath).has('problem_tag'));
+  assert(!queryOf(mounted.router.currentRoute.value.fullPath).has('tag'));
+});
+
+test('problem cards display JSON, array and legacy tags as readable labels', async () => {
+  const fetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) =>
+    url.startsWith('/api/me/problems?')
+      ? response({
+          items: [
+            { platform: 'codeforces', problem_id: 'cf_1A', tags: '["math","dp"]' },
+            { platform: 'codeforces', problem_id: 'cf_1B', tags: ['graphs', 'trees'] },
+            { platform: 'codeforces', problem_id: 'cf_1C', tags: 'greedy,sortings' },
+            { platform: 'codeforces', problem_id: 'cf_1D', tags: '[]' },
+          ],
+          total: 4,
+        })
+      : fetch(url, options);
+  mounted = await mount(Problems, routes, '/my-problems.html');
+  const cards = find(mounted.root, (node) => node.type === 'article').map(textOf);
+  assert(cards[0].includes('math, dp'));
+  assert(!cards[0].includes('["math"'));
+  assert(cards[1].includes('graphs, trees'));
+  assert(cards[2].includes('greedy,sortings'));
+  assert(cards[3].includes('无标签'));
+});
+
+test('changing platform replaces tag choices and clears stale selection without losing search', async () => {
+  mounted = await mount(
+    Problems,
+    routes,
+    '/my-problems.html?platform=codeforces&tag=keyword&problem_tag=math',
+  );
+  labeledControl('平台').props['onUpdate:modelValue']('atcoder');
+  await settle();
+  assert.deepEqual(labeledControl('标签').options.map(textOf), ['全部标签', 'dp', 'graphs']);
+  await submitFilters();
+  const query = queryOf(mounted.router.currentRoute.value.fullPath);
+  assert.equal(query.get('platform'), 'atcoder');
+  assert.equal(query.get('tag'), 'keyword');
+  assert(!query.has('problem_tag'));
+  await mounted.router.push('/my-problems.html?platform=codeforces&problem_tag=legacy');
+  await settle();
+  assert(labeledControl('标签').options.map(textOf).includes('legacy'));
+  assert.equal(
+    queryOf(calls.filter(({ url }) => url.startsWith('/api/me/problems?')).at(-1).url).get(
+      'problem_tag',
+    ),
+    'legacy',
+  );
+});
+
+test('tag endpoint failures retain the problem list and retry only the tag choices', async () => {
+  const fetch = globalThis.fetch;
+  let tagsFailed = true;
+  globalThis.fetch = async (url, options) =>
+    tagsFailed && url.startsWith('/api/me/problems/tags?')
+      ? response({ message: '标签服务暂不可用' }, 503)
+      : fetch(url, options);
+  mounted = await mount(Problems, routes, '/my-problems.html?problem_tag=legacy');
+  assert(textOf(mounted.root).includes('列表题目'));
+  assert(textOf(mounted.root).includes('标签服务暂不可用'));
+  assert(labeledControl('标签').options.map(textOf).includes('legacy'));
+  const listRequests = calls.filter(({ url }) => url.startsWith('/api/me/problems?')).length;
+  tagsFailed = false;
+  await click(buttons('重试标签')[0]);
+  assert(labeledControl('标签').options.map(textOf).includes('math'));
+  assert(!textOf(mounted.root).includes('标签服务暂不可用'));
+  assert.equal(calls.filter(({ url }) => url.startsWith('/api/me/problems?')).length, listRequests);
+});
+
+test('a delayed old platform tag response cannot replace current choices', async () => {
+  const fetch = globalThis.fetch;
+  let release;
+  let pending;
+  globalThis.fetch = async (url, options) => {
+    if (url.startsWith('/api/me/problems/tags?') && queryOf(url).get('platform') === 'codeforces') {
+      pending = options;
+      await new Promise((resolve) => {
+        release = resolve;
+        releases.push(resolve);
+      });
+      return response({ tags: ['old-platform-only'] });
+    }
+    return fetch(url, options);
+  };
+  mounted = await mount(Problems, routes, '/my-problems.html?platform=codeforces');
+  assert(labeledControl('标签').props.disabled);
+  labeledControl('平台').props['onUpdate:modelValue']('atcoder');
+  await settle();
+  assert(pending.signal.aborted);
+  assert.deepEqual(labeledControl('标签').options.map(textOf), ['全部标签', 'dp', 'graphs']);
+  release();
+  await settle();
+  assert(!labeledControl('标签').options.map(textOf).includes('old-platform-only'));
 });
 
 test('binding form requires current password and confirmation; cancellation clears secrets', async () => {

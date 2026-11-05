@@ -1,0 +1,44 @@
+name: Android app checks
+
+on:
+  pull_request:
+    paths:
+      - Android_APP/**
+      - .github/workflows/android-ci.yml
+      - .github/workflows/android-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Test release contracts and publication failures
+        run: python -m unittest discover -s Android_APP/tests -p 'test_*release*.py' -v
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+        with:
+          # The action's legacy default also installs the removed `tools` package.
+          packages: platform-tools
+
+      - name: Install Android SDK platform
+        run: sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Test and build Android app
+        working-directory: Android_APP/app
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug

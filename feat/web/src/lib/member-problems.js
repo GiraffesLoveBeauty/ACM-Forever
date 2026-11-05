@@ -12,6 +12,8 @@ export function memberFilters(query = {}) {
         ? 'codeforces'
         : 'all',
     tag: typeof query.tag === 'string' ? query.tag.slice(0, 100) : '',
+    problem_tag:
+      typeof query.problem_tag === 'string' ? query.problem_tag.trim().slice(0, 100) : '',
     state: query.state === 'favorite' ? 'favorite' : '',
     labels:
       view === 'tracker'

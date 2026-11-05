@@ -6,6 +6,8 @@
 
 - `/api/*`：移植的 WebUI API，包含登录与账号管理、成员信息、提交记录、训练与挑战、学习计划、统计分析、审核与复盘、排行榜等功能。Web 端使用 Cookie 会话和 CSRF 校验。
 - `/api/forum/*`：公开话题列表与详情、分类、搜索、热门与待回答筛选；登录成员可以发帖、评论、回复、点赞、收藏和举报。新话题进入管理员审核队列，审核与举报处理都需要 Web 管理员权限。
+- `/api/community/leaderboard`：公开展示昵称、身份和各平台 AC 统计，不返回 QQ 号、真实姓名或学校字段。可选 `period=today` 按北京时间当日统计，`positive_only=1` 在分页前排除零 AC 成员；与移动端公开排名共享查询，默认保持原网页语义。响应包含实际 page/total/page_size 及周期确认字段，详见 API 指南。
+- `/api/mobile/v1/*`：Android App 专用能力查询、带稳定公开 ID 的排名与论坛、公开成员资料/帖子及本人座右铭编辑；复用现有数据库和 Web 会话权限，完整路径见 [api.md（API 调用指南）](../../docs/api.md#android-app-专用接口v1)。
 - `/api/me/notifications*`：本人回复及审核结果通知、未读数、单条与快照范围内全部已读。`/api/forum/mine/posts/<id>` 提供作者自己的投稿进度和退回原因，公开详情的访问边界保持不变。
 - `/api/community/leaderboard`：公开展示昵称、身份和各平台 AC 统计，不返回 QQ 号、真实姓名或学校字段。
 - `/internal/v1/*`：供受信任的梓喵服务使用的机器接口，使用 `Authorization: Bearer <ACM_BOT_API_TOKEN>` 认证，覆盖成员资料与绑定、提交和统计查询、排行榜与速报、训练和挑战、推荐题目、播报设置、账号验证及同步任务。
@@ -32,17 +34,19 @@ python -m api
 
 ## 数据库与部署
 
-设置 `ACM_DATABASE_PATH` 指向持久化 SQLite 文件。本仓库的 GitHub Actions 会将 `feat/` 同步到服务器 `/home/WYJ/acm-forever-feat`，因此生产数据库必须放在该同步目录之外，例如：
+移动端新增 `mobile_public_profiles` 映射表，按既有可重复初始化方式创建，保留原成员数据和做题记录。初始为现有成员分配随机稳定公开 ID；新增成员在后续初始化或移动端请求时补充，既有 ID 和座右铭不会被覆盖。生产更新前应由运维备份数据库并验证，不能用 App 直接连接或分发数据库文件。具体公开范围、字段与权限见 API 调用指南。
+
+设置 `ACM_DATABASE_PATH` 指向持久化 SQLite 文件。本仓库的 GitHub Actions 会将 `feat/` 同步到服务器 `/root/acm-forever-feat`，因此生产数据库必须放在该同步目录之外，例如：
 
 ```text
-/home/WYJ/acm-forever-data/acm_forever.db
+/root/acm-forever-data/acm_forever.db
 ```
 
 `.db`、WAL 文件、`.env` 和密钥均被忽略，不会随代码同步。备份数据库时应一并考虑 SQLite WAL 状态，建议停服后备份或使用 SQLite 在线备份方式。
 
 帖子封面与正文图片保存在数据库同级的 `uploads/forum/`，备份、迁移时须与数据库一起保留。首次启动会自动为旧数据库添加封面字段及图片元数据、引用表。安装更新后的 `requirements.txt`，其中 Pillow 处理图片，Mistune 解析正文图片引用（不把代码示例当作公开图片）。反向代理请求体上限应至少为 6 MB；图片 API 接受最大 5 MB 的静态 PNG/JPEG/WebP，服务端校验并重编码为 WebP。草稿图片仅本人及合法引用者可读，提交后供管理员审核，发布后才向访客开放；账号限额、引用和存储细节见 [帖子图片 API](../../docs/api.md#帖子封面与正文图片)。
 
-GitHub Actions 会在 `/home/WYJ/acm-forever-data/.env` 已存在时安装依赖并启动用户级 systemd 服务 `acm-forever-webui`。首次部署前，在服务器创建该环境文件，至少设置 `ACM_API_HOST`、`ACM_DATABASE_PATH`、`ACM_WEBUI_SECRET_KEY` 和 `ACM_BOT_API_TOKEN`。数据库路径应设为 `/home/WYJ/acm-forever-data/acm_forever.db`。需要通过服务器网卡访问时，将 `ACM_API_HOST` 设为 `0.0.0.0` 并在防火墙限制可访问来源；经 HTTPS 反向代理时设置 `ACM_WEBUI_COOKIE_SECURE=true`。系统服务定义位于 `deploy/acm-forever-webui.service`。首次配置还需由服务器管理员运行 `sudo loginctl enable-linger WYJ`，让用户级服务在 SSH 断开后和服务器重启后继续运行。
+GitHub Actions 通过公网 SSH 连接 `root@118.178.192.81`，安装系统级 systemd 服务 `acm-forever-webui`，不再依赖 Tailscale 或用户级 linger。正常部署需要 `/root/acm-forever-data/.env` 存在；手动运行默认不启动服务，可先部署代码和依赖，迁移数据库与图片并配置环境文件，再勾选 `start_service` 运行。环境文件至少设置 `ACM_API_HOST`、`ACM_DATABASE_PATH`、`ACM_WEBUI_SECRET_KEY` 和 `ACM_BOT_API_TOKEN`，数据库指向已迁移的数据文件。经 HTTPS 反向代理时保持 `ACM_API_HOST=127.0.0.1` 并设置 `ACM_WEBUI_COOKIE_SECURE=true`。服务定义位于 `deploy/acm-forever-webui.service`，安装到 `/etc/systemd/system/`，使用 `systemctl` 管理。依赖安装、SSH Secrets、首次迁移及域名切换步骤见 [新服务器部署说明](../../docs/public-server-deployment.md)。
 
 服务器当前实际使用的数据库路径、服务运行状态和梓喵接入情况，应以服务器环境文件与运行检查为准，不能仅凭仓库代码推断。若要把旧数据库切换到本服务，先停止会写入旧库的服务并制作可恢复备份（包含 WAL 状态），再设置 `ACM_DATABASE_PATH`、启动 API 并核对关键数据；确认 Web 与梓喵都经 API 正常读写后，再按运维流程停用旧写入路径。不要在没有备份和核验的情况下覆盖生产数据库。
 
@@ -53,8 +57,8 @@ GitHub Actions 会在 `/home/WYJ/acm-forever-data/.env` 已存在时安装依赖
 安装 API 依赖后，可以在服务器部署目录执行初始化，无需启动 HTTP 服务，也无需设置 Web 会话密钥：
 
 ```bash
-cd /home/WYJ/acm-forever-feat
-python3 -m api.init_db --database /home/WYJ/acm-forever-data/acm_forever.db
+cd /root/acm-forever-feat
+python3 -m api.init_db --database /root/acm-forever-data/acm_forever.db
 ```
 
 省略 `--database` 时读取 `ACM_DATABASE_PATH`，未配置时使用当前目录的 `./data/acm_forever.db`。命令初始化服务所需的表结构与默认设置，可重复运行，保留已有业务数据；root 账号仍由服务启动时的配置创建。正常启动也会自动执行相同的表结构初始化。
@@ -67,12 +71,18 @@ python3 -m api.init_db --database /home/WYJ/acm-forever-data/acm_forever.db
 
 CF 支持没有样例的题目及直接返回 PDF 的题面。PDF 原文件存入 SQLite，详情页通过本站接口打开，图示与样例保留在 PDF 中，暂不拆分为结构化样例。启动或初始化时自动给旧题库补充 `statement_pdf BLOB` 列，不清空数据；失败记录可再次按比赛 / 指定题号采集，默认只跳过成功题目。
 
+### 每日自动更新题库
+
+API 服务默认在北京时间每天 04:00 依次更新 AtCoder 和 Codeforces 的公开题目目录。每个平台最多补采 100 道缺失题面的题目，优先处理较新的题目，已成功保存的题面和样例继续使用。管理员可在 **同步任务** 查看进度和结果，仍可手动发起全量采集。
+
+如果服务在 04:00 后启动，会补跑当天尚未启动的平台。遇到手动采集时自动任务会等待，同一天每个平台只自动启动一次。每日记录保存在 SQLite 中，重启服务也会沿用。设置 `ACM_DAILY_PROBLEM_SYNC_ENABLED=false` 可关闭自动任务。
+
 ### 补全已有题库的比赛时间
 
 比赛进度按真实开始时间倒序排列。启动或初始化会补齐 `crawler_contests` 表，初始化仍只建立表结构；已有题库升级后，在 API 部署目录执行以下命令补全比赛名称与开始时间：
 
 ```bash
-python3 -m api.sync_contests --database /home/WYJ/acm-forever-data/acm_forever.db --platform all
+python3 -m api.sync_contests --database /root/acm-forever-data/acm_forever.db --platform all
 ```
 
 省略数据库参数时读取 `ACM_DATABASE_PATH`。命令仅更新比赛元数据，保留题目、题面、样例和用户记录。CF 数据来自 [`contest.list` 的 `startTimeSeconds`](https://codeforces.com/apiHelp/objects#Contest)，AtCoder 使用 [AtCoder Problems 文档](https://github.com/kenkoooo/AtCoderProblems/blob/master/doc/api.md) 中的 `contests.json` 数据集。也可用已下载的原始 JSON 离线导入，例如 `--platform codeforces --input /path/to/codeforces-contests.json`；AtCoder 同理，`--input` 须指定单个平台。
@@ -85,6 +95,7 @@ python3 -m api.sync_contests --database /home/WYJ/acm-forever-data/acm_forever.d
 | --- | --- |
 | `ACM_API_HOST` / `ACM_API_PORT` | 监听地址和端口，默认 `127.0.0.1:8088`，沿用原 WebUI 端口 |
 | `ACM_ACCOUNT_IMPORT_ENABLED` | Excel 导入尚未保存页面开关时的后备默认值，默认 `true`；页面保存的数据库设置优先，关闭后仍可查已有结果 |
+| `ACM_DAILY_PROBLEM_SYNC_ENABLED` | 是否每天自动更新 AtCoder 和 Codeforces 题库，默认 `true` |
 | `ACM_DATABASE_PATH` | SQLite 数据库文件路径，默认 `./data/acm_forever.db` |
 | `ACM_MARKDOWN_UPLOAD_DIR` | Wiki/论坛持久化图片目录，默认数据库同级 `uploads/markdown`；必须在代码同步目录外 |
 | `ACM_PUBLIC_BASE_URL` | Markdown 导出图片的公开站点根地址，例如 `https://实际域名`，不带路径 |
@@ -327,3 +338,5 @@ API 回归新增 `tests/test_member_training.py`，共 20 项，覆盖三种 Web
 原始上传位于数据库目录下 `private/account-imports`，不使用上传文件名或公开静态目录；解析结束删除。启动、每小时及上传时执行有界清理，回收过期资料和遗留文件；到期批次读取也立即清理资料副本。初始密码不落盘、日志、数据库或普通报告，只有原始创建响应返回。保留与恢复细节见 [admin-account-import.md（操作与发布说明）](../../docs/admin-account-import.md)。
 
 #83 尚为独立 PR 时，当前 main 无注销列仍可运行。若存在其真实 `account_state/account_epoch`，导入自动阻断 closed，冻结代际，并安装同事务注销脱敏触发器。注销 QQ 的重新开户使用 #83 单个创建的显式新代际入口，Excel 不恢复旧身份。两个 PR 最终合并时需保留双方初始化和保护逻辑，发布前对最终构建再联调。
+
+Excel 开户仅要求合法且可创建的 QQ，OJ 可空；格式/类型错误、同表重复或被占用的 OJ 账号仅跳过相应绑定，逐行警告保留在无密码结果报告中。事务内再次检查并发占用，不因此回滚合法 QQ 开户。正常 Office/WPS 空目录和纯文本/数值自定义属性可接受，公式、宏、外链和资源限制不放宽。一次性凭据响应补充 `real_name/username`，供浏览器本地导出含 QQ号、姓名、账号、初始密码的 Excel；服务器仍不保存、重放或通过报告输出明文密码。

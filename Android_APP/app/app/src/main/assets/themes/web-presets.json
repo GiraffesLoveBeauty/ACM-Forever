@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "source": "feat/web/src/lib/theme-colors.js",
+  "sha256": "77fa475324c5ab70a1c8018b7945897efdc5c8320e77ec5eaeb56ad15fb4d0ea",
+  "presets": [
+    {
+      "id": "industrial",
+      "name": "工业黄",
+      "light": [
+        "#292c29",
+        "#e8e9e4",
+        "#f8f8f3",
+        "#f1f547"
+      ],
+      "dark": [
+        "#e2e5d8",
+        "#1a1d19",
+        "#242823",
+        "#f1f547"
+      ]
+    },
+    {
+      "id": "mint",
+      "name": "清绿",
+      "light": [
+        "#16766a",
+        "#edf3ef",
+        "#fbfdf9",
+        "#efcf63"
+      ],
+      "dark": [
+        "#70c3a6",
+        "#122222",
+        "#1a302e",
+        "#edcb69"
+      ]
+    },
+    {
+      "id": "gray",
+      "name": "白灰",
+      "light": [
+        "#68717a",
+        "#f0f1f3",
+        "#fcfcfd",
+        "#aab1b9"
+      ],
+      "dark": [
+        "#c0c6cd",
+        "#202327",
+        "#292d32",
+        "#c9cdd2"
+      ]
+    },
+    {
+      "id": "sunshine",
+      "name": "暖黄",
+      "light": [
+        "#98741f",
+        "#faf5e6",
+        "#fffdf6",
+        "#edc54d"
+      ],
+      "dark": [
+        "#e6c65e",
+        "#272317",
+        "#342e1e",
+        "#f2cf60"
+      ]
+    },
+    {
+      "id": "rose",
+      "name": "柔粉",
+      "light": [
+        "#b45178",
+        "#faf0f4",
+        "#fffafd",
+        "#f0c4af"
+      ],
+      "dark": [
+        "#e39ab8",
+        "#281e24",
+        "#352730",
+        "#f0c4af"
+      ]
+    }
+  ]
+}

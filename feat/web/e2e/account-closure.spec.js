@@ -109,6 +109,9 @@ test('a closed QQ can receive a fresh account and its old receipt keeps the new 
   await page.getByRole('button', { name: '创建账号', exact: true }).click();
   expect((await created).status()).toBe(201);
   await noOverflow(page);
+  // Stop the admin page's pending refreshes before switching this context's
+  // account through the request API; an old response can reset its cookie.
+  await page.goto('about:blank');
   const freshLogin = await page.request.post('/api/auth/login', {
     data: { qq_id: qq, password: freshPassword },
   });

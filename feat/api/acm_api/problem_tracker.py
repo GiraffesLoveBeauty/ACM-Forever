@@ -5,10 +5,12 @@ import re
 from urllib.parse import urlsplit
 
 from .cf_client import problem_url as cf_problem_url
+from .problem_tags import has_problem_tag, problem_tags
 
 
 PLATFORMS = {"codeforces", "atcoder"}
 SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,160}")
+CF_PROBLEM_ID = re.compile(r"(?:cf_)?([1-9][0-9]*)(?:-?([A-Za-z]+[0-9]*))?", re.IGNORECASE | re.ASCII)
 
 
 def tracker_options(args):
@@ -16,19 +18,23 @@ def tracker_options(args):
     scope = args.get("scope", "all")
     state = args.get("state", "")
     tag = args.get("tag", "")
+    problem_tag = args.get("problem_tag", "")
     if platform and platform not in PLATFORMS:
         raise ValueError("比赛进度目前支持 Codeforces 和 AtCoder。")
     if scope not in {"all", "solved"} or state not in {"", "favorite"}:
         raise ValueError("无效的题目范围或收藏筛选。")
     if len(tag) > 100:
         raise ValueError("搜索内容最多 100 个字符。")
+    if len(problem_tag) > 100:
+        raise ValueError("题目标签最多 100 个字符。")
     values = {}
     for key, default, maximum in (("page", "1", 1000000), ("page_size", "20", 50)):
         raw = args.get(key, default)
         if not re.fullmatch(r"[0-9]+", raw) or not 1 <= int(raw) <= maximum:
             raise ValueError(f"{key} 必须为 1–{maximum} 的整数。")
         values[key] = int(raw)
-    return {"platform": platform, "scope": scope, "state": state, "tag": tag.strip().casefold(), **values}
+    return {"platform": platform, "scope": scope, "state": state, "tag": tag.strip().casefold(),
+            "problem_tag": problem_tag.strip(), **values}
 
 
 def natural_key(value):
@@ -43,7 +49,7 @@ def identity(platform, problem_id, contest_id=None, problem_index=None, problem_
     contest = str(contest_id or "")
     index = str(problem_index or "")
     if platform == "codeforces":
-        bare = re.sub(r"^cf_", "", problem_id, flags=re.IGNORECASE)
+        id_match = CF_PROBLEM_ID.fullmatch(problem_id)
         if not contest or not index:
             try:
                 parts = urlsplit(problem_url or "")
@@ -54,12 +60,13 @@ def identity(platform, problem_id, contest_id=None, problem_index=None, problem_
                 match = None
             if match:
                 contest, index = match.groups()
-            elif contest and bare.startswith(contest):
-                index = bare[len(contest):]
-            else:
-                match = re.fullmatch(r"([1-9]\d*)([A-Za-z]+\d*)", bare)
-                if match:
-                    contest, index = match.groups()
+            elif id_match:
+                id_contest, id_index = id_match.groups()
+                if contest and id_contest.startswith(contest):
+                    # Numeric Gym indices require a known contest boundary.
+                    index = id_contest[len(contest):] + (id_index or "")
+                elif id_index is not None:
+                    contest, index = id_contest, id_index
         if not re.fullmatch(r"[1-9]\d{0,6}", contest) or not re.fullmatch(r"[A-Za-z]+\d*|\d+", index):
             return None
         index = index.upper()
@@ -82,13 +89,29 @@ def identity(platform, problem_id, contest_id=None, problem_index=None, problem_
 
 
 def problem_id_aliases(platform, problem_id):
-    """CF's offline and server collectors use the same ID with different prefixes."""
+    """Recognize compact, prefixed, and legacy hyphenated CF IDs."""
     aliases = [problem_id]
     if platform == "codeforces":
-        bare = re.sub(r"^cf_", "", problem_id, flags=re.IGNORECASE)
-        if re.fullmatch(r"[1-9]\d*(?:[A-Za-z]+\d*)?", bare):
+        match = CF_PROBLEM_ID.fullmatch(problem_id)
+        if match:
+            contest, index = match.groups()
+            bare = contest + (index or "")
             aliases.extend((bare, "cf_" + bare))
+            if index is not None:
+                legacy = contest + "-" + index
+                aliases.extend((legacy, "cf_" + legacy))
     return tuple(dict.fromkeys(aliases))
+
+
+def problem_id_key(platform, problem_id):
+    """Group the same aliases accepted by CF detail lookups; keep other IDs exact."""
+    if platform != "codeforces":
+        return problem_id
+    match = CF_PROBLEM_ID.fullmatch(problem_id)
+    if match:
+        contest, index = match.groups()
+        return "CF_" + contest + (index or "").upper()
+    return problem_id.upper()
 
 
 def rating(value):
@@ -103,10 +126,7 @@ async def attempt_problem_metadata(db, owner, platform, problem_id):
     if not owner or platform not in PLATFORMS or not SAFE_ID.fullmatch(problem_id):
         return None
     aliases = problem_id_aliases(platform, problem_id)
-    wanted = problem_id
-    if platform == "codeforces":
-        bare = re.sub(r"^cf_", "", problem_id, flags=re.IGNORECASE)
-        wanted = "cf_" + bare.upper()
+    wanted = problem_id_key(platform, problem_id)
     comparison = "problem_id COLLATE NOCASE" if platform == "codeforces" else "problem_id"
     async with db.execute(
         "SELECT problem_id,contest_id FROM submission_attempts WHERE owner_qq_id=? AND platform=? AND "
@@ -115,7 +135,7 @@ async def attempt_problem_metadata(db, owner, platform, problem_id):
     ) as cursor:
         async for row in cursor:
             parsed = identity(platform, row["problem_id"], row["contest_id"])
-            if parsed is None or parsed[0] != wanted:
+            if parsed is None or problem_id_key(platform, parsed[0]) != wanted:
                 continue
             pid, contest, index = parsed
             url = (cf_problem_url(contest, index) if platform == "codeforces" else
@@ -133,57 +153,57 @@ async def contest_tracker(db, owner, options):
         contest_info = {(row["platform"], row["contest_id"]): dict(row) for row in await cursor.fetchall()}
 
     def add(row):
-        prior_key = aliases.get((row["platform"], row["problem_id"]))
-        if prior_key is not None:
-            problem = catalog[prior_key]
+        alias_key = (row["platform"], problem_id_key(row["platform"], row["problem_id"]))
+        key = aliases.get(alias_key)
+        if key is None:
+            parsed = identity(row["platform"], row["problem_id"], row.get("contest_id"),
+                              row.get("problem_index"), row.get("problem_url"))
+            if parsed is None:
+                return None
+            pid, contest, index = parsed
+            key = row["platform"], pid
+            aliases[alias_key] = key
+            aliases[row["platform"], problem_id_key(row["platform"], pid)] = key
+        if key in catalog:
+            problem = catalog[key]
             if problem["problem_rating"] is None:
                 problem["problem_rating"] = rating(row.get("problem_rating"))
             if problem["problem_name"] == problem["problem_id"] and row.get("problem_name"):
                 problem["problem_name"] = row["problem_name"]
-            if not problem["tags"] and row.get("tags"):
+            if not problem_tags(problem["tags"]) and problem_tags(row.get("tags")):
                 problem["tags"] = row["tags"]
             return problem
-        parsed = identity(row["platform"], row["problem_id"], row.get("contest_id"),
-                          row.get("problem_index"), row.get("problem_url"))
-        if parsed is None:
-            return None
-        pid, contest, index = parsed
-        key = row["platform"], pid
-        if key not in catalog:
-            contest_name = None
-            try:
-                metadata = json.loads(row.get("metadata_json") or "{}")
-                if isinstance(metadata, dict) and isinstance(metadata.get("contest_name"), str):
-                    contest_name = metadata["contest_name"].strip()[:300] or None
-            except (ValueError, TypeError):
-                pass
-            catalog[key] = {"platform": row["platform"], "problem_id": pid, "contest_id": contest,
-                            "problem_index": index, "problem_name": row.get("problem_name") or pid,
-                            "problem_rating": rating(row.get("problem_rating")),
-                            "tags": row.get("tags") or "", "contest_name": contest_name,
-                            "status": "unseen", "ac_at": None, "last_submit_at": None,
-                            "is_favorite": False}
-        aliases[row["platform"], row["problem_id"]] = key
-        aliases[row["platform"], pid] = key
-        if row["platform"] == "codeforces":
-            aliases[row["platform"], pid[3:]] = key
+        contest_name = None
+        try:
+            metadata = json.loads(row.get("metadata_json") or "{}")
+            if isinstance(metadata, dict) and isinstance(metadata.get("contest_name"), str):
+                contest_name = metadata["contest_name"].strip()[:300] or None
+        except (ValueError, TypeError):
+            pass
+        catalog[key] = {"platform": row["platform"], "problem_id": pid, "contest_id": contest,
+                        "problem_index": index, "problem_name": row.get("problem_name") or pid,
+                        "problem_rating": rating(row.get("problem_rating")),
+                        "tags": row.get("tags") or "", "contest_name": contest_name,
+                        "status": "unseen", "ac_at": None, "last_submit_at": None,
+                        "is_favorite": False}
         return catalog[key]
 
     async with db.execute(
         "SELECT platform,problem_id,contest_id,problem_index,problem_name,problem_rating,problem_url,tags,metadata_json "
-        "FROM crawler_problems WHERE platform IN ('codeforces','atcoder')"
+        "FROM crawler_problems WHERE platform IN ('codeforces','atcoder') ORDER BY problem_id"
     ) as cursor:
         for row in await cursor.fetchall():
             add(dict(row))
     async with db.execute(
         "SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags FROM recommendations "
-        "WHERE platform IN ('codeforces','atcoder')"
+        "WHERE platform IN ('codeforces','atcoder') ORDER BY problem_id"
     ) as cursor:
         for row in await cursor.fetchall():
             add(dict(row))
     async with db.execute(
         "SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags,submit_time "
-        "FROM submissions WHERE user_qq_id=? AND platform IN ('codeforces','atcoder')", (owner,)
+        "FROM submissions WHERE user_qq_id=? AND platform IN ('codeforces','atcoder') "
+        "ORDER BY submit_time DESC,problem_id", (owner,)
     ) as cursor:
         for row in await cursor.fetchall():
             problem = add(dict(row))
@@ -213,7 +233,7 @@ async def contest_tracker(db, owner, options):
     ) as cursor:
         for row in await cursor.fetchall():
             parsed = identity(row["platform"], row["problem_id"])
-            key = aliases.get((row["platform"], row["problem_id"]),
+            key = aliases.get((row["platform"], problem_id_key(row["platform"], row["problem_id"])),
                               (row["platform"], parsed[0] if parsed else row["problem_id"]))
             if key in catalog:
                 catalog[key]["is_favorite"] = True
@@ -233,12 +253,20 @@ async def contest_tracker(db, owner, options):
         })
         group["problems"].append(problem)
 
+    keyword = options["tag"]
+    cf_search_key = problem_id_key("codeforces", keyword) if CF_PROBLEM_ID.fullmatch(keyword) else None
+
     def matches(problem, group):
         if options["scope"] == "solved" and problem["status"] != "solved":
             return False
         if options["state"] == "favorite" and not problem["is_favorite"]:
             return False
-        return not options["tag"] or options["tag"] in " ".join(
+        if options.get("problem_tag") and not has_problem_tag(problem["tags"], options["problem_tag"]):
+            return False
+        if (cf_search_key is not None and problem["platform"] == "codeforces"
+                and cf_search_key == problem_id_key("codeforces", problem["problem_id"])):
+            return True
+        return not keyword or keyword in " ".join(
             str(value) for value in (problem["problem_id"], problem["problem_name"], problem["tags"],
                                     group["contest_id"], group["contest_name"])).casefold()
 

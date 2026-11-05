@@ -1,0 +1,13 @@
+import './transport.js';
+import { createApp } from 'vue';
+import { createRouter, createMemoryHistory } from 'vue-router';
+import App from './App.vue';
+import '../../../feat/api/acm_api/public/assets/app.css';
+import '../../../feat/api/acm_api/public/assets/admin.css';
+import '../../../feat/api/acm_api/public/assets/cf-practice.css';
+import '../../../feat/api/acm_api/public/assets/theme-editor.css';
+import '../../../feat/web/src/style.css';
+import './mobile.css';
+const router=createRouter({history:createMemoryHistory(),routes:[{path:'/admin.html',component:{render:()=>null}},{path:'/post.html',component:{render:()=>null}},{path:'/:pathMatch(.*)*',redirect:'/admin.html'}]});
+const section=new URLSearchParams(location.search).get('section')||'accounts';
+router.replace({path:'/admin.html',query:{section}}).then(()=>createApp(App).use(router).mount('#app'));

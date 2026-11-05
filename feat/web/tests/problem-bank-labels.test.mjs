@@ -40,6 +40,8 @@ beforeEach(() => {
   mounted = null;
   globalThis.fetch = async (url, options = {}) => {
     calls.push({ url, options });
+    if (url.startsWith('/api/me/problems/tags?'))
+      return new Response(JSON.stringify({ tags: [] }));
     if (url.startsWith('/api/me/problems?'))
       return new Response(JSON.stringify({ items, total: 1, tag_facets: facets }));
     throw Error('Unexpected request ' + url);

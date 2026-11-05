@@ -13,6 +13,7 @@
 - `feat/`：平台功能文件。合并到 `main` 后，此目录变更会由 GitHub Actions 镜像同步到服务器的 `/home/WYJ/acm-forever-feat`。
 - `feat/api/` 包含独立 WebUI 与 API 服务，沿用原端口 `8088`。配置 `/home/WYJ/acm-forever-data/.env` 后，部署工作流会安装或更新用户级服务 `acm-forever-webui`。
 - `feat/web/`：Vue 3 + Vite 前端，包含社区、个人中心和管理后台。开发端口 `5173`；生产构建由 API 服务在 `8088` 提供，Actions 部署前自动构建。
+- `Android_APP/`：原生 Android 客户端、测试和历史浏览器原型；版本 Tag 触发 Actions 构建并将 APK 发布到 Release，安装包不提交源码 Git，签名材料仅在受控本机及 Actions Secrets 保管。
 - 接收目录独立于梓喵部署目录，数据库和环境密钥保存在 `/home/WYJ/acm-forever-data`。
 - Actions 需要仓库 Secrets：`TS_AUTHKEY` 和 `ACM_FOREVER_SERVER_SSH_KEY`。
 
@@ -22,6 +23,10 @@
 
 - [TCrB-AI项目工程规范.md（AI 项目工程协作规范 · 讨论稿）](docs/TCrB-AI项目工程规范.md)
 - [api.md（API 调用指南）](docs/api.md)
+- [android-app.md（Android v0.2.15、更新渠道、构建与发布）](docs/android-app.md)
+- [android-tag-release-v0.2.14.md（Android Tag 自动发布、签名配置与 App 更新）](docs/android-tag-release-v0.2.14.md)
+- [android-release-fix-v0.2.15.md（草稿发布修复与重新首发 · 待评审）](docs/android-release-fix-v0.2.15.md)
+- [android-release-api-plan-v0.2.14.md（已被 Tag 发布替代的自有服务器方案）](docs/android-release-api-plan-v0.2.14.md)
 - [command-line-operations.md（网站服务管理、日志和数据库查询）](docs/command-line-operations.md)
 - [backup-and-diagnostics.md（数据库与图片备份、诊断和恢复）](docs/backup-and-diagnostics.md)
 - [forum-post-revisions.md（帖子修改、重投和版本冲突）](docs/forum-post-revisions.md)

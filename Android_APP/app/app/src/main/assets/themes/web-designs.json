@@ -1,0 +1,208 @@
+{
+  "categories": [
+    {
+      "id": "default",
+      "name": "默认"
+    },
+    {
+      "id": "arknights",
+      "name": "明日方舟"
+    },
+    {
+      "id": "genshin",
+      "name": "原神"
+    },
+    {
+      "id": "zenless",
+      "name": "绝区零"
+    },
+    {
+      "id": "minecraft",
+      "name": "我的世界"
+    }
+  ],
+  "presets": [
+    {
+      "id": "original",
+      "category": "default",
+      "name": "原有设计模板",
+      "description": "原有工业布局，支持现有全部配色。",
+      "preview": "original",
+      "design_template": "original",
+      "theme": {
+        "version": 1,
+        "mode": "system",
+        "light": {
+          "colors": {
+            "primary": "#292c29",
+            "background": "#e8e9e4",
+            "surface": "#f8f8f3",
+            "accent": "#f1f547"
+          },
+          "overrides": {
+            "text": "#292c29",
+            "muted": "#62685e",
+            "border": "#c7cabc",
+            "link": "#292c29",
+            "selected": "#292c29",
+            "hero": "#20231f"
+          }
+        },
+        "dark": {
+          "colors": {
+            "primary": "#e2e5d8",
+            "background": "#1a1d19",
+            "surface": "#242823",
+            "accent": "#f1f547"
+          },
+          "overrides": {
+            "text": "#f5f6eb",
+            "muted": "#b4bbac",
+            "border": "#454b41",
+            "link": "#eef1df",
+            "selected": "#eef1df",
+            "hero": "#151814"
+          }
+        }
+      }
+    },
+    {
+      "id": "phase",
+      "category": "arknights",
+      "name": "相变信号",
+      "description": "放射图盘、四色轨道与三角标记。",
+      "preview": "phase",
+      "design_template": "phase",
+      "theme": {
+        "version": 1,
+        "mode": "system",
+        "light": {
+          "colors": {
+            "primary": "#202629",
+            "background": "#e7e8e5",
+            "surface": "#f8f9f6",
+            "accent": "#d5f500"
+          },
+          "overrides": {
+            "text": "#292c29",
+            "muted": "#62685e",
+            "border": "#c7cabc",
+            "link": "#292c29",
+            "selected": "#292c29",
+            "hero": "#151a1d"
+          }
+        },
+        "dark": {
+          "colors": {
+            "primary": "#e4ece9",
+            "background": "#101619",
+            "surface": "#1d2529",
+            "accent": "#d5f500"
+          },
+          "overrides": {
+            "text": "#f5f6eb",
+            "muted": "#b4bbac",
+            "border": "#454b41",
+            "link": "#eef1df",
+            "selected": "#eef1df",
+            "hero": "#11171a"
+          }
+        }
+      }
+    },
+    {
+      "id": "angel-city",
+      "category": "arknights",
+      "name": "天使之城",
+      "description": "雾白城市、钴蓝坐标与镜像等高线。",
+      "preview": "angel-city",
+      "design_template": "angel-city",
+      "theme": {
+        "version": 1,
+        "mode": "system",
+        "light": {
+          "colors": {
+            "primary": "#202729",
+            "background": "#f0f3f1",
+            "surface": "#fcfdfc",
+            "accent": "#155bd8"
+          },
+          "overrides": {
+            "text": "#292c29",
+            "muted": "#62685e",
+            "border": "#c7cabc",
+            "link": "#292c29",
+            "selected": "#292c29",
+            "hero": "#edf2ef"
+          }
+        },
+        "dark": {
+          "colors": {
+            "primary": "#e4eeef",
+            "background": "#111b22",
+            "surface": "#1b2831",
+            "accent": "#74adff"
+          },
+          "overrides": {
+            "text": "#f5f6eb",
+            "muted": "#b4bbac",
+            "border": "#454b41",
+            "link": "#eef1df",
+            "selected": "#eef1df",
+            "hero": "#182630"
+          }
+        }
+      }
+    },
+    {
+      "id": "minecraft",
+      "category": "minecraft",
+      "name": "方块工坊",
+      "description": "灰色背包面板、泥土纹理与中文像素字。",
+      "preview": "minecraft",
+      "design_template": "minecraft",
+      "theme": {
+        "version": 1,
+        "mode": "system",
+        "light": {
+          "colors": {
+            "primary": "#3c8527",
+            "background": "#ababab",
+            "surface": "#c6c6c6",
+            "accent": "#3c8527"
+          },
+          "overrides": {
+            "text": "#202020",
+            "muted": "#3e3e3e",
+            "border": "#373737",
+            "link": "#1e4513",
+            "selected": "#202020",
+            "hero": "#c6c6c6"
+          }
+        },
+        "dark": {
+          "colors": {
+            "primary": "#a2c881",
+            "background": "#292727",
+            "surface": "#454545",
+            "accent": "#a2c881"
+          },
+          "overrides": {
+            "text": "#f1f1e7",
+            "muted": "#d2d2c7",
+            "border": "#93938b",
+            "link": "#bee79e",
+            "selected": "#f1f1e7",
+            "hero": "#353535"
+          }
+        }
+      }
+    }
+  ],
+  "version": 1,
+  "revision": "be6223a05d433b2147ace9b1f1f101728c431f1e",
+  "sources": {
+    "feat/web/src/lib/theme-colors.js": "df41ad5381193295317e074e14cbf86dd3856f2835580f5c22b7bc98bd042822",
+    "feat/web/src/lib/design-template.js": "401767e6ee19c4511824f7ebaf7dc2edc60c108eb8f0711691995e2be2c5fb37"
+  }
+}

@@ -31,6 +31,12 @@ const visibleTags = computed(() => {
   );
   return tagSearch.value || expandedTags.value ? filtered : filtered.slice(0, 14);
 });
+const tags = ref([]),
+  tagsBusy = ref(false),
+  tagsError = ref('');
+const availableTags = computed(() => [
+  ...new Set([form.problem_tag, ...tags.value].filter(Boolean)),
+]);
 const current = computed(() => memberFilters(route.query));
 const isTracker = computed(() => current.value.view === 'tracker');
 const platforms = computed(() => ({
@@ -40,6 +46,26 @@ const platforms = computed(() => ({
   ...(!isTracker.value ? { luogu: '洛谷', nowcoder: '牛客', cjlu: '校 OJ' } : {}),
 }));
 let revision = 0;
+let tagsRevision = 0;
+async function loadTags(platform = form.platform) {
+  const version = ++tagsRevision;
+  tags.value = [];
+  tagsError.value = '';
+  tagsBusy.value = true;
+  try {
+    const data = await request(
+      '/me/problems/tags?' + new URLSearchParams({ platform: platform === 'all' ? '' : platform }),
+      {},
+      'member-problem-tags',
+    );
+    if (version !== tagsRevision) return;
+    tags.value = data.tags;
+  } catch (e) {
+    if (version === tagsRevision && e.name !== 'AbortError') tagsError.value = e.message;
+  } finally {
+    if (version === tagsRevision) tagsBusy.value = false;
+  }
+}
 async function load() {
   const version = ++revision;
   Object.assign(form, current.value);
@@ -76,7 +102,9 @@ function scope(value) {
   navigate();
 }
 function changeView(view) {
-  Object.assign(form, memberFilters({ ...current.value, view, page: 1 }));
+  const next = memberFilters({ ...current.value, view, page: 1 });
+  if (next.platform !== current.value.platform) next.problem_tag = '';
+  Object.assign(form, next);
   navigate();
 }
 async function favorite(row) {
@@ -89,6 +117,19 @@ async function favorite(row) {
   } catch (e) {
     if (e.name !== 'AbortError') error.value = e.message;
   }
+}
+function tagsText(value) {
+  let tags = value;
+  if (typeof tags === 'string' && tags.trimStart().startsWith('[')) {
+    try {
+      tags = JSON.parse(tags);
+    } catch {
+      /* Legacy text remains readable when it is not a JSON array. */
+    }
+  }
+  return Array.isArray(tags)
+    ? tags.filter((tag) => typeof tag === 'string').join(', ') || '无标签'
+    : tags || '无标签';
 }
 function clear() {
   Object.assign(form, memberFilters({ scope: current.value.scope, view: current.value.view }));
@@ -109,6 +150,14 @@ function clearLabels() {
   navigate();
 }
 watch(() => route.fullPath, load, { immediate: true });
+watch(
+  () => form.platform,
+  (platform, previous) => {
+    if (previous !== undefined && platform !== current.value.platform) form.problem_tag = '';
+    loadTags(platform);
+  },
+  { immediate: true },
+);
 </script>
 <template>
   <main class="community-main member-problems" :class="{ 'member-problems-tracker': isTracker }">
@@ -168,6 +217,13 @@ watch(() => route.fullPath, load, { immediate: true });
             maxlength="100"
             :placeholder="isTracker ? '比赛 ID、题号、题名或标签' : '题号、题名或标签'"
         /></label>
+        <label
+          ><span>标签</span
+          ><select v-model="form.problem_tag" :disabled="tagsBusy">
+            <option value="">{{ tagsBusy ? '正在加载标签…' : '全部标签' }}</option>
+            <option v-for="tag in availableTags" :key="tag" :value="tag">{{ tag }}</option>
+          </select></label
+        >
         <label
           ><span>收藏</span
           ><select v-model="form.state">
@@ -240,8 +296,12 @@ watch(() => route.fullPath, load, { immediate: true });
           ><button class="bank-label-more" type="button" @click="clearLabels">清空标签</button>
         </div>
       </section>
+      <p v-if="tagsError" class="member-problem-tags-error" role="alert">
+        标签加载失败：{{ tagsError }}
+        <button type="button" class="btn" @click="loadTags()">重试标签</button>
+      </p>
       <p v-if="isTracker" class="muted tracker-description">
-        按比赛查看 Codeforces / AtCoder 的站内目录。搜索、收藏与“我已
+        按比赛查看 Codeforces / AtCoder 的站内目录。搜索、标签、收藏与“我已
         AC”筛选匹配的比赛，保留该场全部已收录题目。
       </p>
       <p v-if="busy" role="status">{{ isTracker ? '正在加载比赛进度…' : '正在加载题目…' }}</p>
@@ -298,9 +358,7 @@ watch(() => route.fullPath, load, { immediate: true });
                   }}</small>
                 </div>
                 <small v-else class="muted"
-                  >原站标签：{{
-                    Array.isArray(row.tags) ? row.tags.join('、') || '无' : row.tags || '无'
-                  }}
+                  >原站标签：{{ tagsText(row.tags) }}
                   · 算法标签待接入</small
                 >
               </div>
@@ -506,7 +564,7 @@ watch(() => route.fullPath, load, { immediate: true });
 }
 .community-main.member-problems-tracker {
   width: min(1920px, calc(100% - 32px));
-  padding-inline: 0;
+  padding-inline: 16px;
 }
 .member-problems-tracker > .card {
   min-width: 0;
@@ -559,9 +617,16 @@ form.member-problem-filters {
   min-height: 44px;
   white-space: nowrap;
 }
+.member-problem-tags-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
 @media (max-width: 640px) {
   .community-main.member-problems-tracker {
     width: calc(100% - 24px);
+    padding-inline: 8px;
   }
   .member-problems-tracker > .card {
     padding: 12px;

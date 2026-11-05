@@ -18,6 +18,7 @@ from .acm_api.auth_service import hash_password, validate_password
 from .acm_api.account_lifecycle_service import AccountLifecycleError, bootstrap_root, user_lifecycle
 from .acm_api.database import connect_db
 from .acm_api.forum_api import forum_api
+from .acm_api.mobile_api import mobile_api
 from .acm_api.forum_notifications import forum_notification_api
 from .acm_api.wiki_api import wiki_api
 from .acm_api.wiki_cache import WikiResponseCache
@@ -27,6 +28,7 @@ from .acm_api.cf_practice import PracticeQuery
 from .acm_api.cf_practice_api import cf_practice_api
 from .acm_api.cf_practice_jobs import PracticeJobs
 from .service_runtime import SyncEngine, WebTaskManager, create_web_challenge
+from .acm_api.event_log import install as install_event_logging
 
 
 def _safe_web_next(value, fallback="/index.html"):
@@ -88,7 +90,7 @@ async def _write_admins(db_path, root_ids, admins, identity):
         await db.close()
 
 
-def create_app():
+def create_app(*, daily_problem_sync=False):
     app = Quart(__name__, static_folder=None)
 
     @app.errorhandler(AccountLifecycleError)
@@ -216,6 +218,8 @@ def create_app():
         await closure_cleanup.start()
         await maintenance_once(app)
         app.extensions["account_import_maintenance"] = asyncio.create_task(maintenance_loop(app))
+        if daily_problem_sync:
+            task_manager.start_daily_problem_sync()
 
     @app.after_serving
     async def close_service():
@@ -375,6 +379,7 @@ def create_app():
     app.register_blueprint(account_closure_api, url_prefix="/api")
     app.register_blueprint(bot_api, url_prefix="/internal/v1")
     app.register_blueprint(forum_api, url_prefix="/api")
+    app.register_blueprint(mobile_api, url_prefix="/api/mobile/v1")
     app.register_blueprint(forum_notification_api, url_prefix="/api")
     app.register_blueprint(wiki_api, url_prefix="/api")
     app.register_blueprint(markdown_api, url_prefix="/api")
@@ -382,6 +387,7 @@ def create_app():
     app.register_blueprint(cf_practice_api, url_prefix="/api")
     app.sync_engine = sync_engine
     app.task_manager = task_manager
+    install_event_logging(app, public_pages=_PUBLIC_PAGES)
     return app
 
 
@@ -398,4 +404,4 @@ _RETIRED_PAGES = {"reviews.html", "submissions.html", "workspace.html"}
 _LEGACY_ADMIN_PAGES = {"member.html": "members", "problem-bank.html": "problems", "tasks.html": "tasks", "settings.html": "settings", "forum-moderation.html": "moderation", "cf-practice.html": "cf-practice"}
 
 
-app = create_app()
+app = create_app(daily_problem_sync=_bool_env("ACM_DAILY_PROBLEM_SYNC_ENABLED", True))

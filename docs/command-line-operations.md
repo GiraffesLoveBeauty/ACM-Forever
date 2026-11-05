@@ -4,43 +4,76 @@
 
 ## 服务器服务管理
 
-仓库部署工作流安装的是 **WYJ 用户的 systemd 用户级服务**。通过 SSH 登录服务器后，以 WYJ 账号执行以下命令；使用 `systemctl --user` 和 `journalctl --user`。
+仓库部署工作流通过公网 SSH 部署到 `root@118.178.192.81`，安装 **系统级 systemd 服务**。以 root 登录新服务器后执行以下命令；使用 `systemctl` 和 `journalctl`。首次部署、密钥配置及旧服务器迁移见 [新服务器部署说明](public-server-deployment.md)。
 
 ```sh
 # 服务状态与最近日志
-systemctl --user status acm-forever-webui.service --no-pager
-journalctl --user -u acm-forever-webui.service -n 100 --no-pager
+systemctl status acm-forever-webui.service --no-pager
+journalctl -u acm-forever-webui.service -n 100 --no-pager
 
 # 持续查看日志，Ctrl+C 结束查看
-journalctl --user -u acm-forever-webui.service -f
+journalctl -u acm-forever-webui.service -f
 
 # 启动、停止、重启：按需要分别执行
-systemctl --user start acm-forever-webui.service
-systemctl --user stop acm-forever-webui.service
-systemctl --user restart acm-forever-webui.service
+systemctl start acm-forever-webui.service
+systemctl stop acm-forever-webui.service
+systemctl restart acm-forever-webui.service
 
 # HTTP 与数据库健康检查
 curl --fail --show-error --max-time 5 http://127.0.0.1:8088/health
+```
+
+### 中文彩色实时日志
+
+部署后，在服务器执行 `acm-logs -f`，可用中文查看登录成功/失败、接口访问、权限拒绝、后台任务开始/结束和服务器错误。绿色 `[INFO]` 表示正常记录，黄色 `[WARNING]` 表示请求受限或操作未完成，红色 `[ERROR]` 表示服务器或后台任务错误。终端自动启用颜色；重定向到文件时默认无颜色，也可通过 `--color always/never` 指定。
+
+```sh
+# 实时查看；开头解释全部字段，Ctrl+C 只退出查看
+acm-logs -f
+
+# 最近 30 分钟的警告及错误
+acm-logs --since '30 minutes ago' --level warning -n 1000
+
+# 每条请求后附字段说明，显示全部静态资源和轮询
+acm-logs -f --all --explain
+
+# 离线样例；每条都标明“演示”，不会产生网站操作
+acm-logs --demo --color always
+```
+
+日志第一行说明“发生了什么”，第二行展示中文字段。`用户/身份` 来自本次请求已通过的认证；未检查身份的公开访问不会仅凭 Cookie 被标成已认证用户。`来源` 按网站既有可信代理规则解析，仍为 `127.0.0.1` 时只能确认代理地址。`请求` 使用路由模板，`<...>` 是参数占位符；`结果` 为 HTTP 状态码；`耗时` 统计处理至生成响应的时间，不含完整传输；`编号` 为服务端生成的请求 ID，也会返回在 `X-Request-ID` 响应头中。后台任务另有 `任务/任务编号`。错误会附 `错误类型/排查建议`，详细堆栈仍可用 `journalctl` 查看。
+
+Bot 请求仅在服务端校验 Bearer 凭据成功后标记为“已认证的 Bot 服务”，之后即使返回参数错误或服务器错误也保留该身份。框架自动处理的 OPTIONS 请求未经过凭据校验，仍标为未验证身份。
+
+`202` 表示后台已受理，后续还应查看任务结束日志；`304` 表示继续使用浏览器缓存。默认收起成功的静态资源、健康检查和常见轮询，所有警告及错误仍显示。`-n` 统计读取的原始 journal 条数，过滤后实际显示数量可能更少。程序启动前的历史日志不会凭空补出登录人姓名；旧格式按其状态码和错误信息着色，作为原始诊断显示。
+
+新事件不记录密码、Cookie、CSRF、Authorization、请求正文或 URL 查询参数，也不新增日志数据库表。账号名称、QQ、来源 IP 属于运维信息，只应向有日志权限的管理员开放。查看器会清理终端控制字符，并对旧日志中的常见凭据字段做尽力隐藏；这不能替代对原始历史日志的访问控制。正常请求由应用生成一条结构化记录，避免再重复输出 Hypercorn 原始访问行；异常堆栈保留。此查看器不修改服务和数据库。
+
+完整源码仓库可运行 `python -m feat.api.acm_api.log_viewer --demo`。只有 `feat/` 的服务器部署可运行：
+
+```sh
+cd /root/acm-forever-feat
+/root/acm-forever-data/venv/bin/python -m api.acm_api.log_viewer -f
 ```
 
 仓库的部署默认值如下，实际路径与端口以服务器配置为准：
 
 | 项目 | 默认位置 |
 | --- | --- |
-| 服务代码与工作目录 | `/home/WYJ/acm-forever-feat` |
-| Python | `/home/WYJ/acm-forever-data/venv/bin/python` |
-| 服务环境文件 | `/home/WYJ/acm-forever-data/.env` |
-| 数据库配置 | `ACM_DATABASE_PATH`，部署建议值为 `/home/WYJ/acm-forever-data/acm_forever.db` |
+| 服务代码与工作目录 | `/root/acm-forever-feat` |
+| Python | `/root/acm-forever-data/venv/bin/python` |
+| 服务环境文件 | `/root/acm-forever-data/.env` |
+| 数据库配置 | `ACM_DATABASE_PATH`，部署建议值为 `/root/acm-forever-data/acm_forever.db` |
 | 监听地址 | `127.0.0.1:8088`，由 `ACM_API_HOST` / `ACM_API_PORT` 调整 |
 
-`systemctl --user cat acm-forever-webui.service` 可查看实际的服务定义、工作目录和环境文件位置。服务环境文件不会自动加载到 SSH 终端；下面的数据库工具显式指定数据库路径。
+`systemctl cat acm-forever-webui.service` 可查看实际的服务定义、工作目录和环境文件位置。服务环境文件不会自动加载到 SSH 终端；下面的数据库工具显式指定数据库路径。
 
 ## 查看数据库数据
 
 需要安装 `sqlite3` 命令行工具。将示例路径替换成服务实际使用的 `ACM_DATABASE_PATH`，以只读模式打开：
 
 ```sh
-sqlite3 -readonly /home/WYJ/acm-forever-data/acm_forever.db
+sqlite3 -readonly /root/acm-forever-data/acm_forever.db
 ```
 
 进入 SQLite 交互界面后，按需执行：
@@ -77,18 +110,18 @@ GROUP BY status;
 服务器只部署 `feat/` 的内容，因此在部署目录使用 `api.*` 模块路径：
 
 ```sh
-cd /home/WYJ/acm-forever-feat
+cd /root/acm-forever-feat
 
 # 只读诊断：数据库完整性、外键、图片引用及磁盘空间
-/home/WYJ/acm-forever-data/venv/bin/python -m api.acm_api.maintenance diagnose \
-  --database /home/WYJ/acm-forever-data/acm_forever.db
+/root/acm-forever-data/venv/bin/python -m api.acm_api.maintenance diagnose \
+  --database /root/acm-forever-data/acm_forever.db
 
 # 查看诊断、备份、校验和恢复子命令
-/home/WYJ/acm-forever-data/venv/bin/python -m api.acm_api.maintenance --help
+/root/acm-forever-data/venv/bin/python -m api.acm_api.maintenance --help
 
 # 需要补齐表结构时执行；保留已有数据，正常启动也会自动初始化
-/home/WYJ/acm-forever-data/venv/bin/python -m api.init_db \
-  --database /home/WYJ/acm-forever-data/acm_forever.db
+/root/acm-forever-data/venv/bin/python -m api.init_db \
+  --database /root/acm-forever-data/acm_forever.db
 ```
 
 若服务设置了 `ACM_MARKDOWN_UPLOAD_DIR`，诊断和备份也要传入对应的 `--markdown-dir /实际目录`。完整源码仓库根目录下，模块路径分别为 `feat.api.acm_api.maintenance` 和 `feat.api.init_db`。

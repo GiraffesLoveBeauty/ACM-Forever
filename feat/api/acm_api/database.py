@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 import aiosqlite
 
 from .problem_bank import initialize_problem_bank
+from .mobile_profiles import initialize_mobile_profiles
 from .account_lifecycle_service import migrate_account_lifecycle
 
 
@@ -361,6 +362,7 @@ async def connect_db(db_path):
             "? FROM users WHERE account_state='active' AND " + field + " IS NOT NULL AND TRIM(" + field + ") <> ''",
             (platform, int(time.time())),
         )
+    await initialize_mobile_profiles(db)
     from .account_import_service import initialize_imports
     await initialize_imports(db)
     # Backfill genuinely empty legacy nicknames once. A nonempty QQ nickname is

@@ -21,6 +21,7 @@ from quart import Blueprint, Response, current_app, jsonify, request, session
 import logging
 
 from .web_account_service import prepare_password, insert_web_account, creation_state, AccountCreationError
+from .event_log import remember_identity
 from .auth_service import (
     generate_temporary_password,
     hash_password,
@@ -33,7 +34,8 @@ from .reporting import valid_contest_report_time
 from .cf_client import cf_request
 from .problem_sync import sync_options
 from .problem_bank import problem_bank_status
-from .problem_tracker import attempt_problem_metadata, contest_tracker, problem_id_aliases, tracker_options
+from .problem_tracker import attempt_problem_metadata, contest_tracker, problem_id_aliases, problem_id_key, tracker_options
+from .problem_tags import has_problem_tag, problem_tags
 from .database import connect_db
 from .account_lifecycle_service import (
     AccountLifecycleError, require_active_user, require_web_actor,
@@ -257,7 +259,7 @@ async def _session_identity():
     """Resolve the current identity from the database on every protected request."""
     if session.get("webui_legacy"):
         if _legacy_login_enabled() and _admin_configured():
-            return {"qq_id": None, "role": "root", "must_change_password": False, "legacy": True}
+            return remember_identity({"qq_id": None, "role": "root", "must_change_password": False, "legacy": True})
         session.clear()
         return None
     if not session.get("webui_authenticated"):
@@ -280,14 +282,14 @@ async def _session_identity():
             or account["account_epoch"] != session.get("webui_account_epoch", 1)):
         session.clear()
         return None
-    return {
+    return remember_identity({
         "qq_id": qq_id,
         "role": account["role"],
         "must_change_password": bool(account["must_change_password"]),
         "credential_version": int(account["credential_version"]),
         "account_epoch": int(account["account_epoch"]),
         "legacy": False,
-    }
+    })
 
 
 async def _login_required_response(allow_password_change=False):
@@ -396,6 +398,7 @@ async def api_auth_login():
     if _login_rate_limited(rate_keys, now):
         return jsonify({"success": False, "message": "登录尝试过于频繁，请稍后再试。"}), 429
     account = None
+    login_name = ""
     temporary_password_expired = False
     if _valid_qq(qq_id):
         db = await get_db()
@@ -418,6 +421,9 @@ async def api_auth_login():
                     await db.rollback()
                     account = None
                 else:
+                    async with db.execute("SELECT name FROM users WHERE qq_id=?", (qq_id,)) as cursor:
+                        member = await cursor.fetchone()
+                        login_name = member["name"] if member else ""
                     await db.execute("UPDATE web_accounts SET last_login_at=?,updated_at=? WHERE qq_id=?", (int(time.time()), int(time.time()), qq_id))
                     await db.commit()
                     account = current
@@ -434,7 +440,6 @@ async def api_auth_login():
     )
     if not account and not legacy_login:
         _record_login_failure(rate_keys, now)
-        LOG.warning("WebUI 登录失败，来源=%s", _client_key())
         message = "临时密码已过期，请联系管理员重新发放。" if temporary_password_expired else "QQ号或密码错误。"
         return jsonify({"success": False, "message": message}), 401
     _clear_login_failures(rate_keys)
@@ -455,6 +460,7 @@ async def api_auth_login():
         must_change_password = bool(account["must_change_password"])
     session["webui_csrf"] = secrets.token_urlsafe(32)
     session.permanent = True
+    remember_identity({"qq_id": None if legacy_login else qq_id, "role": role, "legacy": legacy_login}, login_name)
     return jsonify({"success": True, "csrf_token": session["webui_csrf"], "root": role == "root", "role": role, "qq_id": qq_id or None, "must_change_password": must_change_password})
 
 
@@ -1409,11 +1415,20 @@ async def _save_problem_favorite(owner, platform, problem, data):
         await db.execute("BEGIN IMMEDIATE")
         await require_web_actor(db, request.web_identity)
         await require_active_user(db, owner)
+        favorite = int(data["is_favorite"])
+        updated_at = int(time.time())
+        if platform == "codeforces":
+            id_filter, aliases = _problem_id_filter(platform, problem[:160])
+            await db.execute(
+                "UPDATE user_problem_state SET is_favorite=?,updated_at=? "
+                "WHERE owner_qq_id=? AND platform=? AND " + id_filter,
+                (favorite, updated_at, owner, platform, *aliases),
+            )
         await db.execute(
             "INSERT INTO user_problem_state(owner_qq_id,platform,problem_id,is_favorite,updated_at) "
             "VALUES(?,?,?,?,?) ON CONFLICT(owner_qq_id,platform,problem_id) DO UPDATE SET "
             "is_favorite=excluded.is_favorite,updated_at=excluded.updated_at",
-            (owner, platform[:24], problem[:160], int(data["is_favorite"]), int(time.time())),
+            (owner, platform[:24], problem[:160], favorite, updated_at),
         )
         await db.commit()
         return jsonify({"success": True})
@@ -1485,6 +1500,53 @@ _PROBLEM_QUERY = """SELECT p.platform,p.problem_id,p.problem_name,p.problem_rati
       ) catalog
     ) p LEFT JOIN user_problem_state s ON s.owner_qq_id=? AND s.platform=p.platform AND s.problem_id=p.problem_id
     WHERE p.position=1"""
+# Group aliases before choosing the displayed row and the first nonempty tag source.
+# Other members' submissions may supply catalog metadata, never personal tags or AC state.
+_MEMBER_PROBLEM_QUERY = """
+    WITH sources AS (
+        SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags,
+               0 AS source,0 AS submit_time,NULL AS own_ac FROM crawler_problems
+        UNION ALL
+        SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags,
+               1,0,NULL FROM recommendations
+        UNION ALL
+        SELECT platform,problem_id,problem_name,problem_rating,problem_url,
+               CASE WHEN user_qq_id=owner THEN tags ELSE '' END,2,submit_time,
+               CASE WHEN user_qq_id=owner THEN submit_time END
+        FROM submissions CROSS JOIN (SELECT ? AS owner)
+    ), keyed AS (
+        SELECT *,problem_id_key(platform,problem_id) AS id_key FROM sources
+    ), ranked AS (
+        SELECT *,
+            ROW_NUMBER() OVER (
+                PARTITION BY platform,id_key
+                ORDER BY CASE source WHEN 1 THEN 0 WHEN 0 THEN 1 ELSE 2 END,
+                         submit_time DESC,problem_id
+            ) AS position,
+            FIRST_VALUE(tags) OVER (
+                PARTITION BY platform,id_key
+                ORDER BY problem_has_tags(tags) DESC,source,submit_time DESC,problem_id
+            ) AS effective_tags,
+            MAX(own_ac) OVER (PARTITION BY platform,id_key) AS ac_at
+        FROM keyed
+    ), personal AS (
+        SELECT platform,problem_id_key(platform,problem_id) AS id_key,
+               MAX(is_favorite) AS is_favorite,
+               MAX(COALESCE(state,'inbox')<>'inbox') AS outside_inbox
+        FROM user_problem_state WHERE owner_qq_id=?
+        GROUP BY platform,id_key
+    )
+    SELECT p.platform,p.problem_id,p.problem_name,p.problem_rating,p.problem_url,p.id_key,p.ac_at,
+           CASE WHEN problem_has_tags(p.effective_tags) THEN p.effective_tags ELSE '' END AS tags,
+           COALESCE(s.is_favorite,0) AS is_favorite,COALESCE(s.outside_inbox,0) AS outside_inbox
+    FROM ranked p LEFT JOIN personal s ON s.platform=p.platform AND s.id_key=p.id_key
+    WHERE p.position=1
+"""
+
+
+async def _register_member_problem_functions(db):
+    await db.create_function("problem_id_key", 2, problem_id_key, deterministic=True)
+    await db.create_function("problem_has_tags", 1, lambda value: bool(problem_tags(value)), deterministic=True)
 
 
 @api.route("/problems", methods=["GET"])
@@ -2146,31 +2208,41 @@ async def api_me_problems():
     qq_id = _me_qq_id()
     platform = _field(request.args, "platform", 24)
     tag = _field(request.args, "tag", 100)
+    problem_tag = request.args.get("problem_tag", "").strip()
+    if len(problem_tag) > 100:
+        return jsonify({"success": False, "message": "题目标签最多 100 个字符。"}), 400
     state = _field(request.args, "state", 20)
     db = await get_db()
     try:
+        await _register_member_problem_functions(db)
         scope = request.args.get("scope", "all")
         if scope not in {"all", "solved"}:
             return jsonify({"success": False, "message": "无效的题目范围。"}), 400
-        query = _PROBLEM_QUERY
-        params = [qq_id]
+        fields = "p.platform,p.problem_id,p.problem_name,p.problem_rating,p.problem_url,p.tags,p.is_favorite"
         if scope == "solved":
-            query = "SELECT p.*,ac.ac_at FROM (" + query + ") p JOIN (SELECT platform,problem_id,MAX(submit_time) AS ac_at FROM submissions WHERE user_qq_id=? GROUP BY platform,problem_id) ac ON ac.platform=p.platform AND ac.problem_id=p.problem_id WHERE 1=1"
-            params.append(qq_id)
+            fields += ",p.ac_at"
+        query = "SELECT " + fields + " FROM (" + _MEMBER_PROBLEM_QUERY + ") p WHERE 1=1"
+        params = [qq_id, qq_id]
+        if scope == "solved":
+            query += " AND p.ac_at IS NOT NULL"
         if platform:
             query += " AND p.platform=?"
             params.append(platform)
         if tag:
-            query += " AND (p.problem_name LIKE ? OR p.problem_id LIKE ? OR COALESCE(p.tags,'') LIKE ?)"
-            params.extend([f"%{tag}%", f"%{tag}%", f"%{tag}%"])
+            query += (
+                " AND (p.problem_name LIKE ? OR p.problem_id LIKE ? OR p.id_key LIKE ? OR p.tags LIKE ?"
+                " OR (p.platform='codeforces' AND p.id_key=?))"
+            )
+            params.extend([f"%{tag}%"] * 4)
+            params.append(problem_id_key("codeforces", tag))
+        if problem_tag:
+            await db.create_function("problem_has_tag", 2, has_problem_tag, deterministic=True)
+            query += " AND problem_has_tag(p.tags,?)=1"
+            params.append(problem_tag)
         if state == "favorite":
-            query += " AND p.is_favorite=1" if scope == "solved" else " AND COALESCE(s.is_favorite,0)=1"
+            query += " AND p.is_favorite=1"
         elif state == "inbox":
-            if scope == "solved":
-                query += " AND NOT EXISTS(SELECT 1 FROM user_problem_state prior WHERE prior.owner_qq_id=? AND prior.platform=p.platform AND prior.problem_id=p.problem_id AND COALESCE(prior.state,'inbox')<>'inbox')"
-                params.append(qq_id)
-            else:
-                query += " AND COALESCE(s.state,'inbox')='inbox'"
+            query += " AND p.outside_inbox=0"
         count_query = "SELECT COUNT(*) FROM (" + query + ") filtered"
         async with db.execute(count_query, tuple(params)) as cursor:
             total = int((await cursor.fetchone())[0])
@@ -2183,6 +2255,33 @@ async def api_me_problems():
         async with db.execute(query, tuple(params + [size, (page - 1) * size])) as cursor:
             items = [dict(row) for row in await cursor.fetchall()]
         return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": size})
+    finally:
+        await db.close()
+
+
+@api.route("/me/problems/tags", methods=["GET"])
+@member_required
+async def api_me_problem_tags():
+    platform = _field(request.args, "platform", 24)
+    if platform and platform not in {"codeforces", "atcoder", "luogu", "nowcoder", "cjlu"}:
+        return jsonify({"success": False, "message": "无效的题目平台。"}), 400
+    query = "SELECT DISTINCT tags FROM (" + _MEMBER_PROBLEM_QUERY + ") WHERE tags<>''"
+    params = [_me_qq_id(), _me_qq_id()]
+    if platform:
+        query += " AND platform=?"
+        params.append(platform)
+    db = await get_db()
+    try:
+        await _register_member_problem_functions(db)
+        async with db.execute(query, params) as cursor:
+            values = await cursor.fetchall()
+        tags = {}
+        for row in values:
+            for value in problem_tags(row["tags"]):
+                if len(value) <= 100:
+                    key = value.casefold()
+                    tags[key] = min(tags.get(key, value), value)
+        return jsonify({"tags": [tags[key] for key in sorted(tags)]})
     finally:
         await db.close()
 
@@ -2368,9 +2467,13 @@ def _leaderboard_user_filter(search):
     )
 
 
-async def _fetch_leaderboard(db, days, page, page_size, sort_key, search, platforms, paginate=True):
-    cutoff = int(time.time()) - days * 24 * 60 * 60 if days is not None else None
+async def _fetch_leaderboard(db, days, page, page_size, sort_key, search, platforms, paginate=True, start_time=None, end_time=None):
+    cutoff = start_time if start_time is not None else int(time.time()) - days * 24 * 60 * 60 if days is not None else None
     time_sql = " AND s.submit_time >= ?" if cutoff is not None else ""
+    time_values = [cutoff] if cutoff is not None else []
+    if end_time is not None:
+        time_sql += " AND s.submit_time < ?"
+        time_values.append(end_time)
     select_params = []
     platform_counts = []
     for platform, alias in (
@@ -2383,12 +2486,10 @@ async def _fetch_leaderboard(db, days, page, page_size, sort_key, search, platfo
         platform_counts.append(
             f"COUNT(DISTINCT CASE WHEN s.platform = '{platform}'{time_sql} THEN s.problem_id END) AS {alias}"
         )
-        if cutoff is not None:
-            select_params.append(cutoff)
+        select_params.extend(time_values)
     platform_sql = ", ".join(f"'{platform}'" for platform in platforms)
     total_sql = f"COUNT(DISTINCT CASE WHEN s.platform IN ({platform_sql})" + time_sql + " THEN s.platform || ':' || s.problem_id END) AS total_count"
-    if cutoff is not None:
-        select_params.append(cutoff)
+    select_params.extend(time_values)
     where_sql, where_params = _leaderboard_user_filter(search)
     query = (
         "SELECT u.qq_id, COALESCE(NULLIF(u.cf_handle, ''), u.name, u.qq_id) AS name, "
