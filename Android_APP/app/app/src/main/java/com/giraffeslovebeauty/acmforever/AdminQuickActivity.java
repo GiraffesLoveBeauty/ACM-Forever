@@ -41,8 +41,58 @@ public final class AdminQuickActivity extends MobilePageActivity {
     private void members(){LinearLayout form=card(body);EditText term=input(form,"昵称、QQ、学校或 OJ",query);form.addView(button("搜索成员",()->{query=term.getText().toString().trim();page=1;render();}));LinearLayout slot=card(body);read("/api/admin/members?search="+UrlEncoding.form(query)+"&page="+page+"&page_size=20",slot,true,value->{JSONObject data=(JSONObject)value;JSONArray rows=data.getJSONArray("items");if(rows.length()==0)slot.addView(text("暂无成员",16));for(int i=0;i<rows.length();i++){JSONObject row=rows.getJSONObject(i);LinearLayout box=card(slot);box.addView(text(row.optString("name")+" · "+row.optString("qq_id"),18));box.addView(text(row.optString("status")+" · "+row.optString("school"),13));box.addView(button("查看资料",()->{member=row.optString("qq_id");nav("member");}));}pager(slot,data.optInt("total"),20);});}
     private void member(){LinearLayout slot=card(body);read("/api/member/"+UrlEncoding.form(member),slot,true,value->{JSONObject data=(JSONObject)value,user=data.getJSONObject("user");slot.addView(text(user.optString("name"),22));slot.addView(text("QQ "+member+"\n学校："+user.optString("school")+"\n身份："+user.optString("status")+"\n姓名："+user.optString("real_name"),14));JSONObject counts=data.optJSONObject("platform_counts");if(counts!=null)for(Iterator<String> keys=counts.keys();keys.hasNext();){String key=keys.next();slot.addView(text(key+"："+counts.opt(key),14));}slot.addView(button("为该成员生成训练",()->nav("training")));slot.addView(button("查看该成员复盘",()->nav("contests")));slot.addView(text("资料、绑定和账号权限修改请到完整网页后台。",13));});}
     private boolean validMember(EditText input){String value=input.getText().toString().trim();if(!value.matches("[1-9][0-9]{3,11}")){input.setError("请输入有效成员 QQ");return false;}member=value;return true;}
-    private void training(){LinearLayout form=card(body);EditText who=input(form,"成员 QQ",member);Spinner platform=new Spinner(this);String[] ids={"codeforces","atcoder","luogu","nowcoder"};platform.setAdapter(MobileStyle.options(this,new String[]{"Codeforces","AtCoder","洛谷","牛客"}));form.addView(platform);EditText tag=input(form,"标签、题名或题号（可空）",""),difficulty=input(form,"难度（例如 CF 1000，可空）","");
-        LinearLayout results=card(body);form.addView(button("生成训练题",()->{if(!validMember(who))return;try{JSONObject data=new JSONObject().put("owner_qq_id",member).put("platform",ids[platform.getSelectedItemPosition()]).put("tag",tag.getText().toString().trim()).put("difficulty",difficulty.getText().toString().trim()).put("weak_tag",false);write("POST","/api/challenge/start",data,true,()->{results.removeAllViews();results.addView(text("训练已生成，可在挑战历史查看。",15));loadTraining(results);});}catch(Exception e){notice.show("生成训练",e);}}));form.addView(button("查询挑战历史",()->{if(validMember(who))loadTraining(results);}));if(!member.isEmpty())loadTraining(results);}
+    private void training() {
+        LinearLayout form = card(body);
+        EditText who = input(form, "成员 QQ", member);
+        String[] ids = {"codeforces", "atcoder", "luogu", "nowcoder"};
+        Spinner platform = new Spinner(this);
+        platform.setContentDescription("训练平台");
+        platform.setAdapter(MobileStyle.options(this, new String[]{"Codeforces", "AtCoder", "洛谷", "牛客"}));
+        form.addView(platform);
+        EditText tag = input(form, "标签、题名或题号（可空）", "");
+        form.addView(text("难度（必选，已按平台预选）", 14));
+        Spinner difficulty = new Spinner(this);
+        difficulty.setContentDescription("训练难度");
+        form.addView(difficulty);
+        // Bind the choices and their platform together before the first click or a platform change.
+        final String[] difficultyPlatform = {""};
+        Runnable selectDefaults = () -> {
+            int position = platform.getSelectedItemPosition();
+            if (position < 0 || position >= ids.length) return;
+            String selected = ids[position];
+            if (selected.equals(difficultyPlatform[0])) return;
+            List<String> values = ChallengeDifficulty.options(selected);
+            difficulty.setAdapter(MobileStyle.options(this, values.toArray(new String[0])));
+            difficulty.setSelection(values.indexOf(ChallengeDifficulty.defaultValue(selected)));
+            difficultyPlatform[0] = selected;
+        };
+        selectDefaults.run();
+        platform.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, android.view.View view, int position, long id) { selectDefaults.run(); }
+            @Override public void onNothingSelected(AdapterView<?> parent) { }
+        });
+        LinearLayout results = card(body);
+        form.addView(button("生成训练题", () -> {
+            if (!validMember(who)) return;
+            try {
+                int position = platform.getSelectedItemPosition();
+                if (position < 0 || position >= ids.length) throw new IllegalArgumentException("请选择有效训练平台");
+                String selected = ids[position];
+                // A pending selection callback must not submit a difficulty from the previous platform.
+                if (!selected.equals(difficultyPlatform[0])) { selectDefaults.run(); }
+                String level = ChallengeDifficulty.require(selected, difficulty.getSelectedItem());
+                JSONObject data = new JSONObject().put("owner_qq_id", member).put("platform", selected)
+                        .put("tag", tag.getText().toString().trim()).put("difficulty", level).put("weak_tag", false);
+                write("POST", "/api/challenge/start", data, true, () -> {
+                    results.removeAllViews();
+                    results.addView(text("训练已生成，可在挑战历史查看。", 15));
+                    loadTraining(results);
+                });
+            } catch (Exception e) { notice.show("生成训练", e); }
+        }));
+        form.addView(button("查询挑战历史", () -> { if (validMember(who)) loadTraining(results); }));
+        if (!member.isEmpty()) loadTraining(results);
+    }
     private void loadTraining(LinearLayout slot){read("/api/challenge/list?qq_id="+UrlEncoding.form(member),slot,true,value->{JSONArray rows=(JSONArray)value;if(rows.length()==0)slot.addView(text("暂无挑战记录",15));for(int i=0;i<rows.length();i++){JSONObject item=rows.getJSONObject(i);LinearLayout box=card(slot);box.addView(text(item.optString("problem_name",item.optString("problem_id")),17));box.addView(text(item.optString("platform")+" · "+item.optString("status"),13));box.addView(button("查看题面",()->{opening=true;startActivity(new Intent(this,MainActivity.class).putExtra("web_problem_platform",item.optString("platform")).putExtra("web_problem_id",item.optString("problem_id")));}));}});}
     private void contests(){LinearLayout form=card(body);EditText who=input(form,"成员 QQ",member),id=input(form,"比赛 ID",contest);form.addView(button("查询复盘",()->{if(!validMember(who))return;contest=id.getText().toString().trim();render();}));if(member.isEmpty()||contest.isEmpty())return;LinearLayout slot=card(body);String target=member,competition=contest;read("/api/contest/reviews?owner_qq_id="+UrlEncoding.form(target)+"&contest_id="+UrlEncoding.form(competition),slot,true,value->{JSONArray rows=(JSONArray)value;String[] keys={"todo","unsolved","queued","solved","reviewed","ignored"},names={"待处理","未通过","待补题","已解决","已复盘","忽略"};if(rows.length()==0)slot.addView(text("暂无比赛记录",16));for(int i=0;i<rows.length();i++){JSONObject item=rows.getJSONObject(i);LinearLayout box=card(slot);box.addView(text(item.optString("problem_id"),18));box.addView(text(item.optString("verdict"),13));Spinner state=new Spinner(this);state.setAdapter(MobileStyle.options(this,names));state.setSelection(Math.max(0,Arrays.asList(keys).indexOf(item.optString("status"))));box.addView(state);box.addView(button("保存本题状态",()->{try{JSONObject data=new JSONObject().put("owner_qq_id",target).put("contest_id",competition).put("problem_id",item.getString("problem_id")).put("status",keys[state.getSelectedItemPosition()]);write("PUT","/api/contest/reviews",data,true,()->{item.remove("status");try{item.put("status",keys[state.getSelectedItemPosition()]);}catch(Exception ignored){} });}catch(Exception e){notice.show("保存复盘",e);}}));}});}
     private void settings(){LinearLayout slot=card(body);read("/api/settings/contest-report",slot,true,value->{JSONObject data=(JSONObject)value;slot.addView(text("每日 Codeforces 比赛播报",19));slot.addView(text("全站设置 · 北京时间 · 通知群 "+data.optString("group_id","未配置"),13));EditText time=input(slot,"HH:MM，例如 08:30",data.optString("time"));slot.addView(button("保存播报时间",()->{String next=time.getText().toString().trim();if(!next.matches("(?:[01][0-9]|2[0-3]):[0-5][0-9]")){time.setError("请输入 HH:MM");return;}confirmReport(next);}));slot.addView(button("关闭播报",()->confirmReport("")));});}
