@@ -21,7 +21,7 @@ jobs:
     env:
       RELEASE_TAG: ${{ github.ref_name }}
       RELEASE_CHANNEL: ${{ vars.ANDROID_RELEASE_CHANNEL || 'debug' }}
-      DOWNLOAD_ORIGIN: https://acm.cjluacmpanle.top
+      DOWNLOAD_ORIGIN: https://cjluacmpanel.tail1b9e55.ts.net
     steps:
       - uses: actions/checkout@v4
         with:

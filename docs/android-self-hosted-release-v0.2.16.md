@@ -1,28 +1,28 @@
 # 自站优先的 Tag 发布与更新（从原 PR #100 拆分）
 
-> 本PR独立基于main，仅保留原#100的自站客户端、发布脚本、Nginx示例和说明；没有部署、修改Secrets或上传安装包。原#100中的App功能另入0.2.17独立PR，本分支不改应用Name/Code及日志。下面v0.2.16/code30/Tag/地址均为原方案示例，正式发布必须使用届时main的实际版本与更高versionCode，不能把示例当作已发布版本。
+> 本PR独立基于main，保留原#100的自站客户端、发布脚本、Nginx示例和说明。2026-11-06 按授权配置新机 SSH 上传、旧机 Funnel 下载入口；具体状态与运维方式见 [Funnel 下载运维](android-funnel-mirror-operations.md)。原#100中的App功能另入独立PR，本分支不改应用Name/Code及日志。下面v0.2.16/code30/Tag/地址均为原方案示例，正式发布必须使用届时main的实际版本与更高versionCode，不能把示例当作已发布版本。
 
-状态：本地实现，待 PR 跨人评审及运维配置；没有部署服务器、修改 Secrets 或创建 Tag。2026-11-05。App `0.2.16` / versionCode `30`，debug 渠道沿用原证书。
+状态：2026-11-06 下载通路已通过GitHub-hosted runner的SSH上传与公网完整回读验收，仍待跨人评审及手机验证；未创建 Tag 或发布 APK。debug 渠道沿用原证书。
 
 ## 当前问题与地址
 
 0.2.15 的清单、APK 都在 GitHub Release，国内网络可能无法直连。0.2.16 保留 GitHub 作为发布源与备用下载，同时让清单和 APK 优先走网站 HTTPS 静态目录。
 
-- 自站清单：`https://acm.cjluacmpanle.top/GiraffesLoveBeauty/ACM-Forever/releases/latest/update.json`
+- 自站清单：`https://cjluacmpanel.tail1b9e55.ts.net/GiraffesLoveBeauty/ACM-Forever/releases/latest/update.json`
 - GitHub 备用清单：`https://github.com/GiraffesLoveBeauty/ACM-Forever/releases/latest/download/update.json`
-- 本版自站 APK：`https://acm.cjluacmpanle.top/GiraffesLoveBeauty/ACM-Forever/releases/download/v0.2.16/acmforever-0.2.16-debug.apk`
+- 示例自站 APK：`https://cjluacmpanel.tail1b9e55.ts.net/GiraffesLoveBeauty/ACM-Forever/releases/download/v0.2.16/acmforever-0.2.16-debug.apk`
 - 对应 GitHub APK：上一路径的域名换为 `github.com`。
 
-本地核对时网站首页可访问，拟用自站清单返回 404，**以上 APK 地址尚未发布，不是现在可下载的链接**。域名拼写为 `cjluacmpanle`。App 默认 URL 在 `strings.xml`；工作流的 `DOWNLOAD_ORIGIN` 必须与它一致。
+拟用自站清单在首次镜像发布前返回 404，**以上示例 APK 地址尚未发布，不是现在可下载的链接**。App 默认 URL 在 `strings.xml`；工作流的 `DOWNLOAD_ORIGIN` 必须与它一致。SSH 上传仍连接新机；HTTPS 回读连接旧机的 Funnel 公网入口，两者不要求使用同一域名。
 
 ## 运维首次配置
 
 1. 选择持久化目录，推荐 `/srv/acmforever-releases`。不要使用部署时整体替换的 `acm-forever-feat`。如用 `acm-forever-data/releases`，先验证 Nginx worker 遍历权限；不能为了静态文件全局放宽 `/root` 权限。
 2. 创建专用非 root 上传账号，只给此目录写权限和 Nginx 必要读取权限；服务器需要 Python **3.9+** 和 tarfile 标准库。上传目录内文件由脚本设为 0644、版本目录 0755。
-3. 由管理员在现有 HTTPS `server {}` 加入 [Nginx 模板](../Android_APP/deploy/nginx-releases.conf.example)，让 URL 前缀用 `alias` 指向同一目录，禁止目录列表、隐藏文件和写方法。校验 `nginx -t` 后 reload；以后上传静态文件不用重启业务。
+3. 直连 HTTPS 方案可在现有 HTTPS `server {}` 加入 [Nginx 模板](../Android_APP/deploy/nginx-releases.conf.example)。当前采用 [Funnel 下载运维](android-funnel-mirror-operations.md) 中的 loopback 静态源与 SSH 隧道；URL 前缀用 `alias` 指向同一目录，禁止目录列表、隐藏文件和写方法。校验 `nginx -t` 后 reload；以后上传静态文件不用重启业务。
 4. CDN 对该前缀的错误和 `latest/update.json` 禁用缓存；首次上线清除旧 404。模板使用 `no-store`，避免切换版本后仍读旧清单。
 5. 给专用账号配置 SSH 公钥；在可信管理渠道核对服务器 host key，不在 Action 临时 `ssh-keyscan` 后直接信任。用外网可达地址，GitHub runner 不能直接访问 Tailscale 内网地址。
-6. 配置以下 Actions Variables 与 Secrets。本轮不写真实值、不复用网站部署私钥、不提交密码。
+6. 配置以下 Actions Variables 与 Secrets。不要复用网站部署私钥或将密码、密钥写入源码；本次运维已设置仓库级镜像配置。
 
 | 类型 | 名称 | 用途 |
 | --- | --- | --- |
@@ -83,6 +83,6 @@
 
 ## 拆分后的验证与合并条件
 
-本次独立分支待重新review。51项发布故障注入测试通过；Android单元测试71项通过；Lint 0错误/53条警告，debug应用和测试包构建成功；mirrorupdates和startupupdates两组模拟器回归通过；服务器SSH、Nginx、CDN和真实下载仍未验收。两个新PR均以main为base，App功能可以独立review；本自站PR必须等待管理员配置完成及跨人review后才合并，否则会把后续Tag发布切到尚未配置的镜像流程。
+原独立分支已有51项发布故障注入测试、71项Android单元测试通过；Lint 0错误/53条警告，debug应用和测试包构建成功；mirrorupdates和startupupdates两组模拟器回归通过。本次域名调整后的验证单独记录在 [Funnel 下载运维](android-funnel-mirror-operations.md)。仍需跨人review和手机实际更新验证；不能用首页200代替完整文件回读验收。
 
-自站源码与原#100逐文件相同；仅另外拆出主备清单回归测试和此说明。配置中的域名、目录、账号/Secrets名称保持不变，管理员可继续沿用原#100下的配置讨论。
+镜像传输、事务和校验逻辑沿用原#100。当前调整默认下载域名、相应回归测试和运维说明；新机上传目录、账号及Actions Secrets名称保持不变。

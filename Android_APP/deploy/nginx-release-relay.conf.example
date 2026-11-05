@@ -1,0 +1,23 @@
+# Include inside the existing Nginx http {} block; this is a full server block.
+# Only the restricted SSH relay should reach this listener.
+server {
+    listen 127.0.0.1:18089;
+    server_name _;
+
+    location ^~ /GiraffesLoveBeauty/ACM-Forever/releases/ {
+        alias /srv/acmforever-releases/;
+        autoindex off;
+        disable_symlinks on;
+        limit_except GET HEAD { deny all; }
+        types {
+            application/vnd.android.package-archive apk;
+            application/json json;
+            text/plain sha256;
+        }
+        default_type application/octet-stream;
+        add_header X-Content-Type-Options nosniff always;
+        add_header Cache-Control "no-store" always;
+        location ~ /[.] { deny all; }
+    }
+    location / { return 404; }
+}
