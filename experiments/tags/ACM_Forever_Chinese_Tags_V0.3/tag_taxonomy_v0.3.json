@@ -1,0 +1,1184 @@
+{
+  "version": "0.3-draft",
+  "language": "zh-CN",
+  "vocabulary_policy": "100个具体算法标签 + 15个临时大类标签。临时标签在AI无法可靠细化时允许保留；推荐模型默认仅使用具体标签。",
+  "category_order": [
+    "基础算法与技巧",
+    "数据结构",
+    "动态规划",
+    "图论与树",
+    "字符串",
+    "数学与数论",
+    "计算几何",
+    "其他专项"
+  ],
+  "specific_count": 100,
+  "provisional_count": 15,
+  "tags": [
+    {
+      "id": "enumeration",
+      "name_zh": "枚举",
+      "category": "基础算法与技巧",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "simulation",
+      "name_zh": "模拟",
+      "category": "基础算法与技巧",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "sorting",
+      "name_zh": "排序",
+      "category": "基础算法与技巧",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "binary_search",
+      "name_zh": "二分",
+      "category": "基础算法与技巧",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "ternary_search",
+      "name_zh": "三分",
+      "category": "基础算法与技巧",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "two_pointers",
+      "name_zh": "双指针",
+      "category": "基础算法与技巧",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "sliding_window",
+      "name_zh": "滑动窗口",
+      "category": "基础算法与技巧",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "prefix_sum",
+      "name_zh": "前缀和",
+      "category": "基础算法与技巧",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "difference_array",
+      "name_zh": "差分",
+      "category": "基础算法与技巧",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "discretization",
+      "name_zh": "离散化",
+      "category": "基础算法与技巧",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "greedy",
+      "name_zh": "贪心",
+      "category": "基础算法与技巧",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "construction",
+      "name_zh": "构造",
+      "category": "基础算法与技巧",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "divide_conquer",
+      "name_zh": "分治",
+      "category": "基础算法与技巧",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "meet_in_middle",
+      "name_zh": "折半搜索",
+      "category": "基础算法与技巧",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "bitmask",
+      "name_zh": "位掩码",
+      "category": "基础算法与技巧",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "bit_operations",
+      "name_zh": "位运算",
+      "category": "基础算法与技巧",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "backtracking",
+      "name_zh": "回溯搜索",
+      "category": "基础算法与技巧",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "dsu",
+      "name_zh": "并查集",
+      "category": "数据结构",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "weighted_dsu",
+      "name_zh": "带权并查集",
+      "category": "数据结构",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "fenwick_tree",
+      "name_zh": "树状数组",
+      "category": "数据结构",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "segment_tree",
+      "name_zh": "线段树",
+      "category": "数据结构",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "lazy_segment_tree",
+      "name_zh": "懒标记线段树",
+      "category": "数据结构",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "persistent_segment_tree",
+      "name_zh": "可持久化线段树",
+      "category": "数据结构",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "sparse_table",
+      "name_zh": "ST表",
+      "category": "数据结构",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "priority_queue",
+      "name_zh": "优先队列",
+      "category": "数据结构",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "monotonic_stack",
+      "name_zh": "单调栈",
+      "category": "数据结构",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "monotonic_queue",
+      "name_zh": "单调队列",
+      "category": "数据结构",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "balanced_tree",
+      "name_zh": "平衡树",
+      "category": "数据结构",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "sqrt_decomposition",
+      "name_zh": "分块",
+      "category": "数据结构",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "mo_algorithm",
+      "name_zh": "莫队",
+      "category": "数据结构",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "trie",
+      "name_zh": "字典树",
+      "category": "数据结构",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "hash_table",
+      "name_zh": "哈希表",
+      "category": "数据结构",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "linear_dp",
+      "name_zh": "线性DP",
+      "category": "动态规划",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "knapsack_dp",
+      "name_zh": "背包DP",
+      "category": "动态规划",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "interval_dp",
+      "name_zh": "区间DP",
+      "category": "动态规划",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "tree_dp",
+      "name_zh": "树形DP",
+      "category": "动态规划",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "bitmask_dp",
+      "name_zh": "状压DP",
+      "category": "动态规划",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "digit_dp",
+      "name_zh": "数位DP",
+      "category": "动态规划",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "probability_dp",
+      "name_zh": "概率DP",
+      "category": "动态规划",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "expectation_dp",
+      "name_zh": "期望DP",
+      "category": "动态规划",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "counting_dp",
+      "name_zh": "计数DP",
+      "category": "动态规划",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "rerooting_dp",
+      "name_zh": "换根DP",
+      "category": "动态规划",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "dp_optimization",
+      "name_zh": "DP优化",
+      "category": "动态规划",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "lis",
+      "name_zh": "最长上升子序列",
+      "category": "动态规划",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "grid_dp",
+      "name_zh": "网格DP",
+      "category": "动态规划",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "dfs",
+      "name_zh": "深度优先搜索",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "bfs",
+      "name_zh": "广度优先搜索",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "dijkstra",
+      "name_zh": "Dijkstra",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "bellman_ford",
+      "name_zh": "Bellman-Ford",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "floyd",
+      "name_zh": "Floyd",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "zero_one_bfs",
+      "name_zh": "0-1 BFS",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "topological_sort",
+      "name_zh": "拓扑排序",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "minimum_spanning_tree",
+      "name_zh": "最小生成树",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "scc",
+      "name_zh": "强连通分量",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "bridges",
+      "name_zh": "桥",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "articulation_points",
+      "name_zh": "割点",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "two_sat",
+      "name_zh": "2-SAT",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "bipartite_matching",
+      "name_zh": "二分图匹配",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "max_flow",
+      "name_zh": "最大流",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "min_cost_flow",
+      "name_zh": "最小费用流",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "lca",
+      "name_zh": "最近公共祖先",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "heavy_light_decomposition",
+      "name_zh": "树链剖分",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "tree_diameter",
+      "name_zh": "树的直径",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "tree_centroid",
+      "name_zh": "树的重心",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "centroid_decomposition",
+      "name_zh": "点分治",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "dsu_on_tree",
+      "name_zh": "树上启发式合并",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "euler_tour",
+      "name_zh": "欧拉序",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "functional_graph",
+      "name_zh": "基环树",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "kmp",
+      "name_zh": "KMP",
+      "category": "字符串",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "z_function",
+      "name_zh": "Z函数",
+      "category": "字符串",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "string_hash",
+      "name_zh": "字符串哈希",
+      "category": "字符串",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "ac_automaton",
+      "name_zh": "AC自动机",
+      "category": "字符串",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "suffix_array",
+      "name_zh": "后缀数组",
+      "category": "字符串",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "suffix_automaton",
+      "name_zh": "后缀自动机",
+      "category": "字符串",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "manacher",
+      "name_zh": "Manacher",
+      "category": "字符串",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "palindromic_tree",
+      "name_zh": "回文自动机",
+      "category": "字符串",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "gcd",
+      "name_zh": "最大公约数",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "extended_gcd",
+      "name_zh": "扩展欧几里得",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "modular_inverse",
+      "name_zh": "模逆元",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "fast_power",
+      "name_zh": "快速幂",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "sieve",
+      "name_zh": "素数筛",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "prime_factorization",
+      "name_zh": "质因数分解",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "crt",
+      "name_zh": "中国剩余定理",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "combinatorial_counting",
+      "name_zh": "组合计数",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "inclusion_exclusion",
+      "name_zh": "容斥原理",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "stars_and_bars",
+      "name_zh": "隔板法",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "matrix_exponentiation",
+      "name_zh": "矩阵快速幂",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "gaussian_elimination",
+      "name_zh": "高斯消元",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "fft",
+      "name_zh": "快速傅里叶变换",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "ntt",
+      "name_zh": "快速数论变换",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "linearity_of_expectation",
+      "name_zh": "期望线性性",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "nim_game",
+      "name_zh": "Nim博弈",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "sg_function",
+      "name_zh": "SG函数",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "linear_recurrence",
+      "name_zh": "线性递推",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "cross_product",
+      "name_zh": "叉积",
+      "category": "计算几何",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "convex_hull",
+      "name_zh": "凸包",
+      "category": "计算几何",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "rotating_calipers",
+      "name_zh": "旋转卡壳",
+      "category": "计算几何",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "sweep_line",
+      "name_zh": "扫描线",
+      "category": "计算几何",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "expression_parsing",
+      "name_zh": "表达式解析",
+      "category": "其他专项",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "randomized_algorithms",
+      "name_zh": "随机化算法",
+      "category": "其他专项",
+      "is_assignable": true,
+      "status": "draft",
+      "tag_kind": "specific",
+      "eligible_for_recommendation": true,
+      "review_requirement": "none_for_rule_exact;review_for_ai"
+    },
+    {
+      "id": "pending_combinatorics",
+      "name_zh": "组合数学·待细化",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "provisional",
+      "tag_kind": "provisional",
+      "eligible_for_recommendation": false,
+      "review_requirement": "required_for_specific_refinement",
+      "originating_cf_clue": "combinatorics"
+    },
+    {
+      "id": "pending_data_structures",
+      "name_zh": "数据结构·待细化",
+      "category": "数据结构",
+      "is_assignable": true,
+      "status": "provisional",
+      "tag_kind": "provisional",
+      "eligible_for_recommendation": false,
+      "review_requirement": "required_for_specific_refinement",
+      "originating_cf_clue": "data structures"
+    },
+    {
+      "id": "pending_search",
+      "name_zh": "搜索·待细化",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "provisional",
+      "tag_kind": "provisional",
+      "eligible_for_recommendation": false,
+      "review_requirement": "required_for_specific_refinement",
+      "originating_cf_clue": "dfs and similar"
+    },
+    {
+      "id": "pending_dp",
+      "name_zh": "动态规划·待细化",
+      "category": "动态规划",
+      "is_assignable": true,
+      "status": "provisional",
+      "tag_kind": "provisional",
+      "eligible_for_recommendation": false,
+      "review_requirement": "required_for_specific_refinement",
+      "originating_cf_clue": "dp"
+    },
+    {
+      "id": "pending_games",
+      "name_zh": "博弈论·待细化",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "provisional",
+      "tag_kind": "provisional",
+      "eligible_for_recommendation": false,
+      "review_requirement": "required_for_specific_refinement",
+      "originating_cf_clue": "games"
+    },
+    {
+      "id": "pending_geometry",
+      "name_zh": "计算几何·待细化",
+      "category": "计算几何",
+      "is_assignable": true,
+      "status": "provisional",
+      "tag_kind": "provisional",
+      "eligible_for_recommendation": false,
+      "review_requirement": "required_for_specific_refinement",
+      "originating_cf_clue": "geometry"
+    },
+    {
+      "id": "pending_graphs",
+      "name_zh": "图论·待细化",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "provisional",
+      "tag_kind": "provisional",
+      "eligible_for_recommendation": false,
+      "review_requirement": "required_for_specific_refinement",
+      "originating_cf_clue": "graphs"
+    },
+    {
+      "id": "pending_hashing",
+      "name_zh": "哈希·待细化",
+      "category": "数据结构",
+      "is_assignable": true,
+      "status": "provisional",
+      "tag_kind": "provisional",
+      "eligible_for_recommendation": false,
+      "review_requirement": "required_for_specific_refinement",
+      "originating_cf_clue": "hashing"
+    },
+    {
+      "id": "pending_math",
+      "name_zh": "数学·待细化",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "provisional",
+      "tag_kind": "provisional",
+      "eligible_for_recommendation": false,
+      "review_requirement": "required_for_specific_refinement",
+      "originating_cf_clue": "math"
+    },
+    {
+      "id": "pending_matrices",
+      "name_zh": "矩阵·待细化",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "provisional",
+      "tag_kind": "provisional",
+      "eligible_for_recommendation": false,
+      "review_requirement": "required_for_specific_refinement",
+      "originating_cf_clue": "matrices"
+    },
+    {
+      "id": "pending_number_theory",
+      "name_zh": "数论·待细化",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "provisional",
+      "tag_kind": "provisional",
+      "eligible_for_recommendation": false,
+      "review_requirement": "required_for_specific_refinement",
+      "originating_cf_clue": "number theory"
+    },
+    {
+      "id": "pending_probabilities",
+      "name_zh": "概率与期望·待细化",
+      "category": "数学与数论",
+      "is_assignable": true,
+      "status": "provisional",
+      "tag_kind": "provisional",
+      "eligible_for_recommendation": false,
+      "review_requirement": "required_for_specific_refinement",
+      "originating_cf_clue": "probabilities"
+    },
+    {
+      "id": "pending_shortest_paths",
+      "name_zh": "最短路·待细化",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "provisional",
+      "tag_kind": "provisional",
+      "eligible_for_recommendation": false,
+      "review_requirement": "required_for_specific_refinement",
+      "originating_cf_clue": "shortest paths"
+    },
+    {
+      "id": "pending_strings",
+      "name_zh": "字符串·待细化",
+      "category": "字符串",
+      "is_assignable": true,
+      "status": "provisional",
+      "tag_kind": "provisional",
+      "eligible_for_recommendation": false,
+      "review_requirement": "required_for_specific_refinement",
+      "originating_cf_clue": "strings"
+    },
+    {
+      "id": "pending_trees",
+      "name_zh": "树上算法·待细化",
+      "category": "图论与树",
+      "is_assignable": true,
+      "status": "provisional",
+      "tag_kind": "provisional",
+      "eligible_for_recommendation": false,
+      "review_requirement": "required_for_specific_refinement",
+      "originating_cf_clue": "trees"
+    }
+  ]
+}

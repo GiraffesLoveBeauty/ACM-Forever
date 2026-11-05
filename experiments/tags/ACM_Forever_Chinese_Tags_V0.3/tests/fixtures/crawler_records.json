@@ -1,0 +1,28 @@
+{
+  "sample_kind": "synthetic_only_no_third_party_statement",
+  "problems": [
+    {
+      "platform": "codeforces", "problem_id": "cf_99991A", "contest_id": "99991", "problem_index": "A",
+      "problem_name": "Mock Addition HTML", "problem_rating": 800, "tags": "[\"implementation\"]",
+      "problem_url": "https://codeforces.com/contest/99991/problem/A",
+      "statement_html": "<h3>Problem Statement</h3><p>You are given integers <var>A</var> and <var>B</var>. Print their sum.</p><h3>Sample Input 1</h3><pre>1 2\n</pre><h3>Sample Output 1</h3><pre>3\n</pre>",
+      "statement_text": "You are given integers A and B. Print their sum.",
+      "samples": "[{\"index\":1,\"input\":\"1 2\\n\",\"output\":\"3\\n\"}]",
+      "sample_count": 1, "statement_language": "en", "last_fetch_status": "ok"
+    },
+    {
+      "platform": "atcoder", "problem_id": "demo475_d", "contest_id": "demo475", "problem_index": "D",
+      "problem_name": "Mock Addition Text", "tags": [], "problem_rating": null,
+      "problem_url": "https://atcoder.jp/contests/demo475/tasks/demo475_d",
+      "statement_text": "You are given two integers. Print their sum. Constraints: 1 <= A, B <= 100.",
+      "samples": [{"index": 1, "input": " 1 2\n\n", "output": "3\n"}],
+      "last_fetch_status": "ok", "statement_language": "en"
+    },
+    {
+      "platform": "codeforces", "problem_id": "cf_9211", "contest_id": "921", "problem_index": "1",
+      "problem_name": "Mock PDF Metadata", "tags": [],
+      "problem_url": "https://codeforces.com/contest/921/problem/1",
+      "statement_format": "pdf", "has_pdf": true, "last_fetch_status": "ok"
+    }
+  ]
+}

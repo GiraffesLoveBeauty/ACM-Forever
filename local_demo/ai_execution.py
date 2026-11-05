@@ -1,0 +1,443 @@
+"""Single-question web execution, durable receipts, and existing executor integration."""
+import json
+from contextlib import closing, contextmanager
+from datetime import datetime, timezone
+import os
+from pathlib import Path
+import re
+import sqlite3
+import subprocess
+import sys
+
+from annotation_api.adapter import digest
+from annotation_api.config import Config
+from annotation_api.dispatch import request_settings
+from annotation_api.storage import atomic_json, now
+from problem_processing.backup import checked_path
+from problem_processing.execution_state import Ledger
+from problem_processing.executor import bind_plan, execute_batch
+from problem_processing.planning import Planner, historical_problem, semantic_inputs, task_policies
+from problem_processing.translation import current_translation, translation_ready
+from tag_management.model import empty_state
+from tag_management.storage import Journal
+
+ROOT = Path(__file__).resolve().parents[1]
+BASE_URL = 'https://kitsune2.yukirin.me/v1'
+MODEL = 'gpt-6-luna'
+TASKS = {'annotation', 'translation'}
+ACTIVE = {'queued', 'running'}
+QUEUE_STARTUP_SECONDS = 15
+
+
+@contextmanager
+def available_lock(guard):
+    """Only suppress lock contention, never errors raised by the protected work."""
+    try:
+        guard.__enter__()
+    except ValueError:
+        yield False
+        return
+    try:
+        yield True
+    finally:
+        guard.__exit__(None, None, None)
+
+
+def execution_message(result):
+    status, code = result.get('status'), result.get('error')
+    if status == 'completed':
+        return '任务完成，结果已独立保存；自动结果尚未人工确认。'
+    if status == 'reuse_existing':
+        return '已有结果已复用，无需新增 API 请求。'
+    if code == 'connection_failed':
+        return '连接中转站失败（DNS、连接或 TLS 阶段），生成请求正文未发出，未自动重试。请检查网络后重新预检。'
+    if code in {'dispatch_validation_failed', 'local_request_failed'} or status == 'failed_before_dispatch':
+        return '请求在本地发送前停止，没有发送生成请求。请重新检查题面、权限和任务配置；未自动重试。'
+    if status == 'uncertain' or code in {'unknown_delivery', 'manual_delivery_check_required'}:
+        return '未取得可用响应，是否到达中转站及是否计费尚无法确认；不是图片翻译限制。请核对该任务与中转站记录，禁止自动重复请求。'
+    if code == 'api_configuration_error':
+        return '中转站返回接口错误，请核对模型、凭据或请求参数；未自动重试。'
+    if code == 'quota_exhausted':
+        return '中转站返回额度不足，请核对服务账单；未自动重试。'
+    if code == 'rate_limit':
+        return '中转站返回限流，任务停止；未自动重试。'
+    if code in {'response_or_local_failure', 'saved_response_requires_review'}:
+        return '响应或本地回填失败，请检查已保存响应及文字 ID 是否齐全；原文、原图和已有译文保留，未重新请求。'
+    return '任务已停止，请检查当前任务的持久状态与处理依据；未自动重试。'
+
+
+class ExecutionConflict(ValueError):
+    pass
+
+
+def load_web_config():
+    # Only this checkout's dedicated relay .env; never inherit browser/environment overrides.
+    from dotenv import dotenv_values
+    values = dotenv_values(ROOT/'experiments/tags/ACM_Forever_Chinese_Tags_V0.3/.env')
+    cfg = Config(provider='compatible',model=values.get('OPENAI_MODEL') or '',
+        api_key=values.get('OPENAI_API_KEY') or '',base_url=values.get('OPENAI_BASE_URL') or '',
+        timeout=90,max_retries=0,request_interval=0,max_output_tokens=4000,
+        response_format=values.get('ANNOTATION_RESPONSE_FORMAT') or 'json_schema',
+        token_parameter=values.get('ANNOTATION_TOKEN_PARAMETER') or 'max_completion_tokens')
+    if cfg.base_url.rstrip('/') != BASE_URL or cfg.model != MODEL:
+        raise ValueError('Relay configuration requires administrator review')
+    return cfg
+
+
+def problem_guard(labels, key):
+    return Journal(labels.root.parent/'local_ai_execution/coordination'/(digest(key)+'.jsonl')).locked()
+
+
+class WebAIService:
+    def __init__(self, labels, database, *, config_loader=load_web_config, launcher=None):
+        self.labels = labels
+        self.database = checked_path(database)
+        self.store = checked_path(labels.root.parent/'local_ai_execution')
+        self.config_loader = config_loader
+        self.launcher = launcher or self._launch
+
+    def source(self, platform, problem_id):
+        from admin_processing import prepare_crawler
+        uri = self.database.as_uri()+'?mode=ro'
+        with closing(sqlite3.connect(uri,uri=True,timeout=5)) as db:
+            db.row_factory=sqlite3.Row
+            row=db.execute('SELECT platform,problem_id,contest_id,problem_index,problem_name,problem_url,tags,'
+                'metadata_json,statement_html,statement_text,statement_language,requested_language,samples,'
+                'sample_count,statement_source_url,statement_sha256,last_fetch_status,'
+                'length(statement_pdf)>0 AS has_pdf FROM crawler_problems WHERE platform=? AND problem_id=?',
+                (platform,problem_id)).fetchone()
+        if row is None:
+            raise LookupError('爬虫题库中不存在该题')
+        return prepare_crawler(dict(row))
+
+    def check_actor(self, actor):
+        with closing(sqlite3.connect(self.database.as_uri()+'?mode=ro',uri=True,timeout=5)) as db:
+            account=db.execute('SELECT role,is_active,must_change_password FROM web_accounts WHERE qq_id=?',(actor,)).fetchone()
+        if not account or account[0] not in {'admin','root'} or not account[1] or account[2]:
+            raise ExecutionConflict('执行权限已失效，只有有效的 admin/root 账号可以调用 AI。')
+
+    def manual_version(self, key):
+        events,states=self.labels.manager().journal.read() if self.labels.repo.current() else ([],{})
+        own=[e for e in events if e['problem_key']==key]
+        state=states.get(key,empty_state())
+        return digest({'state':state,'last':own[-1]['event_id'] if own else None}),bool(
+            state['added_tag_ids'] or state['removed_tag_ids'] or state['verified_fingerprint'])
+
+    def accepted_translation(self, p, records):
+        row=current_translation(self.labels.root,p)
+        if not row or row.get('processing_policy') != task_policies()['translation']:
+            return False
+        if row.get('problem_key') != p['problem_key'] or str(row.get('translation_model','')).startswith('mock'):
+            return False
+        if any(r['state'] in {'claimed','dispatched','uncertain'} for r in records):
+            return False
+        fp=row.get('activation_audit_id')
+        if fp and re.fullmatch('[a-f0-9]{64}',fp):
+            path=self.labels.root/'translations/activations'/(fp+'.json')
+            audit=json.loads(checked_path(path).read_text(encoding='utf-8'))
+            task=Ledger(self.labels.root).load(audit['source_task_id'])
+            if (audit['decision']!='accept_for_local_website' or audit['accepted_result_sha256']!=digest(row)
+                or audit['problem_key']!=p['problem_key'] or task['problem_key']!=p['problem_key']
+                or task['task_type']!='translation' or task['state'] not in {'blocked','completed'}
+                or task['identity']['mode']!='live' or task['identity']['input_semantic_hash']!=digest(semantic_inputs(p)[1])
+                or audit['source_response_sha256']!=task['response_sha256']):
+                return False
+            if any(r['state']=='blocked' and r['task_id']!=task['task_id'] for r in records):return False
+            Ledger(self.labels.root).artifact('responses',task['attempt_id'],task['response_sha256'])
+            return True
+        task_id=row.get('execution_task_id')
+        task=Ledger(self.labels.root).load(task_id) if isinstance(task_id,str) and re.fullmatch('[a-f0-9]{64}',task_id) else None
+        if not task or task['state']!='completed' or task['problem_key']!=p['problem_key']:
+            return False
+        return Ledger(self.labels.root).artifact('results',task_id,task['result_sha256'])['result']==row
+
+    def proposal(self, p, task_type):
+        if task_type not in TASKS:
+            raise ValueError('不支持的 AI 任务类型')
+        cfg=None
+        try: cfg=self.config_loader()
+        except (ValueError,OSError): pass
+        planner=Planner(self.labels.root)
+        plan=planner.plan([p]);entry=plan['entries'][0]
+        status=entry[task_type]['status'];reason=entry[task_type].get('reason','输入需核验')
+        if reason in {'execution_recovery_or_review_required','request_delivery_or_cache_audit_required'}:
+            records=[r for r in Ledger(self.labels.root).records() if r['problem_key']==p['problem_key'] and r['task_type']==task_type]
+            if records:
+                latest=max(records,key=lambda r:r['updated_at'])
+                reason=execution_message({'status':latest['state'],'error':latest.get('error')})
+        manual,protected=self.manual_version(p['problem_key'])
+        if p['processing_status']=='ready' or task_type=='translation' and translation_ready(p):
+            if task_type=='translation':
+                records=[r for r in Ledger(self.labels.root).records() if r['problem_key']==p['problem_key'] and r['task_type']==task_type]
+                previous=planner.problems.get(p['problem_key'])
+                original=historical_problem(previous) if previous else None
+                # Source-export hashes have different semantics. Prove equivalence without rewriting either.
+                equivalent=original and semantic_inputs(original)[1]==semantic_inputs(p)[1]
+                if self.accepted_translation(original if equivalent else p,records):
+                    status,reason='reuse_existing','已有与当前正文匹配的译文，直接复用，不再计费。'
+            elif protected:
+                status,reason='needs_review','人工修正优先，禁止 AI 覆盖；请使用人工标签管理。'
+        settings=request_settings(cfg) if cfg else None
+        revision=digest({'problem_key':p['problem_key'],'task_type':task_type,
+            'semantic_input':semantic_inputs(p)[0 if task_type=='annotation' else 1],
+            'verified_content_hash':p['verified_content_hash'],'plan_id':plan['plan_id'],
+            'manual':manual,'settings':settings,'status':status})
+        return {'status':status,'reason':reason,'revision':revision,'can_execute':bool(cfg and status=='needs_'+task_type),
+            'config_ready':cfg is not None,'request_settings':settings,'timeout_seconds':90,'max_retries':0,
+            'maximum_requests':1,'manual_protected':protected if task_type=='annotation' else False,
+            'cost_notice':'单题最多新增一次生成请求，费用以中转站账单为准；超时或未知结果不自动重试。'}
+
+    def job_path(self, job_id):
+        if not isinstance(job_id,str) or not re.fullmatch('[a-f0-9]{64}',job_id):
+            raise ValueError('无效任务编号')
+        return checked_path(self.store/'jobs'/(job_id+'.json'))
+
+    def _read(self, job_id):
+        path=self.job_path(job_id)
+        if not path.exists():raise LookupError('没有找到执行记录')
+        return json.loads(path.read_text(encoding='utf-8'))
+
+    def worker_guard(self, job_id):
+        return Journal(self.store/'worker-locks'/(job_id+'.jsonl')).locked()
+
+    def recover_jobs(self):
+        # A submitting parent holds writer through launch. Never race that handoff.
+        with available_lock(Journal(self.store/'writer.jsonl').locked()) as acquired:
+            if acquired:self._recover_locked()
+
+    def _recover_locked(self):
+        for path in sorted((self.store/'jobs').glob('*.json')):
+            job=self._read(path.stem)
+            if job['status'] not in ACTIVE:continue
+            if job['status']=='queued':
+                try:age=(datetime.now(timezone.utc)-datetime.fromisoformat(job['created_at'])).total_seconds()
+                except (ValueError,TypeError):age=QUEUE_STARTUP_SECONDS
+                if 0<=age<QUEUE_STARTUP_SECONDS:continue
+            # An OS lock, not PID reuse or an expired timestamp, proves ownership.
+            # A late worker must obtain this same lock and re-read the terminal receipt.
+            with available_lock(self.worker_guard(job['job_id'])) as worker_free:
+                if not worker_free:continue
+                with available_lock(problem_guard(self.labels,job['problem_key'])) as problem_free:
+                    if not problem_free:continue
+                    ledger=Ledger(self.labels.root)
+                    with available_lock(ledger.locked(job['problem_key'],job['task_type'])) as task_free:
+                        if not task_free:continue
+                        job=self._read(job['job_id'])
+                        if job['status'] not in ACTIVE:continue
+                        self._finish_orphan(job,ledger)
+
+    def _finish_orphan(self, job, ledger):
+        previous=job['status'];evidence=[];status='blocked';code='orphaned_worker_before_dispatch'
+        saved={}
+        try:
+            records=[r for r in ledger.records() if r['problem_key']==job['problem_key'] and r['task_type']==job['task_type']]
+            if job.get('execution_task_id'):
+                records=[r for r in records if r['task_id']==job['execution_task_id']]
+                if len(records)!=1 or records[0]['attempt_id']!=job['execution_attempt_id']:
+                    raise ValueError('Worker task binding cannot be verified')
+            else:
+                # Legacy receipts lack the checkpoint binding. Older work on the same
+                # question must not be mistaken for this worker's completion.
+                records=[r for r in records if r['identity']['request_settings']==job['request_settings']
+                         and datetime.fromisoformat(r['attempts'][-1]['created_at'])>=datetime.fromisoformat(job['created_at'])]
+            for row in records:
+                before=row['state']
+                if before=='claimed':
+                    ledger.transition(row,'blocked',error='orphaned_worker_before_dispatch')
+                elif before=='dispatched':
+                    # Even a durable response is only a candidate until publication is verified.
+                    response=ledger.path('responses',row['attempt_id'])
+                    if response.exists():
+                        try:
+                            envelope=ledger.artifact('responses',row['attempt_id'],row.get('response_sha256'))
+                            if envelope['task_id']!=row['task_id'] or envelope['attempt_id']!=row['attempt_id']:
+                                raise ValueError('Response binding cannot be verified')
+                            saved=envelope['response']
+                            if not isinstance(saved,dict):raise ValueError('Response must be an object')
+                        except (ValueError,OSError,KeyError,TypeError):
+                            saved={}
+                            ledger.transition(row,'uncertain',error='saved_response_requires_review')
+                        else:
+                            ledger.transition(row,'blocked',error='saved_response_requires_review',response_sha256=digest(envelope))
+                    else:
+                        ledger.transition(row,'uncertain',error='no_durable_response')
+                if row['state']=='completed':
+                    artifact=ledger.artifact('results',row['task_id'],row['result_sha256'])
+                    if artifact['task_id']!=row['task_id'] or artifact['identity']!=row['identity']:
+                        raise ValueError('Result binding cannot be verified')
+                    saved=artifact['result']
+                evidence.append({'task_id':row['task_id'],'attempt_id':row['attempt_id'],
+                                 'previous_state':before,'state':row['state']})
+            states={r['state'] for r in records}
+            if 'uncertain' in states:
+                status,code='uncertain','manual_delivery_check_required'
+            elif records and states=={'completed'}:
+                status,code='completed',None
+            elif records:
+                code='saved_response_requires_review' if saved else 'worker_recovery_requires_review'
+        except (ValueError,OSError,KeyError,TypeError):
+            status,code='blocked','worker_recovery_requires_review'
+        job.update(status=status,error=code,updated_at=now(),
+            recovery={'reason':'worker_lock_released','previous_status':previous,'at':now(),'ledger':evidence},
+            message=('执行进程已退出；未发现发送记录，原任务已停止，不会自动重发。' if code=='orphaned_worker_before_dispatch'
+                     else '执行进程已退出；持久状态需核验，禁止自动重发。' if code=='worker_recovery_requires_review'
+                     else execution_message({'status':status,'error':code})))
+        if status=='uncertain' or code=='worker_recovery_requires_review':job['real_api_calls']=None
+        if any(e['previous_state'] in {'dispatched','completed','uncertain'} for e in evidence):
+            job['real_api_calls']=None  # The ledger proves dispatch state, not the relay bill.
+        for key in ('usage','model','elapsed_seconds'):
+            if key in saved:job[key]=saved[key]
+        atomic_json(self.job_path(job['job_id']),job)
+
+    def read(self, job_id):
+        self.job_path(job_id)
+        self.recover_jobs()
+        return self._read(job_id)
+
+    def latest(self, platform, problem_id):
+        self.recover_jobs()
+        result={}
+        for path in sorted((self.store/'jobs').glob('*.json')):
+            row=json.loads(checked_path(path).read_text(encoding='utf-8'))
+            if row['platform']==platform and row['problem_id']==problem_id:
+                previous=result.get(row['task_type'])
+                if previous is None or row['updated_at']>previous['updated_at']:
+                    result[row['task_type']]=self.public(row)
+        return result
+
+    @staticmethod
+    def public(job):
+        result={k:job[k] for k in ('job_id','platform','problem_id','task_type','status','created_at','updated_at',
+            'message','real_api_calls','usage','model','elapsed_seconds','error','failure_stage','recovery') if k in job}
+        if job.get('message')=='任务已停止。请先核对保存记录，不要重复发起付费请求。':
+            result['message']=execution_message(job)  # Read projection only; keep historical evidence immutable.
+        return result
+
+    def submit(self, p, platform, problem_id, task_type, revision, actor):
+        if task_type not in TASKS or not isinstance(revision,str) or not re.fullmatch('[a-f0-9]{64}',revision):
+            raise ValueError('请先检查题目和执行配置')
+        job_id=digest({'problem_key':p['problem_key'],'task_type':task_type,'revision':revision})
+        with Journal(self.store/'writer.jsonl').locked():
+            self._recover_locked()
+            while self.job_path(job_id).exists():
+                previous=self._read(job_id)
+                if previous['status']!='failed_before_dispatch':return self.public(previous)
+                # A new explicit click may retry only a proven unsent attempt.
+                # Keep the previous receipt intact; queued/unknown jobs still deduplicate.
+                job_id=digest({'problem_key':p['problem_key'],'task_type':task_type,'revision':revision,'retry_of':job_id})
+            proposal=self.proposal(p,task_type)
+            if proposal['revision']!=revision:raise ExecutionConflict('题面、配置或处理状态已变化，请重新检查后再执行。')
+            if proposal['status'] in {'reuse_existing','not_required'}:
+                return {'status':'reuse_existing','message':'已有结果已复用，无需新增 API 请求。','real_api_calls':0}
+            if not proposal['can_execute']:raise ExecutionConflict(proposal['reason'] if proposal['config_ready'] else 'API 配置不可用，请检查本地配置。')
+            if any(json.loads(path.read_text(encoding='utf-8'))['status'] in ACTIVE for path in (self.store/'jobs').glob('*.json')):
+                raise ExecutionConflict('已有 AI 任务正在运行；请等待完成。未解决的任务需先核验，不能自动重发。')
+            job={'version':1,'job_id':job_id,'platform':platform,'problem_id':problem_id,'problem_key':p['problem_key'],
+                'task_type':task_type,'revision':revision,'request_settings':proposal['request_settings'],'actor':actor,
+                'status':'queued','message':'已登记单题任务，等待执行。','created_at':now(),'updated_at':now(),'real_api_calls':0}
+            atomic_json(self.job_path(job_id),job)
+            try:self.launcher(job_id)
+            except Exception:
+                job.update(status='failed_before_dispatch',message='执行进程未能启动，没有发送请求。',updated_at=now())
+                atomic_json(self.job_path(job_id),job)
+            return self.public(job)
+
+    def _launch(self, job_id):
+        if self.labels.root.resolve()!=(ROOT/'data/labels').resolve() or self.database.resolve()!=(ROOT/'local_demo/runtime/forum-demo.sqlite3').resolve():
+            raise ValueError('Worker must use the isolated local forum data')
+        env={k:v for k,v in os.environ.items() if not k.startswith(('OPENAI_','ANTHROPIC_','ACM_','TAG_'))}
+        subprocess.Popen([sys.executable,'-B','-X','utf8',str(ROOT/'local_demo/ai_worker.py'),'--job',job_id],
+            cwd=ROOT,env=env,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0),close_fds=True)
+
+    def run(self, job_id, *, client=None):
+        job=self.read(job_id)
+        with self.worker_guard(job_id):
+            job=self._read(job_id)
+            if job['status']!='queued':return self.public(job)
+            job.update(status='running',message='正在执行单题任务，请勿重复提交。',updated_at=now())
+            atomic_json(self.job_path(job_id),job)
+            try:
+                with problem_guard(self.labels,job['problem_key']):
+                    self.check_actor(job['actor'])
+                    p=self.source(job['platform'],job['problem_id'])
+                    proposal=self.proposal(p,job['task_type'])
+                    if proposal['revision']!=job['revision'] or not proposal['can_execute']:
+                        raise ExecutionConflict('执行前状态已变化，请重新检查；没有新增请求。')
+                    cfg=self.config_loader()
+                    if cfg.max_retries!=0 or request_settings(cfg)!=job['request_settings']:
+                        raise ExecutionConflict('执行配置发生变化，请重新检查。')
+                    manual=self.manual_version(p['problem_key'])[0]
+                    def check_source():
+                        self.check_actor(job['actor'])
+                        current=self.source(job['platform'],job['problem_id'])
+                        if (semantic_inputs(current)!=semantic_inputs(p) or current['verified_content_hash']!=p['verified_content_hash']
+                            or self.manual_version(p['problem_key'])[0]!=manual):
+                            raise ExecutionConflict('题面或人工修正已变化，禁止继续发送或激活结果。')
+                    def checkpoint(stage, row):
+                        job.update(execution_task_id=row['task_id'],execution_attempt_id=row['attempt_id'],updated_at=now())
+                        atomic_json(self.job_path(job_id),job)
+                        check_source()
+                    if client is None:
+                        from annotation_api.client import APIClient
+                        class SourceBoundClient(APIClient):
+                            def _check_dispatch(self, request):
+                                check_source()
+                                super()._check_dispatch(request)
+                        client=SourceBoundClient(cfg)
+                        owned=True
+                    else:owned=False
+                    try:
+                        plan=Planner(self.labels.root).plan([p])
+                        outcome=execute_batch([p],job['task_type'],root=self.labels.root,config=cfg,execute=True,
+                            client=client,plan=bind_plan(plan,job['task_type'],request_settings(cfg)),limit=1,checkpoint=checkpoint)
+                    finally:
+                        if owned:client.close()
+                    result=outcome['results'][0];saved=result.get('result') or {}
+                    if not saved and result.get('task_id'):
+                        ledger=Ledger(self.labels.root);record=ledger.load(result['task_id'])
+                        if record and record.get('response_sha256'):
+                            # Parsing errors must not hide usage already returned by the relay.
+                            saved=ledger.artifact('responses',record['attempt_id'],record['response_sha256'])['response']
+                        elif record:
+                            saved={'elapsed_seconds':record.get('elapsed_seconds')}
+                    job.update(status=result['status'],real_api_calls=outcome['real_api_calls'],usage=saved.get('usage'),
+                        model=saved.get('model'),elapsed_seconds=saved.get('elapsed_seconds'),error=result.get('error'),
+                        failure_stage=result.get('failure_stage'),message=execution_message(result))
+            except Exception:
+                records=[r for r in Ledger(self.labels.root).records() if r['problem_key']==job['problem_key'] and r['task_type']==job['task_type']]
+                dispatched=any(r['state'] in {'dispatched','uncertain'} for r in records)
+                job.update(status='uncertain' if dispatched else 'blocked',error='execution_requires_review',
+                    message='任务状态需要核验，已禁止自动重试。' if dispatched else '配置、题面或任务状态已变化，执行已停止。')
+            job['updated_at']=now();atomic_json(self.job_path(job_id),job)
+            return self.public(job)
+
+
+def register_ai_execution(app, labels):
+    from quart import jsonify, request, session
+    from feat.api.acm_api.backend_api import admin_required
+    service=WebAIService(labels,app.config['DB_PATH'])
+    service.recover_jobs()
+    app.extensions['local_ai_execution']=service
+
+    @app.post('/api/admin/problem-processing/<platform>/<problem_id>/execute')
+    @admin_required
+    async def execute_problem(platform, problem_id):
+        if request.content_length and request.content_length>3000:return jsonify(message='执行参数过大'),413
+        payload=await request.get_json(silent=True)
+        if (not isinstance(payload,dict) or set(payload)!={'task_type','revision','confirm'} or payload.get('confirm') is not True):
+            return jsonify(message='请明确确认单题执行，不能从请求修改模型、地址或任务数量。'),400
+        try:
+            p=service.source(platform,problem_id)
+            result=service.submit(p,platform,problem_id,payload['task_type'],payload['revision'],str(session.get('webui_qq_id')))
+            return jsonify(result),202 if result['status'] in ACTIVE else 200
+        except LookupError:return jsonify(message='题库中没有找到该题'),404
+        except ExecutionConflict as exc:return jsonify(message=str(exc)),409
+        except (ValueError,OSError,KeyError,TypeError,sqlite3.Error):return jsonify(message='输入、配置或持久状态无法验证，未启动任务。'),400
+
+    @app.get('/api/admin/problem-processing/jobs/<job_id>')
+    @admin_required
+    async def job_status(job_id):
+        try:return jsonify(service.public(service.read(job_id)))
+        except LookupError:return jsonify(message='没有找到该任务'),404
+        except (ValueError,OSError,KeyError,TypeError):return jsonify(message='任务记录需核验'),400

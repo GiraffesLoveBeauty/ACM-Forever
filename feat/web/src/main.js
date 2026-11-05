@@ -19,6 +19,7 @@ import './angel-city-theme.css';
 import './minecraft-theme.css';
 import './wiki.css';
 import './markdown-code.css';
+import './statement-math.css';
 import './header-layout.css';
 const app = createApp(App);
 const renderMath = (element) => window.renderForumMath?.(element);

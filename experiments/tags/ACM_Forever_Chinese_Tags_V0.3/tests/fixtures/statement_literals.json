@@ -1,0 +1,14 @@
+[
+  {"name":"literal br", "html":"<p>Print &lt;br&gt;.</p>", "markdown":"Print &lt;br&gt;.", "visible":"Print <br>.", "breaks":0},
+  {"name":"literal unknown tag", "html":"<p>Print &lt;YES&gt;.</p>", "markdown":"Print &lt;YES&gt;.", "visible":"Print <YES>.", "breaks":0},
+  {"name":"literal script", "html":"<p>Print &lt;script&gt;alert&#40;1&#41;&lt;/script&gt;.</p>", "markdown":"Print &lt;script&gt;alert&#40;1&#41;&lt;/script&gt;.", "visible":"Print <script>alert(1)</script>.", "breaks":0},
+  {"name":"literal emphasis", "html":"<p>*YES* _NO_ ~~NONE~~</p>", "markdown":"\\*YES\\* \\_NO\\_ \\~\\~NONE\\~\\~", "visible":"*YES* _NO_ ~~NONE~~", "breaks":0},
+  {"name":"literal markdown link", "html":"<p>[YES](answer)</p>", "markdown":"&#91;YES&#93;&#40;answer&#41;", "visible":"[YES](answer)", "breaks":0},
+  {"name":"literal markdown image", "html":"<p>![diagram](https://example.org/a.png)</p>", "markdown":"\\!&#91;diagram&#93;&#40;https&#58;//example.org/a.png&#41;", "visible":"![diagram](https://example.org/a.png)", "breaks":0},
+  {"name":"literal heading", "html":"<p># heading</p>", "markdown":"\\# heading", "visible":"# heading", "breaks":0},
+  {"name":"literal numbered line", "html":"<p>1. Answer</p>", "markdown":"1\\. Answer", "visible":"1. Answer", "breaks":0},
+  {"name":"literal currency and slash", "html":"<p>Print $5 and \\times.</p>", "markdown":"Print &#36;5 and &#92;times.", "visible":"Print $5 and \\times.", "breaks":0},
+  {"name":"literal entity spelling", "html":"<p>Print &amp;lt;br&amp;gt; and &amp;amp;.</p>", "markdown":"Print &amp;lt;br&amp;gt; and &amp;amp;.", "visible":"Print &lt;br&gt; and &amp;.", "breaks":0},
+  {"name":"real break beside literal break", "html":"<p>Print &lt;br&gt;.<br>Continue.</p>", "markdown":"Print &lt;br&gt;.\nContinue.", "visible":"Print <br>.Continue.", "breaks":1},
+  {"name":"backticks inside inline code", "html":"<p>Print <code>`$x_1$`</code>.</p>", "markdown":"Print `` `$x_1$` ``\\.", "visible":"Print `$x_1$`.", "breaks":0, "code":1}
+]

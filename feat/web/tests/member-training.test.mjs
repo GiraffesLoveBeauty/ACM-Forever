@@ -160,12 +160,12 @@ test('member filters and return sources exclude owner/admin state and external U
   assert(!('owner_qq_id' in normalized));
   assert.equal(memberFilters({ page: ['2'], scope: 'unsafe' }).page, 2);
   for (const platform of [undefined, '', 'unknown'])
-    assert.equal(memberFilters({ platform }).platform, 'codeforces');
+    assert.equal(memberFilters({ platform }).platform, 'all');
   assert.equal(memberFilters({ platform: 'atcoder' }).platform, 'atcoder');
   assert.equal(problemReturn('/home.html'), '/home.html');
   assert.equal(
     problemReturn('/problem-bank.html?scope=solved&page=3&qq_id=99999999'),
-    '/problem-bank.html?scope=solved&platform=codeforces&page=3',
+    '/problem-bank.html?scope=solved&platform=all&page=3',
   );
   assert.equal(
     problemReturn(
@@ -370,7 +370,7 @@ test('a delayed old platform tag response cannot replace current choices', async
     }
     return fetch(url, options);
   };
-  mounted = await mount(Problems, routes, '/my-problems.html');
+  mounted = await mount(Problems, routes, '/my-problems.html?platform=codeforces');
   assert(labeledControl('标签').props.disabled);
   labeledControl('平台').props['onUpdate:modelValue']('atcoder');
   await settle();
@@ -380,6 +380,42 @@ test('a delayed old platform tag response cannot replace current choices', async
   await settle();
   assert(!labeledControl('标签').options.map(textOf).includes('old-platform-only'));
 });
+for (const scope of ['all', 'solved']) {
+  for (const platform of ['', 'all', 'codeforces', 'atcoder']) {
+    test(`member list sends backend-compatible platform: ${platform || 'default'}, scope: ${scope}`, async () => {
+      const records = [
+        { platform: 'codeforces', problem_id: 'cf_1A', problem_name: 'CF 合成题', ac_at: 100 },
+        { platform: 'atcoder', problem_id: 'demo_a', problem_name: 'ATC 合成题', ac_at: 200 },
+      ];
+      globalThis.fetch = async (url) => {
+        const parsed = new URL(url, 'https://local.invalid');
+        if (parsed.pathname === '/api/me/problems/tags') {
+          assert.notEqual(parsed.searchParams.get('platform'), 'all');
+          return response({ tags: [] });
+        }
+        assert.equal(parsed.pathname, '/api/me/problems');
+        calls.push({ url });
+        // Match the formal backend: nonempty platform values filter by equality.
+        const selected = parsed.searchParams.get('platform');
+        const items = records.filter((row) => !selected || row.platform === selected);
+        return response({ items, total: items.length });
+      };
+      const query = new URLSearchParams({ scope, ...(platform ? { platform } : {}) });
+      mounted = await mount(Problems, routes, '/problem-bank.html?' + query);
+      const params = new URL(calls[0].url, 'https://local.invalid').searchParams;
+      assert.equal(params.get('scope'), scope);
+      if (!platform || platform === 'all') {
+        assert.equal(params.has('platform'), false);
+        assert(textOf(mounted.root).includes('CF 合成题'));
+        assert(textOf(mounted.root).includes('ATC 合成题'));
+      } else {
+        assert.equal(params.get('platform'), platform);
+        assert(textOf(mounted.root).includes(platform === 'codeforces' ? 'CF 合成题' : 'ATC 合成题'));
+        assert(!textOf(mounted.root).includes(platform === 'codeforces' ? 'ATC 合成题' : 'CF 合成题'));
+      }
+    });
+  }
+}
 
 test('binding form requires current password and confirmation; cancellation clears secrets', async () => {
   const binding = {
@@ -648,20 +684,17 @@ for (const role of ['member', 'admin', 'root']) {
     assert.equal(mounted.router.currentRoute.value.fullPath, '/my-problems.html');
     assert(calls.some(({ url }) => url.startsWith('/api/me/problems?')));
     const list = calls.find(({ url }) => url.startsWith('/api/me/problems?'));
-    assert.equal(new URL(list.url, 'https://acm.test').searchParams.get('platform'), 'codeforces');
-    assert(!textOf(mounted.root).includes('全部平台'));
+    assert.equal(new URL(list.url, 'https://acm.test').searchParams.has('platform'), false);
+    assert(textOf(mounted.root).includes('全部平台'));
     assert(
       !calls.some(({ url }) => url.startsWith('/api/admin/') || url.startsWith('/api/problems?')),
     );
     await click(links('查看题面')[0]);
     const back = links('返回题库')[0];
     await realRouter.push(back.props.href);
-    assert.equal(realRouter.currentRoute.value.fullPath, '/my-problems.html?platform=codeforces');
+    assert.equal(realRouter.currentRoute.value.fullPath, '/my-problems.html?platform=all');
     await click(back);
-    assert.equal(
-      mounted.router.currentRoute.value.fullPath,
-      '/my-problems.html?platform=codeforces',
-    );
+    assert.equal(mounted.router.currentRoute.value.fullPath, '/my-problems.html?platform=all');
   });
 
   test(`${role} Home complete AC link stays in personal problems during filtering and statement round trips`, async () => {
@@ -675,22 +708,22 @@ for (const role of ['member', 'admin', 'root']) {
     await click(buttons('下一页')[0]);
     assert.equal(
       mounted.router.currentRoute.value.fullPath,
-      '/my-problems.html?scope=solved&platform=codeforces&page=2',
+      '/my-problems.html?scope=solved&platform=all&page=2',
     );
     await click(links('查看题面')[0]);
     assert.equal(
       links('返回题库')[0].props.href,
-      '/my-problems.html?scope=solved&platform=codeforces&page=2',
+      '/my-problems.html?scope=solved&platform=all&page=2',
     );
     await click(links('返回题库')[0]);
     assert.equal(
       mounted.router.currentRoute.value.fullPath,
-      '/my-problems.html?scope=solved&platform=codeforces&page=2',
+      '/my-problems.html?scope=solved&platform=all&page=2',
     );
     await click(buttons('清除筛选')[0]);
     assert.equal(
       mounted.router.currentRoute.value.fullPath,
-      '/my-problems.html?scope=solved&platform=codeforces',
+      '/my-problems.html?scope=solved&platform=all',
     );
     await click(buttons('收藏')[0]);
     assert(

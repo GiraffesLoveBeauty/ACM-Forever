@@ -41,6 +41,7 @@ function node(type, text = '') {
     children: [],
     parent: null,
     listeners: new Map(),
+    style: {},
     ...(type === 'canvas' ? { getContext: () => ({}), style: {} } : {}),
     getRootNode() {
       return globalThis.document;

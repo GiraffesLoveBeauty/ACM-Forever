@@ -1,0 +1,92 @@
+/* Applied only to statement rendering; local KaTeX CSS/fonts are already bundled. */
+.problem-statement .statement-math-inline {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: middle;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 0.15em;
+  overflow-wrap: normal;
+  word-break: normal;
+  /* Tiny italic overhang must not create a visible scrollbar under a single variable. */
+  scrollbar-width: none;
+}
+.problem-statement .statement-math-block {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 0.3em;
+}
+.problem-statement .statement-math-block .katex-display { margin: 0.5em 0; }
+.problem-statement .statement-math-sequence {
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  vertical-align: middle;
+  padding-block: 0.15em;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+.problem-statement .statement-math-sequence > .statement-math-inline {
+  flex-shrink: 0;
+  max-width: none;
+  overflow: visible;
+  padding: 0;
+}
+.problem-statement .statement-math-unparsed {
+  text-decoration: underline dotted;
+  text-underline-offset: 0.2em;
+}
+.problem-statement .statement-image-reference {
+  display: block;
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--line, #aaa);
+  font-size: 0.9em;
+}
+.problem-statement .statement-io-format {
+  max-width: 100%;
+  margin: 18px 0;
+  padding: 18px 20px;
+  border: 1px solid var(--line, #ccc);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg, #f2f3f0);
+}
+.problem-statement .statement-io-layout { overflow-x: auto; padding-right: 0.3em; }
+.problem-statement .statement-io-line { min-height: 1.8em; white-space: nowrap; }
+.problem-statement .statement-io-line .statement-math-inline {
+  overflow: visible;
+  max-width: none;
+  padding: 0;
+}
+.problem-statement .statement-io-original { margin-top: 10px; font-size: 12px; }
+.problem-statement .statement-io-original summary { cursor: pointer; color: var(--muted, #667); }
+.problem-statement .statement-io-original pre { margin-bottom: 0; }
+.problem-statement .statement-sample-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+.problem-statement .statement-sample-heading > .btn {
+  margin: 0;
+  padding: 4px 12px;
+  min-height: 30px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.problem-statement .statement-sample-heading > h3 { margin: 12px 0; }
+.problem-statement .statement-sample-copy-status { font-size: 12px; font-weight: normal; }
+.statement-source-image {
+  max-width: 100%;
+  height: auto;
+  vertical-align: middle;
+}
+.statement-image-link {
+  display: inline-block;
+  margin: 0 .5em;
+  font-size: .8em;
+}

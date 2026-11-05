@@ -1,0 +1,162 @@
+{
+  "version": "0.3-draft",
+  "source": "Codeforces official tags observed in 200 crawler records",
+  "policy": {
+    "exact": "Codeforces官方标签映射具体标签，来源cf_rule，保留原始英文标签；不要自动声称经过人工确认。",
+    "clue": "Codeforces宽泛标签映射临时大类标签；AI明确细化相应线索后，才可删除对应临时标签。",
+    "property": "题目属性与算法标签分离。",
+    "unknown": "记录未映射的原始标签并进入审核。",
+    "atcoder": "无原始标签时不凭空生成临时大类；AI确有线索但不能判定具体算法时允许临时类，否则保留为空。",
+    "human_override": "人工确认优先于自动预测，自动运行不得覆盖人工结果。"
+  },
+  "exact": {
+    "2-sat": {
+      "tag_id": "two_sat",
+      "name_zh": "2-SAT"
+    },
+    "binary search": {
+      "tag_id": "binary_search",
+      "name_zh": "二分"
+    },
+    "bitmasks": {
+      "tag_id": "bitmask",
+      "name_zh": "位掩码"
+    },
+    "brute force": {
+      "tag_id": "enumeration",
+      "name_zh": "枚举"
+    },
+    "chinese remainder theorem": {
+      "tag_id": "crt",
+      "name_zh": "中国剩余定理"
+    },
+    "constructive algorithms": {
+      "tag_id": "construction",
+      "name_zh": "构造"
+    },
+    "divide and conquer": {
+      "tag_id": "divide_conquer",
+      "name_zh": "分治"
+    },
+    "dsu": {
+      "tag_id": "dsu",
+      "name_zh": "并查集"
+    },
+    "expression parsing": {
+      "tag_id": "expression_parsing",
+      "name_zh": "表达式解析"
+    },
+    "fft": {
+      "tag_id": "fft",
+      "name_zh": "快速傅里叶变换"
+    },
+    "greedy": {
+      "tag_id": "greedy",
+      "name_zh": "贪心"
+    },
+    "implementation": {
+      "tag_id": "simulation",
+      "name_zh": "模拟"
+    },
+    "sortings": {
+      "tag_id": "sorting",
+      "name_zh": "排序"
+    },
+    "ternary search": {
+      "tag_id": "ternary_search",
+      "name_zh": "三分"
+    },
+    "two pointers": {
+      "tag_id": "two_pointers",
+      "name_zh": "双指针"
+    }
+  },
+  "clue": {
+    "combinatorics": {
+      "reason": "组合计数、容斥、隔板法等，不能直接确定某一种",
+      "provisional_tag_id": "pending_combinatorics",
+      "name_zh": "组合数学·待细化"
+    },
+    "data structures": {
+      "reason": "线段树、树状数组、优先队列、单调栈、并查集等，需结合解法",
+      "provisional_tag_id": "pending_data_structures",
+      "name_zh": "数据结构·待细化"
+    },
+    "dfs and similar": {
+      "reason": "DFS/BFS/回溯或其他搜索，不能直接认定为DFS",
+      "provisional_tag_id": "pending_search",
+      "name_zh": "搜索·待细化"
+    },
+    "dp": {
+      "reason": "线性DP、背包DP、树形DP、状压DP等，需明确转移结构",
+      "provisional_tag_id": "pending_dp",
+      "name_zh": "动态规划·待细化"
+    },
+    "games": {
+      "reason": "Nim博弈、SG函数等，需明确博弈模型",
+      "provisional_tag_id": "pending_games",
+      "name_zh": "博弈论·待细化"
+    },
+    "geometry": {
+      "reason": "凸包、叉积、扫描线等，需明确几何算法",
+      "provisional_tag_id": "pending_geometry",
+      "name_zh": "计算几何·待细化"
+    },
+    "graphs": {
+      "reason": "图论题型线索，不表示具体算法",
+      "provisional_tag_id": "pending_graphs",
+      "name_zh": "图论·待细化"
+    },
+    "hashing": {
+      "reason": "可能是哈希表或字符串哈希，不能自动选择",
+      "provisional_tag_id": "pending_hashing",
+      "name_zh": "哈希·待细化"
+    },
+    "math": {
+      "reason": "数学领域提示，不能当作最终算法标签",
+      "provisional_tag_id": "pending_math",
+      "name_zh": "数学·待细化"
+    },
+    "matrices": {
+      "reason": "矩阵快速幂、高斯消元等，需根据实际用法细化",
+      "provisional_tag_id": "pending_matrices",
+      "name_zh": "矩阵·待细化"
+    },
+    "number theory": {
+      "reason": "数论领域提示，不能当作最终算法标签",
+      "provisional_tag_id": "pending_number_theory",
+      "name_zh": "数论·待细化"
+    },
+    "probabilities": {
+      "reason": "概率与期望相关，不能直接认定概率DP",
+      "provisional_tag_id": "pending_probabilities",
+      "name_zh": "概率与期望·待细化"
+    },
+    "shortest paths": {
+      "reason": "Dijkstra、Floyd、0-1 BFS 等，需具体判断",
+      "provisional_tag_id": "pending_shortest_paths",
+      "name_zh": "最短路·待细化"
+    },
+    "strings": {
+      "reason": "字符串领域提示，不表示具体字符串算法",
+      "provisional_tag_id": "pending_strings",
+      "name_zh": "字符串·待细化"
+    },
+    "trees": {
+      "reason": "树结构或树上算法提示，不表示树形DP或树链剖分",
+      "provisional_tag_id": "pending_trees",
+      "name_zh": "树上算法·待细化"
+    }
+  },
+  "property": {
+    "*special": {
+      "name_zh": "特殊题"
+    },
+    "communication": {
+      "name_zh": "通信题"
+    },
+    "interactive": {
+      "name_zh": "交互题"
+    }
+  }
+}

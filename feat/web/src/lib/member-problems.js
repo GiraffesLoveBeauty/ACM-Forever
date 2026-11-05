@@ -2,15 +2,33 @@ const platforms = ['codeforces', 'luogu', 'atcoder', 'nowcoder', 'cjlu'];
 export function memberFilters(query = {}) {
   const number = Number(query.page);
   const view = query.view === 'tracker' ? 'tracker' : 'list';
-  const allowedPlatforms = view === 'tracker' ? ['codeforces', 'atcoder'] : platforms;
+  const allowedPlatforms = view === 'tracker' ? ['codeforces', 'atcoder'] : ['all', ...platforms];
   return {
     view,
     scope: query.scope === 'solved' ? 'solved' : 'all',
-    platform: allowedPlatforms.includes(query.platform) ? query.platform : 'codeforces',
+    platform: allowedPlatforms.includes(query.platform)
+      ? query.platform
+      : view === 'tracker'
+        ? 'codeforces'
+        : 'all',
     tag: typeof query.tag === 'string' ? query.tag.slice(0, 100) : '',
     problem_tag:
       typeof query.problem_tag === 'string' ? query.problem_tag.trim().slice(0, 100) : '',
     state: query.state === 'favorite' ? 'favorite' : '',
+    labels:
+      view === 'tracker'
+        ? ''
+        : [
+            ...new Set(
+              (typeof query.labels === 'string' ? query.labels : '')
+                .split(',')
+                .filter((t) => /^[a-z][a-z0-9_]{0,80}$/.test(t)),
+            ),
+          ]
+            .sort()
+            .slice(0, 115)
+            .join(','),
+    match: query.match === 'any' && view !== 'tracker' ? 'any' : 'all',
     page: Number.isSafeInteger(number) && number > 0 && number <= 1000000 ? number : 1,
   };
 }
@@ -21,6 +39,7 @@ export function memberQuery(filters) {
         value &&
         !(key === 'view' && value === 'list') &&
         !(key === 'scope' && value === 'all') &&
+        !(key === 'match' && value === 'all') &&
         !(key === 'page' && value === 1),
     ),
   );
