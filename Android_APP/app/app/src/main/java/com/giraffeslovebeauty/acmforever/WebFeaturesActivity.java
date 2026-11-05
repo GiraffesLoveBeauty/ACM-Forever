@@ -29,7 +29,7 @@ public final class WebFeaturesActivity extends Activity {
     @Override public void onCreate(Bundle saved){
         super.onCreate(saved);AppAppearance.load(this);AppAppearance.window(this);api=((AcmApplication)getApplication()).api();
         try{route=saved==null?put(state(getIntent().getStringExtra("feature")==null?"wiki":getIntent().getStringExtra("feature")),"id",getIntent().getIntExtra("post_id",0)):new JSONObject(saved.getString("route"));}catch(Exception e){route=state("wiki");}
-        if(saved==null){String slug=getIntent().getStringExtra("wiki_slug"),query=getIntent().getStringExtra("initial_query");if(slug!=null)put(route,"slug",slug);if(query!=null)put(route,"q",query);}
+        if(saved==null){String slug=getIntent().getStringExtra("wiki_slug"),query=getIntent().getStringExtra("initial_query"),platform=getIntent().getStringExtra("initial_platform");if(slug!=null)put(route,"slug",slug);if(query!=null)put(route,"q",query);if("codeforces".equals(platform)||"atcoder".equals(platform))put(route,"platform",platform);}
         if(saved!=null){java.util.ArrayList<String> back=saved.getStringArrayList("history");if(back!=null)history.addAll(back);}
         root=column();root.setFitsSystemWindows(true);root.setBackground(ProfileCover.drawable(this));AppAppearance.content(this,root);
         LinearLayout top=row();top.setPadding(dp(12),dp(8),dp(12),dp(8));top.setBackgroundColor(MobileStyle.CHROME);

@@ -72,7 +72,7 @@ public final class SearchActivity extends MobilePageActivity {
             case "posts":next=new Intent(this,WebFeaturesActivity.class).putExtra("feature","progress").putExtra("post_id",item.optInt("id"));break;
             case "drafts":next=new Intent(this,MainActivity.class).putExtra("cloud_draft_id",item.optInt("id"));break;
             case "wiki":next=new Intent(this,WebFeaturesActivity.class).putExtra("feature","wiki-article").putExtra("wiki_slug",item.optString("slug"));break;
-            case "tracker":next=new Intent(this,WebFeaturesActivity.class).putExtra("feature","tracker").putExtra("initial_query",item.optString("contest_id"));break;
+            case "tracker":next=new Intent(this,WebFeaturesActivity.class).putExtra("feature","tracker").putExtra("initial_query",item.optString("contest_id")).putExtra("initial_platform",item.optString("platform"));break;
             default:next=new Intent(this,MainActivity.class).putExtra("web_problem_platform",item.optString("platform")).putExtra("web_problem_id",item.optString("problem_id"));}
         opening=true;startActivity(next);
     }
