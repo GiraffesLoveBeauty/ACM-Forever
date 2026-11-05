@@ -32,5 +32,7 @@ class ThemeRendererAssetsTest(unittest.TestCase):
         self.assertNotIn('/assets/hero-halftone.svg',css)
         self.assertTrue((ASSETS/'licenses/fusion-pixel-OFL.txt').is_file())
         self.assertTrue((ASSETS/'licenses/vue-LICENSE.txt').is_file())
+        for notice in ['README.md','OFL.txt','LICENSES/ark-pixel/OFL.txt','LICENSES/cubic-11/OFL.txt','LICENSES/galmuri/LICENSE.txt']:
+            self.assertTrue((ASSETS/'licenses/fusion-pixel'/notice).is_file(),notice)
 
 if __name__=='__main__':unittest.main()
