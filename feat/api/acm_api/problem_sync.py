@@ -154,11 +154,11 @@ def cf_catalog_metadata(problems):
 
 
 async def _scheduled_pending(db, platform, items):
-    """Collect new statements first, then rotate through older failed attempts."""
-    completed = set()
+    """Fill missing statements, keeping content from before a failed refresh."""
+    saved = set()
     attempted = {}
     async with db.execute(
-        "SELECT problem_id,last_attempt_at,last_fetch_status='ok' AND "
+        "SELECT problem_id,last_attempt_at,"
         "(COALESCE(length(statement_html),0)>0 OR COALESCE(length(statement_text),0)>0 "
         "OR COALESCE(length(statement_pdf),0)>0) AS has_statement "
         "FROM crawler_problems WHERE platform=?",
@@ -167,7 +167,7 @@ async def _scheduled_pending(db, platform, items):
         for problem_id, last_attempt_at, has_statement in await cursor.fetchall():
             key = problem_id_key(platform, problem_id)
             if has_statement:
-                completed.add(key)
+                saved.add(key)
             if last_attempt_at:
                 attempted[key] = max(attempted.get(key, ""), last_attempt_at)
     async with db.execute(
@@ -183,7 +183,7 @@ async def _scheduled_pending(db, platform, items):
         contest_number = int(contest_id) if platform == "codeforces" else 0
         return bool(last_attempt), last_attempt, -starts.get(contest_id, 0), -contest_number
 
-    pending = [item for item in items if problem_id_key(platform, item["problem_id"]) not in completed]
+    pending = [item for item in items if problem_id_key(platform, item["problem_id"]) not in saved]
     return sorted(pending, key=priority)
 
 

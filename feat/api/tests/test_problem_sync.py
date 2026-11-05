@@ -16,7 +16,7 @@ from unittest.mock import patch
 from feat.api.acm_api.auth_service import hash_password
 from feat.api.acm_api.contest_metadata import save_contests
 from feat.api.acm_api.database import connect_db
-from feat.api.acm_api.problem_bank import save_metadata_batch, save_problem
+from feat.api.acm_api.problem_bank import record_problem_failure, save_metadata_batch, save_problem
 from feat.api.acm_api.problem_content import parse_atcoder, parse_atcoder_tasks, parse_codeforces
 from feat.api.acm_api.problem_sync import ATCODER_CATALOG_URL, atcoder_catalog_metadata, cf_catalog_metadata, sync_options
 from feat.api.app import create_app
@@ -663,6 +663,7 @@ class ProblemSyncTests(unittest.IsolatedAsyncioTestCase):
             await save_problem(db, previous, {
                 **content, "requested_language": "ja", "source_url": source_url, "sha256": "original-body",
             })
+            await record_problem_failure(db, "atcoder", saved["id"], "Manual refresh failed")
             await save_contests(db, [
                 {"platform": "atcoder", "contest_id": item["contest_id"],
                  "contest_name": item["name"], "start_time": start}
@@ -691,12 +692,31 @@ class ProblemSyncTests(unittest.IsolatedAsyncioTestCase):
             for item in newest
         ])
         self.assertEqual(len(await self.query("SELECT problem_id FROM recommendations")), 102)
+
+        # With spare capacity, retry a failed problem with no saved body,
+        # but keep the saved Japanese body even though its last refresh failed.
+        db = await connect_db(self.db_path)
+        try:
+            await record_problem_failure(db, "atcoder", older["id"], "Initial download failed")
+        finally:
+            await db.close()
+        with patch.object(sync, "download", side_effect=download) as fetch:
+            await sync.run(options, task)
+        self.assertEqual(task["status"], "completed", task["result"])
+        self.assertEqual(task["result"]["success_count"], 1)
+        self.assertEqual([call.args[1] for call in fetch.await_args_list], [
+            ATCODER_CATALOG_URL,
+            f"https://atcoder.jp/contests/{older['contest_id']}/tasks/{older['id']}?lang=en",
+        ])
         rows = await self.query(
-            "SELECT problem_name,statement_html,requested_language,statement_sha256 FROM crawler_problems WHERE problem_id=?",
+            "SELECT problem_name,statement_html,statement_language,requested_language,statement_sha256,"
+            "samples,last_fetch_status FROM crawler_problems WHERE problem_id=?",
             (saved["id"],),
         )
+        rows[0]["samples"] = json.loads(rows[0]["samples"])
         self.assertEqual(rows, [{
             "problem_name": "Renamed in catalog", "statement_html": content["statement_html"],
+            "statement_language": "ja", "samples": content["samples"], "last_fetch_status": "failed",
             "requested_language": "ja", "statement_sha256": "original-body",
         }])
 
