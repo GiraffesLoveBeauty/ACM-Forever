@@ -83,6 +83,77 @@ class BankFilterTests(unittest.TestCase):
         self.assertEqual(self.result(state='favorite',labels='difference_array')['total'],1)
         self.assertEqual(self.result(platform='codeforces')['total'],0)
 
+    def test_original_tag_option_is_trimmed_and_validated(self):
+        self.assertEqual(parse_options({'problem_tag':'  DP  '})['problem_tag'], 'DP')
+        self.assertEqual(parse_options({})['problem_tag'], '')
+        for value in ('x'*101, ['dp']):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                parse_options({'problem_tag':value})
+
+    def test_original_tag_matches_exactly_across_storage_formats(self):
+        for tags in ('["DP", "graphs"]', ['DP','graphs'], 'DP;graphs|trees，greedy'):
+            with self.subTest(tags=tags):
+                self.raw[0]['tags']=tags
+                self.raw[1]['tags']='notdp,math'
+                data=self.result(problem_tag=' dp ')
+                self.assertEqual([p['problem_id'] for p in data['items']], ['demo_a'])
+                self.assertEqual(data['items'][0]['raw_tags'][:2], ['DP','graphs'])
+
+    def test_original_tag_does_not_match_effective_algorithm_labels(self):
+        self.raw[0]['tags']='dp'
+        self.raw[1]['tags']='math'
+        self.assertEqual(self.result(problem_tag='difference_array')['total'], 0)
+        self.assertEqual(self.result(problem_tag='dp')['total'], 1)
+
+    def test_original_and_effective_tag_filters_combine(self):
+        self.raw[0]['tags']='dp'
+        self.raw[1]['tags']='math'
+        self.assertEqual(self.result(problem_tag='math',labels='difference_array,enumeration')['total'], 1)
+        self.assertEqual(self.result(problem_tag='dp',labels='difference_array,enumeration')['total'], 0)
+        self.assertEqual(self.result(problem_tag='dp',labels='difference_array,enumeration',match='any')['total'], 1)
+
+    def test_original_tag_filter_precedes_counts_and_pagination(self):
+        self.raw[0]['tags']='math'
+        self.raw[1]['tags']='dp'
+        self.raw.append(dict(platform='atcoder',problem_id='demo_c',problem_name='Gamma',tags=['dp']))
+        first=self.result(problem_tag='dp',page_size='1')
+        second=self.result(problem_tag='dp',page_size='1',page='2')
+        last=self.result(problem_tag='dp',page_size='1',page='3')
+        self.assertEqual(first['total'], 2)
+        self.assertEqual(second['total'], 2)
+        self.assertEqual(first['returned'], 1)
+        self.assertEqual(first['items'][0]['problem_id'], 'demo_b')
+        self.assertEqual(second['items'][0]['problem_id'], 'demo_c')
+        self.assertEqual(last['total'], 2)
+        self.assertEqual(last['items'], [])
+
+    def test_original_tag_filter_applies_to_facet_counts(self):
+        self.raw[0]['tags']='dp'
+        self.raw[1]['tags']='math'
+        facets={t['id']:t['count'] for t in self.result(problem_tag='dp')['tag_facets']}
+        self.assertEqual(facets['difference_array'], 1)
+        self.assertEqual(facets['enumeration'], 0)
+
+    def test_unknown_original_tag_returns_empty_results(self):
+        data=self.result(problem_tag='no-such-original-tag')
+        self.assertEqual(data['total'], 0)
+        self.assertEqual(data['returned'], 0)
+        self.assertEqual(data['items'], [])
+
+    def test_original_tag_filter_keeps_manual_empty_effective_set(self):
+        self.raw[0]['tags']='dp'
+        self.views[0]['effective_tags']=[]
+        data=self.result(problem_tag='dp')
+        self.assertEqual(data['total'], 1)
+        self.assertEqual(data['items'][0]['tags'], [])
+        self.assertEqual(self.result(problem_tag='dp',labels='difference_array')['total'], 0)
+
+    def test_combined_original_tag_filter_does_not_mutate_inputs(self):
+        original=deepcopy(self.raw); views=deepcopy(self.views)
+        self.result(problem_tag='raw',labels='difference_array')
+        self.assertEqual(original, self.raw)
+        self.assertEqual(views, self.views)
+
 
 class BankAPITests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -149,6 +220,38 @@ class BankAPITests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_filter_is_400(self):
         await self.login()
         self.assertEqual((await self.client.get('/api/me/problems?labels=illegal')).status_code,400)
+
+    async def seed_original_tags(self):
+        from feat.api.acm_api.database import connect_db
+        db=await connect_db(self.database)
+        try:
+            for table in ('crawler_problems', 'recommendations'):
+                await db.executemany(f'UPDATE {table} SET tags=? WHERE platform=? AND problem_id=?', [
+                    ('["DP"]','atcoder','abc464_c'),
+                    ('math','atcoder','abc469_a'),
+                    ('dp;graphs','atcoder','offline_0')])
+            await db.commit()
+        finally:
+            await db.close()
+
+    async def test_original_tag_endpoint_filter_counts_and_paginates(self):
+        await self.seed_original_tags(); await self.login()
+        first=await self.query('problem_tag=dp&page_size=1')
+        second=await self.query('problem_tag=dp&page_size=1&page=2')
+        self.assertEqual(first['total'], 2)
+        self.assertEqual(second['total'], 2)
+        self.assertEqual(first['returned'], 1)
+        ids={first['items'][0]['problem_id'],second['items'][0]['problem_id']}
+        self.assertEqual(ids, {'abc464_c','offline_0'})
+        self.assertEqual((await self.query('problem_tag=math'))['total'], 1)
+
+    async def test_original_tag_endpoint_combines_effective_filters_and_rejects_oversized_tag(self):
+        await self.seed_original_tags(); await self.login()
+        data=await self.query('problem_tag=dp&labels=difference_array')
+        self.assertEqual(data['total'], 1)
+        self.assertEqual(data['items'][0]['problem_id'], 'abc464_c')
+        self.assertEqual((await self.query('problem_tag=math&labels=difference_array'))['total'], 0)
+        self.assertEqual((await self.client.get('/api/me/problems?problem_tag='+'x'*101)).status_code, 400)
 
     async def test_owner_parameters_never_expose_other_favorites_or_solved_rows(self):
         from feat.api.acm_api.database import connect_db

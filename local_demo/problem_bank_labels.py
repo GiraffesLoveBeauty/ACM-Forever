@@ -1,7 +1,7 @@
 """Local read-only catalog projection: apply effective labels before search/pagination."""
 from collections import Counter
-import json
 
+from feat.api.acm_api.problem_tags import has_problem_tag, problem_tags
 from label_pipeline import TAG_BY_ID
 from tag_management.model import resolve_tag
 
@@ -27,12 +27,16 @@ def parse_options(args):
     query = args.get('tag', '').strip()
     if len(query) > 100:
         raise ValueError('搜索词最多 100 字')
+    original_tag = args.get('problem_tag', '')
+    if not isinstance(original_tag, str) or len(original_tag.strip()) > 100:
+        raise ValueError('题目标签必须为最多 100 字的字符串')
     raw = args.get('labels', '')
     if len(raw) > 5000:
         raise ValueError('选择的标签过多')
     selected = {resolve_tag(t.strip()) for t in raw.split(',') if t.strip()}
     return {'platform': platform, 'scope': scope, 'state': state, 'match': mode,
-            'page': page, 'size': size, 'query': query, 'labels': selected}
+            'page': page, 'size': size, 'query': query, 'labels': selected,
+            'problem_tag': original_tag.strip()}
 
 
 def project_rows(records, effective):
@@ -41,14 +45,7 @@ def project_rows(records, effective):
     for raw in records:
         row = dict(raw)
         secondary = index.get((row['platform'], row['problem_id']))
-        tags = row.get('tags') or []
-        if isinstance(tags, str):
-            try:
-                decoded = json.loads(tags)
-                tags = decoded if isinstance(decoded, list) else tags.split(',')
-            except ValueError:
-                tags = tags.split(',')
-        row['raw_tags'] = [str(t).strip() for t in tags if str(t).strip()]
+        row['raw_tags'] = problem_tags(row.get('tags'))
         row.update(has_secondary=secondary is not None,
                    effective_tags=secondary['effective_tags'] if secondary else [],
                    review_status=secondary['review_status'] if secondary else 'unprocessed',
@@ -70,6 +67,8 @@ def filter_bank(records, options):
         if options['scope'] == 'solved' and not row.get('ac_at'):
             continue
         if options['state'] == 'favorite' and not row.get('is_favorite'):
+            continue
+        if options['problem_tag'] and not has_problem_tag(row['raw_tags'], options['problem_tag']):
             continue
         terms = [row.get('problem_name'), row['problem_id'], row.get('problem_key'), row.get('contest_id')]
         terms += ([v for t in row['effective_tags'] for v in (t['id'], t['name_zh'])]
