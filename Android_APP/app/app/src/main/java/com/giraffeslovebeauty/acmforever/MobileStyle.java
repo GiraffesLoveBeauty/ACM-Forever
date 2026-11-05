@@ -37,7 +37,8 @@ final class MobileStyle {
     }
     /** Buttons and filter chips use the same enabled, disabled and selected palette. */
     static void control(TextView view,boolean primary,boolean selected,int radius){
-        int fill=primary||selected?ACCENT:PANEL,ink=selected?ON_SELECTED:primary?ON_ACCENT:BRAND;
+        boolean web="web".equals(AppAppearance.prefs(view.getContext()).getString("theme_source","acm"));
+        int fill=primary?ACCENT:selected?(web?SELECTED:ACCENT):PANEL,ink=selected?(web?ON_SELECTED:ON_ACCENT):primary?ON_ACCENT:BRAND;
         int disabledFill=ThemePalette.mix(PANEL,fill,.22),disabledInk=ThemePalette.readable(new int[]{disabledFill},ThemePalette.mix(ink,disabledFill,.5),3);
         view.setSelected(selected);
         ColorStateList text=new ColorStateList(new int[][]{new int[]{-android.R.attr.state_enabled},new int[]{}},new int[]{disabledInk,ink});

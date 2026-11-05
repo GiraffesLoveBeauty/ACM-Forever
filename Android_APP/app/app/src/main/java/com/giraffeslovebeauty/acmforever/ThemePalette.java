@@ -13,15 +13,17 @@ final class ThemePalette {
     }
     private ThemePalette(int primary,int background,int surface,int accent,boolean dark,boolean industrial,boolean acm,int[] overrides){
         this.primary=primary;this.background=background;this.surface=surface;this.accent=accent;this.dark=dark;
-        text=overrides[0]!=0?overrides[0]:industrial?(dark?0xfff5f6eb:0xff292c29):readable(new int[]{background,surface},dark?0xffedf5eb:0xff1e211c,4.5);
-        muted=overrides[1]!=0?overrides[1]:industrial?(dark?0xffb4bbac:0xff62685e):readable(new int[]{background,surface},mix(text,surface,.3),4.5);
+        text=overrides[0]!=0?overrides[0]:industrial?(dark?0xfff5f6eb:0xff292c29):solve(acm,new int[]{background,surface},dark?0xffedf5eb:acm?0xff1e211c:0xff163432,4.5);
+        muted=overrides[1]!=0?overrides[1]:industrial?(dark?0xffb4bbac:0xff62685e):solve(acm,new int[]{background,surface},mix(text,surface,.3),4.5);
         line=overrides[2]!=0?overrides[2]:industrial?(dark?0xff454b41:0xffc7cabc):mix(surface,text,.22);
-        brand=overrides[3]!=0?overrides[3]:readable(new int[]{surface,background},primary,4.5);
+        brand=overrides[3]!=0?overrides[3]:solve(acm,new int[]{background,surface},primary,4.5);
         hero=overrides[5]!=0?overrides[5]:acm?accent:industrial?(dark?0xff151814:0xff20231f):mix(surface,primary,dark?.1:.15);
-        onHero=readable(new int[]{hero},text,4.5);onAccent=readable(new int[]{accent},text,4.5);
-        onSelected=overrides[4]!=0?readable(new int[]{accent},overrides[4],4.5):onAccent;
-        selected=mix(surface,primary,.12);cat=readable(new int[]{surface,accent},primary,3);
+        onHero=solve(acm,new int[]{hero},acm?text:0xffffffff,4.5);onAccent=solve(acm,new int[]{accent},acm?text:0xff163432,4.5);
+        selected=mix(surface,primary,acm?.12:.1);
+        onSelected=acm?onAccent:overrides[4]!=0?overrides[4]:WebThemeColors.readable(new int[]{selected},primary,4.5);
+        cat=readable(new int[]{surface,accent},primary,3);
     }
+    private static int solve(boolean nativeTheme,int[] surfaces,int preferred,double minimum){return nativeTheme?readable(surfaces,preferred,minimum):WebThemeColors.readable(surfaces,preferred,minimum);}
     static ThemePalette acm(int primary){return acm(primary,0xffffffff);}
     static ThemePalette acm(int primary,int secondary){
         boolean dark=luminance(secondary)<.35;

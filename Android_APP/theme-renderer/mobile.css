@@ -2,9 +2,10 @@
 html, body, #app {margin:0;min-width:0;width:100%;height:100%;overflow:hidden;}
 body {padding:0 !important;}
 body:not([data-mobile-scene='background']) {background:transparent !important;}
-body .forum-welcome {display:block !important;position:relative;min-height:0 !important;width:100%;height:100%;margin:0 !important;padding:0 !important;border:0;box-shadow:none;background:transparent;}
+body:not([data-mobile-scene='background']) #app {display:flex;align-items:center;justify-content:center;}
+body .forum-welcome {display:block !important;position:relative !important;flex:0 0 400px;min-width:0 !important;min-height:0 !important;max-width:none !important;width:400px !important;height:300px !important;box-sizing:border-box;transform:scale(var(--mobile-art-scale,1));transform-origin:center;margin:0 !important;padding:0 !important;border:0 !important;box-shadow:none !important;background:transparent !important;}
 body .forum-algorithm-art, body .community-header-art {position:absolute !important;inset:0 !important;width:100% !important;height:100% !important;min-width:0 !important;min-height:0 !important;margin:0 !important;transform:none !important;}
 body .forum-algorithm-art figcaption, body .header-art-caption {display:none;}
-body .algorithm-layer, body .header-art-layer {width:100%;height:100%;}
-body .algorithm-graph, body .header-art-scene {width:100%;height:100%;}
+body .algorithm-layer, body .header-art-layer {position:absolute !important;inset:0 !important;width:100% !important;height:100% !important;transform:none !important;}
+body .algorithm-graph, body .header-art-scene {position:absolute !important;inset:0 !important;width:100% !important;height:100% !important;transform:none !important;}
 @media (prefers-reduced-motion:reduce) {* {animation:none !important;transition:none !important;}}

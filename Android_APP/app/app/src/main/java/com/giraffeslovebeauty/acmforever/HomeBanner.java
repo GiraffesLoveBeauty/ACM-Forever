@@ -23,10 +23,12 @@ final class HomeBanner {
         box.setBackground(official?fill:new LayerDrawable(new android.graphics.drawable.Drawable[]{fill,new HeroBackdrop()}));
         LinearLayout brand=new SpacedLayout(c);TextView tag=text(c,eyebrow,9,true);tag.setLetterSpacing(.10f);brand.addView(tag,new LinearLayout.LayoutParams(0,-2,1));
         ImageView signature=new ImageView(c);signature.setImageDrawable(new CommunityArtwork(c,dark));signature.setContentDescription("猫娘代码标志");brand.addView(signature,new LinearLayout.LayoutParams(dp(c,27),dp(c,27)));box.addView(brand);gap(c,box,8);
-        LinearLayout line=new SpacedLayout(c),copy=column(c);copy.setContentDescription("社区横幅文字");copy.addView(text(c,title,24,true));gap(c,copy,8);copy.addView(text(c,subtitle,11,false));line.addView(copy,new LinearLayout.LayoutParams(0,-2,1));
+        LinearLayout line=new SpacedLayout(c),copy=column(c);line.setGravity(android.view.Gravity.CENTER_VERTICAL);copy.setContentDescription("社区横幅文字");copy.addView(text(c,title,24,true));gap(c,copy,8);copy.addView(text(c,subtitle,11,false));line.addView(copy,new LinearLayout.LayoutParams(0,-2,1));
         View graph;
         if(official){String scene=eyebrow.toLowerCase(java.util.Locale.ROOT).contains("rank")?"podium":eyebrow.toLowerCase(java.util.Locale.ROOT).contains("profile")?"journey":"graph";graph=new OfficialThemeView(c,scene);}
         else{GraphArtView nativeGraph=new GraphArtView(c,false);nativeGraph.setTooltipText("点选节点，长按放大");if(explore!=null)nativeGraph.setOnLongClickListener(v->{explore.accept(nativeGraph.target());return true;});graph=nativeGraph;}
-        LinearLayout.LayoutParams graphSize=new LinearLayout.LayoutParams(dp(c,140),dp(c,112));graphSize.leftMargin=dp(c,8);line.addView(graph,graphSize);box.addView(line);return box;
+        // Use a fraction of the available banner width, so narrow screens and
+        // enlarged text keep separate text/art columns without clipping either.
+        LinearLayout.LayoutParams graphSize=new LinearLayout.LayoutParams(0,dp(c,112),.9f);graphSize.leftMargin=dp(c,8);line.addView(graph,graphSize);box.addView(line);return box;
     }
 }
