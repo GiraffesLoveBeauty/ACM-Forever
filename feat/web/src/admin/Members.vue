@@ -1,198 +1,425 @@
 <script setup>
-import { ref, reactive, watch } from 'vue';
-import { useRoute } from 'vue-router';
-import { useRequests, external, showError, notify } from '../lib/api.js';
-import { useParams } from '../lib/admin.js';
+import { useMemberProfiles } from '../composables/useMemberProfiles.js';
+import { profileFields } from '../lib/member-profiles.js';
+import { draftKey } from '../lib/member-profile-drafts.js';
 import Pager from '../components/Pager.vue';
-const route = useRoute(),
-  update = useParams(),
-  request = useRequests(),
-  search = ref(route.query.search || ''),
-  data = ref(),
-  detail = ref(),
-  form = reactive({});
-const fields = {
-  name: '昵称',
-  real_name: '真实姓名',
-  school: '学校',
-  status: '身份 / 年级',
-  cf_handle: 'Codeforces',
-  luogu_id: '洛谷',
-  nowcoder_id: '牛客',
-  atcoder_handle: 'AtCoder',
-  cjlu_username: '校 OJ',
-};
-async function load() {
-  detail.value = null;
-  data.value = null;
-  try {
-    if (route.query.qq_id) {
-      detail.value = await request(
-        '/member/' + encodeURIComponent(route.query.qq_id),
-        {},
-        'members',
-      );
-      for (const key of Object.keys(fields)) form[key] = detail.value.user[key] || '';
-    } else {
-      search.value = route.query.search || '';
-      data.value = await request(
-        '/admin/members?' +
-          new URLSearchParams({
-            search: route.query.search || '',
-            page: route.query.page || 1,
-            page_size: 20,
-          }),
-        {},
-        'members',
-      );
-    }
-  } catch (e) {
-    showError(e);
-  }
-}
-async function save() {
-  const bindings = ['cf_handle', 'luogu_id', 'nowcoder_id', 'atcoder_handle', 'cjlu_username'];
-  const changed = bindings.filter(
-    (key) =>
-      String(form[key] || '')
-        .trim()
-        .toLowerCase() !==
-      String(detail.value.user[key] || '')
-        .trim()
-        .toLowerCase(),
-  );
-  if (
-    changed.length &&
-    !confirm(
-      '确认修改该成员的 OJ 绑定？受影响平台的 AC、提交证据与同步状态将被清理，进行中的挑战将结束；收藏与历史资料保留。\n' +
-        changed
-          .map(
-            (key) =>
-              `${fields[key]}：${detail.value.user[key] || '未绑定'} → ${form[key] || '解绑'}`,
-          )
-          .join('\n'),
-    )
-  )
-    return;
-  const expected_bindings = Object.fromEntries(
-    bindings.map((key) => [key, detail.value.user[key] || '']),
-  );
-  const binding_versions = Object.fromEntries(
-    ['codeforces', 'luogu', 'nowcoder', 'atcoder', 'cjlu'].map((platform) => [
-      platform,
-      detail.value.user[
-        platform === 'codeforces' ? 'cf_binding_version' : platform + '_binding_version'
-      ] || 0,
-    ]),
-  );
-  try {
-    const result = await request('/user', {
-      method: 'PUT',
-      body: {
-        qq_id: route.query.qq_id,
-        ...form,
-        confirm_bindings: changed.length > 0,
-        expected_bindings,
-        binding_versions,
-      },
-    });
-    notify(result.message || '成员资料已保存');
-    await load();
-  } catch (e) {
-    showError(e);
-  }
-}
-watch(() => route.query, load, { immediate: true });
+import MemberDetail from './MemberDetail.vue';
+import MemberStatusDrawer from '../components/member-profiles/MemberStatusDrawer.vue';
+import MemberProfileConflict from '../components/member-profiles/MemberProfileConflict.vue';
+const {
+  ready,
+  route,
+  update,
+  filters,
+  data,
+  options,
+  loading,
+  loadError,
+  editing,
+  saving,
+  message,
+  storageError,
+  storageWarnings,
+  candidates,
+  pendingOpen,
+  drawerQQ,
+  conflictQQ,
+  records,
+  drafts,
+  dirty,
+  pendingStatuses,
+  drawerRecord,
+  conflictRecord,
+  localSummary,
+  load,
+  applyFilters,
+  openDrawer,
+  rememberDrawer,
+  selectStatus,
+  cancelDrawer,
+  recover,
+  discard,
+  discardAll,
+  stateLabel,
+  permission,
+  dirtyField,
+  value,
+  input,
+  saveAll,
+  check,
+  merge,
+  leaveEditing,
+  flush,
+} = useMemberProfiles();
 </script>
 <template>
-  <template v-if="!route.query.qq_id"
-    ><section class="admin-panel">
-      <form class="filters" @submit.prevent="update({ search: search.trim(), page: 1 })">
-        <label
-          >搜索成员<input
-            v-model="search"
-            type="search"
-            placeholder="QQ、昵称、身份、学校或 OJ 账号" /></label
-        ><button class="btn primary">搜索</button>
-      </form>
-      <p class="muted">共 {{ data?.total || 0 }} 位成员</p>
-      <div class="table-wrap">
-        <table>
+  <MemberDetail v-if="route.query.qq_id" :key="route.query.qq_id" />
+  <section v-else class="admin-panel member-profiles">
+    <header class="member-profile-heading">
+      <div>
+        <h2>成员资料</h2>
+        <p class="muted">真实姓名、成员身份与账号权限分别展示，权限在成员账号中管理。</p>
+      </div>
+      <button
+        v-if="!editing"
+        class="btn primary"
+        :disabled="!ready || loading"
+        @click="editing = true"
+      >
+        进入编辑模式
+      </button>
+    </header>
+    <form class="filters profile-filters" @submit.prevent="applyFilters()">
+      <label
+        >关键词<input
+          v-model="filters.search"
+          type="search"
+          placeholder="QQ、真实姓名、昵称或 OJ 账号"
+      /></label>
+      <label
+        >学校<select v-model="filters.school" aria-label="学校">
+          <option value="">全部学校</option>
+          <option v-for="school in options.schools" :key="school" :value="school">
+            {{ school }}
+          </option>
+          <option v-if="filters.school && !options.schools.includes(filters.school)">
+            {{ filters.school }}
+          </option>
+        </select></label
+      >
+      <label
+        >身份<select v-model="filters.status" aria-label="身份">
+          <option value="">全部身份</option>
+          <option v-for="status in options.statuses" :key="status" :value="status">
+            {{ status }}
+          </option>
+          <option v-if="filters.status && !options.statuses.includes(filters.status)">
+            {{ filters.status }}
+          </option>
+        </select></label
+      >
+      <button class="btn primary">搜索</button
+      ><button type="button" class="btn" @click="applyFilters(true)">重置</button>
+    </form>
+    <div v-if="candidates.length" class="profile-notice">
+      <span
+        >发现 {{ candidates.length }} 条本地草稿 · 最近更新
+        {{
+          new Date(Math.max(...candidates.map((item) => item.record.updated_at))).toLocaleString()
+        }}</span
+      ><button class="btn" @click="recover">恢复草稿</button
+      ><button class="btn" :disabled="saving" @click="discardAll">放弃本账号草稿</button>
+    </div>
+    <div v-if="editing" class="profile-edit-bar">
+      <strong>编辑成员资料 · 已修改 {{ dirty.length }} 人</strong
+      ><span :role="storageError ? 'alert' : 'status'">{{ localSummary }}</span>
+      <div class="chips">
+        <button class="btn primary" :disabled="saving || !dirty.length" @click="saveAll()">
+          {{ saving ? '保存中…' : `保存全部（${dirty.length}）` }}</button
+        ><button class="btn" @click="pendingOpen = !pendingOpen">查看待保存</button
+        ><button class="btn" @click="leaveEditing">退出编辑，保留草稿</button
+        ><button class="btn" :disabled="saving" @click="discardAll">放弃全部草稿</button>
+      </div>
+    </div>
+    <div v-else-if="dirty.length" class="profile-notice">
+      有 {{ dirty.length }} 人的未提交修改，当前显示服务端已保存资料。<button
+        class="btn"
+        @click="editing = true"
+      >
+        继续编辑
+      </button>
+    </div>
+    <p v-if="message" role="status" class="profile-notice">{{ message }}</p>
+    <p v-if="storageError && !editing" role="alert">{{ storageError }}</p>
+    <div v-if="storageWarnings.length" role="alert">
+      <p v-for="(warning, i) in storageWarnings" :key="i">
+        草稿读取异常：{{ warning.message }}。可清空本账号本页草稿，未恢复的内容不会自动提交。
+      </p>
+      <button class="btn" :disabled="saving" @click="discardAll">清空本账号本页草稿</button>
+    </div>
+    <MemberProfileConflict
+      v-if="conflictRecord?.current"
+      :key="conflictRecord.qq_id + '-' + conflictRecord.current.profile_revision"
+      :record="conflictRecord"
+      :current="conflictRecord.current"
+      @resolve="merge"
+      @close="conflictQQ = null"
+    />
+    <section v-if="pendingOpen && records.length" class="profile-pending" aria-label="待保存成员">
+      <h3>全部编辑成员（包含其他页和筛选条件）</h3>
+      <article v-for="record in records" :key="draftKey(record)" class="list-item">
+        <div>
+          <b>{{ record.base.name }} · QQ {{ record.qq_id }}</b>
+          <p>
+            {{ stateLabel(record) }} · {{ Object.keys(record.changes).length }} 个字段{{
+              record.drawer?.creating ? ' · 有未确认身份输入' : ''
+            }}
+          </p>
+          <p v-if="record.error" role="alert">{{ record.error }}</p>
+          <p v-for="(error, key) in record.fieldErrors" :key="key" role="alert">
+            {{ profileFields[key] }}：{{ error }}
+          </p>
+        </div>
+        <div class="chips">
+          <button v-if="record.current" class="btn" @click="conflictQQ = record.qq_id">
+            核对变化</button
+          ><button v-else-if="record.state === 'uncertain'" class="btn" @click="check(record)">
+            核对保存结果</button
+          ><button
+            v-else-if="Object.keys(record.changes).length && record.state !== 'blocked'"
+            class="btn"
+            :disabled="saving || record.state === 'saving'"
+            @click="saveAll(record)"
+          >
+            保存此成员</button
+          ><button
+            class="btn"
+            :disabled="record.state === 'saving'"
+            @click="update({ search: record.qq_id, school: null, status: null, page: 1 })"
+          >
+            定位成员</button
+          ><button v-if="record.drawer?.creating" class="btn" @click="drawerQQ = record.qq_id">
+            继续身份输入</button
+          ><button class="btn" :disabled="record.state === 'saving'" @click="discard(record)">
+            放弃此草稿
+          </button>
+        </div>
+      </article>
+    </section>
+    <p v-if="loading" role="status">正在加载成员资料…</p>
+    <div v-else-if="loadError" role="alert">
+      <p>成员资料加载失败：{{ loadError }}</p>
+      <button class="btn" @click="load">重新加载</button>
+    </div>
+    <template v-else-if="data"
+      ><p class="muted">共 {{ data.total }} 位成员 · 第 {{ data.page }} 页</p>
+      <p v-if="!data.items.length">
+        {{
+          filters.search || filters.school || filters.status
+            ? '没有符合条件的成员。请调整或重置筛选。'
+            : '暂无成员资料。'
+        }}
+      </p>
+      <div
+        v-else
+        class="table-wrap profile-table-wrap"
+        tabindex="0"
+        aria-label="成员资料表格，可横向滚动"
+      >
+        <table class="profile-table">
           <thead>
             <tr>
-              <th>成员</th>
               <th>QQ</th>
-              <th>学校 / 身份</th>
-              <th>OJ 账号</th>
-              <th>Web 角色</th>
+              <th v-for="(label, key) in profileFields" :key="key">{{ label }}</th>
+              <th>权限（只读）</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in data?.items || []" :key="row.qq_id">
-              <td>{{ row.name }}</td>
-              <td>{{ row.qq_id }}</td>
-              <td>{{ row.school }}<br />{{ row.status }}</td>
+            <tr
+              v-for="row in data.items"
+              :key="row.qq_id + '-' + row.account_epoch"
+              :data-member="row.qq_id"
+              :class="{
+                'profile-row-dirty':
+                  drafts[row.qq_id] && Object.keys(drafts[row.qq_id].changes).length,
+              }"
+            >
               <td>
-                {{
-                  row.cf_handle || row.luogu_id || row.atcoder_handle || row.nowcoder_id || '未绑定'
-                }}
+                {{ row.qq_id
+                }}<small v-if="drafts[row.qq_id]">{{ stateLabel(drafts[row.qq_id]) }}</small>
               </td>
-              <td>{{ row.role || '未开通' }}</td>
-              <td><button class="btn" @click="update({ qq_id: row.qq_id })">查看资料</button></td>
+              <td
+                v-for="(label, key) in profileFields"
+                :key="key"
+                :class="{ 'profile-cell-dirty': dirtyField(row, key) }"
+              >
+                <template v-if="editing"
+                  ><button
+                    v-if="key === 'status'"
+                    class="btn profile-status-button"
+                    :disabled="['saving', 'blocked'].includes(drafts[row.qq_id]?.state)"
+                    :aria-label="`${row.qq_id} 身份`"
+                    @click="openDrawer(row)"
+                  >
+                    {{ value(row, key) || '选择身份' }}</button
+                  ><input
+                    v-else
+                    :value="value(row, key)"
+                    :aria-label="`${row.qq_id} ${label}`"
+                    :aria-invalid="Boolean(drafts[row.qq_id]?.fieldErrors?.[key])"
+                    :disabled="['saving', 'blocked'].includes(drafts[row.qq_id]?.state)"
+                    @input="input(row, key, $event.target.value)"
+                  /><small
+                    v-if="drafts[row.qq_id]?.fieldErrors?.[key]"
+                    class="profile-field-error"
+                    >{{ drafts[row.qq_id].fieldErrors[key] }}</small
+                  ></template
+                ><template v-else>{{ row[key] || '—' }}</template>
+              </td>
+              <td>{{ permission(row) }}</td>
+              <td>
+                <button
+                  class="btn"
+                  @click="
+                    flush();
+                    update({ qq_id: row.qq_id });
+                  "
+                >
+                  查看资料
+                </button>
+              </td>
             </tr>
           </tbody>
         </table>
       </div>
       <Pager
-        :page="Number(data?.page || 1)"
-        :total="data?.total || 0"
-        @change="(page) => update({ page })"
-      /></section></template
-  ><template v-else
-    ><button class="btn" @click="update({ qq_id: null })">← 返回成员列表</button
-    ><template v-if="detail"
-      ><section class="admin-panel">
-        <h2>{{ detail.user.name }} · {{ route.query.qq_id }}</h2>
-        <p>Web 角色：{{ detail.permissions?.role || '未开通' }}</p>
-        <form @submit.prevent="save">
-          <div class="admin-create-grid">
-            <label v-for="(label, key) in fields" :key="key"
-              >{{ label }}<input v-model="form[key]"
-            /></label>
-          </div>
-          <p class="muted">OJ 账号变更后会清理旧账号提交证据并重新同步；历史学习资料保留存档。</p>
-          <button class="btn primary">保存资料与绑定</button>
-        </form>
-      </section>
-      <section class="admin-panel">
-        <h2>平台统计</h2>
-        <div class="chips">
-          <span v-for="(count, platform) in detail.platform_counts" :key="platform" class="chip"
-            >{{ platform }} · {{ count }} 题</span
-          >
-        </div>
-        <p>
-          CF Rating {{ detail.cf?.rating ?? '—' }} · AtCoder Rating
-          {{ detail.atcoder?.rating ?? '—' }} · 挑战 Rating {{ detail.challenge_rating ?? '—' }}
-        </p>
-      </section>
-      <section class="admin-panel">
-        <h2>最近 AC 摘要</h2>
-        <article v-for="(row, i) in detail.recent_ac" :key="i" class="list-item">
-          <span
-            ><b>{{ row.problem_name || row.problem_id }}</b
-            ><br />{{ row.platform }} · {{ row.problem_rating || '未知' }}</span
-          ><a
-            v-if="row.problem_url"
-            class="btn"
-            :href="external(row.problem_url)"
-            target="_blank"
-            rel="noopener"
-            >打开题目</a
-          >
-        </article>
-      </section></template
-    ></template
-  >
+        :page="data.page"
+        :total="data.total"
+        @change="
+          (page) => {
+            flush();
+            update({ page });
+          }
+        "
+      />
+    </template>
+    <MemberStatusDrawer
+      v-if="drawerRecord"
+      :member="drawerRecord.base"
+      :statuses="options.statuses"
+      :pending="pendingStatuses"
+      :initial="drawerRecord.drawer"
+      @select="selectStatus"
+      @draft="rememberDrawer"
+      @close="drawerQQ = null"
+      @cancel="cancelDrawer"
+    />
+  </section>
 </template>
+<style scoped>
+.member-profiles {
+  min-width: 0;
+  max-width: 100%;
+}
+.member-profile-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.member-profile-heading h2 {
+  margin: 0;
+}
+.profile-filters {
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.profile-filters label:first-child {
+  flex: 1;
+  min-width: 180px;
+}
+.profile-filters select {
+  width: 100%;
+  min-width: 130px;
+}
+.profile-edit-bar,
+.profile-notice {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin: 14px 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.profile-edit-bar {
+  background: var(--hover-bg, var(--panel));
+  position: sticky;
+  top: 8px;
+  z-index: 5;
+}
+.profile-edit-bar .chips {
+  width: 100%;
+}
+.profile-table-wrap {
+  max-width: 100%;
+  overflow: auto;
+}
+.profile-table {
+  min-width: 1420px;
+}
+.profile-table th {
+  white-space: nowrap;
+}
+.profile-table td {
+  min-width: 115px;
+  max-width: 190px;
+  overflow-wrap: anywhere;
+}
+.profile-table td:first-child {
+  min-width: 100px;
+}
+.profile-table input {
+  width: 100%;
+  min-width: 110px;
+  box-sizing: border-box;
+}
+.profile-table small {
+  display: block;
+  margin-top: 6px;
+}
+.profile-table td.profile-cell-dirty {
+  box-shadow: inset 0 -2px var(--accent);
+}
+.profile-row-dirty {
+  background: var(--hover-bg, transparent);
+}
+.profile-field-error {
+  color: var(--danger, #b43232);
+}
+.profile-pending {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+  margin: 14px 0;
+}
+.profile-pending .list-item {
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.profile-pending p {
+  margin: 6px 0;
+}
+.profile-status-button {
+  width: 100%;
+  white-space: normal;
+}
+.profile-pending .chips {
+  flex-wrap: wrap;
+}
+@media (max-width: 600px) {
+  .profile-filters label {
+    flex: 1 1 100%;
+    min-width: 0 !important;
+  }
+  .member-profile-heading .btn {
+    width: 100%;
+  }
+  .profile-edit-bar {
+    position: static;
+  }
+  .profile-edit-bar .btn {
+    flex: 1 1 auto;
+  }
+  .profile-notice {
+    overflow-wrap: anywhere;
+  }
+  .profile-pending {
+    padding: 10px;
+  }
+}
+</style>
