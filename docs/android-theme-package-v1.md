@@ -67,6 +67,8 @@ example.acmtheme
 
 `webPreset` 的 `theme` 复用现有网页 v1 配色 JSON，包括 `version/mode/light/dark`；每个 profile 包含 `primary/background/surface/accent` 和 `text/muted/border/link/selected/hero` 覆盖。`design_template` 限当前四套官方模板 `original/phase/angel-city/minecraft`。导入时保存这一份快照，不依赖将来官方默认配色；不会把整个网页收藏库塞进包。
 
+内置“工业黄”有依赖预设ID的特殊默认色。`WebThemes.profile` 在解析浅/深两套配色时，将六类有效默认色固化为覆盖字段，保留已有显式覆盖；导出和离线主题层共用该解析结果。导入后即使ID重分配为 `portable-*`，仍保留相同原生配色，其中浅色横幅为 `#20231f`、深色为 `#151814`。这是格式v1内的完整快照，不需要新增ID特例或更改包版本。修复前已导出的包未保存这些信息，需要从原内置主题重新导出。
+
 内部主题ID与 `bg_image_id` 重新生成，防止覆盖旧主题；这不改变实际外观。名称保留，允许两套同名主题，以独立ID管理。历史未显式保存的字段继续使用相同客户端默认值。跨越未来不兼容模板引擎时需要格式迁移或明确报错，本格式不承诺任意未来版本的像素完全一致。
 
 ## 原图与裁剪
