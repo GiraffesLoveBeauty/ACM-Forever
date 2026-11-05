@@ -45,8 +45,8 @@ python Android_APP/tools/build_theme_renderer.py
 python -m unittest discover -s Android_APP/tests -p 'test_theme_renderer*.py' -v
 ```
 
-构建源入口是 `Android_APP/theme-renderer/`，直接import仓库的原组件和CSS；压缩运行资源位于 `Android_APP/app/app/src/main/assets/themes/renderer/`，供离线APK使用。`sources.json`逐项记录源文件SHA256（文本统一LF换行，二进制保持原字节）；Android CI在源码资源变化但未重建时失败。Vue使用MIT，像素字体使用OFL，许可随资源一起打包。生成包不包含截图或研究素材。
+构建源入口是 `Android_APP/theme-renderer/`，直接import仓库的原组件和CSS；压缩运行资源位于 `Android_APP/app/app/src/main/assets/themes/renderer/`，供离线APK使用。`sources.json`逐项记录源文件SHA256（文本统一LF换行，二进制保持原字节）；Android CI在源码资源变化但未重建时失败。Vue使用MIT，像素字体使用OFL；保留字体来源README及Ark Pixel、Cubic 11、Galmuri组件声明，许可随资源一起打包。生成包不包含截图或研究素材。
 
 目录同步固定到 `origin/main 1c89408122e99986b22efe9fd14e07e49f1c1757`。页面样式与组件使用当前受审分支的只读Web源码，source fingerprints是准确依据；后续Web改主题，需要重新编译并重新review Android资源，不能把离线副本描述为自动追踪远端。
 
-本次运行资源约1.05MB未压缩，其中像素字体约702KB；主题导出包不重复携带这些内置资源。用户自己的原图决定私人主题包的主体体积。验证与已知限制见 [v0.2.17](android-v0.2.17.md)。
+本次运行资源约1.1MB未压缩，其中像素字体约702KB；主题导出包不重复携带这些内置资源。用户自己的原图决定私人主题包的主体体积。验证与已知限制见 [v0.2.17](android-v0.2.17.md)。
