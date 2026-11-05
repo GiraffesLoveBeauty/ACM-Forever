@@ -3,7 +3,7 @@ export async function enter(ctx){
   root.innerHTML='<section class="admin-panel"><div class="filters"><button class="btn primary" id="refresh-tasks">刷新任务</button><a class="btn" href="/admin.html?section=problems">拉取题目</a><span class="muted">离开此模块停止刷新，后台任务继续执行。</span></div><p id="tasks-message" role="status"></p><div id="tasks-list" class="list"></div></section>';
   async function load(){
     const rows=await api('/tasks');
-    const describe=result=>result==null?'':typeof result==='object'?Object.entries(result).map(([key,value])=>key+'：'+describe(value)).join('；'):typeof result==='number'?(result>=0?'新增 '+result+' 条':({[-1]:'成员不存在',[-2]:'未绑定账号',[-3]:'抓取失败'})[result]||'同步失败'):String(result);
+    const describe=result=>result==null?'':typeof result==='object'?Object.entries(result).map(([key,value])=>key+'：'+describe(value)).join('；'):typeof result==='number'?(result>=0?'新增 '+result+' 条':({[-1]:'成员不存在',[-2]:'未绑定账号',[-3]:'抓取失败',[-5]:'已暂停，保留已有记录'})[result]||'同步失败'):String(result);
     const time=value=>value?new Date(value*1000).toLocaleString():'尚未开始';
     function problemSummary(task){
       const result=task.result,progress=task.progress||{};

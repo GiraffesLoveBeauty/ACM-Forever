@@ -17,6 +17,7 @@ import aiosqlite
 
 import logging
 from .cf_client import CFUnavailable, cf_request
+from .sync_policy import SYNC_PAUSED, submission_sync_paused
 
 LOG = logging.getLogger("acm_api.crawler")
 
@@ -312,6 +313,9 @@ class Crawler:
         db: aiosqlite.Connection,
         config: dict,
     ) -> int:
+        if submission_sync_paused("luogu", config):
+            LOG.info("[同步模块] 洛谷用户过题记录同步已暂停，保留已有记录。")
+            return SYNC_PAUSED
         luogu_uid, qq_id = user_row["luogu_id"], user_row["qq_id"]
         added_count = 0
         luogu_cookie = config.get("luogu_cookie")
@@ -396,6 +400,9 @@ class Crawler:
         config: dict,
     ) -> int:
         """深度同步用的洛谷爬虫（分页聚合后一次性写入）。"""
+        if submission_sync_paused("luogu", config):
+            LOG.info("[同步模块] 洛谷用户过题记录同步已暂停，保留已有记录。")
+            return SYNC_PAUSED
         luogu_uid, qq_id = user_row["luogu_id"], user_row["qq_id"]
         luogu_cookie = config.get("luogu_cookie")
         luogu_csrf_token = config.get("luogu_csrf_token")
