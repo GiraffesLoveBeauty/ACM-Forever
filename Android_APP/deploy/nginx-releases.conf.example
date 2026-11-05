@@ -1,0 +1,21 @@
+# Add inside the existing HTTPS server{} after setting up the dedicated release directory.
+# The alias must match ANDROID_MIRROR_ROOT, NOT the replaceable application checkout.
+location ^~ /GiraffesLoveBeauty/ACM-Forever/releases/ {
+    alias /srv/acmforever-releases/;
+    autoindex off;
+    disable_symlinks on;
+    limit_except GET HEAD { deny all; }
+    types {
+        application/vnd.android.package-archive apk;
+        application/json json;
+        text/plain sha256;
+    }
+    default_type application/octet-stream;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Cache-Control "no-store" always;
+    # Deny lock files, temporary staging directories and temporary manifests.
+    location ~ /\. { deny all; }
+}
+# Do not add try_files with SPA/index.html fallback: missing assets must return 404.
+# First configuration: nginx -t, then reload. Subsequent static uploads need no reload.
+# If using a CDN, bypass caching for latest/update.json and errors under this prefix.

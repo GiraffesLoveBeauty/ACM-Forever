@@ -1,0 +1,24 @@
+# Old server only. Replace NEW_SERVER_PUBLIC_HOST before installing.
+# Generate the private key on this server and pin the new server's verified host key.
+[Unit]
+Description=ACM release downloads: restricted SSH relay to new server
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=acmrelay
+Group=acmrelay
+ExecStart=/usr/bin/ssh -NT -i /var/lib/acm-release-relay/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/acm-release-relay/known_hosts -o ExitOnForwardFailure=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -L 127.0.0.1:18089:127.0.0.1:18089 acmrelay@NEW_SERVER_PUBLIC_HOST
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

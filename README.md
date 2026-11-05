@@ -50,3 +50,4 @@
 
 - [wiki.md（Wiki 知识手册、共享 Markdown、接口与备份恢复）](docs/wiki.md)
 - [issue-83-account-closure.md（账号注销、同 QQ 新建账号与发布验收）](docs/issue-83-account-closure.md)
+- [android-self-hosted-release-v0.2.16.md（自站更新独立PR、运维配置与发布条件 · 待配置/待评审）](docs/android-self-hosted-release-v0.2.16.md)

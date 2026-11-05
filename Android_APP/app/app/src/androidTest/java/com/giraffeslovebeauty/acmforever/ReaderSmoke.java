@@ -39,6 +39,7 @@ public final class ReaderSmoke extends Instrumentation {
         if("navigation".equals(mode)){NavigationUiSmoke.run(this);return;}
         if("localthemes".equals(mode)){LocalThemeUiSmoke.run(this);return;}
         if("spacefeatures".equals(mode)){SpaceFeaturesUiSmoke.run(this);return;}
+        if("mirrorupdates".equals(mode)){MirrorUpdatesUiSmoke.run(this);return;}
         if(settingsMode){LocalSettingsUiSmoke.run(this);return;}
         if(communityMode){CommunityUiSmoke.run(this);return;}
         if(loginMode){LoginUiSmoke.run(this);return;}

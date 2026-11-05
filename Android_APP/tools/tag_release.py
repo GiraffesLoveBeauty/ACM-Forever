@@ -8,6 +8,7 @@ import re
 import subprocess
 import tempfile
 from urllib.parse import quote
+from urllib.parse import urlsplit
 
 PACKAGE = "com.giraffeslovebeauty.acmforever"
 
@@ -152,7 +153,7 @@ def require_newer(github, manifest):
         raise ValueError("The signing certificate changed within the same release channel")
 
 
-def publish(github, tag, directory, source_commit):
+def publish(github, tag, directory, source_commit, download_origin="https://github.com", mirror=None):
     directory = Path(directory)
     manifest_path = directory / "update.json"
     if manifest_path.stat().st_size > 32768:
@@ -166,9 +167,17 @@ def publish(github, tag, directory, source_commit):
         raise ValueError("Channel and pinned signing certificate are required")
     suffix = "-debug" if manifest["channel"] == "debug" else ""
     filename = "acmforever-" + manifest["versionName"] + suffix + ".apk"
-    expected_url = "https://github.com/" + github.repository + "/releases/download/" + tag + "/" + filename
+    origin = urlsplit(download_origin)
+    if (origin.scheme != "https" or not origin.hostname or origin.username or origin.password
+            or origin.path not in ("", "/") or origin.query or origin.fragment):
+        raise ValueError("Download origin must be a configured HTTPS origin")
+    expected_url = download_origin.rstrip("/") + "/" + github.repository + "/releases/download/" + tag + "/" + filename
     if manifest.get("apkUrl") != expected_url:
         raise ValueError("APK URL must identify this repository, version tag and channel")
+    if download_origin.rstrip("/") != "https://github.com":
+        expected_backup = "https://github.com/" + github.repository + "/releases/download/" + tag + "/" + filename
+        if mirror is None or manifest.get("apkFallbackUrls") != [expected_backup]:
+            raise ValueError("Self-hosted publication requires a mirror and the matching GitHub backup")
     apk, checksum = directory / filename, directory / (filename + ".sha256")
     if (not 0 < apk.stat().st_size <= 150 * 1024 * 1024 or apk.stat().st_size != manifest.get("sizeBytes")
             or digest(apk) != manifest["sha256"]
@@ -189,7 +198,12 @@ def publish(github, tag, directory, source_commit):
             remote_checksum = github.download(tag, checksum.name, Path(temp))
             if digest(remote_checksum) != digest(checksum):
                 raise ValueError("Published checksum differs from the APK checksum")
-        return "Already published; identical APK and manifest"
+        if mirror is not None:
+            if (github.latest() or {}).get("tag_name") != tag:
+                raise ValueError("A historical tag cannot replace mirror latest")
+            mirror.stage(tag, directory, manifest)
+            mirror.promote(tag, directory, manifest)
+        return "Already published; identical APK and manifest, mirror reconciled"
     require_newer(github, manifest)
     with tempfile.TemporaryDirectory() as temp:
         notes = Path(temp) / "release-notes.md"
@@ -205,7 +219,12 @@ def publish(github, tag, directory, source_commit):
             if digest(remote) != digest(local):
                 raise ValueError("Uploaded asset read-back failed; Release remains a draft")
         require_newer(github, manifest)
+        if mirror is not None:
+            mirror.stage(tag, directory, manifest)
+            require_newer(github, manifest)
         github.publish(tag)
+        if mirror is not None:
+            mirror.promote(tag, directory, manifest)
     return "Published verified Release " + tag
 
 
@@ -219,6 +238,8 @@ def main():
     release = sub.add_parser("publish")
     for option in ("tag", "directory", "repository", "source-commit"):
         release.add_argument("--" + option, required=True)
+    release.add_argument("--download-origin", default="https://github.com")
+    release.add_argument("--mirror", action="store_true")
     args = parser.parse_args()
     if args.command == "validate":
         print(validate_source(args.tag, Path(args.gradle).read_text(encoding="utf-8"), json.loads(Path(args.history).read_text(encoding="utf-8"))))
@@ -228,7 +249,11 @@ def main():
                 or os.environ.get("GITHUB_REPOSITORY") != args.repository
                 or os.environ.get("GITHUB_SHA") != args.source_commit):
             parser.error("Publication is allowed only in the matching GitHub tag-push Action")
-        print(publish(GitHub(args.repository), args.tag, args.directory, args.source_commit))
+        mirror = None
+        if args.mirror:
+            from mirror_release import SSHMirror
+            mirror = SSHMirror(args.repository, args.download_origin)
+        print(publish(GitHub(args.repository), args.tag, args.directory, args.source_commit, args.download_origin, mirror))
 
 
 if __name__ == "__main__":
