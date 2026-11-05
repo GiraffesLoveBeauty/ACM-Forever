@@ -1,5 +1,7 @@
 # ACMforever 0.2.14：Tag 自动发布与 App 更新
 
+> 执行补充：PR #96 已合并，签名 Secret 已配置，v0.2.14 首次 Action 因草稿按 Tag 查询返回 404 而失败，尚无公开 Release。用户已选择改发 0.2.15；当前修复与首发步骤见 [android-release-fix-v0.2.15.md](android-release-fix-v0.2.15.md)。以下保留 0.2.14 原方案和当时的准备状态，不能据其“未配置”描述判断当前配置。
+
 状态：2026-11-05，实现及验收提交本次 PR 评审；未创建发布 Tag、未发布 Release、未操作生产服务器。仓库 `GiraffesLoveBeauty/ACM-Forever` 已按授权改为公开，原提交历史保留，匿名访问实测返回 200。
 
 ## 1. 范围与发布位置
