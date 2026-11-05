@@ -152,7 +152,11 @@ class APITests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.get('/processing-demo.html')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers['X-Local-Demo'], 'isolated-read-only')
-        self.assertNotIn('https:', response.headers['Content-Security-Policy'])
+        csp=response.headers['Content-Security-Policy']
+        self.assertIn("connect-src 'self'",csp)
+        self.assertIn("script-src 'self'",csp)
+        self.assertIn('https://img.atcoder.jp',csp)
+        self.assertNotIn('img-src https:;',csp)
 
     async def test_remote_host_rejected(self):
         self.assertEqual((await self.client.get('/health', headers={'Host':'external.example'})).status_code, 403)

@@ -3,7 +3,7 @@ import json
 
 from problem_processing.adapter import normalize
 from problem_processing.planning import Planner, historical_problem, semantic_inputs
-from problem_processing.translation import language_plan, prepare_request
+from problem_processing.translation import language_plan, prepare_layout_request, translation_ready
 from problem_bank_labels import project_rows, filter_bank, parse_options
 
 
@@ -113,10 +113,11 @@ def register_admin_processing(app, labels):
             if view and p['problem_key'] in planner.problems:
                 same_input = semantic_inputs(p)[0] == semantic_inputs(historical_problem(planner.problems[p['problem_key']]))[0]
             protected = None
-            if language['action'] == 'translate' and p['processing_status'] == 'ready':
-                prepared = prepare_request(p, language)
+            if language['action'] == 'translate' and translation_ready(p):
+                prepared = prepare_layout_request(p, language)
                 protected = dict(segments=len(prepared['segments']), tokens=len(prepared['protected']),
-                                 version=prepared['protection_version'])
+                                 version=prepared['protection_version'], mode='layout_by_id',
+                                 images=prepared['layout']['image_count'])
             # Respect the independent local manual overlay in addition to planner snapshot state.
             if view and view['manual_history_count']:
                 plan['effective_tags'] = view['effective_tags']
@@ -124,8 +125,12 @@ def register_admin_processing(app, labels):
             preflight={task:app.extensions['local_ai_execution'].proposal(p,task) for task in ('annotation','translation')}
             if p['processing_status']=='html_pending' and 'image_requires_review' in p['processing_issues']:
                 reason='题面包含图片，当前自动流程无法确认图片是否承载必要条件，需先复核；并非 API 配置或余额错误。原图和原文均已保留，本次不会发送请求。'
-                for task in ('annotation','translation'):
-                    preflight[task]['reason']=reason
+                if preflight['annotation']['status']=='pending':
+                    preflight['annotation']['reason']=reason
+                if translation_ready(p) and preflight['translation']['status']=='needs_translation':
+                    preflight['translation']['reason']='仅翻译图片周围文字；原图及位置由本地保留，图片内文字和条件尚未翻译或核验。'
+                elif not translation_ready(p) and preflight['translation']['status']=='pending':
+                    preflight['translation']['reason']='原图保留，但正文还存在其他采集异常，请先检查正文完整性。'
             if view and not same_input:
                 # Saved translations remain in history but must not be presented as the new source's result.
                 base['existing']={**view,'translation_active':False,'translation_status':'stale',
@@ -143,6 +148,7 @@ def register_admin_processing(app, labels):
                               'preview_truncated': len(p['original_statement']) > 6000,
                               'source_links': p['source_links'], 'raw_tags': p['raw_tags'],
                               'language': {k: language[k] for k in ('action', 'source_language', 'reason')},
+                              'image_handling_notice': '默认保留原图及其相对位置，仅翻译文字；图片内文字不翻译。' if 'image_requires_review' in p['processing_issues'] else None,
                               'protection': protected, 'plan': plan,'execution':preflight,
                               'jobs':app.extensions['local_ai_execution'].latest(platform,problem_id)})
         except (ValueError, KeyError, TypeError, OSError):

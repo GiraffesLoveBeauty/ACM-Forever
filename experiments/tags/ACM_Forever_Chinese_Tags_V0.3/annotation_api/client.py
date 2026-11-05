@@ -9,11 +9,12 @@ from .dispatch import ACTIVE, wire_request
 
 class CallError(Exception):
     def __init__(self, code, *, retryable=False, fatal=False, unknown=False, retry_after=None,
-                 http_status=None, elapsed_seconds=None):
+                 http_status=None, elapsed_seconds=None, failure_stage=None):
         super().__init__(code)
         self.code, self.retryable, self.fatal, self.unknown = code, retryable, fatal, unknown
         self.retry_after = retry_after
         self.http_status, self.elapsed_seconds = http_status, elapsed_seconds
+        self.failure_stage = failure_stage
 
 
 @dataclass
@@ -46,12 +47,22 @@ class APIClient:
                 http_client._mounts.clear()
             elif http_client.trust_env:
                 raise ValueError("真实自定义 HTTP 客户端必须禁用环境代理")
-        http_client.event_hooks["request"].append(self._check_dispatch)
+        self.http_requests_prepared = 0
+        http_client.event_hooks["request"].append(self._guard_request)
         self.sdk = openai.OpenAI(api_key=config.api_key, base_url=config.base_url,
                                  timeout=config.timeout, max_retries=0, http_client=http_client)
 
     def close(self):
         self.sdk.close()
+
+    def _guard_request(self, request):
+        try:
+            self._check_dispatch(request)
+        except Exception:
+            # SDK wraps request-hook exceptions as connection errors. Preserve
+            # proof that the transport has not received this request.
+            raise CallError("dispatch_validation_failed", fatal=True, failure_stage="before_dispatch") from None
+        self.http_requests_prepared += 1
 
     def _check_dispatch(self, request):
         if not self.offline_transport:
@@ -66,9 +77,13 @@ class APIClient:
         if not self.offline_transport:
             permit = ACTIVE.get()
             if permit is None:
-                raise CallError("executor_required", fatal=True)
-            permit.call(cfg, kwargs)
+                raise CallError("executor_required", fatal=True, failure_stage="before_dispatch")
+            try:
+                permit.call(cfg, kwargs)
+            except (ValueError, OSError):
+                raise CallError("dispatch_validation_failed", fatal=True, failure_stage="before_dispatch") from None
         started = time.perf_counter()
+        prepared_before = self.http_requests_prepared
         try:
             result = self.sdk.chat.completions.create(**kwargs)
         except openai.RateLimitError as exc:
@@ -83,7 +98,23 @@ class APIClient:
                 pass
             raise CallError("quota_exhausted" if quota else "rate_limit", retryable=not quota, fatal=quota,
                             retry_after=delay, http_status=429, elapsed_seconds=round(time.perf_counter()-started, 4)) from None
-        except (openai.APITimeoutError, openai.APIConnectionError):
+        except (openai.APITimeoutError, openai.APIConnectionError) as exc:
+            cause = exc
+            seen = set()
+            while cause is not None and id(cause) not in seen:
+                seen.add(id(cause))
+                if isinstance(cause, CallError) and cause.failure_stage == "before_dispatch":
+                    raise CallError("dispatch_validation_failed", fatal=True, failure_stage="before_dispatch",
+                                    elapsed_seconds=round(time.perf_counter()-started, 4)) from None
+                if isinstance(cause, (httpx.ConnectError, httpx.ConnectTimeout)):
+                    # DNS/TCP/TLS establishment failed before an HTTP body could
+                    # be delivered. Read/write failures remain uncertain.
+                    raise CallError("connection_failed", fatal=True, failure_stage="connect",
+                                    elapsed_seconds=round(time.perf_counter()-started, 4)) from None
+                cause = cause.__cause__
+            if self.http_requests_prepared == prepared_before:
+                raise CallError("local_request_failed", fatal=True, failure_stage="before_dispatch",
+                                elapsed_seconds=round(time.perf_counter()-started, 4)) from None
             raise CallError("unknown_delivery", unknown=True, elapsed_seconds=round(time.perf_counter()-started, 4)) from None
         except openai.APIStatusError as exc:
             # Server errors can occur after processing; do not blindly resend.
@@ -93,6 +124,9 @@ class APIClient:
             raise CallError("api_configuration_error", fatal=True, http_status=exc.status_code,
                             elapsed_seconds=round(time.perf_counter()-started, 4)) from None
         except Exception:
+            if self.http_requests_prepared == prepared_before:
+                raise CallError("local_request_failed", fatal=True, failure_stage="before_dispatch",
+                                elapsed_seconds=round(time.perf_counter()-started, 4)) from None
             # SDK parsing/transport faults may happen after sending a request.
             raise CallError("unknown_delivery", unknown=True, elapsed_seconds=round(time.perf_counter()-started, 4)) from None
         try:

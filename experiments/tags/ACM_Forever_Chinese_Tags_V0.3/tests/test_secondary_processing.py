@@ -352,8 +352,9 @@ class SecondaryTests(unittest.TestCase):
         self.assertEqual(manager.journal.path.read_bytes(), before)
 
     def test_sdk_mock_uses_translation_schema_not_label_schema(self):
+        from problem_processing.translation import prepare_layout_request
         observed = []
-        p = normalize(SAMPLES[0]); prepared = prepare_request(p, language_plan(p))
+        p = normalize(SAMPLES[0]); prepared = prepare_layout_request(p, language_plan(p))
         response = MockTranslationClient().call(prepared["messages"])
         def handler(request):
             observed.append(json.loads(request.content))

@@ -105,11 +105,13 @@ test('invalid explicit math remains literal and gets a visible review marker',()
   assert.equal(root.querySelector('.statement-math-unparsed').textContent,'$\\unsupported{x_i}$');
   assert.equal(root.querySelectorAll('em').length,0);
 });
-test('images retain a traceable source link without fetching remote resources',()=>{
+test('trusted images retain their positions and a traceable source link',()=>{
   const root=render('![示意图](https://img.atcoder.jp/example/P_1.png)');
-  assert.equal(root.querySelectorAll('img').length,0);
+  assert.equal(root.querySelectorAll('img').length,1);
+  assert.equal(root.querySelector('img').getAttribute('loading'),'lazy');
+  assert.equal(root.querySelector('img').getAttribute('referrerpolicy'),'no-referrer');
   assert.equal(root.querySelector('a').href,'https://img.atcoder.jp/example/P_1.png');
-  assert.ok(root.textContent.includes('尚未导入本地资源'));assert.deepEqual(tex(root),[]);
+  assert.ok(root.textContent.includes('查看原图'));assert.deepEqual(tex(root),[]);
 });
 test('unsafe and credential-bearing image links are not offered',()=>{
   const root=render('<img src="javascript:alert(1)" alt="x"><img src="https://user:pass@atcoder.jp/x.png">');

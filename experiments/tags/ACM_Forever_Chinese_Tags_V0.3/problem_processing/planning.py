@@ -18,7 +18,7 @@ from .adapter import normalize
 from .backup import check_sensitive, checked_path, safe_relative
 from .repository import Repository
 from .translation import SYSTEM as TRANSLATION_PROMPT, SCHEMA as TRANSLATION_SCHEMA
-from .translation import TRANSLATION_VERSION, language_plan
+from .translation import TRANSLATION_VERSION, language_plan, translation_ready
 
 VERSION = "offline-plan-1"
 OUTPUT_ROOT = BASE / "outputs" / "plans"
@@ -305,6 +305,11 @@ class Planner:
             if p["processing_status"] != "ready" or p["statement_status"] != "ok":
                 for task in ("annotation", "translation"):
                     result[task].update(status="pending", reason="unreliable_statement")
+                if translation_ready(p):
+                    old = historical_problem(self.problems[key]) if key in self.problems else None
+                    state, reason, source = self._translation(p, old, translation_input)
+                    result['translation'].update(status=state, reason=reason, existing_result=source,
+                        image_handling='preserve_local_images_translate_text_only')
             else:
                 old = historical_problem(self.problems[key]) if key in self.problems else None
                 for task, outcome in (("annotation", self._annotation(p, old, annotation_input, view)),

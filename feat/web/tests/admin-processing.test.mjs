@@ -8,7 +8,7 @@ const Workbench = (await import(await loadSfc('src/components/AdminProblemProces
   .default;
 const keys = ['window', 'document', 'Document', 'Node', 'ShadowRoot', 'fetch', 'location'];
 const originals = new Map(keys.map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
-let dom, view, calls, executionAllowed, executionStatus, finishPost;
+let dom, view, calls, executionAllowed, executionStatus, finishPost, savedJobs;
 beforeEach(() => {
   dom = new JSDOM('<body/>', { url: 'http://localhost/admin.html?section=problems' });
   for (const k of ['window', 'document', 'Document', 'Node', 'ShadowRoot'])
@@ -22,6 +22,7 @@ beforeEach(() => {
   calls = [];
   view = null;
   executionAllowed=false;executionStatus='needs_translation';finishPost=null;
+  savedJobs={};
   globalThis.fetch = async (url, options = {}) => {
     calls.push({ url, options });
     if(url.endsWith('/execute') && options.method==='POST'){
@@ -70,6 +71,8 @@ beforeEach(() => {
             translation:{can_execute:executionAllowed,status:executionStatus,revision:'a'.repeat(64),config_ready:true,request_settings:{model:'offline-fixture',base_url:'https://offline.invalid/v1'}},
           },
           real_api_calls: 0,
+          jobs:savedJobs,
+          image_handling_notice:'默认保留原图及其相对位置，仅翻译文字；图片内文字不翻译。',
         }),
       );
     throw Error('Unexpected request ' + url);
@@ -181,4 +184,21 @@ test('unimported crawler manual action explains missing persistence without inve
   await settle();
   assert.ok(textOf(view.root).includes('尚未纳入标签持久目录'));
   assert.ok(!calls.some((c) => c.options.method === 'POST'));
+});
+
+test('translation tab shows its own saved receipt rather than an annotation failure',async()=>{
+  savedJobs={
+    annotation:{task_type:'annotation',status:'blocked',message:'标签图片需复核'},
+    translation:{task_type:'translation',status:'uncertain',message:'未取得可用响应，是否计费尚无法确认'},
+  };
+  await page();
+  await find(view.root,n=>n.type==='button' && textOf(n).trim()==='AI 翻译')[0].props.onClick();await settle();
+  assert.ok(textOf(view.root).includes('翻译任务：未取得可用响应'));
+  assert.ok(textOf(view.root).includes('默认保留原图及其相对位置'));
+  assert.ok(textOf(view.root).includes('本地请求尝试不等于中转站接收或计费成功'));
+  assert.ok(!textOf(view.root).includes('标签任务：标签图片需复核'));
+  await find(view.root,n=>n.type==='button' && textOf(n).trim()==='AI 标签' && n.props['aria-pressed']!==undefined)[0].props.onClick();await settle();
+  assert.ok(textOf(view.root).includes('标签任务：标签图片需复核'));
+  assert.ok(!textOf(view.root).includes('翻译任务：未取得可用响应'));
+  assert.equal(calls.filter(c=>c.options.method==='POST').length,0);
 });

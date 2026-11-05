@@ -9,7 +9,7 @@ from unittest.mock import patch
 import server  # Configure imports for the isolated processing module.
 from problem_processing.adapter import normalize
 from problem_processing.translation import (
-    MockTranslationClient, TOKEN, language_plan, parse_translation, prepare_request, translate,
+    MockTranslationClient, TOKEN, language_plan, parse_translation, prepare_request, prepare_layout_request, translate,
 )
 
 
@@ -91,11 +91,9 @@ class TranslationParsingTests(unittest.TestCase):
         self.parse()
         self.assertEqual(original,self.prepared);self.assertEqual(payload,self.value)
 
-    def test_direct_mock_entry_uses_parse_only_and_reuses_cached_result(self):
-        segment=self.formula_segment();a,b=TOKEN.findall(segment['text'])
-        segment['text']=f'{b} 在前，{a} 在后。'
-        response=MockTranslationClient().call(self.prepared['messages'])
-        response.content=json.dumps(self.value,ensure_ascii=False)
+    def test_direct_mock_entry_uses_local_layout_and_reuses_cached_result(self):
+        prepared=prepare_layout_request(self.problem,language_plan(self.problem))
+        response=MockTranslationClient().call(prepared['messages'])
         class SavedResponse:
             calls=0
             def call(self,*args,**kwargs):
@@ -107,9 +105,9 @@ class TranslationParsingTests(unittest.TestCase):
                 first=translate(self.problem,root=Path(temp)/'labels',client=client,mock=True)
                 second=translate(self.problem,root=Path(temp)/'labels',client=client,mock=True)
         self.assertEqual(first['translation_status'],'mock')
-        self.assertEqual(first['translation_validation_mode'],'parse_only')
+        self.assertEqual(first['translation_validation_mode'],'layout_by_id')
         self.assertEqual(first['real_api_calls'],0)
-        self.assertIn('$M$ 在前，$N$ 在后。',first['statement_zh'])
+        self.assertLess(first['statement_zh'].index('$N$'),first['statement_zh'].index('$M$'))
         self.assertEqual(client.calls,1);self.assertTrue(second['cache_hit'])
 
 

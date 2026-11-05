@@ -33,12 +33,14 @@ const states = {
 };
 const task = computed(() => data.value?.plan?.[tab.value]);
 const execution = computed(() => data.value?.execution?.[tab.value]);
+const displayedJob = computed(() => job.value?.task_type === tab.value ? job.value : data.value?.jobs?.[tab.value]);
 const translationHtml = computed(() => data.value?.existing?.translation_active ? renderStatementMarkdown(data.value.existing.translated_statement) : '');
 const originalHtml = computed(() => renderStatementMarkdown(data.value?.statement_preview || ''));
 function switchTab(next) {
   // Keep a dirty editor mounted while viewing other tasks; do not discard its draft.
   tab.value = next;
   confirmation.value = null;
+  jobError.value = '';
 }
 async function load() {
   if (!isAdmin.value) return;
@@ -69,7 +71,7 @@ async function pollJob(id) {
   try {
     const result=await request(`/admin/problem-processing/jobs/${id}`,{},'ai-status');
     if(disposed)return;
-    job.value=result;
+    job.value={task_type:job.value?.task_type,...result};
     if(['queued','running'].includes(result.status))pollTimer=setTimeout(()=>pollJob(id),1500);
     else {executing.value=false;emit('saved');await load();}
   } catch(e) {
@@ -82,7 +84,7 @@ async function executeTask() {
   try {
     const result=await request(`/admin/problem-processing/${encodeURIComponent(props.platform)}/${encodeURIComponent(props.problemId)}/execute`,
       {method:'POST',body:{task_type:chosen.task_type,revision:chosen.revision,confirm:true}},'ai-execute');
-    job.value=result;
+    job.value={task_type:chosen.task_type,...result};
     if(['queued','running'].includes(result.status) && result.job_id) await pollJob(result.job_id);
     else {executing.value=false;emit('saved');await load();}
   } catch(e) {
@@ -191,15 +193,16 @@ onBeforeUnmount(() => {
             <p>爬虫原始标签：{{ data.raw_tags?.join('、') || '无' }}</p>
           </template>
           <template v-else>
-            <p class="muted">翻译响应仅解析 JSON 并恢复公式占位符，不再用语序、数字、段落或 Markdown 一致性校验拦截结果。题目身份与防重复请求保护继续生效。</p>
+            <p class="muted">本地保留排版，AI 仅按文字 ID 翻译。图片、公式、代码和样例不交给模型重建。仅检查 ID 能否对应回填，不进行翻译准确性审核；防重复请求保护继续生效。</p>
+            <p v-if="data.image_handling_notice" class="muted">{{ data.image_handling_notice }}</p>
             <p>
               识别语言：{{ data.language?.source_language || '未知' }} · {{ data.language?.reason }}
             </p>
             <p v-if="data.protection">
-              翻译保护：{{ data.protection.tokens }} 个公式 / 变量 / 代码占位符，{{
+              本地结构保护：{{ data.protection.images || 0 }} 张图片，{{
                 data.protection.segments
               }}
-              个段落。
+              个待翻译文字片段。
             </p>
             <p v-if="data.existing?.translation_active">
               已激活译文：{{ data.existing.translated_title }}
@@ -223,7 +226,8 @@ onBeforeUnmount(() => {
             <button class="btn primary" @click="executeTask">确认执行单题</button>
             <button class="btn" @click="confirmation = null">取消</button>
           </section>
-          <p v-if="job" role="status">{{ job.message }}<span v-if="job.usage"> · Token：{{ job.usage.total_tokens ?? '未返回' }}</span></p>
+          <p v-if="displayedJob" role="status">{{ displayedJob.task_type === 'translation' ? '翻译任务' : '标签任务' }}：{{ displayedJob.message }}<span v-if="displayedJob.usage"> · Token：{{ displayedJob.usage.total_tokens ?? '未返回' }}</span><span v-else> · Token：未取得用量记录</span></p>
+          <p v-if="displayedJob?.status === 'uncertain'" class="muted">本地请求尝试不等于中转站接收或计费成功；请先核对原任务，不要重复调用。</p>
           <p v-if="executing" class="muted">关闭页面不会取消已提交任务；重新打开此题可继续查看状态，请勿重复调用。</p>
           <p v-if="jobError" role="alert">{{ jobError }}</p>
           <button v-if="job?.job_id && jobError" class="btn" @click="pollJob(job.job_id)">查询原任务状态</button>

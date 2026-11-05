@@ -105,6 +105,7 @@ class ReadOnlyLabels:
                 "translation_active": active_translation,
                 "translation_origin": translation.get("translation_origin", "ai") if active_translation else None,
                 "translation_validation_mode": translation.get("translation_validation_mode", "legacy_strict") if active_translation else None,
+                "translation_layout": translation.get("translation_layout") if active_translation else None,
                 "translation_model": translation.get("translation_model") if active_translation else None,
                 "translation_review_status": translation.get("translation_review_status") if active_translation else None,
                 "translated_title": m.get("translated_title") if active_translation else None,
@@ -216,8 +217,8 @@ def create_local_app(labels=None):
     @app.after_request
     async def local_headers(response):
         response.headers["Cache-Control"] = "no-store"
-        # Do not fetch remote avatars/images while viewing the original statement.
-        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+        # Permit only trusted OJ statement images; scripts and API connections stay local.
+        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://img.atcoder.jp https://atcoder.jp https://codeforces.com https://*.codeforces.com; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
         response.headers["X-Local-Demo"] = "isolated-read-only"
         return response
 

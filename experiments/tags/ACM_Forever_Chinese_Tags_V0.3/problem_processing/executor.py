@@ -117,8 +117,8 @@ class Executor:
             from annotation_api.schema import SCHEMA
             item = adapt(p)
             return messages(item), SCHEMA, "acm_tag_annotation", item
-        from .translation import language_plan, prepare_request, SCHEMA
-        prepared = prepare_request(p, language_plan(p))
+        from .translation import language_plan, prepare_layout_request, SCHEMA
+        prepared = prepare_layout_request(p, language_plan(p))
         return prepared["messages"], SCHEMA, "acm_problem_translation", prepared
 
     def _source_current(self, p, task_type):
@@ -164,7 +164,7 @@ class Executor:
                           "requested_model": row["identity"]["request_settings"]["model"],
                           "provider": row["identity"]["request_settings"]["provider"]}
             else:
-                from .translation import parse_translation, language_plan, TRANSLATION_VERSION, TRANSLATION_RESULT_MODE
+                from .translation import parse_translation, language_plan, TRANSLATION_VERSION, layout_metadata
                 title, statement = parse_translation(response["content"], prepared)
                 lang = language_plan(p)
                 result = {"problem_key": p["problem_key"], "original_title": p["original_title"],
@@ -172,7 +172,7 @@ class Executor:
                           "source_language": lang["source_language"], "target_language": "zh-CN", "title_zh": title,
                           "statement_zh": statement, "translation_status": "mock" if self.mock else "auto",
                           "translation_model": response["model"], "translation_version": TRANSLATION_VERSION,
-                          "translation_validation_mode": TRANSLATION_RESULT_MODE,
+                          "translation_validation_mode": "layout_by_id", **layout_metadata(prepared),
                           "source_content_hash": p["content_hash"], "source_verified_hash": p["verified_content_hash"],
                           "processing_policy": row["identity"]["policy"], "fully_human_verified": False,
                           "output_mode": row["identity"]["request_settings"]["response_format"], "error": None}
@@ -362,20 +362,26 @@ class Executor:
                     outcome.update(api_calls=calls, real_api_calls=0 if self.mock or getattr(self.client, "offline_transport", False) else calls)
                     return outcome
                 except BaseException as exc:
+                    not_sent = (isinstance(exc, CallError) and exc.failure_stage in {"before_dispatch", "connect"}
+                                and not row.get("response_sha256"))
+                    if not_sent:
+                        calls = 0
                     uncertain = row["state"] == "dispatched" and (not isinstance(exc, CallError) or exc.unknown)
                     if isinstance(exc, ValueError) and row.get("response_sha256"):
                         uncertain = False
                     if row["state"] == "claimed":
                         self.ledger.transition(row, "failed_before_dispatch", error="local_preparation_failed")
                     elif row["state"] == "dispatched":
-                        codes = {"unknown_delivery", "rate_limit", "quota_exhausted", "api_configuration_error", "executor_required"}
-                        self.ledger.transition(row, "uncertain" if uncertain else "blocked",
+                        codes = {"unknown_delivery", "rate_limit", "quota_exhausted", "api_configuration_error", "executor_required",
+                                 "connection_failed", "dispatch_validation_failed", "local_request_failed"}
+                        self.ledger.transition(row, "failed_before_dispatch" if not_sent else "uncertain" if uncertain else "blocked",
                             error=exc.code if isinstance(exc, CallError) and exc.code in codes else "response_or_local_failure",
                             http_status=exc.http_status if isinstance(exc, CallError) else None,
                             elapsed_seconds=exc.elapsed_seconds if isinstance(exc, CallError) else None)
                     if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                         raise
                     return self._view(p, task_type, row["state"], task_id=task_id, error=row.get("error"), api_calls=calls,
+                                      failure_stage=getattr(exc, "failure_stage", None),
                                       real_api_calls=0 if self.mock or getattr(self.client, "offline_transport", False) else calls)
         except Busy:
             return self._view(p, task_type, "blocked", task_id=task_id, error="task_already_running")

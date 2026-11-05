@@ -288,7 +288,7 @@ class SafeExecutionTests(unittest.TestCase):
             result = original(messages, **kwargs)
             try:
                 original(messages, **kwargs)
-            except ValueError:
+            except (ValueError, CallError):
                 errors.append("blocked")
             return result
         client.call = twice

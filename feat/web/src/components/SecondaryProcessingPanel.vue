@@ -135,6 +135,7 @@ watch(
       <div class="secondary-translation">
         <h3>中文翻译</h3>
         <p v-if="data.translation_validation_mode === 'parse_only'" class="muted">AI 自动译文 · 未进行本地内容一致性校验 · 尚未人工确认。</p>
+        <p v-if="data.translation_validation_mode === 'layout_by_id'" class="muted">本地保留结构，AI 按 ID 回填文字。图片、公式、代码和样例保持原位；图片内文字未翻译，译文尚未人工确认。</p>
         <p v-if="data.translation_origin === 'ai_offline_corrected'" class="muted">AI 原响应经离线结构校订后启用，尚未经人工确认；原始响应与校订审计均保留。</p>
         <p>{{ translations[data.translation_status] || '状态：' + data.translation_status }}</p>
         <template v-if="data.translation_active">

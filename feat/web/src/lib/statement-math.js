@@ -2,6 +2,7 @@ import { marked, Renderer } from 'marked';
 import createDOMPurify from 'dompurify';
 import katex from 'katex';
 import { addStatementSampleButtons } from './statement-samples.js';
+import { retainStatementImages } from './statement-images.js';
 
 const command = /\\(?:leq?|geq?|times|cdot|frac|sum|prod|dots|ldots|in|neq?|sqrt|log|lfloor|rfloor|lceil|rceil|mod|bmod)\b/;
 const atom = String.raw`(?:\{(?:[^{}\n]|\{[^{}\n]*\})*\}|\\[A-Za-z]+|\\[{},;! ]|(?<![A-Za-z])[A-Za-z](?:_(?:\{[^{}\n]*\}|[A-Za-z0-9']+))?(?![A-Za-z])|\d+(?:\.\d+)?|[{}\[\]()+*/^_=<>|,;:'-])`;
@@ -167,19 +168,7 @@ export function renderStatementMarkdown(source, doc = document) {
     const sequence=doc.createElement('span');sequence.className='statement-math-sequence';
     first.before(sequence);sequence.append(...nodes);
   }
-  // Source images may require a separate asset import; do not issue remote requests in the forum demo.
-  for (const image of root.querySelectorAll('img')) {
-    const reference = doc.createElement('span'); reference.className = 'statement-image-reference';
-    reference.textContent = `[图片：${image.alt || '待关联资源'}；尚未导入本地资源]`;
-    try {
-      const url = new URL(image.getAttribute('src'));
-      if (['https:','http:'].includes(url.protocol) && !url.username && !url.password) {
-        const link=doc.createElement('a');link.href=url.href;link.textContent='查看原图';link.target='_blank';
-        reference.append(doc.createTextNode(' '),link);
-      }
-    } catch { /* Unresolved or unsafe source is retained as an explicit pending notice. */ }
-    image.replaceWith(reference);
-  }
+  retainStatementImages(root);
   for (const link of root.querySelectorAll('a')) {
     try {
       const href = new URL(link.getAttribute('href'), doc.defaultView.location.origin);

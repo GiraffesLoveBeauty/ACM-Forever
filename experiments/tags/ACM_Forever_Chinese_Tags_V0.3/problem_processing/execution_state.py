@@ -117,7 +117,7 @@ class Ledger:
         if state not in STATES:
             raise ValueError("非法任务状态")
         transitions = {"claimed": {"failed_before_dispatch", "dispatched", "blocked"},
-                       "dispatched": {"completed", "uncertain", "blocked"},
+                       "dispatched": {"completed", "uncertain", "blocked", "failed_before_dispatch"},
                        "uncertain": {"completed", "blocked"},
                        "completed": set(), "blocked": set(), "failed_before_dispatch": set()}
         if state not in transitions.get(row["state"], set()):

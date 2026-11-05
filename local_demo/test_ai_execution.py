@@ -78,6 +78,7 @@ class Fixture:
         def handler(request):
             self.requests.append(request)
             if failure=='timeout':raise httpx.ReadTimeout('synthetic timeout',request=request)
+            if failure=='connect':raise httpx.ConnectError('synthetic TLS/connect failure',request=request)
             if failure=='auth':return httpx.Response(401,json={'error':{'message':'synthetic auth failure'}})
             body=json.loads(request.content)
             fake=(MockAnnotationClient() if task=='annotation' else MockTranslationClient()).call(body['messages'])
@@ -99,6 +100,64 @@ class ServiceTests(Fixture,unittest.TestCase):
             self.assertEqual(proposal['maximum_requests'],1)
         self.assertEqual(self.launched,[])
         self.assertFalse((self.service.store/'jobs').exists())
+
+    def test_connection_failure_reports_unsent_and_allows_only_explicit_new_attempt(self):
+        job=self.queue('translation')
+        first=self.service.run(job['job_id'],client=self.client('translation',failure='connect'))
+        self.assertEqual(first['status'],'failed_before_dispatch',first)
+        self.assertEqual(first['real_api_calls'],0)
+        self.assertEqual(first['error'],'connection_failed')
+        self.assertIn('生成请求正文未发出',first['message'])
+        self.assertEqual(len(self.requests),1)  # one simulated connection, no retry
+        proposal=self.service.proposal(self.problem,'translation')
+        self.assertTrue(proposal['can_execute'])
+        second=self.service.submit(self.problem,'atcoder','abc999_a','translation',proposal['revision'],'1')
+        self.assertNotEqual(second['job_id'],job['job_id'])
+        result=self.service.run(second['job_id'],client=self.client('translation'))
+        self.assertEqual(result['status'],'completed',result)
+        self.assertEqual(self.service.read(job['job_id'])['status'],'failed_before_dispatch')
+
+    def test_parsing_failure_keeps_returned_usage_and_model(self):
+        job=self.queue('translation')
+        def missing_id(content):
+            value=json.loads(content);value['segments'].pop();return json.dumps(value)
+        result=self.service.run(job['job_id'],client=self.client('translation',rewrite=missing_id))
+        self.assertEqual(result['status'],'blocked',result)
+        self.assertEqual(result['usage']['total_tokens'],30)
+        self.assertEqual(result['model'],'offline-response')
+        self.assertIn('文字 ID',result['message'])
+        self.assertFalse(self.service.proposal(self.problem,'translation')['can_execute'])
+
+    def test_old_uncertain_receipt_is_projected_without_rewriting_history(self):
+        row={'status':'uncertain','error':'unknown_delivery',
+             'message':'任务已停止。请先核对保存记录，不要重复发起付费请求。'}
+        original=deepcopy(row);view=self.service.public(row)
+        self.assertIn('是否到达中转站及是否计费尚无法确认',view['message'])
+        self.assertEqual(row,original)
+
+    def test_worker_created_client_runs_real_sdk_guards_with_memory_transport(self):
+        self.crawler_only()
+        self.update("UPDATE crawler_problems SET statement_html=? WHERE problem_id='abc999_b'",
+            ('<div id="task-statement"><p>Read the given diagram and print the answer.</p><img src="https://img.atcoder.jp/offline/a.png"></div>',))
+        p=self.service.source('atcoder','abc999_b')
+        proposal=self.service.proposal(p,'translation')
+        job=self.service.submit(p,'atcoder','abc999_b','translation',proposal['revision'],'1')
+        calls=[]
+        class Memory(httpx.BaseTransport):
+            def handle_request(_,request):
+                calls.append(request)
+                body=json.loads(request.content)
+                fake=MockTranslationClient().call(body['messages'])
+                return httpx.Response(200,json={'id':'offline','object':'chat.completion','created':0,'model':'memory-test',
+                    'choices':[{'index':0,'finish_reason':'stop','message':{'role':'assistant','content':fake.content}}],
+                    'usage':{'prompt_tokens':20,'completion_tokens':10,'total_tokens':30}})
+        class GuardedMemoryClient(APIClient):
+            def __init__(_,cfg):super().__init__(cfg,http_client=httpx.Client(transport=Memory(),trust_env=False))
+        with patch('annotation_api.client.APIClient',GuardedMemoryClient):
+            result=self.service.run(job['job_id'])
+        self.assertEqual(result['status'],'completed',result)
+        self.assertEqual(len(calls),1)
+        self.assertIn('![图片](https://img.atcoder.jp/offline/a.png)',self.labels.find('atcoder','abc999_b')['translated_statement'])
 
     def test_same_revision_double_submit_launches_once(self):
         first=self.queue();second=self.queue()
@@ -174,7 +233,6 @@ class ServiceTests(Fixture,unittest.TestCase):
         self.assertEqual(self.requests,[])
 
     def test_web_translation_bypasses_strict_content_validator(self):
-        import re
         self.crawler_only()
         self.update("UPDATE crawler_problems SET statement_text=?,statement_html='' WHERE problem_id='abc999_b'",
             ('Problem Statement\n\nRead $N$ and $M$ in that order.\n\nInput\n\n```\n1 2\n```\n\nOutput\n\nPrint the answer.',))
@@ -183,9 +241,8 @@ class ServiceTests(Fixture,unittest.TestCase):
         job=self.service.submit(p,'atcoder','abc999_b','translation',proposal['revision'],'1')
         def reorder(content):
             value=json.loads(content)
-            segment=next(s for s in value['segments'] if len(re.findall(r'__ACM_KEEP_\d+__',s['text']))==2)
-            a,b=re.findall(r'__ACM_KEEP_\d+__',segment['text'])
-            segment['text']=f'先考虑 {b}，然后考虑 {a}。'
+            value['segments'][0]['text']='Returned English 999'
+            value['segments'].reverse()
             return json.dumps(value,ensure_ascii=False)
         with patch('problem_processing.translation.validate_translation',side_effect=AssertionError('STRICT GATE DISABLED')):
             result=self.service.run(job['job_id'],client=self.client('translation',rewrite=reorder))
@@ -194,9 +251,10 @@ class ServiceTests(Fixture,unittest.TestCase):
         self.assertEqual(result['real_api_calls'],0)
         view=self.labels.find('atcoder','abc999_b')
         self.assertTrue(view['translation_active'])
-        self.assertEqual(view['translation_validation_mode'],'parse_only')
+        self.assertEqual(view['translation_validation_mode'],'layout_by_id')
         self.assertFalse(view['fully_human_verified'])
-        self.assertIn('先考虑 $M$，然后考虑 $N$。',view['translated_statement'])
+        self.assertIn('Returned English 999',view['translated_statement'])
+        self.assertLess(view['translated_statement'].index('$N$'),view['translated_statement'].index('$M$'))
         self.assertEqual(self.service.proposal(p,'translation')['status'],'reuse_existing')
 
     def test_crawler_only_changed_before_worker_sends_nothing(self):
@@ -208,7 +266,7 @@ class ServiceTests(Fixture,unittest.TestCase):
         self.assertEqual(self.requests,[])
         self.assertNotIn(p['problem_key'],self.labels.repo.snapshot()[0])
 
-    def test_crawler_image_requires_review_not_an_api_failure(self):
+    def test_crawler_image_translates_text_and_keeps_annotation_pending(self):
         self.crawler_only()
         self.update("UPDATE crawler_problems SET statement_html=? WHERE problem_id='abc999_b'",
             ('<div id="task-statement"><p>Find the value N in this figure.</p><img src="https://img.atcoder.jp/example.png"></div>',))
@@ -216,10 +274,13 @@ class ServiceTests(Fixture,unittest.TestCase):
         self.assertEqual(p['processing_status'],'html_pending')
         self.assertIn('image_requires_review',p['processing_issues'])
         proposal=self.service.proposal(p,'translation')
-        self.assertFalse(proposal['can_execute'])
-        with self.assertRaises(ExecutionConflict):
-            self.service.submit(p,'atcoder','abc999_b','translation',proposal['revision'],'1')
-        self.assertEqual(self.launched,[])
+        self.assertTrue(proposal['can_execute'],proposal)
+        self.assertFalse(self.service.proposal(p,'annotation')['can_execute'])
+        job=self.service.submit(p,'atcoder','abc999_b','translation',proposal['revision'],'1')
+        result=self.service.run(job['job_id'],client=self.client('translation'))
+        self.assertEqual(result['status'],'completed',result)
+        self.assertEqual(len(self.requests),1)
+        self.assertIn('![图片](https://img.atcoder.jp/example.png)',self.labels.find('atcoder','abc999_b')['translated_statement'])
 
     def test_restart_preserves_crawler_samples_after_task_registers_input(self):
         self.crawler_only()
@@ -372,6 +433,22 @@ class RouteTests(Fixture,unittest.IsolatedAsyncioTestCase):
         after=await(await self.client.get(path)).get_json()
         self.assertTrue(after['existing']['translation_active'])
         self.assertEqual(after['execution']['translation']['status'],'reuse_existing')
+        self.assertEqual(len(self.requests),1)
+
+    async def test_image_unknown_delivery_reason_is_not_replaced_by_image_block(self):
+        self.crawler_only()
+        self.update("UPDATE crawler_problems SET statement_html=? WHERE problem_id='abc999_b'",
+            ('<div id="task-statement"><p>Read this figure and print the correct answer.</p><img src="https://img.atcoder.jp/offline/a.png"></div>',))
+        p=self.service.source('atcoder','abc999_b')
+        proposal=self.service.proposal(p,'translation')
+        job=self.service.submit(p,'atcoder','abc999_b','translation',proposal['revision'],'1')
+        self.service.run(job['job_id'],client=Fixture.client(self,'translation',failure='timeout'))
+        await self.login()
+        detail=await(await self.client.get('/api/admin/problem-processing/atcoder/abc999_b')).get_json()
+        self.assertIn('是否到达中转站及是否计费尚无法确认',detail['execution']['translation']['reason'])
+        self.assertNotIn('需先复核；并非 API 配置',detail['execution']['translation']['reason'])
+        self.assertIn('默认保留原图',detail['image_handling_notice'])
+        self.assertFalse(detail['execution']['translation']['can_execute'])
         self.assertEqual(len(self.requests),1)
 
     async def test_direct_old_execution_route_remains_blocked(self):

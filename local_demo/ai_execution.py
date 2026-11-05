@@ -16,7 +16,7 @@ from problem_processing.backup import checked_path
 from problem_processing.execution_state import Ledger
 from problem_processing.executor import bind_plan, execute_batch
 from problem_processing.planning import Planner, historical_problem, semantic_inputs, task_policies
-from problem_processing.translation import current_translation
+from problem_processing.translation import current_translation, translation_ready
 from tag_management.model import empty_state
 from tag_management.storage import Journal
 
@@ -25,6 +25,29 @@ BASE_URL = 'https://kitsune2.yukirin.me/v1'
 MODEL = 'gpt-6-luna'
 TASKS = {'annotation', 'translation'}
 ACTIVE = {'queued', 'running'}
+
+
+def execution_message(result):
+    status, code = result.get('status'), result.get('error')
+    if status == 'completed':
+        return '任务完成，结果已独立保存；自动结果尚未人工确认。'
+    if status == 'reuse_existing':
+        return '已有结果已复用，无需新增 API 请求。'
+    if code == 'connection_failed':
+        return '连接中转站失败（DNS、连接或 TLS 阶段），生成请求正文未发出，未自动重试。请检查网络后重新预检。'
+    if code in {'dispatch_validation_failed', 'local_request_failed'} or status == 'failed_before_dispatch':
+        return '请求在本地发送前停止，没有发送生成请求。请重新检查题面、权限和任务配置；未自动重试。'
+    if status == 'uncertain' or code in {'unknown_delivery', 'manual_delivery_check_required'}:
+        return '未取得可用响应，是否到达中转站及是否计费尚无法确认；不是图片翻译限制。请核对该任务与中转站记录，禁止自动重复请求。'
+    if code == 'api_configuration_error':
+        return '中转站返回接口错误，请核对模型、凭据或请求参数；未自动重试。'
+    if code == 'quota_exhausted':
+        return '中转站返回额度不足，请核对服务账单；未自动重试。'
+    if code == 'rate_limit':
+        return '中转站返回限流，任务停止；未自动重试。'
+    if code in {'response_or_local_failure', 'saved_response_requires_review'}:
+        return '响应或本地回填失败，请检查已保存响应及文字 ID 是否齐全；原文、原图和已有译文保留，未重新请求。'
+    return '任务已停止，请检查当前任务的持久状态与处理依据；未自动重试。'
 
 
 class ExecutionConflict(ValueError):
@@ -121,8 +144,13 @@ class WebAIService:
         planner=Planner(self.labels.root)
         plan=planner.plan([p]);entry=plan['entries'][0]
         status=entry[task_type]['status'];reason=entry[task_type].get('reason','输入需核验')
+        if reason in {'execution_recovery_or_review_required','request_delivery_or_cache_audit_required'}:
+            records=[r for r in Ledger(self.labels.root).records() if r['problem_key']==p['problem_key'] and r['task_type']==task_type]
+            if records:
+                latest=max(records,key=lambda r:r['updated_at'])
+                reason=execution_message({'status':latest['state'],'error':latest.get('error')})
         manual,protected=self.manual_version(p['problem_key'])
-        if p['processing_status']=='ready':
+        if p['processing_status']=='ready' or task_type=='translation' and translation_ready(p):
             if task_type=='translation':
                 records=[r for r in Ledger(self.labels.root).records() if r['problem_key']==p['problem_key'] and r['task_type']==task_type]
                 previous=planner.problems.get(p['problem_key'])
@@ -165,15 +193,23 @@ class WebAIService:
 
     @staticmethod
     def public(job):
-        return {k:job[k] for k in ('job_id','platform','problem_id','task_type','status','created_at','updated_at',
-            'message','real_api_calls','usage','model','elapsed_seconds','error') if k in job}
+        result={k:job[k] for k in ('job_id','platform','problem_id','task_type','status','created_at','updated_at',
+            'message','real_api_calls','usage','model','elapsed_seconds','error','failure_stage') if k in job}
+        if job.get('message')=='任务已停止。请先核对保存记录，不要重复发起付费请求。':
+            result['message']=execution_message(job)  # Read projection only; keep historical evidence immutable.
+        return result
 
     def submit(self, p, platform, problem_id, task_type, revision, actor):
         if task_type not in TASKS or not isinstance(revision,str) or not re.fullmatch('[a-f0-9]{64}',revision):
             raise ValueError('请先检查题目和执行配置')
         job_id=digest({'problem_key':p['problem_key'],'task_type':task_type,'revision':revision})
         with Journal(self.store/'writer.jsonl').locked():
-            if self.job_path(job_id).exists():return self.public(self.read(job_id))
+            while self.job_path(job_id).exists():
+                previous=self.read(job_id)
+                if previous['status']!='failed_before_dispatch':return self.public(previous)
+                # A new explicit click may retry only a proven unsent attempt.
+                # Keep the previous receipt intact; queued/unknown jobs still deduplicate.
+                job_id=digest({'problem_key':p['problem_key'],'task_type':task_type,'revision':revision,'retry_of':job_id})
             proposal=self.proposal(p,task_type)
             if proposal['revision']!=revision:raise ExecutionConflict('题面、配置或处理状态已变化，请重新检查后再执行。')
             if proposal['status'] in {'reuse_existing','not_required'}:
@@ -240,10 +276,16 @@ class WebAIService:
                     finally:
                         if owned:client.close()
                     result=outcome['results'][0];saved=result.get('result') or {}
+                    if not saved and result.get('task_id'):
+                        ledger=Ledger(self.labels.root);record=ledger.load(result['task_id'])
+                        if record and record.get('response_sha256'):
+                            # Parsing errors must not hide usage already returned by the relay.
+                            saved=ledger.artifact('responses',record['attempt_id'],record['response_sha256'])['response']
+                        elif record:
+                            saved={'elapsed_seconds':record.get('elapsed_seconds')}
                     job.update(status=result['status'],real_api_calls=outcome['real_api_calls'],usage=saved.get('usage'),
                         model=saved.get('model'),elapsed_seconds=saved.get('elapsed_seconds'),error=result.get('error'),
-                        message='任务完成，结果已独立保存；自动结果尚未人工确认。' if result['status']=='completed' else
-                            '已有结果已复用。' if result['status']=='reuse_existing' else '任务已停止。请先核对保存记录，不要重复发起付费请求。')
+                        failure_stage=result.get('failure_stage'),message=execution_message(result))
             except Exception:
                 records=[r for r in Ledger(self.labels.root).records() if r['problem_key']==job['problem_key'] and r['task_type']==job['task_type']]
                 dispatched=any(r['state'] in {'dispatched','uncertain'} for r in records)

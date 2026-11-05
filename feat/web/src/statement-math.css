@@ -80,3 +80,13 @@
 }
 .problem-statement .statement-sample-heading > h3 { margin: 12px 0; }
 .problem-statement .statement-sample-copy-status { font-size: 12px; font-weight: normal; }
+.statement-source-image {
+  max-width: 100%;
+  height: auto;
+  vertical-align: middle;
+}
+.statement-image-link {
+  display: inline-block;
+  margin: 0 .5em;
+  font-size: .8em;
+}
