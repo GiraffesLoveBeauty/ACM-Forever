@@ -10,6 +10,7 @@ from .problem_tags import has_problem_tag, problem_tags
 
 PLATFORMS = {"codeforces", "atcoder"}
 SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,160}")
+CF_PROBLEM_ID = re.compile(r"(?:cf_)?([1-9][0-9]*)(?:-?([A-Za-z]+[0-9]*))?", re.IGNORECASE | re.ASCII)
 
 
 def tracker_options(args):
@@ -48,7 +49,7 @@ def identity(platform, problem_id, contest_id=None, problem_index=None, problem_
     contest = str(contest_id or "")
     index = str(problem_index or "")
     if platform == "codeforces":
-        bare = re.sub(r"^cf_", "", problem_id, flags=re.IGNORECASE)
+        id_match = CF_PROBLEM_ID.fullmatch(problem_id)
         if not contest or not index:
             try:
                 parts = urlsplit(problem_url or "")
@@ -59,12 +60,13 @@ def identity(platform, problem_id, contest_id=None, problem_index=None, problem_
                 match = None
             if match:
                 contest, index = match.groups()
-            elif contest and bare.startswith(contest):
-                index = bare[len(contest):]
-            else:
-                match = re.fullmatch(r"([1-9]\d*)([A-Za-z]+\d*)", bare)
-                if match:
-                    contest, index = match.groups()
+            elif id_match:
+                id_contest, id_index = id_match.groups()
+                if contest and id_contest.startswith(contest):
+                    # Numeric Gym indices require a known contest boundary.
+                    index = id_contest[len(contest):] + (id_index or "")
+                elif id_index is not None:
+                    contest, index = id_contest, id_index
         if not re.fullmatch(r"[1-9]\d{0,6}", contest) or not re.fullmatch(r"[A-Za-z]+\d*|\d+", index):
             return None
         index = index.upper()
@@ -87,12 +89,17 @@ def identity(platform, problem_id, contest_id=None, problem_index=None, problem_
 
 
 def problem_id_aliases(platform, problem_id):
-    """CF's offline and server collectors use the same ID with different prefixes."""
+    """Recognize compact, prefixed, and legacy hyphenated CF IDs."""
     aliases = [problem_id]
     if platform == "codeforces":
-        bare = re.sub(r"^cf_", "", problem_id, flags=re.IGNORECASE)
-        if re.fullmatch(r"[1-9]\d*(?:[A-Za-z]+\d*)?", bare):
+        match = CF_PROBLEM_ID.fullmatch(problem_id)
+        if match:
+            contest, index = match.groups()
+            bare = contest + (index or "")
             aliases.extend((bare, "cf_" + bare))
+            if index is not None:
+                legacy = contest + "-" + index
+                aliases.extend((legacy, "cf_" + legacy))
     return tuple(dict.fromkeys(aliases))
 
 
@@ -100,10 +107,10 @@ def problem_id_key(platform, problem_id):
     """Group the same aliases accepted by CF detail lookups; keep other IDs exact."""
     if platform != "codeforces":
         return problem_id
-    aliases = problem_id_aliases(platform, problem_id)
-    if len(aliases) > 1:
-        bare = re.sub(r"^cf_", "", problem_id, flags=re.IGNORECASE)
-        return "CF_" + bare.upper()
+    match = CF_PROBLEM_ID.fullmatch(problem_id)
+    if match:
+        contest, index = match.groups()
+        return "CF_" + contest + (index or "").upper()
     return problem_id.upper()
 
 
@@ -119,10 +126,7 @@ async def attempt_problem_metadata(db, owner, platform, problem_id):
     if not owner or platform not in PLATFORMS or not SAFE_ID.fullmatch(problem_id):
         return None
     aliases = problem_id_aliases(platform, problem_id)
-    wanted = problem_id
-    if platform == "codeforces":
-        bare = re.sub(r"^cf_", "", problem_id, flags=re.IGNORECASE)
-        wanted = "cf_" + bare.upper()
+    wanted = problem_id_key(platform, problem_id)
     comparison = "problem_id COLLATE NOCASE" if platform == "codeforces" else "problem_id"
     async with db.execute(
         "SELECT problem_id,contest_id FROM submission_attempts WHERE owner_qq_id=? AND platform=? AND "
@@ -131,7 +135,7 @@ async def attempt_problem_metadata(db, owner, platform, problem_id):
     ) as cursor:
         async for row in cursor:
             parsed = identity(platform, row["problem_id"], row["contest_id"])
-            if parsed is None or parsed[0] != wanted:
+            if parsed is None or problem_id_key(platform, parsed[0]) != wanted:
                 continue
             pid, contest, index = parsed
             url = (cf_problem_url(contest, index) if platform == "codeforces" else
@@ -249,6 +253,9 @@ async def contest_tracker(db, owner, options):
         })
         group["problems"].append(problem)
 
+    keyword = options["tag"]
+    cf_search_key = problem_id_key("codeforces", keyword) if CF_PROBLEM_ID.fullmatch(keyword) else None
+
     def matches(problem, group):
         if options["scope"] == "solved" and problem["status"] != "solved":
             return False
@@ -256,7 +263,10 @@ async def contest_tracker(db, owner, options):
             return False
         if options.get("problem_tag") and not has_problem_tag(problem["tags"], options["problem_tag"]):
             return False
-        return not options["tag"] or options["tag"] in " ".join(
+        if (cf_search_key is not None and problem["platform"] == "codeforces"
+                and cf_search_key == problem_id_key("codeforces", problem["problem_id"])):
+            return True
+        return not keyword or keyword in " ".join(
             str(value) for value in (problem["problem_id"], problem["problem_name"], problem["tags"],
                                     group["contest_id"], group["contest_name"])).casefold()
 
