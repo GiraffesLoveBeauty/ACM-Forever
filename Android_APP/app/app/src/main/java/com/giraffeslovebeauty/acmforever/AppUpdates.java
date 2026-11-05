@@ -31,7 +31,10 @@ final class AppUpdates {
     private Runnable listener;
     private UpdateManifest release;
     private String source="",error="",verifiedName="",pendingResult="",downloadState="";
-    private long downloadId=-1,generation;
+    private long downloadId=-1;
+    private volatile long generation;
+    private int downloadSource;
+    private long lastBytes=-1,lastProgress;
     private boolean checking,verifying,installRequested;
     private int progress=-1;
     private long promptedVersion;
@@ -44,12 +47,14 @@ final class AppUpdates {
         this.context=context.getApplicationContext();this.api=api;prefs=AppAppearance.prefs(context);
         prefs.edit().remove(KEY+"wifi_download").apply();
         downloadId=prefs.getLong(KEY+"download",-1);verifiedName=prefs.getString(KEY+"verified","");
+        downloadSource=Math.max(0,prefs.getInt(KEY+"download_source",0));lastProgress=android.os.SystemClock.elapsedRealtime();
         try{
             source=endpoint();
             if(source.equals(prefs.getString(KEY+"source",""))){
                 String stored=prefs.getString(KEY+"manifest","");
                 if(!stored.isEmpty()){release=new UpdateManifest(new JSONObject(stored),context.getPackageName());release.requireChannel(channel());}
                 if(release!=null&&release.versionCode>currentVersion()){
+                    if(downloadSource>=release.apkUrls.size())throw new IllegalArgumentException("下载来源已失效，请重新检查更新。");
                     downloadId=prefs.getLong(KEY+"download",-1);verifiedName=prefs.getString(KEY+"verified","");
                     if(!verifiedFile().isFile())verifiedName="";
                 }else clearStored();
@@ -114,22 +119,18 @@ final class AppUpdates {
     private void changed(){if(listener!=null&&activity()!=null)listener.run();}
     void check(boolean manual){
         if(!syncSource()){changed();return;}if(busy())return;error="";pendingResult="";checking=true;changed();
-        final long ticket=++generation;final String address=source;
+        final long ticket=++generation;final java.util.List<String> addresses=UpdateManifest.sources(customSource(),context.getString(R.string.default_update_manifest_url),context.getString(R.string.fallback_update_manifest_url));
         prefs.edit().putLong(KEY+"attempt",System.currentTimeMillis()).apply();
         io.execute(()->{
             try{
-                if(address.isEmpty())throw new ApiClient.UnconfiguredException();
                 if(!networkAvailable())throw new ApiClient.NoNetworkException();
-                HttpURLConnection connection=openManifest(address);
-                UpdateManifest found;
-                try{
-                    try(InputStream stream=connection.getInputStream();ByteArrayOutputStream bytes=new ByteArrayOutputStream()){
-                        byte[] buffer=new byte[4096];int n;
-                        while((n=stream.read(buffer))!=-1){if(bytes.size()+n>32768)throw new IllegalArgumentException("版本清单超过 32 KB。");bytes.write(buffer,0,n);}
-                        found=new UpdateManifest(new JSONObject(new String(bytes.toByteArray(),StandardCharsets.UTF_8)),context.getPackageName());
-                        found.requireChannel(channel());
-                    }
-                }finally{connection.disconnect();}
+                UpdateManifest result=null;Exception lastFailure=null;
+                for(String address:addresses){
+                    if(ticket!=generation)return;
+                    try{result=readManifest(address);break;}catch(IOException|ApiClient.ApiException e){lastFailure=e;}
+                }
+                if(result==null)throw lastFailure==null?new IOException("无法读取更新清单"):lastFailure;
+                final UpdateManifest found=result;
                 ui.post(()->{
                     if(ticket!=generation)return;checking=false;
                     if(release==null||release.versionCode!=found.versionCode||!release.sha256.equals(found.sha256)){deleteVerified();}
@@ -142,6 +143,13 @@ final class AppUpdates {
                 });
             }catch(Exception failure){ui.post(()->{if(ticket!=generation)return;checking=false;error=failure instanceof IllegalArgumentException?failure.getMessage():FailureState.title(failure);changed();});}
         });
+    }
+    private UpdateManifest readManifest(String address)throws Exception{
+        HttpURLConnection connection=openManifest(address);
+        try{try(InputStream stream=connection.getInputStream();ByteArrayOutputStream bytes=new ByteArrayOutputStream()){
+            byte[] buffer=new byte[4096];int n;while((n=stream.read(buffer))!=-1){if(bytes.size()+n>32768)throw new IllegalArgumentException("版本清单超过 32 KB。");bytes.write(buffer,0,n);}
+            UpdateManifest found=new UpdateManifest(new JSONObject(new String(bytes.toByteArray(),StandardCharsets.UTF_8)),context.getPackageName());found.requireChannel(channel());return found;
+        }}finally{connection.disconnect();}
     }
     private HttpURLConnection openManifest(String address)throws Exception{
         String next=UpdateManifest.https(address);
@@ -196,13 +204,21 @@ final class AppUpdates {
     }
     void download(){
         if(!syncSource()){changed();return;}if(busy()||!available()||ready())return;
+        downloadSource=0;enqueueDownload();
+    }
+    private void enqueueDownload(){
         try{
-            DownloadManager.Request request=new DownloadManager.Request(Uri.parse(release.apkUrl));
+            if(release==null||downloadSource>=release.apkUrls.size())throw new IllegalArgumentException("安装包下载地址无效。");
+            DownloadManager.Request request=new DownloadManager.Request(Uri.parse(release.apkUrls.get(downloadSource)));
             request.setTitle("ACMforever "+release.versionName);request.setDescription("下载后校验并由系统确认安装");
             request.setMimeType("application/vnd.android.package-archive");request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
             request.setDestinationInExternalFilesDir(context,Environment.DIRECTORY_DOWNLOADS,"acmforever-"+release.versionCode+"-"+System.currentTimeMillis()+".apk");
-            downloadId=downloads().enqueue(request);progress=-1;downloadState="正在等待下载…";error="";save();changed();ui.removeCallbacks(poll);ui.postDelayed(poll,1000);
+            downloadId=downloads().enqueue(request);progress=-1;lastBytes=-1;lastProgress=android.os.SystemClock.elapsedRealtime();downloadState=downloadSource==0?"正在等待下载…":"主下载源不可用，正在使用备用源…";error="";save();changed();ui.removeCallbacks(poll);ui.postDelayed(poll,1000);
         }catch(Exception e){downloadId=-1;fail(e);}
+    }
+    private boolean nextDownloadSource(){
+        if(release==null||downloadSource+1>=release.apkUrls.size()||!networkAvailable())return false;
+        if(downloadId!=-1)downloads().remove(downloadId);downloadId=-1;downloadSource++;enqueueDownload();return true;
     }
     private DownloadManager downloads(){return (DownloadManager)context.getSystemService(Context.DOWNLOAD_SERVICE);}
     private void pollDownload(){
@@ -214,6 +230,13 @@ final class AppUpdates {
             progress=total>0?(int)Math.min(100,bytes*100/total):-1;
             int status=cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
             int reason=cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON));
+            long now=android.os.SystemClock.elapsedRealtime();if(bytes!=lastBytes||!networkAvailable()){lastBytes=bytes;lastProgress=now;}
+            boolean storageFailure=reason==DownloadManager.ERROR_INSUFFICIENT_SPACE||reason==DownloadManager.ERROR_DEVICE_NOT_FOUND;
+            if(status==DownloadManager.STATUS_FAILED&&!storageFailure&&nextDownloadSource())return;
+            if(status!=DownloadManager.STATUS_SUCCESSFUL&&status!=DownloadManager.STATUS_FAILED&&networkAvailable()&&now-lastProgress>=30000){
+                if(nextDownloadSource())return;
+                throw new IOException("安装包下载连接超时，请重试。");
+            }
             downloadState=status==DownloadManager.STATUS_PENDING?"正在等待下载…":status==DownloadManager.STATUS_PAUSED?(reason==DownloadManager.PAUSED_WAITING_FOR_NETWORK?"无网络，恢复连接后继续下载…":reason==DownloadManager.PAUSED_QUEUED_FOR_WIFI?"系统正在等待可用网络…":"连接中断，系统正在重试下载…"):"";changed();
             if(status==DownloadManager.STATUS_FAILED)throw new IllegalArgumentException(reason==DownloadManager.ERROR_INSUFFICIENT_SPACE?"下载失败：存储空间不足。":reason==DownloadManager.ERROR_DEVICE_NOT_FOUND?"下载失败：存储设备不可用。":reason==DownloadManager.ERROR_CANNOT_RESUME?"下载中断且无法续传，请重试。":"安装包下载失败，系统原因 "+reason+"，请重试。");
             if(status==DownloadManager.STATUS_SUCCESSFUL){Uri uri=downloads().getUriForDownloadedFile(downloadId);if(uri==null)throw new IOException("找不到下载文件。");verify(uri);}
@@ -271,7 +294,7 @@ final class AppUpdates {
     private File verifiedFile(){return new File(new File(context.getCacheDir(),"updates"),verifiedName.matches("verified-[A-Za-z0-9_-]+\\.apk")?verifiedName:"missing");}
     private void deleteVerified(){if(!verifiedName.isEmpty())verifiedFile().delete();verifiedName="";}
     private void clearStored(){if(downloadId!=-1)downloads().remove(downloadId);downloadId=-1;deleteVerified();release=null;prefs.edit().remove(KEY+"manifest").remove(KEY+"download").remove(KEY+"verified").remove(KEY+"source").apply();}
-    private void save(){SharedPreferences.Editor edit=prefs.edit().putString(KEY+"source",source).putLong(KEY+"download",downloadId).putString(KEY+"verified",verifiedName);if(release!=null)edit.putString(KEY+"manifest",release.json());else edit.remove(KEY+"manifest");edit.apply();}
+    private void save(){SharedPreferences.Editor edit=prefs.edit().putString(KEY+"source",source).putLong(KEY+"download",downloadId).putInt(KEY+"download_source",downloadSource).putString(KEY+"verified",verifiedName);if(release!=null)edit.putString(KEY+"manifest",release.json());else edit.remove(KEY+"manifest");edit.apply();}
     private void fail(Exception e){error=e instanceof IllegalArgumentException?e.getMessage():FailureState.title(e);save();changed();}
     private boolean networkAvailable(){ConnectivityManager cm=(ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);NetworkCapabilities caps=cm==null?null:cm.getNetworkCapabilities(cm.getActiveNetwork());return caps!=null&&caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);}
 }

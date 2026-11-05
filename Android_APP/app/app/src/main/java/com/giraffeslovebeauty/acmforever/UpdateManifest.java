@@ -1,8 +1,10 @@
 package com.giraffeslovebeauty.acmforever;
 
 import org.json.JSONObject;
+import org.json.JSONArray;
 import java.net.URI;
 import java.util.Locale;
+import java.util.*;
 
 /** Public release metadata. It never contains cookies, credentials or an executable instruction. */
 final class UpdateManifest {
@@ -10,6 +12,7 @@ final class UpdateManifest {
     final String packageName,versionName,apkUrl,sha256,notes,channel;
     final long versionCode,sizeBytes;
     final int minSdk;
+    final List<String> apkUrls;
     private final String json;
     UpdateManifest(JSONObject value,String expectedPackage)throws Exception{
         packageName=value.getString("packageName");
@@ -19,6 +22,12 @@ final class UpdateManifest {
         versionCode=value.getLong("versionCode");versionName=value.getString("versionName");
         if(versionCode<1||versionCode>2100000000L||!versionName.matches("[0-9]+\\.[0-9]+(?:\\.[0-9]+)?(?:[-+][A-Za-z0-9_.-]+)?"))throw new IllegalArgumentException("更新版本无效。");
         apkUrl=https(value.getString("apkUrl"));sha256=value.getString("sha256").toLowerCase(Locale.ROOT);
+        List<String> urls=new ArrayList<>();urls.add(apkUrl);
+        if(value.has("apkFallbackUrls")){
+            JSONArray alternatives=value.getJSONArray("apkFallbackUrls");if(alternatives.length()>3)throw new IllegalArgumentException("安装包备用地址过多。");
+            for(int i=0;i<alternatives.length();i++){String candidate=https(alternatives.getString(i));if(!urls.contains(candidate))urls.add(candidate);}
+        }
+        apkUrls=Collections.unmodifiableList(urls);
         if(!sha256.matches("[0-9a-f]{64}"))throw new IllegalArgumentException("版本清单缺少有效 SHA-256。");
         sizeBytes=value.optLong("sizeBytes",0);minSdk=value.optInt("minSdk",26);
         if(sizeBytes<0||sizeBytes>MAX_APK_BYTES||minSdk<1)throw new IllegalArgumentException("安装包大小或系统版本要求无效。");
@@ -26,6 +35,10 @@ final class UpdateManifest {
         json=value.toString();
     }
     String json(){return json;}
+    static List<String> sources(String override,String primary,String fallback){
+        if(override!=null&&!override.trim().isEmpty())return Collections.singletonList(https(override));
+        List<String> urls=new ArrayList<>();urls.add(https(primary));String backup=https(fallback);if(!urls.contains(backup))urls.add(backup);return Collections.unmodifiableList(urls);
+    }
     void requireChannel(String current){if(!channel.isEmpty()&&!channel.equals(current))throw new IllegalArgumentException("更新清单与当前 App 渠道不同，请安装对应渠道的版本。");}
     static String https(String value){
         try{
