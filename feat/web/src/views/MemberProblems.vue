@@ -74,6 +74,8 @@ async function load() {
   busy.value = true;
   try {
     const { view, ...filters } = current.value;
+    // The backend treats every nonempty platform as a literal platform name.
+    if (filters.platform === 'all') delete filters.platform;
     if (view === 'tracker') {
       delete filters.labels;
       delete filters.match;

@@ -98,13 +98,13 @@ def allowed_data_path(path):
         rf"(?:annotations/{HEX}\.jsonl|catalog/current\.json|"
         rf"catalog/generations/{HEX}/(?:manifest\.json|problems\.jsonl|auto_tags\.jsonl)|"
         rf"manual/overrides\.jsonl|translations/current\.json|"
-        rf"translations/(?:history|requests)/{HEX}\.json|execution/(?:tasks|responses|results)/{HEX}\.json|exports/[A-Za-z0-9_.-]+\.jsonl?|"
+        rf"translations/(?:history|requests|activations)/{HEX}\.json|execution/(?:tasks|responses|results)/{HEX}\.json|exports/[A-Za-z0-9_.-]+\.jsonl?|"
         rf"exports/[A-Za-z0-9_.-]+\.json)", path))
 
 
 def allowed_data_directory(path):
     return bool(re.fullmatch(rf"(?:annotations|catalog|catalog/generations|catalog/generations/{HEX}|"
-                             r"manual|translations|translations/history|translations/requests|exports|"
+                             r"manual|translations|translations/history|translations/requests|translations/activations|exports|"
                              r"execution|execution/tasks|execution/responses|execution/results|execution/locks)", path))
 
 
@@ -244,7 +244,7 @@ def validate_dataset(root, files):
     if any(e["problem_key"] not in known_keys for e in events):
         raise ValueError("人工历史无法对应题目目录")
     views = repo.manager().get_effective_tags_many(list(ps))
-    translations = {}
+    translations, activations = {}, {}
     for path, data in files.items():
         if path.startswith("translations/history/"):
             row = parse(data); fp = Path(path).stem
@@ -255,6 +255,8 @@ def validate_dataset(root, files):
             if row.get("translation_status") not in {"auto", "mock", "needs_review"}:
                 raise ValueError("翻译状态不兼容")
             translations[fp] = row
+        if path.startswith("translations/activations/"):
+            activations[Path(path).stem] = parse(data)
         if path.startswith("translations/requests/"):
             row = parse(data)
             request_state(row)
@@ -262,6 +264,20 @@ def validate_dataset(root, files):
                 raise ValueError("翻译请求身份或指纹损坏")
             if row["state"] == "success" and f"translations/history/{Path(path).stem}.json" not in files:
                 raise ValueError("成功翻译缺少已付费结果")
+    for fp, audit in activations.items():
+        row = translations.get(fp)
+        if (not isinstance(audit, dict) or row is None or audit.get("version") != 1
+                or audit.get("audit_id") != fp or row.get("activation_audit_id") != fp
+                or audit.get("problem_key") != row["problem_key"]
+                or audit.get("decision") != "accept_for_local_website"
+                or audit.get("accepted_result_sha256") != digest(row)
+                or audit.get("source_task_id") != row.get("source_execution_task_id")
+                or audit.get("source_content_hash") != row["source_content_hash"]
+                or audit.get("source_verified_hash") != row["source_verified_hash"]):
+            raise ValueError("翻译发布审计与历史结果不对应")
+    for fp, row in translations.items():
+        if "activation_audit_id" in row and (row["activation_audit_id"] != fp or fp not in activations):
+            raise ValueError("翻译历史缺少对应发布审计")
     index = parse(files["translations/current.json"]) if "translations/current.json" in files else {}
     if not isinstance(index, dict):
         raise ValueError("翻译索引格式错误")

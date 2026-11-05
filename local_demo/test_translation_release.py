@@ -16,6 +16,7 @@ from problem_processing.repository import Repository
 from problem_processing.planning import historical_problem
 from problem_processing.translation import MockTranslationClient, language_plan, prepare_request, current_translation
 from problem_processing.execution_state import Ledger
+from problem_processing import backup
 from translation_release import build_release, publish_release
 
 
@@ -38,7 +39,9 @@ class ReleaseTests(unittest.TestCase):
         self.ledger = Ledger(self.root)
         self.task = self.ledger.claim(task_identity(self.problem,'translation',cfg),self.problem)
         self.ledger.transition(self.task,'dispatched')
-        response_hash = self.ledger.save_artifact('responses',self.task['attempt_id'],{'response':response})
+        response_hash = self.ledger.save_artifact('responses', self.task['attempt_id'], {
+            'version': 1, 'task_id': self.task['task_id'],
+            'attempt_id': self.task['attempt_id'], 'response': response})
         self.ledger.transition(self.task,'blocked',response_sha256=response_hash,error='test_structure_failure')
         token=next(k for k,v in prepared['protected'].items() if v.startswith('The bound'))
         self.edits={'protected_prose':{token:'N 的上界为 2 \\times 10^5。'}}
@@ -61,6 +64,82 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(first,second)
         publish_release(self.root,*second)
         self.assertEqual(len(list((self.root/'translations/history').glob('*.json'))),1)
+
+    def release_backup(self):
+        row, audit = build_release(self.root, self.key, self.edits)
+        publish_release(self.root, row, audit)
+        report = backup.create_backup(self.root, Path(self.temp.name)/'backups')
+        return row, audit, Path(report['backup'])
+
+    def test_published_translation_backup_and_isolated_restore_preserve_activation(self):
+        with patch('socket.socket.connect', side_effect=AssertionError('NO NETWORK')):
+            row, audit = build_release(self.root, self.key, self.edits)
+            publish_release(self.root, row, audit)
+            before = backup.inventory(self.root)
+            report = backup.create_backup(self.root, Path(self.temp.name)/'backups')
+            folder = Path(report['backup'])
+            rel = 'translations/activations/' + row['request_fingerprint'] + '.json'
+            self.assertIn('payload/' + rel, [f['path'] for f in report['files']])
+            self.assertTrue(backup.verify_backup(folder)['verified'])
+            restored = backup.restore_backup(folder, Path(self.temp.name)/'restored', active_root=self.root)
+            restored_root = Path(restored['restored_data_root'])
+            self.assertEqual((self.root/rel).read_bytes(), (restored_root/rel).read_bytes())
+            self.assertEqual(json.loads((restored_root/rel).read_bytes()), audit)
+            self.assertEqual(current_translation(restored_root, self.problem), row)
+            self.assertEqual(backup.inventory(self.root), before)
+            self.assertEqual(report['api_calls'], 0)
+            self.assertEqual(restored['api_calls'], 0)
+
+    def test_corrupt_activation_blocks_restore_before_target_creation(self):
+        row, _, folder = self.release_backup()
+        path = folder/'payload/translations/activations'/(row['request_fingerprint']+'.json')
+        path.write_bytes(b'{}')
+        target = Path(self.temp.name)/'restored'
+        with self.assertRaisesRegex(ValueError, 'SHA-256'):
+            backup.restore_backup(folder, target, active_root=self.root)
+        self.assertFalse(target.exists())
+
+    def test_missing_activation_blocks_restore_before_target_creation(self):
+        row, _, folder = self.release_backup()
+        (folder/'payload/translations/activations'/(row['request_fingerprint']+'.json')).unlink()
+        target = Path(self.temp.name)/'restored'
+        with self.assertRaises(ValueError):
+            backup.restore_backup(folder, target, active_root=self.root)
+        self.assertFalse(target.exists())
+
+    def test_published_translation_missing_audit_is_not_backed_up(self):
+        row, audit = build_release(self.root, self.key, self.edits)
+        publish_release(self.root, row, audit)
+        (self.root/'translations/activations'/(row['request_fingerprint']+'.json')).unlink()
+        with self.assertRaisesRegex(ValueError, '缺少对应发布审计'):
+            backup.create_backup(self.root, Path(self.temp.name)/'backups')
+
+    def test_mismatched_activation_result_digest_is_not_backed_up(self):
+        row, audit = build_release(self.root, self.key, self.edits)
+        publish_release(self.root, row, audit)
+        audit['accepted_result_sha256'] = '0'*64
+        atomic_json(self.root/'translations/activations'/(row['request_fingerprint']+'.json'), audit)
+        with self.assertRaisesRegex(ValueError, '发布审计与历史结果不对应'):
+            backup.create_backup(self.root, Path(self.temp.name)/'backups')
+
+    def test_activation_allowlist_rejects_other_paths(self):
+        fp = 'a'*64
+        self.assertTrue(backup.allowed_data_path('translations/activations/'+fp+'.json'))
+        self.assertTrue(backup.allowed_data_directory('translations/activations'))
+        for path in ('translations/activations/.env', 'translations/activations/other.json',
+                     'translations/activations/../'+fp+'.json',
+                     'translations/activations/nested/'+fp+'.json'):
+            self.assertFalse(backup.allowed_data_path(path))
+        self.assertFalse(backup.allowed_data_directory('translations/activations/nested'))
+
+    def test_activation_sensitive_fields_still_block_backup(self):
+        row, audit = build_release(self.root, self.key, self.edits)
+        publish_release(self.root, row, audit)
+        audit['authorization'] = 'synthetic-sensitive-value'
+        atomic_json(self.root/'translations/activations'/(row['request_fingerprint']+'.json'), audit)
+        with self.assertRaisesRegex(ValueError, '敏感') as raised:
+            backup.create_backup(self.root, Path(self.temp.name)/'backups')
+        self.assertNotIn('synthetic-sensitive-value', str(raised.exception))
 
     def test_original_response_and_blocked_task_remain_unchanged(self):
         paths=list((self.root/'execution').rglob('*.json'))
