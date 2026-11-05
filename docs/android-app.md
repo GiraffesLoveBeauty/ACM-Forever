@@ -1,6 +1,8 @@
-# ACMforever Android v0.2.15
+# ACMforever Android v0.2.17（候选版）
 
-状态：2026-11-05，0.2.14 的 PR #96 已合并，但首次 Tag Action 在草稿附件上传前失败。当前准备 0.2.15 草稿发布修复，待本轮评审；包名 `com.giraffeslovebeauty.acmforever`，版本 `0.2.15` / code `29`，minSdk 26、target/compile SDK 35。签名 Secret 已配置，尚无本轮公开 Release。执行记录与后续步骤见 [android-release-fix-v0.2.15.md（草稿发布修复与重新首发）](android-release-fix-v0.2.15.md)。下文 0.2.14/PR #48 的验证保留为历史记录，不表示 0.2.15 已线上发布。
+当前候选版为 `0.2.17` / code `31`：搜索历史标签、原网页主题资源离线采用、本机主题完整导入导出及原图保存，见 [本轮验收](android-v0.2.17.md)、[主题包格式](android-theme-package-v1.md)与[官方主题解析](android-official-theme-adaptation-v0.2.17.md)。从main独立拆出原#100的全局搜索/便捷管理，并加入本轮主题功能；自站更新另开PR等待管理员。当前保留GitHub单源，不改发布工作流；源码先review，安装包另行发布。
+
+以下为 v0.2.16 历史说明。状态：2026-11-05，该轮基于 main `f30cf10`，版本 `0.2.16` / code `30`，包名不变，minSdk26、target/compile SDK35。0.2.15已发布，本版全局搜索、便捷管理、自站镜像待跨人评审；没有创建本版Tag或部署镜像。范围和验收见 [android-v0.2.16.md](android-v0.2.16.md)，修改关联见 [android-modification-standard.md](android-modification-standard.md)。下文旧版验收保留为历史记录。
 
 ## 范围与目录
 
@@ -36,9 +38,9 @@ PR 复用主线 Web 会话、CSRF 和业务 API，仅为公开成员身份/资�
 
 ## 更新渠道与说明
 
-- `assets/releases/history.json` 保存 29 版更新日志，检查更新页离线可读，构建时检查当前版本一致。早期没有详细记录的版本明确标作存档。
-- 调试包和正式包默认使用资源 `default_update_manifest_url` 的公开 GitHub Release `releases/latest/download/update.json`，不依赖业务 API；自有服务器安装包 API 方案已被替代，无需后端新增接口。
-- 用户可覆盖为独立 HTTPS 清单地址，留空恢复 GitHub 默认地址。新清单包含 channel，不同渠道被拒绝；旧的无 channel 清单仍兼容，实际 APK 签名校验继续保留。
+- `assets/releases/history.json` 保存 30 版更新日志，检查更新页离线可读，构建时检查当前版本一致。早期没有详细记录的版本明确标作存档。
+- 当前App PR沿用 `default_update_manifest_url` 的公开GitHub Release清单与原APK下载流程，不依赖业务API。自站清单、备用源与镜像事务从原#100拆到另一PR，当前分支不包含。
+- 用户可覆盖为独立 HTTPS 清单地址，留空恢复GitHub默认地址；自定义源保持独立。新清单包含 channel，不同渠道被拒绝；旧的无 channel 清单仍兼容，实际 APK 签名校验继续保留。
 - 清单至多跟随五次 HTTPS 跳转，每次拒绝 HTTP 降级、URL 凭据和 fragment，大小上限 32 KiB；不附业务登录 Cookie。
 - 客户端校验包名、版本、minSdk、大小和 SHA-256；下载后再次核对实际 APK 包信息与当前签名。签名不符、旧包、错误哈希不会进入安装步骤。最长 APK 150 MiB。
 - 自动检查默认开启，已保存的关闭选项继续生效。已移除 Wi-Fi 自动下载选项及旧版保存值。自动检查间隔至少 6 小时，每进程启动仅发起一次，返回页面或重建不重复检查。
@@ -49,11 +51,11 @@ PR 复用主线 Web 会话、CSRF 和业务 API，仅为公开成员身份/资�
 
 ## 当前调试安装包怎样分发
 
-不把 APK 提交进 Git。当前本地体验包位于独立整合工作区的 `Android_APP/dist/acmforever-0.2.15-debug.apk`，本轮实际核验见 [android-release-fix-v0.2.15.md](android-release-fix-v0.2.15.md)。对外分发包由负责人推送 Tag 后的 Action 编译并自动附加到 Release，无需手工上传。
+不把 APK 提交进 Git。当前0.2.17仅有本地验证构建，尚未对外分发。评审合并后，负责人另行确认并推送Tag，由现有Action编译并发布到GitHub Release；APK不进源码仓库。
 
-本仓库已公开，原签名 Secret 已配置。本修复评审合并后，负责人创建 `v0.2.15` Tag，Action 才会构建、核验并公开完整 Release。0.2.14 首发留下的空草稿尚未公开；只推修复 PR 不会使手机收到新版。首次 Release 成功前清单 404 如实报错；旧 debug 包首次迁移需手动安装本版或设置 GitHub 清单地址。
+本仓库已公开，沿用原签名Secret。当前App分支的GitHub发布不需要自站SSH；自站另一个PR仍待管理员配置并review。当前版本为0.2.17/code31，评审和发布确认后才创建新Tag。只推PR不会使手机收到新版；直连GitHub仍可能超时。
 
-客户端只提示 `versionCode` 严格更大的版本。本次为 `0.2.15` / code `29`，首次验收用 code28 → code29；已安装本地 code29 的设备不会提示另一个同 code 安装包。后续继续递增 code 并补日志。正式签名与当前调试签名不同，首次切换正式版需重装；之后保持正式密钥连续更新。单一 latest 更新流不提供 debug/release 同时分发。
+客户端只提示 `versionCode` 严格更大的版本。本次为 `0.2.17` / code `31`；此前0.2.16曾做code29→code30验证，本版尚未线上升级；同code不提示。后续继续递增并补日志。正式签名与当前调试签名不同，首次切换正式版需重装；之后保持正式密钥连续更新。单一latest流不同时分发两个签名渠道。
 
 ## 构建与 CI
 
@@ -64,15 +66,15 @@ cd Android_APP/app
 ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
 ```
 
-Windows 的 `Android_APP/tools/*local-v0214.ps1` 保留用于 0.2.14 历史构建和回归，其中打包脚本固定检查 code28，不能直接用于 0.2.15。当前版本使用上面的标准 Gradle 命令，发布时由 Tag Action 构建并调用实际 APK 清单工具。现有本机离线工具位于 `%TEMP%/acmforever-build-v0.2.0`，不能视为从零安装脚本。调试密钥放 `Android_APP/dist/signing/debug.keystore`；缺少原密钥的机器会生成不同调试签名，不能覆盖已有包。
+Windows 的 `Android_APP/tools/*local-v0214.ps1` 保留历史用途，其中打包脚本固定检查code28，不能用于新版。本轮本机使用 `build-local-v0216.ps1` 和 `package-local-v0216.ps1`，也可用上面的标准Gradle命令；发布由Tag Action构建并核验实际APK。现有本机离线工具位于 `%TEMP%/acmforever-build-v0.2.0`，不是从零安装脚本。调试密钥放 `Android_APP/dist/signing/debug.keystore`；缺少原密钥会生成不同签名，不能覆盖已有包。
 
 `android-ci.yml` 在 App/相关工作流的 PR 变更时执行 Python 发布合同/失败重试测试和 Android JVM/Lint/构建。`api-tests.yml` 按既有触发范围执行 Vue 构建、后端合同和 Web 单测。十三组模拟器测试目前是本机验收，没有加入 Actions。
 
 ## Tag 发布操作（本轮不执行）
 
-详见 [android-tag-release-v0.2.14.md（完整步骤、签名配置与失败处理）](android-tag-release-v0.2.14.md)。`android-release.yml` 改为 `push` Tag 触发，默认 debug；需先配置 `ANDROID_DEBUG_KEYSTORE_BASE64` 为既有密钥，实际证书固定核对。未来正式渠道另外配置长期正式签名及证书变量。
+当前保留 [android-tag-release-v0.2.14.md（GitHub Tag发布）](android-tag-release-v0.2.14.md) 的现有流程；自站发布另开PR。工作流以 `push` Tag触发，默认debug；沿用 `ANDROID_DEBUG_KEYSTORE_BASE64`，实际证书固定核对。未来正式渠道另外配置长期正式签名及证书变量。
 
-发布顺序：跨人 review 和适用检查 → 非提交者合入 main → 负责人推送版本 Tag → Action 检查 main/版本/日志、测试并签名构建 → 生成 APK/校验文件/清单 → 草稿上传 → 三附件逐一回读比对 → 公开为 latest。版本 code 必须更大，同渠道证书固定；已公开附件不覆盖，失败保留草稿可重跑。说明来自本版内置日志，Release 正文同时包含源提交。
+发布顺序：跨人review与检查 → 非提交者合入main → 负责人确认并推Tag → 签名构建三件制品 → GitHub草稿上传和回读 → 公开Release。版本code递增、同渠道证书固定、已公开附件不可覆盖；自站事务不在此PR。说明来自内置日志，Release正文包含源提交。
 
 发布工具拒绝 tag、包名、版本、minSdk、渠道、固定签名、内置日志不一致及超限说明，核验实际大小/哈希。真实 Tag 发布和目标手机网络下载、覆盖安装仍需负责人发布后的验收；本地测试不表示已经上线。
 

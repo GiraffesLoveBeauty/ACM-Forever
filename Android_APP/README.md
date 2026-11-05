@@ -1,6 +1,26 @@
-# 打一辈子爱臭美 / ACMforever v0.2.14
+# 打一辈子爱臭美 / ACMforever v0.2.17
 
-当前工程及发布说明以 [android-app.md（Android v0.2.14、更新渠道、构建与发布）](../docs/android-app.md) 为准。以下旧版条目保留其当时状态。
+当前工程及发布说明以 [android-app.md（Android 工程、更新渠道、构建与发布）](../docs/android-app.md) 为准。以下旧版条目保留其当时状态。
+
+## v0.2.17（候选版，待评审）
+
+搜索历史标签按文字宽度自动换行；官方主题直接使用仓库原Vue/CSS/SVG；我的主题预览图可点击应用。新增无损`.acmtheme`导入导出，保存完整外观配置、背景原图与裁剪位置。原#100的全局搜索和便捷管理一并纳入此独立App PR；不包含自站改动，沿用GitHub更新源。没有修改网页或业务后端。
+
+- [本轮范围与验收](../docs/android-v0.2.17.md)
+- [主题包格式与导入导出入口](../docs/android-theme-package-v1.md)
+- [官方主题源文件解析与采用范围](../docs/android-official-theme-adaptation-v0.2.17.md)
+
+本轮只提交源码PR供别人review；不合并、不打Tag、不发布APK。0.2.16以下条目保留历史状态。
+
+## v0.2.16
+
+全局搜索、设备端模块排序与历史、原生便捷管理、自站优先并以 GitHub 备用的更新。既有接口复用，缺少的模块显示真实错误；不改网页或业务后端。
+
+- [修改标准与接口关联](../docs/android-modification-standard.md)
+- [本轮范围与验收](../docs/android-v0.2.16.md)
+- [原#100历史讨论（已拆分，自站另待配置）](https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/100)
+
+本轮先提交 PR 交别人 review，确认后才合并/创建Tag；APK不进源码Git。
 
 ## v0.2.14
 
