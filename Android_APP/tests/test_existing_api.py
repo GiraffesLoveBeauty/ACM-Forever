@@ -254,6 +254,37 @@ class MobileApiContracts(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(remaining), 1)  # Existing fixture was not removed.
         self.assertEqual((await self.client.delete("/api/forum/drafts/" + str(remaining[0]["id"]), json={}, headers=headers)).status_code, 200)
 
+    async def test_admin_training_defaults_use_real_challenge_provider(self):
+        # No mock provider: exercise the exact validation that rejected an empty difficulty.
+        cases = (("codeforces", "1000"), ("atcoder", "800"),
+                 ("luogu", "普及-"), ("nowcoder", "2星"), ("atcoder", "0"))
+        db = await connect_db(self.db_path)
+        try:
+            for index, (platform, difficulty) in enumerate(cases):
+                await db.execute(
+                    "INSERT INTO recommendations(platform,problem_id,problem_name,problem_rating,problem_url,tags) VALUES(?,?,?,?,?,'dp')",
+                    (platform, "synthetic-" + str(index), "训练合成题", difficulty, "https://example.invalid/problem"),
+                )
+            await db.commit()
+        finally:
+            await db.close()
+        headers = await self.login("90000002")
+        for platform, difficulty in cases:
+            with self.subTest(platform=platform, difficulty=difficulty):
+                payload = {"owner_qq_id": "90000001", "platform": platform,
+                           "difficulty": difficulty, "tag": "", "weak_tag": False}
+                missing_csrf = await self.client.post("/api/challenge/start", json=payload)
+                self.assertEqual(missing_csrf.status_code, 403)
+                response = await self.client.post("/api/challenge/start", json=payload, headers=headers)
+                data = await response.get_json()
+                self.assertEqual(response.status_code, 200, data)
+                self.assertTrue(data["success"])
+                self.assertEqual((data["platform"], data["difficulty"]), (platform, difficulty))
+                payload["difficulty"] = ""
+                response = await self.client.post("/api/challenge/start", json=payload, headers=headers)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("难度", (await response.get_json())["message"])
+
     async def test_problem_favorites_training_and_contest_state_use_member_scope(self):
         headers = await self.login()
         path = "/api/me/problems/luogu/P1001"

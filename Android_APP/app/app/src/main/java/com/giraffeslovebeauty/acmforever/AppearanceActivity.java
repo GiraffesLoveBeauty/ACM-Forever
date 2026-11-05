@@ -20,7 +20,7 @@ import java.util.function.IntSupplier;
 
 /** Local personalization. Colour changes repaint existing views without navigation. */
 public final class AppearanceActivity extends Activity {
-    private static final int PICK_IMAGE=71,PICK_THEME=72,CROP_IMAGE=73;
+    private static final int PICK_IMAGE=71,PICK_THEME=72,CROP_IMAGE=73,IMPORT_LOCAL=74,EXPORT_LOCAL=75;
     private static final int[] COLORS={0xffc8eb21,0xff82c7aa,0xff83b8e5,0xffbaa4df,0xffebafc5,0xffe9c786,0xffffffff,0xfff4f5f7,0xff292c29};
     private static final String[] NAMES={"黄绿","薄荷","天蓝","薰衣草","樱粉","暖杏","纯白","雾灰","墨色"};
     private String page="menu",pickerTarget="background";
@@ -38,13 +38,13 @@ public final class AppearanceActivity extends Activity {
         super.onCreate(state);themeId=getIntent().getStringExtra(LocalThemes.EXTRA);
         if(themeId!=null&&(!LocalThemes.valid(themeId)||!LocalThemes.exists(getApplicationContext(),themeId))){finish();return;}
         prefs=AppAppearance.prefs(this);
-        if(state!=null){page=state.getString("page","menu");category=state.getString("category","all");pickerTarget=state.getString("picker_target","background");ArrayList<String> saved=state.getStringArrayList("history");if(saved!=null)history.addAll(saved);}
+        if(state!=null){page=state.getString("page","menu");category=state.getString("category","all");pickerTarget=state.getString("picker_target","background");choosing=state.getBoolean("choosing",false);ArrayList<String> saved=state.getStringArrayList("history");if(saved!=null)history.addAll(saved);}
         render();
     }
     @Override protected void onResume(){super.onResume();navigating=false;if(prefs!=null)render();}
     @Override protected void onPause(){if(themeId!=null)AppAppearance.load(getApplicationContext());super.onPause();}
-    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("page",page);state.putString("category",category);state.putString("picker_target",pickerTarget);state.putStringArrayList("history",new ArrayList<>(history));}
-    @Override protected void onDestroy(){files.shutdownNow();ModalDialogs.close(this);super.onDestroy();}
+    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("page",page);state.putString("category",category);state.putString("picker_target",pickerTarget);state.putBoolean("choosing",choosing);state.putStringArrayList("history",new ArrayList<>(history));}
+    @Override protected void onDestroy(){files.shutdown();ModalDialogs.close(this);super.onDestroy();}
     @Override public void onBackPressed(){if(saving)return;if(history.isEmpty()){finish();return;}page=history.pop();render();}
     private void go(String next){if(page.equals(next)||saving)return;history.push(page);page=next;render();}
     private String title(){switch(page){case "saved":return "我的主题";case "background":return "背景选择";case "theme":return "主题选择";case "controls":return "控件背景透明度";case "library":return "主题库";case "picker":return "theme".equals(pickerTarget)?"ACMForever主色":"secondary".equals(pickerTarget)?"ACMForever辅色":"调色盘";default:return themeId==null?"个性化设置":LocalThemes.name(getApplicationContext(),themeId);}}
@@ -95,6 +95,7 @@ public final class AppearanceActivity extends Activity {
         }else{
             box.addView(button("预览",()->launch(new Intent(this,ThemePreviewActivity.class).putExtra(LocalThemes.EXTRA,themeId))),new LinearLayout.LayoutParams(-1,dp(64)));
             box.addView(button("重命名",this::rename),new LinearLayout.LayoutParams(-1,dp(64)));
+            box.addView(button("导出",this::exportTheme),new LinearLayout.LayoutParams(-1,dp(64)));
             box.addView(button("删除",this::confirmDelete),new LinearLayout.LayoutParams(-1,dp(64)));
         }
     }
@@ -108,13 +109,20 @@ public final class AppearanceActivity extends Activity {
         JSONArray items=LocalThemes.list(this);if(items.length()==0){card().addView(text("尚未保存主题。可返回一键保存当前外观。",15,false));return;}
         for(int i=0;i<items.length();i++){
             JSONObject item=items.optJSONObject(i);if(item==null)continue;String id=item.optString("id");if(!LocalThemes.valid(id))continue;
-            LinearLayout tile=card(),line=row();Button name=button(item.optString("name"),()->{try{LocalThemes.apply(this,id);repaint();Toast.makeText(this,"主题已应用",Toast.LENGTH_SHORT).show();}catch(Exception e){notice(e.getMessage());}});
+            LinearLayout tile=card(),line=row();Button name=button(item.optString("name"),()->applyTheme(id));
             name.setContentDescription("应用主题 "+item.optString("name"));line.addView(name,new LinearLayout.LayoutParams(0,dp(56),1));
             Button settings=button("设置",()->launch(new Intent(this,AppearanceActivity.class).putExtra(LocalThemes.EXTRA,id)));settings.setContentDescription("设置主题 "+item.optString("name"));line.addView(settings,new LinearLayout.LayoutParams(dp(92),dp(56)));tile.addView(line);
-            View preview=new View(this);preview.setContentDescription("主题缩略图 "+item.optString("name"));Context scoped=LocalThemes.scope(this,id);AppAppearance.load(scoped);preview.setBackground(ProfileCover.drawable(scoped));AppAppearance.load(this);
+            android.widget.FrameLayout preview=new android.widget.FrameLayout(this){@Override public boolean onInterceptTouchEvent(MotionEvent event){return true;}};preview.setContentDescription("主题缩略图 "+item.optString("name"));Context scoped=LocalThemes.scope(this,id);AppAppearance.load(scoped);preview.setBackground(ProfileCover.drawable(scoped));if(OfficialThemeView.background(scoped)){OfficialThemeView artwork=new OfficialThemeView(scoped,"background");artwork.setFocusable(false);artwork.setClickable(false);preview.addView(artwork,new android.widget.FrameLayout.LayoutParams(-1,-1));}AppAppearance.load(this);
+            preview.setOnTouchListener((v,event)->{if(event.getAction()==MotionEvent.ACTION_UP)v.performClick();return true;});
             preview.setOutlineProvider(new ViewOutlineProvider(){@Override public void getOutline(View view,Outline outline){outline.setRoundRect(0,0,view.getWidth(),view.getHeight(),dp(16));}});preview.setClipToOutline(true);
+            preview.setFocusable(true);preview.setOnClickListener(v->{if(!saving&&!ModalDialogs.isShowing(this))applyTheme(id);});
             LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,dp(100));lp.topMargin=dp(12);tile.addView(preview,lp);
         }
+    }
+    private void applyTheme(String id){if(saving)return;saving=true;files.execute(()->{Exception failure=null;try{LocalThemes.apply(getApplicationContext(),id);}catch(Exception e){failure=e;}Exception error=failure;runOnUiThread(()->{saving=false;if(isDestroyed())return;if(error!=null)notice(error.getMessage());else{repaint();Toast.makeText(this,"主题已应用",Toast.LENGTH_SHORT).show();}});});}
+    private void exportTheme(){
+        if(themeId==null||choosing||saving)return;choosing=true;Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/zip");intent.putExtra(Intent.EXTRA_TITLE,"ACMforever-"+LocalThemes.name(getApplicationContext(),themeId).replaceAll("[\\\\/:*?\"<>|]","_")+ThemePackage.EXTENSION);
+        try{startActivityForResult(intent,EXPORT_LOCAL);}catch(Exception e){choosing=false;notice("没有可用的文件保存器");}
     }
     private void rename(){
         EditText name=new EditText(this);name.setSingleLine(true);name.setText(LocalThemes.name(getApplicationContext(),themeId));name.setSelection(name.length());name.setContentDescription("主题名称");
@@ -162,6 +170,7 @@ public final class AppearanceActivity extends Activity {
         LinearLayout options=card();
         options.addView(button("ACMForever",this::acmTheme,()->save(prefs.edit().putString("theme_source","acm"))));
         options.addView(button("主题库",()->!acmTheme(),()->go("library")));
+        options.addView(button("本地导入",()->pick("application/zip",IMPORT_LOCAL)));
         LinearLayout colors=card();visible(colors,this::acmTheme);colors.setContentDescription("ACMForever主色");colors.addView(text("ACMForever主色",16,true));gap(colors,12);
         swatches(colors,()->prefs.getInt("theme_primary",0xffc8eb21),color->save(prefs.edit().putInt("theme_primary",color).putString("theme_source","acm")),"theme");
         LinearLayout secondary=card();visible(secondary,this::acmTheme);secondary.setContentDescription("ACMForever辅色");secondary.addView(text("ACMForever辅色",16,true));gap(secondary,12);
@@ -244,7 +253,7 @@ public final class AppearanceActivity extends Activity {
     private void pickImage(){
         if(saving||choosing)return;choosing=true;
         Intent intent=android.os.Build.VERSION.SDK_INT>=33?new Intent(android.provider.MediaStore.ACTION_PICK_IMAGES).setType("image/*"):
-                new Intent(Intent.ACTION_PICK,android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI).setType("image/*");
+                new Intent(Intent.ACTION_PICK).setDataAndType(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,"image/*");
         try{startActivityForResult(intent,PICK_IMAGE);}catch(android.content.ActivityNotFoundException e){
             try{startActivityForResult(new Intent(Intent.ACTION_PICK).setType("image/*"),PICK_IMAGE);}
             catch(android.content.ActivityNotFoundException unavailable){choosing=false;new ModalDialogs.Builder(this).setMessage("未找到可用相册，请先启用系统照片应用。").setPositiveButton("知道了",null).show();}
@@ -254,6 +263,7 @@ public final class AppearanceActivity extends Activity {
     private void pick(String mime,int request){
         if(saving||choosing)return;choosing=true;Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.setType(mime);intent.addCategory(Intent.CATEGORY_OPENABLE);
         if(request==PICK_THEME)intent.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"application/json","text/plain","application/octet-stream"});
+        if(request==IMPORT_LOCAL)intent.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"application/zip","application/octet-stream","application/x-zip-compressed"});
         try{startActivityForResult(intent,request);}catch(Exception e){choosing=false;new ModalDialogs.Builder(this).setMessage("没有可用的文件选择器").setPositiveButton("知道了",null).show();}
     }
     private String filename(Uri uri){
@@ -268,8 +278,15 @@ public final class AppearanceActivity extends Activity {
     }
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
-        if(request==PICK_IMAGE||request==PICK_THEME)choosing=false;
+        if(request==PICK_IMAGE||request==PICK_THEME||request==IMPORT_LOCAL||request==EXPORT_LOCAL)choosing=false;
         if(request==CROP_IMAGE){saving=false;if(result==RESULT_OK)save(prefs.edit().putString("bg_mode","image"));return;}
+        if(request==IMPORT_LOCAL||request==EXPORT_LOCAL){
+            if(result!=RESULT_OK||data==null||data.getData()==null||saving)return;Uri chosen=data.getData();String owner=themeId;saving=true;
+            files.execute(()->{Exception error=null;String importedId=null;try{
+                if(request==IMPORT_LOCAL){ThemePackage pack;try(InputStream in=getContentResolver().openInputStream(chosen)){pack=ThemePackage.read(in);}importedId=LocalThemes.install(getApplicationContext(),pack);}
+                else{ThemePackage pack=LocalThemes.pack(getApplicationContext(),owner);try(OutputStream out=getContentResolver().openOutputStream(chosen,"wt")){if(out==null)throw new IOException("无法写入文件");pack.write(out);}}
+            }catch(Exception e){error=e;}Exception failure=error;String installed=importedId;runOnUiThread(()->{saving=false;if(isDestroyed())return;if(failure!=null)notice((request==IMPORT_LOCAL?"导入失败：":"导出失败：")+failure.getMessage());else if(request==IMPORT_LOCAL){Toast.makeText(this,"已导入 "+LocalThemes.name(getApplicationContext(),installed)+"，可到我的主题点击名称或预览图应用",Toast.LENGTH_LONG).show();if(themeId==null)go("saved");}else Toast.makeText(this,"主题及背景原图已导出",Toast.LENGTH_SHORT).show();});});return;
+        }
         if((request!=PICK_IMAGE&&request!=PICK_THEME)||result!=RESULT_OK||data==null||data.getData()==null||saving)return;
         if(request==PICK_IMAGE){saving=true;startActivityForResult(new Intent(this,BackgroundCropActivity.class).putExtra(LocalThemes.EXTRA,themeId).setData(data.getData()).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),CROP_IMAGE);return;}
         Uri uri=data.getData();saving=true;

@@ -130,7 +130,7 @@ public final class MainActivity extends Activity {
     private boolean loginBusy;
     private SessionVault sessionVault;
     private volatile boolean passwordSaveFailed;
-    private boolean returnFromAdmin;
+    private boolean returnFromAdmin,openingSearch;
     private String searchScope = "forum";
     private String searchReturn = "forum";
     private boolean filterLoading;
@@ -159,7 +159,7 @@ public final class MainActivity extends Activity {
         // Application configures the shared client once. Recreating a screen must not
         // acquire its request monitor while an existing network operation is pending.
 
-        navigationOwner=api.sessionGeneration();externalRoot=getIntent().getBooleanExtra("external_navigation",false)||getIntent().hasExtra("web_problem_id")||getIntent().hasExtra("club_post_id")||getIntent().hasExtra("cloud_draft_id");
+        navigationOwner=api.sessionGeneration();externalRoot=getIntent().getBooleanExtra("external_navigation",false)||getIntent().hasExtra("web_problem_id")||getIntent().hasExtra("club_post_id")||getIntent().hasExtra("cloud_draft_id")||getIntent().hasExtra("search_public_member");
         getIntent().putExtra("external_navigation",externalRoot);
         if (state != null && state.getLong("session_generation", -1) == api.sessionGeneration()) {
             restoreNavigation(state);navigation.restore(state.getParcelableArrayList("navigation_history"));
@@ -189,7 +189,7 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onResume() {
-        super.onResume();openingSpace=false;
+        super.onResume();openingSpace=false;openingSearch=false;
         if(navigationOwner!=api.sessionGeneration()){navigation.clear();navigationOwner=api.sessionGeneration();refreshComposer();if(!"compose".equals(screen))loadScreen();}
         else{
             CloudDrafts.State draft=cloud.state();
@@ -207,6 +207,8 @@ public final class MainActivity extends Activity {
     @Override protected void onPause(){if(application!=null)application.updates().detach(this);super.onPause();}
 
     private void acceptWebIntent(Intent intent){
+        String publicMember=intent.getStringExtra("search_public_member");
+        if(publicMember!=null){intent.removeExtra("search_public_member");try{JSONObject member=new JSONObject(publicMember);if(externalRoot&&navigation.isEmpty()){memberPreview=member;screen="member";}else openMember(member,screen);}catch(org.json.JSONException e){failureDialog(e);}}
         int draft=intent.getIntExtra("cloud_draft_id",0);if(intent.hasExtra("cloud_draft_id")&&draft>=0){intent.removeExtra("cloud_draft_id");if(externalRoot&&navigation.isEmpty()&&"forum".equals(screen)){screen="compose";updateSearchHeader();refreshNav();}ui.post(()->openDraft(draft));}
         if(intent.hasExtra("notification_comment_id")){notificationComment=Math.max(0,intent.getIntExtra("notification_comment_id",0));intent.removeExtra("notification_comment_id");}
         String source=intent.getStringExtra("web_problem_platform"),id=intent.getStringExtra("web_problem_id");
@@ -534,30 +536,21 @@ public final class MainActivity extends Activity {
     }
 
     private void openSearch() {
-        if (loginBusy || !java.util.Arrays.asList("forum", "rank", "problems").contains(screen)) return;
-        searchScope = screen; searchReturn = screen;
-        navigation.push(pageSnapshot());pendingScroll=0;
-        screen = "search"; ++requestSerial; refreshNav();
-        pageRefresh.reset(requestSerial);
-        content.removeAllViews(); renderSearch();
+        if (loginBusy || openingSearch || ModalDialogs.isShowing(this)) return;
+        if(!allowLeavingEditor(this::openSearch))return;
+        openingSearch=true;search.clearFocus();search.setText("");root.requestFocus();
+        startActivity(new Intent(this,SearchActivity.class));
     }
 
     private void submitSearch(String value) {
-        String term = value.trim();
-        if (term.isEmpty()) { message("请输入搜索内容"); return; }
-        if (!"search".equals(screen)) searchScope = screen;
-        if (!java.util.Arrays.asList("forum", "rank", "problems").contains(searchScope)) return;
-        if (preferences.getBoolean("record_search", true)) {
-            JSONArray history = searchHistory(), next = new JSONArray(); next.put(term);
-            for (int i = 0; i < history.length() && next.length() < 10; i++)
-                if (!term.equals(history.optString(i))) next.put(history.optString(i));
-            preferences.edit().putString("search_history", next.toString()).apply();
-        }
-        query = term; page = 1; screen = searchScope; search.setText(term);
-        root.requestFocus();
-        ((android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(search.getWindowToken(), 0);
-        refreshNav(); loadScreen();
+        if(openingSearch||loginBusy||ModalDialogs.isShowing(this))return;
+        String term=value.trim();if(term.isEmpty())return;
+        if(!allowLeavingEditor(()->submitSearch(term)))return;
+        openingSearch=true;root.requestFocus();search.setText("");
+        startActivity(new Intent(this,SearchActivity.class).putExtra("query",term));
     }
+
+    private void openSearchSettings(){if(openingSearch)return;openingSearch=true;startActivity(new Intent(this,SearchActivity.class).putExtra("mode","settings"));}
 
     private void renderSearch() {
         content.removeAllViews();
@@ -623,10 +616,8 @@ public final class MainActivity extends Activity {
     private void openProblem(JSONObject problem){navigate("problem_detail",()->selectedProblem=problem);}
 
     private void updateSearchHeader() {
-        search.setEnabled(java.util.Arrays.asList("forum", "rank", "problems").contains(screen));
-        String hint = "搜索论坛话题";
-        if ("rank".equals(screen)) hint = "搜索公开昵称";
-        if ("problems".equals(screen)) hint = "搜索题名或标签";
+        search.setEnabled(!loginBusy);
+        String hint = "搜索用户、论坛、Wiki、题目";
         if ("mine".equals(screen)) hint = "个人中心";
         if ("account".equals(screen)) hint = "账号设置";
         if ("member".equals(screen)) hint = "成员主页";
@@ -2101,6 +2092,7 @@ public final class MainActivity extends Activity {
         LinearLayout settings = card();
         settings.addView(label("账号与应用", 13, BRAND, true));
         menuRow(settings,"个性化设置","背景选择 · 主题选择",this::showCoverSettings);
+        menuRow(settings,"搜索设置","搜索模块排序 · 历史记录",()->openSearchSettings());
         menuRow(settings, "修改密码", "保护账号安全", this::showChangePassword);
         menuRow(settings, "检查更新", "下载新版 · 自动更新选项", this::checkForUpdates);
 
@@ -2130,9 +2122,13 @@ public final class MainActivity extends Activity {
         return api.isAdministrator();
     }
 
-    private void addAdministratorSection() { }
+    private void addAdministratorSection() {
+        if(!isAdministratorAccount())return;
+        LinearLayout admin=card();admin.addView(label("管理员",13,BRAND,true));
+        menuRow(admin,"便捷管理","审核 · 同步任务 · 成员 · 训练与复盘",this::showAdministratorMenu);
+    }
 
-    private void showAdministratorMenu() { message("成员、题单与内容管理请使用社团 Web 后台。"); }
+    private void showAdministratorMenu() { if(isAdministratorAccount()&&!returnFromAdmin){returnFromAdmin=true;startActivity(new Intent(this,AdminQuickActivity.class));} }
 
     private String value(JSONObject object, String key, String fallback) {
         if (object == null || object.isNull(key)) return fallback;
