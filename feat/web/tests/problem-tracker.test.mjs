@@ -97,6 +97,7 @@ beforeEach(() => {
   );
   globalThis.fetch = async (url, options = {}) => {
     calls.push({ url, options });
+    if (url.startsWith('/api/me/problems/tags?')) return response({ tags: ['math', 'greedy'] });
     if (url.startsWith('/api/me/problems/tracker?')) {
       const query = new URL(url, 'https://acm.test').searchParams;
       const delayed = query.get('tag') === 'delayed';
@@ -197,7 +198,7 @@ for (const role of ['member', 'admin', 'root']) {
 
 test('contest pagination and switching views retain filters and reset the page on view changes', async () => {
   await open(
-    '/my-problems.html?view=tracker&scope=solved&platform=codeforces&tag=Round&state=favorite&page=2',
+    '/my-problems.html?view=tracker&scope=solved&platform=codeforces&tag=Round&problem_tag=math&state=favorite&page=2',
   );
   await click(button('下一页'));
   assert.deepEqual(queryOf(mounted.router.currentRoute.value.fullPath), {
@@ -205,6 +206,7 @@ test('contest pagination and switching views retain filters and reset the page o
     scope: 'solved',
     platform: 'codeforces',
     tag: 'Round',
+    problem_tag: 'math',
     state: 'favorite',
     page: '3',
   });
@@ -214,6 +216,7 @@ test('contest pagination and switching views retain filters and reset the page o
   assert.equal(list.scope, 'solved');
   assert.equal(list.platform, 'codeforces');
   assert.equal(list.tag, 'Round');
+  assert.equal(list.problem_tag, 'math');
   assert.equal(list.state, 'favorite');
   assert(!('page' in list));
   assert(!('view' in list));
@@ -230,21 +233,23 @@ test('contest pagination and switching views retain filters and reset the page o
 });
 
 test('entering tracker defaults an unsupported platform to CF and preserves explicit AtCoder selection', async () => {
-  await open('/my-problems.html?platform=luogu&page=3');
+  await open('/my-problems.html?platform=luogu&problem_tag=trees&page=3');
   await click(button('比赛进度'));
   assert.equal(queryOf(mounted.router.currentRoute.value.fullPath).view, 'tracker');
   assert.equal(queryOf(mounted.router.currentRoute.value.fullPath).platform, 'codeforces');
   assert.equal(queryOf(trackerCalls().at(-1).url).platform, 'codeforces');
-  await mounted.router.push('/my-problems.html?view=tracker&platform=atcoder');
+  assert(!('problem_tag' in queryOf(mounted.router.currentRoute.value.fullPath)));
+  await mounted.router.push('/my-problems.html?view=tracker&platform=atcoder&problem_tag=math');
   await settle();
   assert.equal(queryOf(trackerCalls().at(-1).url).platform, 'atcoder');
+  assert.equal(queryOf(trackerCalls().at(-1).url).problem_tag, 'math');
   await click(button('清除筛选'));
   assert.equal(queryOf(trackerCalls().at(-1).url).platform, 'codeforces');
 });
 
 test('local statement round trip preserves tracker filters and contest page without identity leakage', async () => {
   const path =
-    '/my-problems.html?view=tracker&scope=solved&platform=codeforces&tag=Round&state=favorite&page=2';
+    '/my-problems.html?view=tracker&scope=solved&platform=codeforces&tag=Round&problem_tag=math&state=favorite&page=2';
   await open(path);
   const link = problemLinks().find((node) => queryOf(node.props.href).problem_id === 'cf_2000A');
   assert.equal(queryOf(link.props.href).from, path);

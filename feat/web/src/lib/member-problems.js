@@ -8,6 +8,8 @@ export function memberFilters(query = {}) {
     scope: query.scope === 'solved' ? 'solved' : 'all',
     platform: allowedPlatforms.includes(query.platform) ? query.platform : 'codeforces',
     tag: typeof query.tag === 'string' ? query.tag.slice(0, 100) : '',
+    problem_tag:
+      typeof query.problem_tag === 'string' ? query.problem_tag.trim().slice(0, 100) : '',
     state: query.state === 'favorite' ? 'favorite' : '',
     page: Number.isSafeInteger(number) && number > 0 && number <= 1000000 ? number : 1,
   };

@@ -182,9 +182,13 @@ response.raise_for_status()
 
 ### 本人 AC 与站内题面
 
-`GET /api/me/problems?scope=solved` 从会话读取 QQ，客户端的 `qq_id/owner_qq_id` 不改变归属。以平台和题号去重，返回 `ac_at`（Unix 秒），按最近 AC 时间倒序，再按平台、题号稳定排序。`platform/tag/state=favorite/page/page_size` 与总数使用相同条件；`tag` 同时匹配题名、题号和标签。本人范围默认每页 20、上限 100，默认全站目录仍为 500、上限 500。返回 `items/total/returned/page/page_size`；无效 `scope` 或非整数分页参数返回 400。
+成员题库将 Codeforces 的 `100A`、`cf_100A` 及大小写别名视为同一题。标签选项、列表和比赛进度按同一优先级取非空标签；本人 AC 与收藏也跨这些别名合并。AtCoder 仍按原题号精确区分。
 
-`GET /api/me/problems/tracker` 为个人题库的比赛进度矩阵提供数据，member / admin / root 均只读取会话本人，客户端身份参数不改变归属。支持 `platform`（空、`codeforces`、`atcoder`）、`tag`（比赛 ID / 题号 / 题名 / 标签）、`scope=all|solved`、`state=favorite`、`page` 和 `page_size`（默认 20、上限 50）。无效参数返回 400；未登录或未完成首次改密沿用本人接口权限。
+`GET /api/me/problems?scope=solved` 从会话读取 QQ，客户端的 `qq_id/owner_qq_id` 不改变归属。以平台和题号去重，返回 `ac_at`（Unix 秒），按最近 AC 时间倒序，再按平台、题号稳定排序。`platform/tag/problem_tag/state=favorite/page/page_size` 与总数使用相同条件；`tag` 同时匹配题名、题号和标签，独立的 `problem_tag` 按完整标签忽略大小写匹配（最长 100 字符，超长返回 400），兼容逗号等分隔的旧标签及 JSON 标签数组，不把 `math` 匹配为 `mathematics`，`%`、`_` 不作为通配符。标签与搜索、收藏、本人 AC 范围共同生效，先筛选再统计与分页。本人范围默认每页 20、上限 100，默认全站目录仍为 500、上限 500。返回 `items/total/returned/page/page_size`；无效 `scope` 或非整数分页参数返回 400。
+
+`GET /api/me/problems/tags?platform=codeforces` 返回 `tags: string[]`，供题库标签下拉框使用，沿用成员登录和首次改密限制。下拉选项、列表展示及标签筛选使用同一份有效标签：按已采集目录 → 推荐目录 → 会话本人的 AC 元数据取第一份非空标签，空字符串和 JSON 空数组均允许回退；不读取其他成员独有的提交标签，也不混入被优先来源替代的旧标签。比赛进度采用相同优先顺序。平台可为空或 `codeforces/atcoder/luogu/nowcoder/cjlu`，无效平台返回 400。按完整标签忽略大小写去重并排序，排除空白和超过 100 字符的标签；列表不受当前题目页码、搜索或收藏筛选限制，不联网或触发采集。
+
+`GET /api/me/problems/tracker` 为个人题库的比赛进度矩阵提供数据，member / admin / root 均只读取会话本人，客户端身份参数不改变归属。支持 `platform`（空、`codeforces`、`atcoder`）、`tag`（比赛 ID / 题号 / 题名 / 标签）、`problem_tag`（完整标签，规则同题目列表）、`scope=all|solved`、`state=favorite`、`page` 和 `page_size`（默认 20、上限 50）。组合筛选须由同一道题满足，选中比赛后仍保留该场全部已收录题目。无效参数返回 400；未登录或未完成首次改密沿用本人接口权限。
 
 返回 `items/total/page/page_size`，`total` 为比赛数量。每个比赛含 `platform/contest_id/contest_name/start_time/total_count/solved_count/attempted_count/problems`；题目含 `platform/problem_id/problem_index/problem_name/problem_rating/status/ac_at/last_submit_at/is_favorite`。`status` 为 `solved`（已 AC）、`attempted`（有提交记录且未 AC）、`unseen`（未记录），时间为 Unix 秒。`start_time` 为真实比赛开始时间，未收录时为 null；默认按开始时间倒序，未知时间在后，同时间以平台和自然比赛 ID 稳定排序，再进行分页。AC 证据优先于之后的失败提交；收藏和提交状态只关联本人。按自然题序排列 D1 / D2 等题目，筛选先选择比赛，再返回该场全部已入库题目，分页不会切开比赛。前端每页完整展开 20 场，使用页面纵向滚动。仅使用本地目录、比赛缓存和提交数据，不调用 OJ 或触发采集；未记录不代表原站没有提交，目录和尝试记录均可能尚未同步完整。
 
