@@ -14,7 +14,9 @@ public final class SearchActivity extends MobilePageActivity {
     private android.content.SharedPreferences prefs;private String mode="search",query="";
     private final ArrayDeque<String> history=new ArrayDeque<>();private List<String> modules;private long account;
     @Override public void onCreate(Bundle state){super.onCreate(state);prefs=AppAppearance.prefs(this);mode=state==null?getIntent().getStringExtra("mode"):state.getString("mode");if(mode==null)mode="search";
-        query=state==null?getIntent().getStringExtra("query"):state.getString("query","");if(query==null)query="";if(state!=null){ArrayList<String> back=state.getStringArrayList("history");if(back!=null)history.addAll(back);}createPage("全局搜索");account=api.sessionGeneration();render();}
+        query=state==null?getIntent().getStringExtra("query"):state.getString("query","");if(query==null)query="";if(state!=null){ArrayList<String> back=state.getStringArrayList("history");if(back!=null)history.addAll(back);}createPage("全局搜索");account=api.sessionGeneration();
+        // A fresh home-page search is a submission; restoring a page must not rewrite history.
+        if(state==null&&"search".equals(mode)&&!query.trim().isEmpty())submit(query);else render();}
     @Override protected void onSaveInstanceState(Bundle out){super.onSaveInstanceState(out);out.putString("mode",mode);out.putString("query",query);out.putStringArrayList("history",new ArrayList<>(history));}
     @Override protected void onResume(){super.onResume();if(api!=null&&account!=api.sessionGeneration()){account=api.sessionGeneration();render();}}
     @Override public void onBackPressed(){if(writing)return;if(history.isEmpty()){super.onBackPressed();return;}mode=history.pop();render();}
