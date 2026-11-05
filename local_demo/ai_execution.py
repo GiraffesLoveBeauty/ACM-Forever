@@ -1,6 +1,7 @@
 """Single-question web execution, durable receipts, and existing executor integration."""
 import json
-from contextlib import closing
+from contextlib import closing, contextmanager
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import re
@@ -25,6 +26,21 @@ BASE_URL = 'https://kitsune2.yukirin.me/v1'
 MODEL = 'gpt-6-luna'
 TASKS = {'annotation', 'translation'}
 ACTIVE = {'queued', 'running'}
+QUEUE_STARTUP_SECONDS = 15
+
+
+@contextmanager
+def available_lock(guard):
+    """Only suppress lock contention, never errors raised by the protected work."""
+    try:
+        guard.__enter__()
+    except ValueError:
+        yield False
+        return
+    try:
+        yield True
+    finally:
+        guard.__exit__(None, None, None)
 
 
 def execution_message(result):
@@ -176,12 +192,110 @@ class WebAIService:
             raise ValueError('无效任务编号')
         return checked_path(self.store/'jobs'/(job_id+'.json'))
 
-    def read(self, job_id):
+    def _read(self, job_id):
         path=self.job_path(job_id)
         if not path.exists():raise LookupError('没有找到执行记录')
         return json.loads(path.read_text(encoding='utf-8'))
 
+    def worker_guard(self, job_id):
+        return Journal(self.store/'worker-locks'/(job_id+'.jsonl')).locked()
+
+    def recover_jobs(self):
+        # A submitting parent holds writer through launch. Never race that handoff.
+        with available_lock(Journal(self.store/'writer.jsonl').locked()) as acquired:
+            if acquired:self._recover_locked()
+
+    def _recover_locked(self):
+        for path in sorted((self.store/'jobs').glob('*.json')):
+            job=self._read(path.stem)
+            if job['status'] not in ACTIVE:continue
+            if job['status']=='queued':
+                try:age=(datetime.now(timezone.utc)-datetime.fromisoformat(job['created_at'])).total_seconds()
+                except (ValueError,TypeError):age=QUEUE_STARTUP_SECONDS
+                if 0<=age<QUEUE_STARTUP_SECONDS:continue
+            # An OS lock, not PID reuse or an expired timestamp, proves ownership.
+            # A late worker must obtain this same lock and re-read the terminal receipt.
+            with available_lock(self.worker_guard(job['job_id'])) as worker_free:
+                if not worker_free:continue
+                with available_lock(problem_guard(self.labels,job['problem_key'])) as problem_free:
+                    if not problem_free:continue
+                    ledger=Ledger(self.labels.root)
+                    with available_lock(ledger.locked(job['problem_key'],job['task_type'])) as task_free:
+                        if not task_free:continue
+                        job=self._read(job['job_id'])
+                        if job['status'] not in ACTIVE:continue
+                        self._finish_orphan(job,ledger)
+
+    def _finish_orphan(self, job, ledger):
+        previous=job['status'];evidence=[];status='blocked';code='orphaned_worker_before_dispatch'
+        saved={}
+        try:
+            records=[r for r in ledger.records() if r['problem_key']==job['problem_key'] and r['task_type']==job['task_type']]
+            if job.get('execution_task_id'):
+                records=[r for r in records if r['task_id']==job['execution_task_id']]
+                if len(records)!=1 or records[0]['attempt_id']!=job['execution_attempt_id']:
+                    raise ValueError('Worker task binding cannot be verified')
+            else:
+                # Legacy receipts lack the checkpoint binding. Older work on the same
+                # question must not be mistaken for this worker's completion.
+                records=[r for r in records if r['identity']['request_settings']==job['request_settings']
+                         and datetime.fromisoformat(r['attempts'][-1]['created_at'])>=datetime.fromisoformat(job['created_at'])]
+            for row in records:
+                before=row['state']
+                if before=='claimed':
+                    ledger.transition(row,'blocked',error='orphaned_worker_before_dispatch')
+                elif before=='dispatched':
+                    # Even a durable response is only a candidate until publication is verified.
+                    response=ledger.path('responses',row['attempt_id'])
+                    if response.exists():
+                        try:
+                            envelope=ledger.artifact('responses',row['attempt_id'],row.get('response_sha256'))
+                            if envelope['task_id']!=row['task_id'] or envelope['attempt_id']!=row['attempt_id']:
+                                raise ValueError('Response binding cannot be verified')
+                            saved=envelope['response']
+                            if not isinstance(saved,dict):raise ValueError('Response must be an object')
+                        except (ValueError,OSError,KeyError,TypeError):
+                            saved={}
+                            ledger.transition(row,'uncertain',error='saved_response_requires_review')
+                        else:
+                            ledger.transition(row,'blocked',error='saved_response_requires_review',response_sha256=digest(envelope))
+                    else:
+                        ledger.transition(row,'uncertain',error='no_durable_response')
+                if row['state']=='completed':
+                    artifact=ledger.artifact('results',row['task_id'],row['result_sha256'])
+                    if artifact['task_id']!=row['task_id'] or artifact['identity']!=row['identity']:
+                        raise ValueError('Result binding cannot be verified')
+                    saved=artifact['result']
+                evidence.append({'task_id':row['task_id'],'attempt_id':row['attempt_id'],
+                                 'previous_state':before,'state':row['state']})
+            states={r['state'] for r in records}
+            if 'uncertain' in states:
+                status,code='uncertain','manual_delivery_check_required'
+            elif records and states=={'completed'}:
+                status,code='completed',None
+            elif records:
+                code='saved_response_requires_review' if saved else 'worker_recovery_requires_review'
+        except (ValueError,OSError,KeyError,TypeError):
+            status,code='blocked','worker_recovery_requires_review'
+        job.update(status=status,error=code,updated_at=now(),
+            recovery={'reason':'worker_lock_released','previous_status':previous,'at':now(),'ledger':evidence},
+            message=('执行进程已退出；未发现发送记录，原任务已停止，不会自动重发。' if code=='orphaned_worker_before_dispatch'
+                     else '执行进程已退出；持久状态需核验，禁止自动重发。' if code=='worker_recovery_requires_review'
+                     else execution_message({'status':status,'error':code})))
+        if status=='uncertain' or code=='worker_recovery_requires_review':job['real_api_calls']=None
+        if any(e['previous_state'] in {'dispatched','completed','uncertain'} for e in evidence):
+            job['real_api_calls']=None  # The ledger proves dispatch state, not the relay bill.
+        for key in ('usage','model','elapsed_seconds'):
+            if key in saved:job[key]=saved[key]
+        atomic_json(self.job_path(job['job_id']),job)
+
+    def read(self, job_id):
+        self.job_path(job_id)
+        self.recover_jobs()
+        return self._read(job_id)
+
     def latest(self, platform, problem_id):
+        self.recover_jobs()
         result={}
         for path in sorted((self.store/'jobs').glob('*.json')):
             row=json.loads(checked_path(path).read_text(encoding='utf-8'))
@@ -194,7 +308,7 @@ class WebAIService:
     @staticmethod
     def public(job):
         result={k:job[k] for k in ('job_id','platform','problem_id','task_type','status','created_at','updated_at',
-            'message','real_api_calls','usage','model','elapsed_seconds','error','failure_stage') if k in job}
+            'message','real_api_calls','usage','model','elapsed_seconds','error','failure_stage','recovery') if k in job}
         if job.get('message')=='任务已停止。请先核对保存记录，不要重复发起付费请求。':
             result['message']=execution_message(job)  # Read projection only; keep historical evidence immutable.
         return result
@@ -204,8 +318,9 @@ class WebAIService:
             raise ValueError('请先检查题目和执行配置')
         job_id=digest({'problem_key':p['problem_key'],'task_type':task_type,'revision':revision})
         with Journal(self.store/'writer.jsonl').locked():
+            self._recover_locked()
             while self.job_path(job_id).exists():
-                previous=self.read(job_id)
+                previous=self._read(job_id)
                 if previous['status']!='failed_before_dispatch':return self.public(previous)
                 # A new explicit click may retry only a proven unsent attempt.
                 # Keep the previous receipt intact; queued/unknown jobs still deduplicate.
@@ -237,8 +352,8 @@ class WebAIService:
 
     def run(self, job_id, *, client=None):
         job=self.read(job_id)
-        with Journal(self.store/'worker-locks'/(job_id+'.jsonl')).locked():
-            job=self.read(job_id)
+        with self.worker_guard(job_id):
+            job=self._read(job_id)
             if job['status']!='queued':return self.public(job)
             job.update(status='running',message='正在执行单题任务，请勿重复提交。',updated_at=now())
             atomic_json(self.job_path(job_id),job)
@@ -259,7 +374,10 @@ class WebAIService:
                         if (semantic_inputs(current)!=semantic_inputs(p) or current['verified_content_hash']!=p['verified_content_hash']
                             or self.manual_version(p['problem_key'])[0]!=manual):
                             raise ExecutionConflict('题面或人工修正已变化，禁止继续发送或激活结果。')
-                    def checkpoint(stage, row):check_source()
+                    def checkpoint(stage, row):
+                        job.update(execution_task_id=row['task_id'],execution_attempt_id=row['attempt_id'],updated_at=now())
+                        atomic_json(self.job_path(job_id),job)
+                        check_source()
                     if client is None:
                         from annotation_api.client import APIClient
                         class SourceBoundClient(APIClient):
@@ -299,6 +417,7 @@ def register_ai_execution(app, labels):
     from quart import jsonify, request, session
     from feat.api.acm_api.backend_api import admin_required
     service=WebAIService(labels,app.config['DB_PATH'])
+    service.recover_jobs()
     app.extensions['local_ai_execution']=service
 
     @app.post('/api/admin/problem-processing/<platform>/<problem_id>/execute')

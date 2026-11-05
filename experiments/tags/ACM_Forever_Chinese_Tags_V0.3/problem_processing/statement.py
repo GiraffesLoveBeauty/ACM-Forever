@@ -26,8 +26,15 @@ def newline(text):
 
 def html_statement(raw, source_url="", language="en"):
     module = parser_module()
-    mismatched = []
+    mismatched, list_issues = [], []
     class CheckedTreeParser(module.TreeParser):
+        def handle_starttag(self, tag, attrs):
+            if tag in {'ol', 'li'}:
+                names = [name for name, _ in attrs if name in {'start', 'value', 'type', 'reversed'}]
+                if len(names) != len(set(names)):
+                    list_issues.append('ambiguous_list_numbering')
+            super().handle_starttag(tag, attrs)
+
         def handle_endtag(self, tag):
             if tag not in module.VOID_TAGS and self.stack[-1].tag != tag:
                 mismatched.append(tag)
@@ -35,7 +42,7 @@ def html_statement(raw, source_url="", language="en"):
     parser = CheckedTreeParser()
     parser.feed(raw)
     parser.close()
-    issues = [] if len(parser.stack) == 1 and not mismatched else ["unbalanced_html"]
+    issues = list_issues + ([] if len(parser.stack) == 1 and not mismatched else ["unbalanced_html"])
     root = parser.root
     # Reuse known statement containers and language selectors, never include navigation.
     containers = [n for n in root.walk() if n.attrs.get("id") == "task-statement" or
@@ -62,10 +69,63 @@ def html_statement(raw, source_url="", language="en"):
             return None
         return url
 
-    def render(node):
+    def list_integer(attrs, name, default):
+        if name not in attrs:
+            return default
+        value = attrs[name]
+        if isinstance(value, str) and re.fullmatch(r'[+-]?[0-9]+', value.strip()):
+            try:
+                number = int(value.strip())
+                if -(2**31) <= number < 2**31:
+                    return number
+            except ValueError:
+                pass
+        issues.append('invalid_list_numbering')
+        return default
+
+    def render_list(node):
+        ordered = node.tag == 'ol'
+        items = [c for c in node.children if not isinstance(c, str) and c.tag == 'li']
+        nested = [n for item in items for n in item.walk() if n.tag in {'ol', 'ul'}]
+        if nested and (ordered or any(n.tag == 'ol' for n in nested)):
+            # Literal markers preserve values, but not Markdown's nested list hierarchy.
+            issues.append('nested_ordered_list_requires_review')
+        if ordered and 'type' in node.attrs and node.attrs['type'] != '1':
+            issues.append('unsupported_ordered_list_type')
+        step = -1 if ordered and 'reversed' in node.attrs else 1
+        number = list_integer(node.attrs, 'start', len(items) if step == -1 else 1) if ordered else None
+        parts = []
+        for child in node.children:
+            if isinstance(child, str):
+                if child.strip():
+                    issues.append('invalid_list_structure')
+                    parts.append(render(child))
+            elif child.tag == 'li':
+                if ordered:
+                    if 'type' in child.attrs and child.attrs['type'] != '1':
+                        issues.append('unsupported_ordered_list_type')
+                    number = list_integer(child.attrs, 'value', number)
+                    # Markdown engines renumber consecutive list items, ignoring li[value].
+                    # Escaped dots keep the actual HTML counter as literal local structure.
+                    marker = str(number) + r'\. '
+                    number += step
+                else:
+                    marker = '- '
+                parts.append(render(child, marker))
+            else:
+                if child.tag not in {'script', 'style'}:
+                    issues.append('invalid_list_structure')
+                parts.append(render(child))
+        return '\n\n' + ''.join(parts).strip() + '\n\n'
+
+    def render(node, item_marker=None):
         if isinstance(node, str):
             return re.sub(r"\s+", " ", node)
         tag = node.tag
+        if tag in {'ol', 'ul', 'li', 'style'} and re.search(
+                r'list-style|counter(?:-reset|-increment|-set)?\s*:|display\s*:',
+                node.attrs.get('style') or (''.join(c for c in node.children if isinstance(c, str)) if tag == 'style' else ''), re.I):
+            issues.append('custom_list_numbering_requires_review')
         if any(name.lower().startswith(("mathjax", "katex")) for name in (node.attrs.get("class") or "").split()):
             issues.append("rendered_math_requires_review")
         if tag == "script":
@@ -84,6 +144,8 @@ def html_statement(raw, source_url="", language="en"):
             text = newline(text)
             fence = "`" * max(3, 1 + max((len(x) for x in re.findall(r"`+", text)), default=0))
             return "\n\n" + fence + "\n" + text + ("" if text.endswith("\n") else "\n") + fence + "\n\n"
+        if tag in {'ol', 'ul'}:
+            return render_list(node)
         body = "".join(render(c) for c in node.children)
         if tag == "img":
             issues.append("image_requires_review")
@@ -111,7 +173,11 @@ def html_statement(raw, source_url="", language="en"):
                 issues.append("complex_table")
             return " " + body.strip() + " |"
         if tag == "li":
-            return "\n- " + body.strip() + "\n"
+            if item_marker is None:
+                issues.append('orphan_list_item')
+                item_marker = '- '
+            boundary = '\n' if item_marker == '- ' else '\n\n'
+            return boundary + (item_marker + body.strip()).rstrip() + boundary
         if tag in module.BLOCK_TAGS:
             return "\n\n" + ("|" if tag == "tr" else "") + body.strip("\n") + "\n\n"
         return body

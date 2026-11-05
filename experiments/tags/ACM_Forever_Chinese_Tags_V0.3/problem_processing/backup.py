@@ -12,11 +12,12 @@ from uuid import uuid4
 from annotation_api.adapter import digest
 from label_pipeline import BASE, TAXONOMY
 from tag_management.model import identity
-from tag_management.service import auto_record
+from tag_management.service import TagManager, auto_record
 from tag_management.storage import Journal, json_object
 from .repository import PROJECT_ROOT, Repository
 
-BACKUP_VERSION = 1
+BACKUP_VERSION = 2
+WEB_OVERRIDES = "local_tag_management/overrides.jsonl"
 HEX = r"[0-9a-f]{64}"
 VERSION_FILES = ("tag_taxonomy_v0.3.json", "cf_mapping_v0.3.json", "ai_annotation_prompt_v0.3.md")
 ERROR_CODES = {"unknown_delivery", "quota_exhausted", "rate_limit", "api_configuration_error",
@@ -338,13 +339,45 @@ def write_new(path, data):
         stream.write(data); stream.flush(); os.fsync(stream.fileno())
 
 
-def create_backup(root=None, destination=None, *, request_root=None):
+def read_override_file(path):
+    path = checked_path(path)
+    if not path.exists():
+        return None
+    if not stat.S_ISREG(path.lstat().st_mode):
+        raise ValueError("网页人工历史必须为普通 JSONL 文件")
+    return path.read_bytes()
+
+
+def web_manual_summary(root, files, override_file=None):
+    """Use the same journal selection and TagManager view as ReadOnlyLabels.manager()."""
+    repo = Repository(root)
+    manager = TagManager(repo.current() / "auto_tags.jsonl", override_file) if override_file is not None else repo.manager()
+    if override_file is not None:
+        check_sensitive(rows(checked_path(override_file).read_bytes()))
+    events, _ = manager.journal.read()
+    known_keys = {p["problem_key"] for name, data in files.items()
+                  if re.fullmatch(rf"catalog/generations/{HEX}/problems\.jsonl", name) for p in rows(data)}
+    if any(event["problem_key"] not in known_keys for event in events):
+        raise ValueError("网页人工历史无法对应题目目录")
+    views = manager.get_effective_tags_many(list(repo.snapshot()[0]))
+    return {"source": "local_tag_management" if override_file is not None else "label_manual",
+            "file": WEB_OVERRIDES if override_file is not None else None,
+            "manual_events": len(events), "effective_view_sha256": digest(views)}
+
+
+def create_backup(root=None, destination=None, *, request_root=None, override_file=None):
     # Validate the raw configured path before Repository.data_root() resolves links away.
     source_input = Path(root or os.environ.get("TAG_DATA_ROOT") or PROJECT_ROOT / "data" / "labels")
     source = checked_path(source_input if source_input.is_absolute() else PROJECT_ROOT / source_input)
     dest = backup_root(destination)
     if dest.is_relative_to(source) or source.is_relative_to(dest):
         raise ValueError("备份与源数据目录不能嵌套")
+    override_input = Path(override_file) if override_file is not None else source.parent / WEB_OVERRIDES
+    override = checked_path(override_input if override_input.is_absolute() else PROJECT_ROOT / override_input)
+    Journal(override)  # Validate the configured journal path without creating it.
+    override_before = read_override_file(override)
+    if override_file is not None and override_before is None:
+        raise ValueError("指定的网页人工历史文件不存在")
     before, directories = inventory(source)
     selected, excluded, transformed = {}, [], []
     for path, data in before.items():
@@ -357,7 +390,10 @@ def create_backup(root=None, destination=None, *, request_root=None):
     if any(not allowed_data_directory(p) for p in directories):
         raise ValueError("源目录含未审查子目录")
     counts = validate_dataset(source, selected)
+    web_manual = web_manual_summary(source, selected, override if override_before is not None else None)
     payload = {"payload/" + p: data for p, data in selected.items()}
+    if override_before is not None:
+        payload[WEB_OVERRIDES] = override_before
     for path, data in selected.items():
         if path.startswith("translations/requests/"):
             cleaned = json_bytes(request_state(parse(data)))
@@ -376,7 +412,8 @@ def create_backup(root=None, destination=None, *, request_root=None):
         payload["request_states/" + path] = json_bytes(request_state(parse(data)))
         transformed.append("request_states/" + path)
     after, after_dirs = inventory(source)
-    if (before, directories) != (after, after_dirs) or (req is not None and inventory(req) != (requests_before, requests_dirs)):
+    if ((before, directories) != (after, after_dirs) or read_override_file(override) != override_before
+            or (req is not None and inventory(req) != (requests_before, requests_dirs))):
         raise ValueError("备份期间数据变化，未发布备份；请暂停写入后重试")
     created = datetime.now(timezone.utc)
     target = dest / (created.strftime("%Y%m%dT%H%M%S%fZ") + "-" + uuid4().hex[:8])
@@ -389,6 +426,7 @@ def create_backup(root=None, destination=None, *, request_root=None):
     for path, data in sorted(payload.items()):
         write_new(target / path, data)
     manifest = {"backup_version": BACKUP_VERSION, "created_at": created.isoformat(), "counts": counts,
+                "web_manual": web_manual,
                 "annotation_request_states": len(requests_before), "directories": sorted(all_dirs),
                 "files": [{"path": p, "sha256": sha256(data), "bytes": len(data)} for p, data in sorted(payload.items())],
                 "file_count": len(payload), "total_bytes": sum(map(len, payload.values())),
@@ -396,7 +434,7 @@ def create_backup(root=None, destination=None, *, request_root=None):
                 "request_policy": "status-only-v1; no headers/config/raw response; not an executable API cache"}
     write_new(target / "manifest.json", json_bytes(manifest))
     verify_backup(target)
-    if inventory(source) != (before, directories):
+    if inventory(source) != (before, directories) or read_override_file(override) != override_before:
         # Immutable captured backup remains verifiable, but caller must know concurrent writes occurred.
         raise ValueError("备份发布后检测到源数据变化，请暂停写入并重新备份")
     return {"backup": str(target), **manifest, "verified": True, "api_calls": 0}
@@ -410,7 +448,8 @@ def verify_backup(path, *, include_files=False):
     manifest = parse(files.pop("manifest.json"))
     if not isinstance(manifest, dict):
         raise ValueError("备份清单必须为对象")
-    if manifest.get("backup_version") != BACKUP_VERSION:
+    version = manifest.get("backup_version")
+    if type(version) is not int or version not in {1, BACKUP_VERSION}:
         raise ValueError("备份版本不兼容")
     expected, case_names = {}, set()
     for entry in manifest["files"]:
@@ -419,11 +458,14 @@ def verify_backup(path, *, include_files=False):
             raise ValueError("清单含重复路径")
         case_names.add(name.lower())
         if not (name.startswith("payload/") and allowed_data_path(name[8:]) or
+                version == BACKUP_VERSION and name == WEB_OVERRIDES or
                 name in {"versions/" + n for n in VERSION_FILES} or
                 re.fullmatch(rf"request_states/{HEX}/{HEX}\.json", name)):
             raise ValueError("清单含未审查路径")
         expected[name] = entry
     allowed_dirs = {"payload", "versions", "request_states"}
+    if version == BACKUP_VERSION:
+        allowed_dirs.add("local_tag_management")
     declared_dirs = manifest["directories"]
     if len({safe_relative(d).lower() for d in declared_dirs}) != len(declared_dirs):
         raise ValueError("清单含重复目录")
@@ -454,19 +496,30 @@ def verify_backup(path, *, include_files=False):
     counts = validate_dataset(path / "payload", payload)
     if counts != manifest["counts"]:
         raise ValueError("备份语义摘要不一致")
+    web_manual = None
+    if version == BACKUP_VERSION:
+        web_manual = web_manual_summary(path / "payload", payload,
+                                        path / WEB_OVERRIDES if WEB_OVERRIDES in files else None)
+        if web_manual != manifest.get("web_manual"):
+            raise ValueError("网页人工历史或有效标签摘要不一致")
     if inventory(path) != ({"manifest.json": json_bytes(manifest), **files}, directories):
         # Compare original bytes rather than allowing noncanonical manifest representations.
         raise ValueError("备份校验期间文件变化或清单格式不规范")
-    result = {"backup": str(path), "manifest": manifest, "verified": True, "api_calls": 0}
+    result = {"backup": str(path), "manifest": manifest, "verified": True, "api_calls": 0,
+              "web_manual_verified": version == BACKUP_VERSION, "web_manual": web_manual,
+              "warnings": [] if version == BACKUP_VERSION else ["旧版备份未记录网页人工历史，无法验证其完整性"]}
     return (result, files, directories) if include_files else result
 
 
-def restore_backup(path, destination, *, generation=None, active_root=None):
+def restore_backup(path, destination, *, generation=None, active_root=None, active_override_file=None):
     target = checked_path(destination)
     backup = checked_path(path)
     active = checked_path(active_root or Repository().root)
+    active_override = checked_path(active_override_file or active.parent / WEB_OVERRIDES)
     if target.exists() or target.is_relative_to(active) or active.is_relative_to(target) or target.is_relative_to(backup) or backup.is_relative_to(target):
         raise ValueError("恢复只允许全新隔离目录，不能覆盖或嵌套活动数据/备份")
+    if target.is_relative_to(active_override.parent) or active_override.is_relative_to(target):
+        raise ValueError("恢复目录不能覆盖或嵌套活动网页人工历史")
     result, files, directories = verify_backup(backup, include_files=True)
     if generation is not None:
         if not re.fullmatch(HEX, generation) or f"payload/catalog/generations/{generation}/manifest.json" not in files:
@@ -487,7 +540,17 @@ def restore_backup(path, destination, *, generation=None, active_root=None):
     views = repo.manager().get_effective_tags_many(list(repo.snapshot()[0]))
     if generation is None and counts != result["manifest"]["counts"]:
         raise ValueError("恢复语义摘要与备份不一致")
+    restored_override = target / WEB_OVERRIDES if WEB_OVERRIDES in files else None
+    web_manual = None
+    if result["web_manual_verified"]:
+        web_manual = web_manual_summary(target / "payload", {n[8:]: d for n, d in files.items() if n.startswith("payload/")},
+                                        restored_override)
+        if generation is None and web_manual != result["web_manual"]:
+            raise ValueError("恢复后的网页人工历史或有效标签摘要不一致")
     return {"destination": str(target), "restored_data_root": str(target / "payload"), "counts": counts,
+            "restored_override_file": str(restored_override) if restored_override is not None else None,
+            "web_manual": web_manual, "web_manual_verified": result["web_manual_verified"],
+            "warnings": result["warnings"],
             "reloaded_effective_tags": len(views), "verified": True, "api_calls": 0,
             "request_states": "只读防重放审计记录；不会自动写回实验缓存"}
 
@@ -505,7 +568,8 @@ def list_backups(root=None):
             report = verify_backup(path)
             manifest = report["manifest"]
             result.append({"backup": str(path), "verified": True, "created_at": manifest["created_at"],
-                           "counts": manifest["counts"], "total_bytes": manifest["total_bytes"]})
+                           "counts": manifest["counts"], "total_bytes": manifest["total_bytes"],
+                           "web_manual_verified": report["web_manual_verified"], "warnings": report["warnings"]})
         except (ValueError, OSError, KeyError, TypeError):
             result.append({"backup": str(path), "verified": False, "status": "不完整、损坏或版本不兼容"})
     return result
