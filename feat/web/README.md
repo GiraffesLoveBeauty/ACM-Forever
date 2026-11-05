@@ -176,3 +176,16 @@ CI 先构建 Vue，再运行 API 合约、Vue 组件回归及原有脚本用例�
 正式回归 `tests/account-import.test.mjs` 覆盖选择范围、结果不确定、恢复与继续、离页、会话隔离、旧响应隔离、凭据、下载和开关保存、失败、重复点击。`e2e/account-import-settings.spec.js` 通过真实 API 验证开关及刷新后状态，在桌面和移动端执行。测试数据库、体验服务、容量报告与截图均须放项目外。操作说明见 [admin-account-import.md](../../docs/admin-account-import.md)。
 
 OJ 账号格式错误、同表重复或已占用时，仅跳过该平台绑定并显示逐行提示，合法 QQ 仍可开户。`ImportResults.vue` 的“导出开户 Excel”通过 `lib/account-import-credentials.js` 本地生成真正 XLSX（QQ号、姓名、账号、初始密码），不新增依赖、不回传或持久保存明文。所有单元格为文本；姓名与昵称区分，已有成员姓名使用原档案。仅导出本页实际领取到密码的成功账号，刷新后不恢复密码。
+
+
+## 成员资料列表与本地草稿
+
+管理中心 `section=members` 支持关键词、学校、身份和分页 URL；查看详情再返回保留条件。列表独立显示真实姓名、昵称、学校、身份、权限及四个平台账号，校 OJ 保留原详情维护能力，权限只读。
+
+`admin/Members.vue` 负责列表布局，`admin/MemberDetail.vue` 保留原详情；`composables/useMemberProfiles.js` 管理进入/退出、请求、恢复和逐行状态；`lib/member-profiles.js` 负责校验、有界并发及超时对账；`lib/member-profile-drafts.js` 只保存最小编辑 schema，按管理员作用域、成员代际和编辑副本隔离。
+
+输入即时写入 localStorage，刷新/关闭/离开后需明确恢复，不自动提交；仅当前设备浏览器可恢复。不同管理员不展示对方草稿，各标签页使用独立副本。草稿读取/配额异常有明确提示并保留内存输入；可清空本账号本页草稿。localStorage 不是加密存储，共用同一管理员账号的人不能被区分。
+
+保存全部覆盖跨页和跨筛选的已确认修改，最多 3 个请求并发；各行独立成功或失败。OJ 先确认影响；冲突逐字段比较原值、服务端值和本地草稿，重新保存仍执行版本保护；请求结果不确定先对账。成功只清理该次成功版本，未确认身份输入及更新版本继续保留。
+
+专项回归为 `tests/member-profile-state.test.mjs`、`tests/member-profile-components.test.mjs` 和 `e2e/member-profiles.spec.js`，仅使用合成数据。完整接口和验收见 [issue-85-member-profile.md（成员资料实施）](../../docs/issue-85-member-profile.md)。

@@ -160,7 +160,10 @@ response.raise_for_status()
 
 | 方法与路径 | 权限 / 契约 |
 | --- | --- |
-| `GET /api/admin/members` | admin/root；`search` 搜 QQ、昵称、身份、学校和 OJ 账号；`page` 默认 1，`page_size` 默认 20、上限 100；返回 `items/total/page/page_size`，含正确的 Web `role` 与 `is_active` |
+| `GET /api/admin/members` | admin/root；`search` 增加真实姓名，`school/status` 首尾去空白后精确 AND 筛选；`page` 默认 1，`page_size` 默认 20、上限 100；返回 `items/total/page/page_size`，越界页回到最后有效页；包含真实姓名、独立 OJ、Web 权限、账号代际、资料指纹和绑定版本 |
+| `GET /api/admin/members/options` | admin/root；所有 active 成员使用的去重学校与身份，以及当前管理员非认证用途的 opaque `draft_scope`；不受当前页或筛选限制 |
+| `GET /api/admin/members/<qq_id>` | admin/root；轻量编辑快照，与列表行使用相同序列化及 `profile_revision` |
+| `PATCH /api/admin/members/<qq_id>` | admin/root + CSRF；严格局部更新、`expected_account_epoch/profile_revision`、OJ 确认与原绑定/版本；仅修改显式白名单，省略字段保留 |
 | `GET /api/member/<qq_id>`、`PUT /api/user` | admin/root；详情、资料与绑定编辑，Web 角色只读 |
 | `/api/admin/web-accounts/*` | admin/root；Web 账号管理，角色授予仍要求 root，与 QQBot 名单独立 |
 | `GET/PUT /api/admins` | 查询 QQBot Root / 管理员配置；仅 Web root 可写，不修改 `web_accounts.role` |
@@ -653,3 +656,29 @@ CF 持久 job 成员捕获 epoch，closed 分项不能被晚到成功覆盖；�
 新绑定摘要增加可选 `provenance`：`source=admin_import`、`owner_verified_at=null`、`existence_status=not_checked`；原 `binding_status/self_service/sync_status` 含义不变。现有 CF 本人核验成功后来源为 `member_verified`。不自动同步、不覆盖已有档案或证据。
 
 操作与保留规则见 [admin-account-import.md（Excel 批量开户操作说明）](admin-account-import.md)，设计、实现状态和验证见 [issue-84-account-import.md（Issue #84 实施记录）](issue-84-account-import.md)。
+
+
+## 成员资料原页编辑（#85）
+
+查询与 PATCH 继承现有 admin/root 鉴权；响应 `Cache-Control: private, no-store`。成员身份 `status` 是资料文本，与 Web `role` 独立。列表和快照的 `real_name` 没有值时返回空串，界面显示横线，不能用昵称或 QQ 冒充真实姓名。
+
+PATCH 白名单为 `real_name/name/school/status/cf_handle/atcoder_handle/luogu_id/nowcoder_id`。其余请求字段只允许版本及绑定确认元数据；`qq_id/role/is_active/password/account_state/account_epoch/cjlu_username` 等写入值均报错。昵称非空，其余字段显式空串/null 清空；文本类型与长度显式检查（姓名/昵称/学校 128，身份 64，OJ 使用现有平台格式）。不截断输入；历史上未修改的异常 OJ 不阻断普通资料编辑。
+
+```json
+{
+  "expected_account_epoch": 1,
+  "profile_revision": "<上次读取的64位资料指纹>",
+  "real_name": "合成姓名",
+  "school": "合成学校"
+}
+```
+
+资料指纹是 QQ、账号状态/代际、全部相关资料和五平台绑定版本的确定性 SHA-256 快照；不包含统计或同步时间，不作为权限凭证或修改历史。其他写入口的实际资料变动也会使旧指纹失效，但旧入口本身不因此获得新协议的强制乐观锁。
+
+有 OJ 实际变更时，另带 `confirm_bindings: true`、`expected_bindings: {cf_handle: "旧账号", ...}` 和 `binding_versions: {codeforces: 1, ...}`。在 `BEGIN IMMEDIATE` 内重新校验操作者可用性/角色、目标 active/代际、指纹与绑定，再调用既有绑定原语清理对应平台证据、结束挑战、更新绑定版本并审计；收藏和历史资料保留。省略的校 OJ 字段及其版本、证据不受影响。一次成员保存的任一验证失败均回滚该成员的全部字段。
+
+成功响应 `{success, member, task_id, warnings, message}`：`member` 在写事务内生成。200 表示已保存；202 表示已保存并已提交异步同步，不需要等同步完成才确认资料写入。同步调度异常仍返回保存成功及 `warnings`，不能当成资料未写入而直接重试。
+
+错误区分：400 `invalid_fields/invalid_profile/invalid_account/confirmation_required/invalid_revision/invalid_epoch`，字段错误附 `field_errors`；409 `profile_conflict/binding_changed` 附最新 `current` 快照，`duplicate_binding` 表示重复平台账号；生命周期使用既有 `ACCOUNT_CLOSED/ACCOUNT_CHANGED/MEMBER_NOT_FOUND`；权限/CSRF 仍为 401/403。并发冲突必须核对并以最新指纹重提，没有强制覆盖选项。
+
+浏览器草稿只存当前设备 localStorage，按非认证 `draft_scope`、QQ/代际和编辑副本隔离，不含密码、令牌、Cookie 或导入凭据。恢复先获取轻量快照，换代际/注销的草稿不可应用。每次只清理对应成功修订；请求超时先查询最新快照对账，不自动重放绑定写入。详见 [issue-85-member-profile.md（实施和验收）](issue-85-member-profile.md)。

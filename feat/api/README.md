@@ -340,3 +340,10 @@ API 回归新增 `tests/test_member_training.py`，共 20 项，覆盖三种 Web
 #83 尚为独立 PR 时，当前 main 无注销列仍可运行。若存在其真实 `account_state/account_epoch`，导入自动阻断 closed，冻结代际，并安装同事务注销脱敏触发器。注销 QQ 的重新开户使用 #83 单个创建的显式新代际入口，Excel 不恢复旧身份。两个 PR 最终合并时需保留双方初始化和保护逻辑，发布前对最终构建再联调。
 
 Excel 开户仅要求合法且可创建的 QQ，OJ 可空；格式/类型错误、同表重复或被占用的 OJ 账号仅跳过相应绑定，逐行警告保留在无密码结果报告中。事务内再次检查并发占用，不因此回滚合法 QQ 开户。正常 Office/WPS 空目录和纯文本/数值自定义属性可接受，公式、宏、外链和资源限制不放宽。一次性凭据响应补充 `real_name/username`，供浏览器本地导出含 QQ号、姓名、账号、初始密码的 Excel；服务器仍不保存、重放或通过报告输出明文密码。
+
+
+## 成员资料局部更新（#85）
+
+`GET /api/admin/members` 新增真实姓名与学校/身份组合筛选，`/api/admin/members/options` 返回全量候选及非认证草稿作用域，`GET/PATCH /api/admin/members/<qq_id>` 提供轻量快照与严格白名单局部更新。沿用 users 和绑定版本，不新增表或迁移；旧详情与原 PUT 接口继续兼容，账号生命周期和校 OJ 维护不改动。
+
+新 PATCH 在最终事务内复核操作者、目标代际和 `profile_revision`，复用绑定格式/唯一性/版本/确认/清理及审计。同步调度失败通过成功响应的 warnings 告知，数据库已提交后不误报为资料未保存。`tests/test_member_profiles.py` 覆盖筛选、权限、并发、隐藏字段及绑定流程。具体协议见 [api.md（API 指南）](../../docs/api.md) 与 [issue-85-member-profile.md（实施验收）](../../docs/issue-85-member-profile.md)。
