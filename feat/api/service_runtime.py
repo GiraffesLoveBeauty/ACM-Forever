@@ -2,6 +2,7 @@
 import asyncio
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import aiohttp
@@ -10,9 +11,14 @@ import aiosqlite
 from .acm_api.constants import PLATFORM_SYNC_CONCURRENCY
 from .acm_api.database import connect_db, isolated_connection
 from .acm_api.binding_service import platform_spec
-from .acm_api.problem_sync import ProblemSync
+from .acm_api.problem_sync import ProblemSync, sync_options
 from .acm_api.sync_service import SyncMixin
 from .acm_api.event_log import emit
+
+
+PROBLEM_SYNC_TIMEZONE = timezone(timedelta(hours=8))
+PROBLEM_SYNC_HOUR = 4
+PROBLEM_SYNC_RETRY_SECONDS = 60
 
 
 class SyncEngine(SyncMixin):
@@ -143,6 +149,8 @@ class WebTaskManager:
         self.sync_engine = sync_engine
         self.tasks = {}
         self.problem_sync = ProblemSync(sync_engine.db_path)
+        self._daily_problem_sync_task = None
+        self._claiming_daily_problem_sync = False
 
     async def _logged_task(self, operation, item, *args, **kwargs):
         fields = {"task_id": item["id"], "task_kind": item.get("kind", "后台任务")}
@@ -176,12 +184,16 @@ class WebTaskManager:
                 level, message = "warning", "后台任务已结束，部分操作未完成，请查看任务结果"
             emit("task.finished", message, level, **fields)
 
+    def _active_problem_sync(self):
+        return next((item for item in self.tasks.values()
+                     if item.get("kind") == "题目采集" and item["status"] in {"queued", "running"}), None)
+
     def submit_problem_sync(self, options):
-        for item in self.tasks.values():
-            if item.get("kind") == "题目采集" and item["status"] in {"queued", "running"}:
-                if item["options"] == options:
-                    return {"id": item["id"], "merged": True}
-                return None
+        if self._claiming_daily_problem_sync:
+            return None
+        active = self._active_problem_sync()
+        if active is not None:
+            return {"id": active["id"], "merged": True} if active["options"] == options else None
         task_id = uuid.uuid4().hex[:12]
         item = {
             "id": task_id, "kind": "题目采集", "platform": options["platform"], "options": dict(options),
@@ -191,6 +203,65 @@ class WebTaskManager:
         self.tasks[task_id] = item
         item["_task"] = asyncio.create_task(self._logged_task(self.problem_sync.run, item, options, item))
         return {"id": task_id, "merged": False}
+
+    def start_daily_problem_sync(self):
+        if self._daily_problem_sync_task is None:
+            self._daily_problem_sync_task = asyncio.create_task(
+                self._daily_problem_sync_loop(), name="daily-problem-sync",
+            )
+
+    async def _claim_daily_problem_sync(self, platform, day):
+        async with aiosqlite.connect(str(self.sync_engine.db_path)) as db:
+            async with db.execute(
+                "INSERT INTO settings(key,value) VALUES(?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE settings.value<excluded.value",
+                (f"daily_problem_sync_{platform}", day),
+            ) as cursor:
+                claimed = cursor.rowcount == 1
+            await db.commit()
+        return claimed
+
+    async def _run_daily_problem_sync(self):
+        day = datetime.now(PROBLEM_SYNC_TIMEZONE).date()
+        for platform in ("atcoder", "codeforces"):
+            if datetime.now(PROBLEM_SYNC_TIMEZONE).date() != day:
+                break
+            if self._claiming_daily_problem_sync or self._active_problem_sync() is not None:
+                return False
+            # Hold admission across the SQLite claim so manual work cannot
+            # take the slot after today's run has been recorded.
+            self._claiming_daily_problem_sync = True
+            try:
+                claimed = await self._claim_daily_problem_sync(platform, day.isoformat())
+            finally:
+                self._claiming_daily_problem_sync = False
+            if not claimed:
+                continue
+            for task_id, item in list(self.tasks.items()):
+                if item.get("platform") == platform and item.get("options", {}).get("scheduled") and item["_task"].done():
+                    del self.tasks[task_id]
+            options = sync_options({"platform": platform, "scope": "platform"})
+            options["scheduled"] = True
+            task_id = self.submit_problem_sync(options)["id"]
+            await asyncio.gather(self.tasks[task_id]["_task"], return_exceptions=True)
+        return True
+
+    async def _daily_problem_sync_loop(self):
+        while True:
+            now = datetime.now(PROBLEM_SYNC_TIMEZONE)
+            due = now.replace(hour=PROBLEM_SYNC_HOUR, minute=0, second=0, microsecond=0)
+            if now < due:
+                await asyncio.sleep((due - now).total_seconds())
+                continue
+            try:
+                complete = await self._run_daily_problem_sync()
+            except (OSError, aiosqlite.Error):
+                emit("problem_sync.schedule_failed", "每日题库更新暂无法安排，稍后重试", "warning")
+                complete = False
+            delay = PROBLEM_SYNC_RETRY_SECONDS
+            if complete:
+                delay = (due + timedelta(days=1) - datetime.now(PROBLEM_SYNC_TIMEZONE)).total_seconds()
+            await asyncio.sleep(max(0, delay))
 
     async def submit_account_sync(self, qq_id, platforms, days=0, *, expected_epoch=None):
         normalized = []
@@ -317,6 +388,10 @@ class WebTaskManager:
         return True
 
     async def close(self):
+        if self._daily_problem_sync_task is not None:
+            self._daily_problem_sync_task.cancel()
+            await asyncio.gather(self._daily_problem_sync_task, return_exceptions=True)
+            self._daily_problem_sync_task = None
         pending = []
         for task_id, item in self.tasks.items():
             task = item.get("_task")

@@ -71,6 +71,12 @@ python3 -m api.init_db --database /root/acm-forever-data/acm_forever.db
 
 CF 支持没有样例的题目及直接返回 PDF 的题面。PDF 原文件存入 SQLite，详情页通过本站接口打开，图示与样例保留在 PDF 中，暂不拆分为结构化样例。启动或初始化时自动给旧题库补充 `statement_pdf BLOB` 列，不清空数据；失败记录可再次按比赛 / 指定题号采集，默认只跳过成功题目。
 
+### 每日自动更新题库
+
+API 服务默认在北京时间每天 04:00 依次更新 AtCoder 和 Codeforces 的公开题目目录。每个平台最多补采 100 道缺失题面的题目，优先处理较新的题目，已成功保存的题面和样例继续使用。管理员可在 **同步任务** 查看进度和结果，仍可手动发起全量采集。
+
+如果服务在 04:00 后启动，会补跑当天尚未启动的平台。遇到手动采集时自动任务会等待，同一天每个平台只自动启动一次。每日记录保存在 SQLite 中，重启服务也会沿用。设置 `ACM_DAILY_PROBLEM_SYNC_ENABLED=false` 可关闭自动任务。
+
 ### 补全已有题库的比赛时间
 
 比赛进度按真实开始时间倒序排列。启动或初始化会补齐 `crawler_contests` 表，初始化仍只建立表结构；已有题库升级后，在 API 部署目录执行以下命令补全比赛名称与开始时间：
@@ -89,6 +95,7 @@ python3 -m api.sync_contests --database /root/acm-forever-data/acm_forever.db --
 | --- | --- |
 | `ACM_API_HOST` / `ACM_API_PORT` | 监听地址和端口，默认 `127.0.0.1:8088`，沿用原 WebUI 端口 |
 | `ACM_ACCOUNT_IMPORT_ENABLED` | Excel 导入尚未保存页面开关时的后备默认值，默认 `true`；页面保存的数据库设置优先，关闭后仍可查已有结果 |
+| `ACM_DAILY_PROBLEM_SYNC_ENABLED` | 是否每天自动更新 AtCoder 和 Codeforces 题库，默认 `true` |
 | `ACM_DATABASE_PATH` | SQLite 数据库文件路径，默认 `./data/acm_forever.db` |
 | `ACM_MARKDOWN_UPLOAD_DIR` | Wiki/论坛持久化图片目录，默认数据库同级 `uploads/markdown`；必须在代码同步目录外 |
 | `ACM_PUBLIC_BASE_URL` | Markdown 导出图片的公开站点根地址，例如 `https://实际域名`，不带路径 |
