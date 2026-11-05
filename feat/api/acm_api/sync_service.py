@@ -11,6 +11,7 @@ from .database import isolated_connection
 from .binding_guard import BindingGuard, BindingChanged
 from .binding_service import platform_spec
 from .account_lifecycle_service import AccountLifecycleError, snapshot_epoch, require_active_user
+from .sync_policy import SYNC_PAUSED, submission_sync_paused
 
 
 def _sync_platform_label(platform):
@@ -128,6 +129,7 @@ class SyncMixin:
             LOG.info(f"  -> 为用户 {user['name']} 执行平台独立同步...")
             user_new_count = 0
             sync_succeeded = True
+            has_paused_platform = False
             session = self._http_session
             for platform, field, fetcher in (
                 ("codeforces", "cf_handle", Crawler.fetch_cf_submissions),
@@ -137,6 +139,9 @@ class SyncMixin:
                 ("cjlu", "cjlu_username", fetch_cjlu_submissions),
             ):
                 if not user[field]:
+                    continue
+                if submission_sync_paused(platform, self._crawler_config()):
+                    has_paused_platform = True
                     continue
                 state = await self._get_platform_sync_state(qq_id, platform, legacy_cursor, user=user)
                 cursor_timestamp = int(state["cursor_timestamp"] or 0)
@@ -179,6 +184,9 @@ class SyncMixin:
                     )
                     LOG.exception("同步用户 %s 的 %s 数据失败", qq_id, field)
             if sync_succeeded:
+                if has_paused_platform:
+                    LOG.info("用户 %s 的启用平台已同步；洛谷过题记录同步已暂停，保留原同步时间。", qq_id)
+                    return True
                 if not await self._mark_user_synced(user, current_sync_time):
                     return False
                 if user_new_count > 0:
@@ -249,6 +257,8 @@ class SyncMixin:
                 _, _, version = platform_spec(normalized_platform)
                 if expected_binding.get("account_epoch") != user["account_epoch"] or int(user[version]) != expected_binding["version"] or str(user[field] or "").strip().casefold() != expected_binding["account"].strip().casefold():
                     return -4
+            if submission_sync_paused(normalized_platform, self._crawler_config()):
+                return SYNC_PAUSED
             start_timestamp = 0 if days == 0 else int(time.time()) - days * 24 * 60 * 60
             state = await self._get_platform_sync_state(qq_id, normalized_platform, user["last_sync_timestamp"] or 0, user=user)
             if incremental and normalized_platform == "codeforces":
@@ -309,6 +319,9 @@ class SyncMixin:
             ):
                 if not (user[field] or "").strip():
                     continue
+                if submission_sync_paused(platform, self._crawler_config()):
+                    results[platform] = SYNC_PAUSED
+                    continue
                 state = await self._get_platform_sync_state(qq_id, platform, legacy_cursor, user=user)
                 cursor_timestamp = int(state["cursor_timestamp"] or 0)
                 start_timestamp = requested_start if days else (cursor_timestamp or int(time.time()) - 7 * 86400)
@@ -359,7 +372,7 @@ class SyncMixin:
             if not isinstance(result, dict):
                 await event.reply(text="⚠️ 账号已保存，但首次同步未能完成，将在后续自动同步时重试。")
                 return
-            failed = [platform for platform, count in result.items() if count is None or count < 0]
+            failed = [platform for platform, count in result.items() if count is None or (count < 0 and count != SYNC_PAUSED)]
             if failed:
                 await event.reply(
                     text="⚠️ 账号已保存，但以下平台首次同步失败："
@@ -367,7 +380,10 @@ class SyncMixin:
                     + "。后续自动同步会继续重试。"
                 )
                 return
-            await event.reply(text="✅ 账号绑定后的全部历史记录同步已完成。")
+            if SYNC_PAUSED in result.values():
+                await event.reply(text="ℹ️ 账号已保存，启用平台已同步；洛谷过题记录同步已暂停，已有记录保留。")
+            else:
+                await event.reply(text="✅ 账号绑定后的全部历史记录同步已完成。")
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -382,6 +398,8 @@ class SyncMixin:
                 count = await self.sync_single_platform_for_days(qq_id, sync_platform, 0)
             if count is None:
                 await event.reply(text=f"⚠️ {_sync_platform_label(sync_platform)} 已绑定，但已有同步任务运行，将在后续自动同步时重试。")
+            elif count == SYNC_PAUSED:
+                await event.reply(text=f"ℹ️ {_sync_platform_label(sync_platform)} 已绑定；过题记录同步已暂停，已有记录保留。")
             elif count < 0:
                 await event.reply(text=f"⚠️ {_sync_platform_label(sync_platform)} 已绑定，但首次拉取做题记录失败，将在后续自动同步时重试。")
             else:
@@ -428,7 +446,7 @@ class SyncMixin:
             count = await self.sync_single_platform_for_days(qq_id, platform, days)
             if task:
                 task["result"] = count
-                task["status"] = "completed" if count is not None and count >= 0 else "failed"
+                task["status"] = "completed" if count is not None and (count >= 0 or count == SYNC_PAUSED) else "failed"
                 task["finished_at"] = int(time.time())
             if count is None:
                 await event.reply(text="⚠️ 当前已有该用户的同步任务运行，请稍后再试。")
@@ -436,6 +454,8 @@ class SyncMixin:
                 await event.reply(text=f"❌ 找不到用户 {qq_id}。")
             elif count == -2:
                 await event.reply(text=f"❌ 用户 {qq_id} 尚未绑定 {platform} 账号。")
+            elif count == SYNC_PAUSED:
+                await event.reply(text=f"ℹ️ {_sync_platform_label(platform)} 过题记录同步已暂停，已有记录保留。")
             elif count < 0:
                 await event.reply(text=f"⚠️ {platform} 平台同步失败，请查看日志。")
             else:
@@ -465,15 +485,15 @@ class SyncMixin:
             if not isinstance(result, dict):
                 await event.reply(text=f"❌ 用户 {qq_id} 不存在或同步被跳过。")
                 return
-            failed = any(count < 0 for count in result.values())
+            failed = any(count < 0 and count != SYNC_PAUSED for count in result.values())
             rows = [
-                (name, "失败" if count < 0 else f"新增 {count} 条记录")
+                (name, "已暂停，保留已有记录" if count == SYNC_PAUSED else "失败" if count < 0 else f"新增 {count} 条记录")
                 for name, count in result.items()
             ]
             image = await asyncio.to_thread(
                 self._generate_table_image,
                 f"用户 {qq_id} 同步结果",
-                "⚠️ 部分平台失败" if failed else "✅ 全部平台同步完成",
+                "⚠️ 部分平台失败" if failed else "ℹ️ 启用平台同步完成，部分平台已暂停" if SYNC_PAUSED in result.values() else "✅ 全部平台同步完成",
                 ("平台", "结果"),
                 rows,
                 (360, 970),

@@ -121,6 +121,7 @@ def create_app(*, daily_problem_sync=False):
     root_ids = _csv_env("ACM_ROOT_QQ_IDS")
     initial_admin_ids = _csv_env("ACM_ADMIN_QQ_IDS")
     crawler_config = {
+        "luogu_user_sync_enabled": _bool_env("ACM_LUOGU_USER_SYNC_ENABLED", False),
         "luogu_cookie": os.getenv("ACM_LUOGU_COOKIE", ""),
         "luogu_csrf_token": os.getenv("ACM_LUOGU_CSRF_TOKEN", ""),
         "cf_api_key": os.getenv("ACM_CF_API_KEY", ""),

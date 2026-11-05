@@ -392,3 +392,27 @@ test('the task page renders collector progress as problem counts and preserves c
   await settle();
   assert.match(textOf(mounted.root), /已取消/);
 });
+
+test('the task page explains paused user crawling alongside other platform results', async () => {
+  jobs = [
+    {
+      id: 'account-sync',
+      kind: '账号全量同步',
+      platform: 'luogu,atcoder',
+      qq_id: '12345678',
+      status: 'completed',
+      result: { luogu: -5, atcoder: 2 },
+    },
+    {
+      id: 'all-account-sync',
+      kind: '全员平台同步',
+      status: 'completed',
+      result: { 87654321: { luogu: -5 } },
+    },
+  ];
+  await page(Tasks);
+  const content = textOf(mounted.root);
+  assert.match(content, /luogu：已暂停，保留已有记录；atcoder：新增 2 条/);
+  assert.match(content, /87654321：luogu：已暂停，保留已有记录/);
+  assert.doesNotMatch(content, /同步失败|新增 -5 条/);
+});

@@ -71,6 +71,12 @@ python3 -m api.init_db --database /root/acm-forever-data/acm_forever.db
 
 CF 支持没有样例的题目及直接返回 PDF 的题面。PDF 原文件存入 SQLite，详情页通过本站接口打开，图示与样例保留在 PDF 中，暂不拆分为结构化样例。启动或初始化时自动给旧题库补充 `statement_pdf BLOB` 列，不清空数据；失败记录可再次按比赛 / 指定题号采集，默认只跳过成功题目。
 
+### 洛谷用户过题记录同步暂停
+
+洛谷用户过题记录抓取默认暂停，自动、手动、全员以及绑定后的首次同步都会跳过洛谷，其他平台继续同步。已有洛谷绑定、过题记录与排行榜统计保留，暂停不会推进洛谷同步游标、增加失败次数或更新整用户的“全部平台已同步”时间。任务结果中的 `-5` 表示已暂停，管理后台会显示“已暂停，保留已有记录”。
+
+需要恢复时，在服务环境文件中设置 `ACM_LUOGU_USER_SYNC_ENABLED=true`，确认洛谷 Cookie 和 CSRF Token 有效后重启 API 服务。仅设置凭据不会恢复抓取。此开关只控制用户过题记录，不影响账号验证或题目目录采集。
+
 ### 每日自动更新题库
 
 API 服务默认在北京时间每天 04:00 依次更新 AtCoder 和 Codeforces 的公开题目目录。每个平台最多补采 100 道缺失题面的题目，优先处理较新的题目，已成功保存的题面和样例继续使用。管理员可在 **同步任务** 查看进度和结果，仍可手动发起全量采集。
@@ -110,7 +116,8 @@ python3 -m api.sync_contests --database /root/acm-forever-data/acm_forever.db --
 | `ACM_TEMP_PASSWORD_TTL_HOURS` | Web 临时密码有效期，默认 72 小时 |
 | `ACM_WEB_ALLOWED_ORIGINS` | 允许携带凭据访问 API 的前端来源，逗号分隔；生产环境应精确填写 |
 | `ACM_WEBUI_TRUSTED_PROXIES` | 可信反向代理 IP 列表，逗号分隔 |
-| `ACM_LUOGU_COOKIE` / `ACM_LUOGU_CSRF_TOKEN` | 需要同步洛谷数据时使用 |
+| `ACM_LUOGU_USER_SYNC_ENABLED` | 是否抓取用户洛谷过题记录，默认 `false`（暂停）；设为 `true` 并重启后恢复 |
+| `ACM_LUOGU_COOKIE` / `ACM_LUOGU_CSRF_TOKEN` | 洛谷凭据；仅配置凭据不会解除过题记录同步暂停 |
 | `ACM_CF_API_KEY` / `ACM_CF_API_SECRET` | 需要签名访问 Codeforces API 时使用 |
 | `ACM_CF_DATA_TTL_HOURS` | CF 练习赛选题的成员数据有效期，默认 24 小时；整数 1–720 |
 | `ACM_CF_PROBLEM_TTL_HOURS` | CF 题目和比赛列表核实有效期，默认 6 小时；整数 1–720 |

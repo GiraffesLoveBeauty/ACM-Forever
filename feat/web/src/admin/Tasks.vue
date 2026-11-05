@@ -15,7 +15,9 @@ function describe(value) {
   if (typeof value === 'number')
     return value >= 0
       ? `新增 ${value} 条`
-      : { '-1': '成员不存在', '-2': '未绑定账号', '-3': '抓取失败' }[value] || '同步失败';
+      : { '-1': '成员不存在', '-2': '未绑定账号', '-3': '抓取失败', '-5': '已暂停，保留已有记录' }[
+          value
+        ] || '同步失败';
   return String(value);
 }
 async function load() {

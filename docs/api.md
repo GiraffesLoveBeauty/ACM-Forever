@@ -346,6 +346,8 @@ print(task["status"], task["progress"], task["result"])
 
 `result.scope=platform` 表示全平台任务；`metadata_count` 是已导入目录题数，`batch_count/completed_batches` 是题面总批次 / 已完成批次。`progress.phase` 为 `catalog/metadata/statements`，目录阶段有 `metadata_done/metadata_total`，题面阶段有当前 `batch`。全平台的 `remaining_count` 表示本任务尚未尝试的题数，失败题数单独统计。任务错误列表最多显示前 100 条，超出时 `failure_details_truncated=true`；完整逐题错误保存在数据库对应行中。
 
+用户平台同步任务的 `result` 按平台返回新增记录数；`-5` 表示该平台同步已暂停，后台显示“已暂停，保留已有记录”。暂停属于跳过操作，不算抓取失败，也不会推进该平台的同步游标。洛谷用户过题记录默认暂停，其他平台继续同步；恢复方法见 [API 服务环境变量](../feat/api/README.md#洛谷用户过题记录同步暂停)。
+
 取消仍使用 `POST /api/tasks/<任务ID>/cancel`，要求同样的管理员 Cookie 与 CSRF。任务记录保存在进程内，服务重启后清空；已入库的数据保留，再次提交时可跳过成功题目。
 
 成功的题面 HTML（包含样例章节）、纯文本及 `samples` JSON 数组存于 `crawler_problems` 的同一行，没有独立样例表。样例保留输入输出的空格与换行，CF 的逐行 div 和旧版 br 排版会还原为换行。AtCoder 空白处理详见 [采集说明](crawler-samples.md#样例直接保存在题目中)。同时原子更新现有 `recommendations`，使 `GET /api/problems` 和成员题库列表能够展示新题。AtCoder 官方列表不提供估算难度和算法标签，新题的这些信息为空，已有数据在刷新时保留；CF 保存元数据中的 Rating 与 tags，缺失 Rating 为 null。下载、解析或数据库写入失败时保留已有题面与样例，并在已有题目行中记录最近失败。

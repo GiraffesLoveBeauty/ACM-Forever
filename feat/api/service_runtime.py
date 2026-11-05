@@ -14,6 +14,7 @@ from .acm_api.binding_service import platform_spec
 from .acm_api.problem_sync import ProblemSync, sync_options
 from .acm_api.sync_service import SyncMixin
 from .acm_api.event_log import emit
+from .acm_api.sync_policy import SYNC_PAUSED
 
 
 PROBLEM_SYNC_TIMEZONE = timezone(timedelta(hours=8))
@@ -97,7 +98,7 @@ class SyncEngine(SyncMixin):
             task["result"] = results
             task["status"] = (
                 "completed"
-                if all(value is not None and value >= 0 for value in results.values())
+                if all(value is not None and (value >= 0 or value == SYNC_PAUSED) for value in results.values())
                 else "failed"
             )
         except asyncio.CancelledError:
@@ -172,7 +173,7 @@ class WebTaskManager:
                     return ("error" in value or any(type(value.get(key)) is int and value[key] > 0
                                                    for key in ("failure_count", "failed_count"))
                             or any(failed(v) for v in value.values()))
-                return type(value) is int and value < 0 and value != -2
+                return type(value) is int and value < 0 and value not in {-2, SYNC_PAUSED}
 
             if status == "failed":
                 level, message = "error", "后台任务执行失败，请在同步任务页面查看结果"
