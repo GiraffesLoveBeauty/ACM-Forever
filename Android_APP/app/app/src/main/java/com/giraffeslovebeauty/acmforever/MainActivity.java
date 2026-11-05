@@ -497,12 +497,12 @@ public final class MainActivity extends Activity {
         searchParams.leftMargin = dp(9);
         searchParams.rightMargin = dp(9);
         header.addView(search, searchParams);
-        ImageButton tools=new ImageButton(this);MobileStyle.flat(tools);android.graphics.drawable.Drawable plus=getDrawable(R.drawable.skland_add);plus.setTint(MobileStyle.ON_ACCENT);tools.setImageDrawable(plus);tools.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);tools.setBackground(MobileStyle.panel(this,MobileStyle.controlFill(ACCENT),12,0));tools.setPadding(dp(8),dp(8),dp(8),dp(8));tools.setContentDescription("常用工具");tools.setOnClickListener(v->showTools(tools));header.addView(tools,new LinearLayout.LayoutParams(dp(44),dp(44)));
+        ImageButton tools=new ImageButton(this);MobileStyle.flat(tools);android.graphics.drawable.Drawable plus=AppIcons.get(this,"add",MobileStyle.ON_ACCENT);tools.setImageDrawable(plus);tools.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);tools.setBackground(MobileStyle.panel(this,MobileStyle.controlFill(ACCENT),12,0));tools.setPadding(dp(8),dp(8),dp(8),dp(8));tools.setContentDescription("常用工具");tools.setOnClickListener(v->showTools(tools));header.addView(tools,new LinearLayout.LayoutParams(dp(44),dp(44)));
 
         ScrollView scroll = new ScrollView(this);
         pageScroll=scroll;
         scroll.setFillViewport(true);
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        root.addView(PullRefreshLayout.forPage(this,scroll,pageRefresh,()->!loginBusy&&!composeBusy&&!actionBusy&&!"compose".equals(screen)&&!ModalDialogs.isShowing(this)), new LinearLayout.LayoutParams(-1, 0, 1));
         content = column();
         content.setPadding(dp(12), dp(12), dp(12), dp(24));
         scroll.addView(content);

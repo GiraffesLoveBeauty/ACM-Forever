@@ -25,7 +25,7 @@ final class NavigationUiSmoke {
             URL.setURLStreamHandlerFactory(protocol->"https".equals(protocol)?new URLStreamHandler(){@Override protected URLConnection openConnection(URL url)throws IOException{if(!"navigation.test.invalid".equals(url.getHost()))throw new IOException("External traffic forbidden");return new Fixture(url);}}:null);
             prefs.edit().putString("api_base_url","https://navigation.test.invalid").putBoolean("auto_login",false).putBoolean("app_update_automatic",false).apply();api.setBaseUrl("https://navigation.test.invalid");api.setNetworkAvailable(()->true);api.login("90000001","Synthetic-Test!");
             activity=test.startActivitySync(new Intent().setClassName(context,MainActivity.class.getName()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK));opened.add(activity);
-            await(()->find("社区话题")!=null,"home");main(()->{ImageView plus=(ImageView)description("常用工具");check(plus.getScaleType()==ImageView.ScaleType.FIT_CENTER&&plus.getDrawable().getIntrinsicWidth()>=MobileStyle.dp(context,28),"plus has an enlarged drawable");plus.performClick();});
+            await(()->find("社区话题")!=null&&((ImageView)description("常用工具")).getDrawable().getBounds().width()>=MobileStyle.dp(context,28),"home and enlarged plus drawn");main(()->{ImageView plus=(ImageView)description("常用工具");check(plus.getScaleType()==ImageView.ScaleType.FIT_CENTER,"plus fits its button without stretching");plus.performClick();});
             main(()->{Button settings=(Button)find("个性化设置");check(settings!=null&&settings.getGravity()==Gravity.CENTER&&settings.getCompoundDrawables()[0]==null,"personalization text is centered");ModalDialogs.close(activity);});
             testForumMembers();
             testManualSessionRecreation(api,prefs);
@@ -82,7 +82,7 @@ final class NavigationUiSmoke {
         Activity home=activity;Instrumentation.ActivityMonitor monitor=test.addMonitor(SearchActivity.class.getName(),null,false);
         try{main(()->((EditText)field("search")).performClick());activity=test.waitForMonitorWithTimeout(monitor,7000);check(activity!=null,"global search opens once");opened.add(activity);}finally{test.removeMonitor(monitor);}
         await(()->find("最近 10 条搜索")!=null,"global search page");
-        main(()->((EditText)walk(decor(),v->v instanceof EditText)).setText("清空验证"));click("搜索");await(()->find("导航话题")!=null,"cross-module forum results");
+        main(()->{((EditText)walk(decor(),v->v instanceof EditText)).setText("清空验证");description("搜索").performClick();});await(()->find("导航话题")!=null,"cross-module forum results");
         Activity searchPage=activity;monitor=test.addMonitor(MainActivity.class.getName(),null,false);
         try{click("导航话题");activity=test.waitForMonitorWithTimeout(monitor,7000);check(activity!=null,"search result opens native detail");opened.add(activity);}finally{test.removeMonitor(monitor);}
         await(()->"detail".equals(field("screen"))&&find("发布新的评论")!=null,"forum result detail");Activity detail=activity;back();test.waitForIdleSync();check(detail.isFinishing(),"detail returns to search activity");

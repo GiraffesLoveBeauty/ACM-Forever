@@ -20,7 +20,7 @@ final class HomeBanner {
         LinearLayout box=column(c);box.setContentDescription("社区主题横幅");box.setPadding(dp(c,18),dp(c,16),dp(c,12),dp(c,16));
         GradientDrawable fill=new GradientDrawable();fill.setColor(ThemePalette.module(MobileStyle.HERO,AppAppearance.prefs(c).getInt("module_transparency",0)));fill.setCornerRadius(dp(c,16));
         boolean official="web".equals(AppAppearance.prefs(c).getString("theme_source","acm"));
-        box.setBackground(official?fill:new LayerDrawable(new android.graphics.drawable.Drawable[]{fill,new HeroBackdrop()}));
+        if(!official)box.setBackground(new LayerDrawable(new android.graphics.drawable.Drawable[]{fill,new HeroBackdrop()}));
         LinearLayout brand=new SpacedLayout(c);TextView tag=text(c,eyebrow,9,true);tag.setLetterSpacing(.10f);brand.addView(tag,new LinearLayout.LayoutParams(0,-2,1));
         ImageView signature=new ImageView(c);signature.setImageDrawable(new CommunityArtwork(c,dark));signature.setContentDescription("猫娘代码标志");brand.addView(signature,new LinearLayout.LayoutParams(dp(c,27),dp(c,27)));box.addView(brand);gap(c,box,8);
         LinearLayout line=new SpacedLayout(c),copy=column(c);line.setGravity(android.view.Gravity.CENTER_VERTICAL);copy.setContentDescription("社区横幅文字");copy.addView(text(c,title,24,true));gap(c,copy,8);copy.addView(text(c,subtitle,11,false));line.addView(copy,new LinearLayout.LayoutParams(0,-2,1));
@@ -29,6 +29,12 @@ final class HomeBanner {
         else{GraphArtView nativeGraph=new GraphArtView(c,false);nativeGraph.setTooltipText("点选节点，长按放大");if(explore!=null)nativeGraph.setOnLongClickListener(v->{explore.accept(nativeGraph.target());return true;});graph=nativeGraph;}
         // Use a fraction of the available banner width, so narrow screens and
         // enlarged text keep separate text/art columns without clipping either.
-        LinearLayout.LayoutParams graphSize=new LinearLayout.LayoutParams(0,dp(c,112),.9f);graphSize.leftMargin=dp(c,8);line.addView(graph,graphSize);box.addView(line);return box;
+        LinearLayout.LayoutParams graphSize=new LinearLayout.LayoutParams(0,dp(c,112),.9f);graphSize.leftMargin=dp(c,8);line.addView(graph,graphSize);box.addView(line);
+        if(!official)return box;
+        // Official templates keep their original CSS background/decorations in a
+        // separate layer. The native template and its HeroBackdrop stay independent.
+        android.widget.FrameLayout layers=new android.widget.FrameLayout(c){
+            @Override protected void onMeasure(int width,int height){box.measure(width,View.MeasureSpec.makeMeasureSpec(0,View.MeasureSpec.UNSPECIFIED));setMeasuredDimension(box.getMeasuredWidth(),box.getMeasuredHeight());getChildAt(0).measure(View.MeasureSpec.makeMeasureSpec(getMeasuredWidth(),View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(getMeasuredHeight(),View.MeasureSpec.EXACTLY));}
+        };OfficialThemeView backdrop=new OfficialThemeView(c,"banner-background");backdrop.setAlpha(1-AppAppearance.prefs(c).getInt("module_transparency",0)*.2f);backdrop.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);layers.addView(backdrop,new android.widget.FrameLayout.LayoutParams(-1,-1));layers.addView(box,new android.widget.FrameLayout.LayoutParams(-1,-2));LinearLayout wrapper=column(c);wrapper.addView(layers,new LinearLayout.LayoutParams(-1,-2));return wrapper;
     }
 }

@@ -25,6 +25,7 @@ final class AppUpdates {
     private final Context context;
     private final ApiClient api;
     private final SharedPreferences prefs;
+    private final java.util.function.BooleanSupplier network;
     private final Handler ui=new Handler(Looper.getMainLooper());
     private final ExecutorService io=Executors.newSingleThreadExecutor();
     private WeakReference<Activity> owner=new WeakReference<>(null);
@@ -41,7 +42,11 @@ final class AppUpdates {
     private final Runnable poll=this::pollDownload;
 
     AppUpdates(Context context,ApiClient api){
+        this(context,api,()->networkAvailable(context));
+    }
+    AppUpdates(Context context,ApiClient api,java.util.function.BooleanSupplier network){
         this.context=context.getApplicationContext();this.api=api;prefs=AppAppearance.prefs(context);
+        this.network=java.util.Objects.requireNonNull(network);
         prefs.edit().remove(KEY+"wifi_download").apply();
         downloadId=prefs.getLong(KEY+"download",-1);verifiedName=prefs.getString(KEY+"verified","");
         try{
@@ -66,7 +71,7 @@ final class AppUpdates {
     private Activity activity(){Activity a=owner.get();return a==null||a.isFinishing()||a.isDestroyed()?null:a;}
     boolean automatic(){return prefs.getBoolean(KEY+"automatic",true);}
     void automatic(boolean value){prefs.edit().putBoolean(KEY+"automatic",value).apply();changed();}
-    void maybeCheck(){if(automatic()&&System.currentTimeMillis()-prefs.getLong(KEY+"attempt",0)>=6*60*60*1000L)check(false);}
+    void maybeCheck(){if(!automatic()||busy())return;long now=System.currentTimeMillis(),success=prefs.getLong(KEY+"success",0),attempt=prefs.getLong(KEY+"attempt",0);boolean sameBuild=prefs.getLong(KEY+"checked_build",-1)==currentVersion();if((!sameBuild||now-success>=6*60*60*1000L||now<success)&&(attempt==0||now-attempt>=60000||now<attempt))check(false);}
     void startupCheck(){if(startupChecked)return;startupChecked=true;maybeCheck();}
     long currentVersion(){try{PackageInfo p=context.getPackageManager().getPackageInfo(context.getPackageName(),0);return Build.VERSION.SDK_INT>=28?p.getLongVersionCode():p.versionCode;}catch(Exception e){return 0;}}
     String currentName(){try{return context.getPackageManager().getPackageInfo(context.getPackageName(),0).versionName;}catch(Exception e){return "未知";}}
@@ -87,16 +92,18 @@ final class AppUpdates {
         if(next.equals(source))return true;
         if(offerDialog!=null){offerDialog.setOnDismissListener(null);offerDialog.dismiss();offerDialog=null;}
         ++generation;cancelDownload();source=next;release=null;error="";checking=false;pendingOffer=false;pendingResult="";promptedVersion=0;clearStored();
-        prefs.edit().remove(KEY+"attempt").apply();
+        prefs.edit().remove(KEY+"attempt").remove(KEY+"success").remove(KEY+"checked_build").apply();
         return true;
     }
     boolean busy(){return checking||verifying||downloadId!=-1;}
+    boolean checking(){return checking;}
     boolean downloading(){return downloadId!=-1;}
     boolean verifying(){return verifying;}
     int progress(){return progress;}
     boolean ready(){return !verifiedName.isEmpty()&&verifiedFile().isFile();}
     boolean available(){return release!=null&&release.versionCode>currentVersion()&&release.minSdk<=Build.VERSION.SDK_INT;}
     String error(){return error;}
+    String lastCheck(){long time=prefs.getLong(KEY+"attempt",0),success=prefs.getLong(KEY+"success",0);if(time==0)return "尚未发起检查";String label=new java.text.SimpleDateFormat("MM-dd HH:mm",Locale.CHINA).format(new Date(time));return "最近检查："+label+(checking?" · 检查中":success>=time?" · 成功":" · 未完成或失败，可立即手动重试");}
     String status(){
         if(checking)return "正在检查新版本…";
         if(verifying)return "正在校验安装包…";
@@ -119,7 +126,7 @@ final class AppUpdates {
         io.execute(()->{
             try{
                 if(address.isEmpty())throw new ApiClient.UnconfiguredException();
-                if(!networkAvailable())throw new ApiClient.NoNetworkException();
+                if(!network.getAsBoolean())throw new ApiClient.NoNetworkException();
                 HttpURLConnection connection=openManifest(address);
                 UpdateManifest found;
                 try{
@@ -133,7 +140,7 @@ final class AppUpdates {
                 ui.post(()->{
                     if(ticket!=generation)return;checking=false;
                     if(release==null||release.versionCode!=found.versionCode||!release.sha256.equals(found.sha256)){deleteVerified();}
-                    release=found;save();changed();
+                    release=found;prefs.edit().putLong(KEY+"success",System.currentTimeMillis()).putLong(KEY+"checked_build",currentVersion()).apply();save();changed();
                     if((manual||automatic())&&available()&&!ready()&&(manual||promptedVersion!=found.versionCode)){
                         pendingOffer=true;presentOffer();
                     }else if(manual){
@@ -273,5 +280,5 @@ final class AppUpdates {
     private void clearStored(){if(downloadId!=-1)downloads().remove(downloadId);downloadId=-1;deleteVerified();release=null;prefs.edit().remove(KEY+"manifest").remove(KEY+"download").remove(KEY+"verified").remove(KEY+"source").apply();}
     private void save(){SharedPreferences.Editor edit=prefs.edit().putString(KEY+"source",source).putLong(KEY+"download",downloadId).putString(KEY+"verified",verifiedName);if(release!=null)edit.putString(KEY+"manifest",release.json());else edit.remove(KEY+"manifest");edit.apply();}
     private void fail(Exception e){error=e instanceof IllegalArgumentException?e.getMessage():FailureState.title(e);save();changed();}
-    private boolean networkAvailable(){ConnectivityManager cm=(ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);NetworkCapabilities caps=cm==null?null:cm.getNetworkCapabilities(cm.getActiveNetwork());return caps!=null&&caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);}
+    private static boolean networkAvailable(Context context){ConnectivityManager cm=(ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);NetworkCapabilities caps=cm==null?null:cm.getNetworkCapabilities(cm.getActiveNetwork());return caps!=null&&caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);}
 }

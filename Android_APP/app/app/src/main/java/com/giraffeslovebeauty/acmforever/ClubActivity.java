@@ -39,7 +39,7 @@ public final class ClubActivity extends Activity {
         LinearLayout root=new SpacedLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackground(ProfileCover.drawable(this));AppAppearance.content(this,root);
         Button back=new Button(this);back.setText("← 返回");MobileStyle.button(back,false);back.setOnClickListener(v->onBackPressed());root.addView(back);
         refresh=new PageRefresh(this,root,1);
-        scroll=new ScrollView(this);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));content=new SpacedLayout(this);content.setOrientation(LinearLayout.VERTICAL);content.setPadding(dp(14),dp(16),dp(14),dp(24));scroll.addView(content);
+        scroll=new ScrollView(this);root.addView(PullRefreshLayout.forPage(this,scroll,refresh,()->!ModalDialogs.isShowing(this)),new LinearLayout.LayoutParams(-1,0,1));content=new SpacedLayout(this);content.setOrientation(LinearLayout.VERTICAL);content.setPadding(dp(14),dp(16),dp(14),dp(24));scroll.addView(content);
         render();
     }
     @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putAll(snapshot());state.putParcelableArrayList("training_history",history.snapshot());}

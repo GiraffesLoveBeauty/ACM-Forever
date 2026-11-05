@@ -26,6 +26,7 @@
 - [TCrB-AI项目工程规范.md（AI 项目工程协作规范 · 讨论稿）](docs/TCrB-AI项目工程规范.md)
 - [api.md（API 调用指南）](docs/api.md)
 - [android-app.md（Android v0.2.17、更新渠道、构建与发布）](docs/android-app.md)
+- [android-v0.2.19.md（搜索拖拽、下拉刷新、便捷成员管理与主题分层 · 待评审）](docs/android-v0.2.19.md)
 - [android-v0.2.18.md（搜索单列、官方主题适配与私人主题系统分享 · 待评审）](docs/android-v0.2.18.md)
 - [android-v0.2.17.md（搜索历史、主题导入导出与独立App PR验收 · 待评审）](docs/android-v0.2.17.md)
 - [android-theme-package-v1.md（本机主题包格式、原图与完整还原）](docs/android-theme-package-v1.md)

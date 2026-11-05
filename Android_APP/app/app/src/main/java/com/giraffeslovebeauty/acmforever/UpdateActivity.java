@@ -11,24 +11,26 @@ import android.widget.*;
 public final class UpdateActivity extends Activity {
     private AppUpdates updates;
     private LinearLayout body,banner;
-    private TextView status,notes,error,source;
+    private TextView status,notes,error,source,last;
     private Button check,download,install,cancel;
     private CheckBox automatic;
     private boolean painting;
+    private boolean initialCheck;
+    private PullRefreshLayout pull;
     private int dp(int n){return MobileStyle.dp(this,n);}
     @Override public void onCreate(Bundle state){
-        super.onCreate(state);AppAppearance.load(this);AppAppearance.window(this);updates=((AcmApplication)getApplication()).updates();
+        super.onCreate(state);initialCheck=state==null;AppAppearance.load(this);AppAppearance.window(this);updates=((AcmApplication)getApplication()).updates();
         LinearLayout root=new SpacedLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setFitsSystemWindows(true);root.setBackground(ProfileCover.drawable(this));AppAppearance.content(this,root);
         LinearLayout header=new SpacedLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);header.setPadding(dp(12),dp(8),dp(16),dp(8));header.setBackgroundColor(MobileStyle.CHROME);
         ImageButton back=new ImageButton(this);MobileStyle.flat(back);back.setImageDrawable(AppIcons.get(this,"back",MobileStyle.TEXT));back.setBackgroundColor(Color.TRANSPARENT);back.setContentDescription("返回");back.setOnClickListener(v->finish());header.addView(back,new LinearLayout.LayoutParams(dp(48),dp(48)));header.addView(text("应用更新",22));root.addView(header);
         banner=new LinearLayout(this);banner.setGravity(Gravity.CENTER_VERTICAL);banner.setPadding(dp(16),dp(8),dp(8),dp(8));ErrorModule.style(banner);
         error=text("",14);error.setTextColor(ErrorModule.ink());error.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);banner.addView(error,new LinearLayout.LayoutParams(0,-2,1));
         ImageButton close=new ImageButton(this);MobileStyle.flat(close);close.setBackgroundColor(Color.TRANSPARENT);close.setImageDrawable(AppIcons.get(this,"close",0xffaf2424));close.setContentDescription("关闭更新错误提示");close.setOnClickListener(v->updates.dismissError());banner.addView(close,new LinearLayout.LayoutParams(dp(48),dp(48)));LinearLayout.LayoutParams bannerBounds=new LinearLayout.LayoutParams(-1,-2);bannerBounds.setMargins(dp(12),dp(16),dp(12),dp(8));root.addView(banner,bannerBounds);
-        ScrollView scroll=new ScrollView(this);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));body=new SpacedLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(dp(16),dp(16),dp(16),dp(24));scroll.addView(body);
+        ScrollView scroll=new ScrollView(this);pull=new PullRefreshLayout(this,scroll,()->!updates.busy()&&!ModalDialogs.isShowing(this),()->updates.check(true));root.addView(pull,new LinearLayout.LayoutParams(-1,0,1));body=new SpacedLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(dp(16),dp(16),dp(16),dp(24));scroll.addView(body);
         LinearLayout current=card();current.addView(text("ACMforever "+updates.currentName(),20));status=text("",16);status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);current.addView(status);notes=text("",14);current.addView(notes);
-        check=button(current,"检查更新",()->updates.check(true));download=button(current,"下载新版安装包",()->updates.openDownload(this));install=button(current,"安装新版",()->updates.install(this));cancel=button(current,"取消下载",updates::cancelDownload);
+        last=text("",12);current.addView(last);check=button(current,"检查更新",()->updates.check(true));download=button(current,"下载新版安装包",()->updates.openDownload(this));install=button(current,"安装新版",()->updates.install(this));cancel=button(current,"取消下载",updates::cancelDownload);
         LinearLayout options=card();options.addView(text("自动更新选项",18));automatic=new CheckBox(this);automatic.setText("启动时自动检查更新");automatic.setMinHeight(dp(48));options.addView(automatic);
-        options.addView(text("自动检查默认开启，启动时在会话处理后发起，最多每 6 小时一次。发现新版始终先询问，点击下载安装包后进入猫娘下载页。下载后需确认系统安装，同签名更新保留账号和本机设置。",12));
+        options.addView(text("自动检查默认开启，启动时在会话处理后发起，检查成功后间隔 6 小时；失败可在下一次启动重试。进入本页与手动检查始终立即检查。发现新版先询问，点击下载后进入猫娘下载页；安装仍需系统确认。",12));
         automatic.setOnCheckedChangeListener((b,value)->{if(!painting){updates.automatic(value);if(value)updates.check(false);}});
         LinearLayout publishing=card();publishing.addView(text("版本发布地址",16));source=text("",12);source.setTextIsSelectable(true);publishing.addView(source);button(publishing,"设置发布地址",this::editSource);
         releaseHistory();
@@ -54,8 +56,8 @@ public final class UpdateActivity extends Activity {
         new ModalDialogs.Builder(this).fullPage().setTitle("v"+entry.versionName+" 更新说明").setView(details).show();
     }
     private void refresh(){
-        if(isFinishing()||isDestroyed())return;painting=true;
-        try{status.setText(updates.status());error.setText(updates.error());banner.setVisibility(updates.error().isEmpty()?View.GONE:View.VISIBLE);notes.setText(updates.notes());notes.setVisibility(updates.notes().isEmpty()?View.GONE:View.VISIBLE);
+        if(isFinishing()||isDestroyed())return;painting=true;pull.loading(updates.checking());
+        try{status.setText(updates.status());last.setText(updates.lastCheck());error.setText(updates.error());banner.setVisibility(updates.error().isEmpty()?View.GONE:View.VISIBLE);notes.setText(updates.notes());notes.setVisibility(updates.notes().isEmpty()?View.GONE:View.VISIBLE);
             check.setEnabled(!updates.busy());download.setText(updates.downloadLabel());download.setVisibility(updates.available()&&!updates.ready()?View.VISIBLE:View.GONE);download.setEnabled(!updates.busy());install.setVisibility(updates.ready()?View.VISIBLE:View.GONE);cancel.setVisibility(updates.downloading()?View.VISIBLE:View.GONE);
             automatic.setChecked(updates.automatic());source.setText(updates.endpoint());
         }finally{painting=false;}
@@ -65,7 +67,7 @@ public final class UpdateActivity extends Activity {
         AlertDialog dialog=new ModalDialogs.Builder(this).setTitle("版本发布地址").setView(field).setNegativeButton("取消",null).setPositiveButton("保存",null).create();ModalDialogs.show(dialog);
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{try{updates.source(field.getText().toString());dialog.dismiss();}catch(IllegalArgumentException e){field.setError(e.getMessage());}});
     }
-    @Override protected void onResume(){super.onResume();updates.attach(this,this::refresh);updates.resumeInstall(this);}
+    @Override protected void onResume(){super.onResume();updates.attach(this,this::refresh);updates.resumeInstall(this);if(initialCheck){initialCheck=false;if(!updates.busy()&&!updates.ready())updates.check(true);}}
     @Override protected void onPause(){updates.detach(this);super.onPause();}
     @Override protected void onDestroy(){ModalDialogs.close(this);super.onDestroy();}
 }

@@ -14,7 +14,7 @@ import '../../feat/web/src/minecraft-theme.css';
 import './mobile.css';
 
 const state=reactive({scene:'background',design:'original'});
-const app=createApp({setup(){return ()=>state.scene==='background'?null:h('section',{class:'forum-welcome'},[state.scene==='graph'?h(GraphArt):h(CommunityArt,{scene:state.scene})]);}});
+const app=createApp({setup(){return ()=>state.scene==='background'?null:h('section',{class:'forum-welcome'},state.scene==='banner-background'?[h('div',{class:'industrial-hero-dots','aria-hidden':'true'})]:[state.scene==='graph'?h(GraphArt):h(CommunityArt,{scene:state.scene})]);}});
 app.provide('getDesignTemplate',()=>state.design);
 app.mount('#app');
 // Lay out the original scene at its SVG's design size, then scale the entire

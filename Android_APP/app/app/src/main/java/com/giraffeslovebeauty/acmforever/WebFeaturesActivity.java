@@ -34,7 +34,7 @@ public final class WebFeaturesActivity extends Activity {
         root=column();root.setFitsSystemWindows(true);root.setBackground(ProfileCover.drawable(this));AppAppearance.content(this,root);
         LinearLayout top=row();top.setPadding(dp(12),dp(8),dp(12),dp(8));top.setBackgroundColor(MobileStyle.CHROME);
         Button back=button("返回",this::onBackPressed);top.addView(back);heading=text("",21);top.addView(heading,new LinearLayout.LayoutParams(0,-2,1));root.addView(top);
-        refresh=new PageRefresh(this,root,1);notice=new ActionNotice(this,root,2);scroll=new ScrollView(this);scroll.setFillViewport(true);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        refresh=new PageRefresh(this,root,1);notice=new ActionNotice(this,root,2);scroll=new ScrollView(this);scroll.setFillViewport(true);root.addView(PullRefreshLayout.forPage(this,scroll,refresh,()->!ModalDialogs.isShowing(this)),new LinearLayout.LayoutParams(-1,0,1));
         body=column();body.setPadding(dp(14),dp(16),dp(14),dp(24));scroll.addView(body);render();
     }
     @Override protected void onSaveInstanceState(Bundle out){super.onSaveInstanceState(out);out.putString("route",route.toString());out.putStringArrayList("history",new java.util.ArrayList<>(history));}

@@ -3,9 +3,18 @@ html, body, #app {margin:0;min-width:0;width:100%;height:100%;overflow:hidden;}
 body {padding:0 !important;}
 body:not([data-mobile-scene='background']) {background:transparent !important;}
 body:not([data-mobile-scene='background']) #app {display:flex;align-items:center;justify-content:center;}
-body .forum-welcome {display:block !important;position:relative !important;flex:0 0 400px;min-width:0 !important;min-height:0 !important;max-width:none !important;width:400px !important;height:300px !important;box-sizing:border-box;transform:scale(var(--mobile-art-scale,1));transform-origin:center;margin:0 !important;padding:0 !important;border:0 !important;box-shadow:none !important;background:transparent !important;}
+body:not([data-mobile-scene='banner-background']) .forum-welcome {display:block !important;position:relative !important;flex:0 0 400px;min-width:0 !important;min-height:0 !important;max-width:none !important;width:400px !important;height:300px !important;box-sizing:border-box;transform:scale(var(--mobile-art-scale,1));transform-origin:center;margin:0 !important;padding:0 !important;border:0 !important;box-shadow:none !important;background:transparent !important;}
 body .forum-algorithm-art, body .community-header-art {position:absolute !important;inset:0 !important;width:100% !important;height:100% !important;min-width:0 !important;min-height:0 !important;margin:0 !important;transform:none !important;}
 body .forum-algorithm-art figcaption, body .header-art-caption {display:none;}
 body .algorithm-layer, body .header-art-layer {position:absolute !important;inset:0 !important;width:100% !important;height:100% !important;transform:none !important;}
+/* Keep each source template's composition: graph above terrain (MC), inset in the
+   city, radial disc/rails (phase). Only the outer 400x300 canvas scales to fit. */
 body .algorithm-graph, body .header-art-scene {position:absolute !important;inset:0 !important;width:100% !important;height:100% !important;transform:none !important;}
+html[data-design-template='minecraft'] body .algorithm-graph {inset:0 0 auto !important;height:230px !important;}
+html[data-design-template='angel-city'] body .algorithm-graph {inset:35px 0 auto !important;height:230px !important;}
+html[data-design-template='phase'] body .algorithm-graph {inset:12px 0 auto !important;height:265px !important;}
+/* Separate official banner template. Execute its actual CSS backgrounds and
+   pseudo elements, behind native text and the independent interactive art. */
+body[data-mobile-scene='banner-background'] #app {display:block;}
+body[data-mobile-scene='banner-background'] .forum-welcome {position:relative;box-sizing:border-box;width:100% !important;height:100% !important;min-height:0 !important;min-width:0 !important;margin:0 !important;padding:0 !important;transform:none !important;border:0 !important;border-radius:0 !important;box-shadow:none !important;overflow:hidden;}
 @media (prefers-reduced-motion:reduce) {* {animation:none !important;transition:none !important;}}
