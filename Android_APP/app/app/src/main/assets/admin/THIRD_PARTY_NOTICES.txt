@@ -1,0 +1,8 @@
+Runtime third-party licenses
+vue-router 4.6.4 — vue-router-LICENSE
+@vue/runtime-core 3.5.43 — vue_runtime-core-LICENSE
+@vue/runtime-dom 3.5.43 — vue_runtime-dom-LICENSE
+@vue/reactivity 3.5.43 — vue_reactivity-LICENSE
+@vue/shared 3.5.43 — vue_shared-LICENSE
+marked 16.4.2 — marked-LICENSE.md
+dompurify 3.4.17 — dompurify-LICENSE

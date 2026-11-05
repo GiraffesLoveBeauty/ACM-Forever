@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 
 from quart import Blueprint, Response, current_app, jsonify, request
 from .backend_api import _session_identity, admin_required, get_db
+from .account_lifecycle_service import require_web_actor
 from .markdown_content import ContentError, export_markdown
 from . import wiki_service as svc
 from .wiki_cache import database_namespace
@@ -61,13 +62,14 @@ def endpoint(write=False, public=False, cache=None):
             try:
                 if write:
                     await db.execute("BEGIN IMMEDIATE")
+                    await require_web_actor(db, request.web_identity, roles={"admin", "root"})
                 elif public:
                     # Version keys and response data must use one WAL read snapshot.
                     await db.execute("BEGIN")
                 data = await request.get_json(silent=True) if write else request.args
                 if write and not isinstance(data, dict):
                     raise svc.WikiError("请求必须为 JSON 对象。")
-                identity = await _session_identity() if write else None
+                identity = request.web_identity if write else None
                 store = current_app.extensions["wiki_public_cache"]
                 key = None
                 version_ms = query_ms = json_ms = 0

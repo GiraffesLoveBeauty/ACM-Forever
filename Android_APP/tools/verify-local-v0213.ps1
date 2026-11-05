@@ -1,0 +1,21 @@
+param([string[]]$Modes=@('lifecycle','imports','drafts','settings','polish','navigation','localthemes','web','spacefeatures','appearance','community','login'))
+$ErrorActionPreference='Stop'
+$buildRoot=Join-Path $env:TEMP 'acmforever-build-v0.2.0'
+$adb=Join-Path $buildRoot 'sdk\platform-tools\adb.exe'
+$env:ANDROID_USER_HOME=Join-Path $buildRoot 'android-home'
+$qa=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\app\app\build\qa-v0213'))
+New-Item -ItemType Directory -Path $qa -Force | Out-Null
+& $adb -s emulator-5554 install -r (Join-Path $buildRoot 'local-v0213\app\build\outputs\apk\debug\app-debug.apk')
+if($LASTEXITCODE -ne 0){throw 'App installation failed'}
+& $adb -s emulator-5554 install -r (Join-Path $buildRoot 'local-v0213\app\build\outputs\apk\androidTest\debug\app-debug-androidTest.apk')
+if($LASTEXITCODE -ne 0){throw 'Test installation failed'}
+& $adb -s emulator-5554 shell wm size 900x1920
+try {
+    foreach($mode in $Modes){
+        $result=& $adb -s emulator-5554 shell am instrument -w -e mode $mode com.giraffeslovebeauty.acmforever.test/com.giraffeslovebeauty.acmforever.ReaderSmoke
+        $result | Set-Content -LiteralPath (Join-Path $qa "$mode.txt") -Encoding utf8
+        Write-Output "$mode verification:"
+        $result
+        if(($result -join "`n") -notmatch 'PASS:' -or ($result -join "`n") -match 'FAIL:'){throw "$mode verification failed"}
+    }
+} finally { & $adb -s emulator-5554 shell wm size reset }

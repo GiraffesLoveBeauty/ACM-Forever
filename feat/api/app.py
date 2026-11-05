@@ -12,9 +12,13 @@ from quart import Quart, abort, jsonify, redirect, request, send_from_directory
 
 from .acm_api.backend_api import api
 from .acm_api.bot_api import bot_api
+from .acm_api.account_closure_api import account_closure_api
+from .acm_api.account_closure_cleanup import ClosureCleanup
 from .acm_api.auth_service import hash_password, validate_password
+from .acm_api.account_lifecycle_service import AccountLifecycleError, bootstrap_root, user_lifecycle
 from .acm_api.database import connect_db
 from .acm_api.forum_api import forum_api
+from .acm_api.mobile_api import mobile_api
 from .acm_api.forum_notifications import forum_notification_api
 from .acm_api.wiki_api import wiki_api
 from .acm_api.wiki_cache import WikiResponseCache
@@ -24,6 +28,7 @@ from .acm_api.cf_practice import PracticeQuery
 from .acm_api.cf_practice_api import cf_practice_api
 from .acm_api.cf_practice_jobs import PracticeJobs
 from .service_runtime import SyncEngine, WebTaskManager, create_web_challenge
+from .acm_api.event_log import install as install_event_logging
 
 
 def _safe_web_next(value, fallback="/index.html"):
@@ -71,18 +76,27 @@ def _read_admins(db_path, fallback):
     return list(fallback)
 
 
-def _write_admins(db_path, root_ids, admins):
-    with sqlite3.connect(db_path, timeout=5) as connection:
-        connection.execute(
-            "INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)",
-            ("webui_admin_qq_ids", json.dumps(admins, ensure_ascii=False)),
-        )
-        connection.commit()
-    return {"root": list(root_ids), "admins": list(admins)}
+async def _write_admins(db_path, root_ids, admins, identity):
+    from .acm_api.cf_practice_jobs import open_db
+    from .acm_api.account_lifecycle_service import require_web_actor
+    db = await open_db(db_path)
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, identity, roles={"root"})
+        await db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", ("webui_admin_qq_ids", json.dumps(admins, ensure_ascii=False)))
+        await db.commit()
+        return {"root": list(root_ids), "admins": list(admins)}
+    finally:
+        await db.close()
 
 
 def create_app():
     app = Quart(__name__, static_folder=None)
+
+    @app.errorhandler(AccountLifecycleError)
+    async def lifecycle_error_response(error):
+        return jsonify({"success": False, "code": error.code, "message": str(error)}), error.status
+
     db_path = Path(os.getenv("ACM_DATABASE_PATH", "./data/acm_forever.db")).expanduser()
     secret_key = os.getenv("ACM_WEBUI_SECRET_KEY", "").strip()
     app.secret_key = secret_key
@@ -92,6 +106,8 @@ def create_app():
         SESSION_COOKIE_SECURE=_bool_env("ACM_WEBUI_COOKIE_SECURE", False),
     )
     app.config["DB_PATH"] = str(db_path)
+    app.config["ACCOUNT_CLOSURE_ENABLED"] = _bool_env("ACM_ACCOUNT_CLOSURE_ENABLED", False)
+    app.config["ACCOUNT_IMPORT_ENABLED"] = _bool_env("ACM_ACCOUNT_IMPORT_ENABLED", True)
     app.config["WIKI_CACHE_ENABLED"] = _bool_env("ACM_WIKI_CACHE_ENABLED", True)
     app.extensions["wiki_public_cache"] = WikiResponseCache()
     app.config["AVATAR_UPLOAD_DIR"] = db_path.parent / "uploads" / "avatars"
@@ -145,10 +161,11 @@ def create_app():
         "webui_trusted_proxies": _csv_env("ACM_WEBUI_TRUSTED_PROXIES"),
         "admins": initial_admin_ids,
         "_admin_config_provider": admin_snapshot,
-        "_admin_config_updater": lambda admins: _write_admins(
-            db_path, root_ids, admins
+        "_admin_config_updater": lambda admins, identity: _write_admins(
+            db_path, root_ids, admins, identity
         ),
-        "_task_provider": task_manager.snapshots,
+        "_task_provider": task_manager.public_snapshots,
+        "_account_closure_notifier": task_manager.revoke_account_tasks,
         "_task_canceller": task_manager.cancel,
         "_problem_sync_submitter": task_manager.submit_problem_sync,
         "_account_sync_submitter": task_manager.submit_account_sync,
@@ -163,6 +180,16 @@ def create_app():
     }
     app.config["PLUGIN_CONFIG"] = plugin_config
 
+    closure_cleanup = ClosureCleanup(db_path, {
+        "avatar": app.config["AVATAR_UPLOAD_DIR"],
+        "forum": app.config["FORUM_UPLOAD_DIR"],
+        "forum_thumb": app.config["FORUM_UPLOAD_DIR"] / "thumbnails",
+        "markdown": app.config["MARKDOWN_UPLOAD_DIR"],
+    })
+    app.extensions["account_closure_cleanup"] = closure_cleanup
+    from .acm_api.account_import_api import account_import_api, maintenance_once, maintenance_loop
+    app.register_blueprint(account_import_api)
+
     @app.before_serving
     async def initialize_service():
         if not secret_key:
@@ -174,32 +201,34 @@ def create_app():
             if bootstrap_qq and bootstrap_password:
                 async with db.execute("SELECT COUNT(*) AS n FROM web_accounts") as cursor:
                     account_count = int((await cursor.fetchone())["n"])
-                if account_count == 0:
+                lifecycle = await user_lifecycle(db, bootstrap_qq)
+                if account_count == 0 and (not lifecycle or lifecycle["account_state"] == "active"):
                     error = validate_password(bootstrap_password)
                     if error:
                         raise RuntimeError("ACM_BOOTSTRAP_ROOT_PASSWORD: " + error)
                     if not bootstrap_qq.isdigit() or not 4 <= len(bootstrap_qq) <= 12:
                         raise RuntimeError("ACM_BOOTSTRAP_ROOT_QQ_ID must be 4-12 digits.")
                     now = int(__import__("time").time())
-                    await db.execute(
-                        "INSERT OR IGNORE INTO users(qq_id,name) VALUES(?,?)",
-                        (bootstrap_qq, bootstrap_qq),
-                    )
-                    await db.execute(
-                        "INSERT OR IGNORE INTO web_accounts"
-                        "(qq_id,password_hash,role,must_change_password,is_active,"
-                        "credential_version,created_at,updated_at) "
-                        "VALUES(?,?,'root',0,1,1,?,?)",
-                        (bootstrap_qq, hash_password(bootstrap_password), now, now),
-                    )
-                    await db.commit()
+                    bootstrap_hash = hash_password(bootstrap_password)
+                    await bootstrap_root(db, bootstrap_qq, bootstrap_hash, now)
         finally:
             await db.close()
         await sync_engine.start()
         await practice_jobs.start()
+        await closure_cleanup.start()
+        await maintenance_once(app)
+        app.extensions["account_import_maintenance"] = asyncio.create_task(maintenance_loop(app))
 
     @app.after_serving
     async def close_service():
+        await closure_cleanup.close()
+        import_task = app.extensions.pop("account_import_maintenance", None)
+        if import_task:
+            import_task.cancel()
+            await asyncio.gather(import_task, return_exceptions=True)
+        executor = app.extensions.pop("account_password_executor", None)
+        if executor:
+            executor.close()
         await task_manager.close()
         await practice_jobs.close()
         await sync_engine.close()
@@ -301,8 +330,16 @@ def create_app():
     async def uploaded_avatar(filename):
         if not re.fullmatch(r"[a-f0-9]{32}\.(?:png|jpg|webp)", filename):
             abort(404)
+        from .acm_api.backend_api import get_db
+        db = await get_db()
+        try:
+            async with db.execute("SELECT 1 FROM users WHERE account_state='active' AND avatar_url=?", ("/uploads/avatars/" + filename,)) as cursor:
+                if not await cursor.fetchone():
+                    abort(404)
+        finally:
+            await db.close()
         response = await send_from_directory(app.config["AVATAR_UPLOAD_DIR"], filename)
-        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        response.headers["Cache-Control"] = "no-store"
         return response
 
     @app.after_request
@@ -337,8 +374,10 @@ def create_app():
         return response
 
     app.register_blueprint(api, url_prefix="/api")
+    app.register_blueprint(account_closure_api, url_prefix="/api")
     app.register_blueprint(bot_api, url_prefix="/internal/v1")
     app.register_blueprint(forum_api, url_prefix="/api")
+    app.register_blueprint(mobile_api, url_prefix="/api/mobile/v1")
     app.register_blueprint(forum_notification_api, url_prefix="/api")
     app.register_blueprint(wiki_api, url_prefix="/api")
     app.register_blueprint(markdown_api, url_prefix="/api")
@@ -346,17 +385,18 @@ def create_app():
     app.register_blueprint(cf_practice_api, url_prefix="/api")
     app.sync_engine = sync_engine
     app.task_manager = task_manager
+    install_event_logging(app, public_pages=_PUBLIC_PAGES)
     return app
 
 
 _PUBLIC_PAGES = {
-    "index.html", "login.html", "post.html", "wiki.html", "forum-moderation.html",
+    "account-closure.html", "index.html", "login.html", "post.html", "wiki.html", "forum-moderation.html",
     "change-password.html", "home.html", "admin.html", "notifications.html", "my-post.html",
     "leaderboard.html", "challenge.html", "reviews.html", "problem-bank.html", "my-problems.html", "problem.html",
     "submissions.html", "workspace.html", "contest-review.html", "member.html", "compose.html",
     "tasks.html", "settings.html", "cf-practice.html", "auth-unavailable.html", "forbidden.html",
 }
-_ANONYMOUS_PAGES = {"wiki.html", "index.html", "login.html", "post.html", "leaderboard.html", "auth-unavailable.html", "forbidden.html"}
+_ANONYMOUS_PAGES = {"account-closure.html", "wiki.html", "index.html", "login.html", "post.html", "leaderboard.html", "auth-unavailable.html", "forbidden.html"}
 _ADMIN_PAGES = {"admin.html", "member.html", "tasks.html", "settings.html", "forum-moderation.html", "cf-practice.html"}
 _RETIRED_PAGES = {"reviews.html", "submissions.html", "workspace.html"}
 _LEGACY_ADMIN_PAGES = {"member.html": "members", "problem-bank.html": "problems", "tasks.html": "tasks", "settings.html": "settings", "forum-moderation.html": "moderation", "cf-practice.html": "cf-practice"}

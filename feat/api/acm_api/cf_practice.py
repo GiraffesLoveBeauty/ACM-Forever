@@ -120,7 +120,7 @@ def paging(payload):
 
 
 async def options(db):
-    async with db.execute("SELECT COALESCE(status,'') AS value, COUNT(*) AS member_count FROM users GROUP BY COALESCE(status,'') ORDER BY value") as cursor:
+    async with db.execute("SELECT COALESCE(status,'') AS value, COUNT(*) AS member_count FROM users WHERE account_state='active' GROUP BY COALESCE(status,'') ORDER BY value") as cursor:
         rows = await cursor.fetchall()
     return {"statuses": [{"value": row["value"], "label": row["value"] or "未设置身份", "member_count": row["member_count"]} for row in rows], "max_candidates": MAX_CANDIDATES}
 
@@ -142,10 +142,10 @@ async def resolve_scope(db, payload, ttl_seconds, now=None):
         raise PracticeError("成员身份已变化，请重新选择", "scope_changed" if expected else "invalid_scope", 409 if expected else 400)
     placeholders = ",".join("?" for _ in statuses)
     async with db.execute(
-        f"SELECT u.qq_id,u.name,COALESCE(u.status,'') AS status,u.cf_handle,u.cf_binding_version,"
+        f"SELECT u.qq_id,u.name,COALESCE(u.status,'') AS status,u.cf_handle,u.cf_binding_version,u.account_state,u.account_epoch,"
         "s.binding_key,s.full_history_at,s.coverage_through_at,s.last_success_at,s.last_status,s.last_error_message "
         "FROM users u LEFT JOIN user_platform_sync_state s ON s.user_qq_id=u.qq_id AND s.platform='codeforces' "
-        f"WHERE COALESCE(u.status,'') IN ({placeholders}) ORDER BY u.qq_id", statuses,
+        f"WHERE u.account_state='active' AND COALESCE(u.status,'') IN ({placeholders}) ORDER BY u.qq_id", statuses,
     ) as cursor:
         members = [dict(row) for row in await cursor.fetchall()]
     if not set(excluded) <= {row["qq_id"] for row in members}:
@@ -153,7 +153,7 @@ async def resolve_scope(db, payload, ttl_seconds, now=None):
     participants = [row for row in members if row["qq_id"] not in excluded]
     fingerprint = hashlib.sha256(json.dumps({
         "statuses": statuses, "excluded": excluded,
-        "members": [[row["qq_id"], row["status"], binding_key(row)] for row in participants],
+        "members": [[row["qq_id"], row["status"], binding_key(row), row["account_epoch"]] for row in participants],
     }, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     if expected is not None and expected != fingerprint:
         raise PracticeError("成员身份、名单或 CF 绑定已变化，请重新查重", "scope_changed", 409)

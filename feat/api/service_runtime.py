@@ -12,6 +12,7 @@ from .acm_api.database import connect_db, isolated_connection
 from .acm_api.binding_service import platform_spec
 from .acm_api.problem_sync import ProblemSync
 from .acm_api.sync_service import SyncMixin
+from .acm_api.event_log import emit
 
 
 class SyncEngine(SyncMixin):
@@ -48,19 +49,32 @@ class SyncEngine(SyncMixin):
     def _crawler_config(self):
         return self.crawler_config
 
+    @staticmethod
+    def binding_snapshot(user, platforms):
+        result = {}
+        for platform in platforms:
+            _, field, version = platform_spec(platform)
+            result[platform] = {"account": user[field] or "", "version": int(user[version]),
+                                "account_epoch": user["account_epoch"]}
+        return result
+
     async def sync_account(self, qq_id, platforms, task, days=0, *, incremental=False):
         task["status"] = "running"
         task["started_at"] = int(time.time())
         results = {}
         try:
             async with isolated_connection(self.db) as connection:
-                async with connection.execute("SELECT * FROM users WHERE qq_id=?", (str(qq_id),)) as cursor:
+                async with connection.execute("SELECT * FROM users WHERE account_state='active' AND qq_id=?", (str(qq_id),)) as cursor:
                     user = await cursor.fetchone()
-            task["bindings"] = {}
-            if user:
+            if not user or user["account_epoch"] != task.get("account_epoch", 1):
+                task.update(status="cancelled", bindings={}, result=None)
+                return
+            task["account_epoch"] = user["account_epoch"]
+            if "bindings" not in task:
+                task["bindings"] = {}
                 for platform in platforms:
                     _, field, version = platform_spec(platform)
-                    task["bindings"][platform] = {"account": user[field] or "", "version": int(user[version])}
+                    task["bindings"][platform] = {"account": user[field] or "", "version": int(user[version]), "account_epoch": user["account_epoch"]}
             async with self._sync_cycle_lock:
                 for platform in platforms:
                     try:
@@ -96,18 +110,15 @@ class SyncEngine(SyncMixin):
         results = {}
         try:
             async with self._sync_cycle_lock:
-                async with self.db.execute(
-                    "SELECT qq_id FROM users WHERE cf_handle IS NOT NULL OR luogu_id IS NOT NULL "
-                    "OR nowcoder_id IS NOT NULL OR atcoder_handle IS NOT NULL OR cjlu_username IS NOT NULL "
-                    "ORDER BY qq_id"
-                ) as cursor:
-                    qq_ids = [row["qq_id"] for row in await cursor.fetchall()]
-                for qq_id in qq_ids:
+                members = task.get("_account_snapshots", [])
+                for user in members:
+                    qq_id = user["qq_id"]
                     results[str(qq_id)] = {}
                     for platform in ("codeforces", "luogu", "nowcoder", "atcoder", "cjlu"):
                         try:
                             count = await self.sync_single_platform_for_days(
-                                qq_id, platform, days
+                                qq_id, platform, days,
+                                expected_binding=self.binding_snapshot(user, [platform])[platform],
                             )
                         except asyncio.CancelledError:
                             raise
@@ -133,6 +144,38 @@ class WebTaskManager:
         self.tasks = {}
         self.problem_sync = ProblemSync(sync_engine.db_path)
 
+    async def _logged_task(self, operation, item, *args, **kwargs):
+        fields = {"task_id": item["id"], "task_kind": item.get("kind", "后台任务")}
+        emit("task.started", "后台任务开始执行", **fields)
+        final_status = None
+        try:
+            return await operation(*args, **kwargs)
+        except asyncio.CancelledError:
+            final_status = "cancelled"
+            raise
+        except Exception:
+            final_status = "failed"
+            raise
+        finally:
+            status = final_status or item.get("status")
+
+            def failed(value):
+                if isinstance(value, dict):
+                    return ("error" in value or any(type(value.get(key)) is int and value[key] > 0
+                                                   for key in ("failure_count", "failed_count"))
+                            or any(failed(v) for v in value.values()))
+                return type(value) is int and value < 0 and value != -2
+
+            if status == "failed":
+                level, message = "error", "后台任务执行失败，请在同步任务页面查看结果"
+            elif status in {"cancelled", "interrupted"}:
+                level, message = "warning", "后台任务已取消或中断"
+            elif status == "completed" and not failed(item.get("result")):
+                level, message = "info", "后台任务已结束，请在同步任务页面查看各平台结果"
+            else:
+                level, message = "warning", "后台任务已结束，部分操作未完成，请查看任务结果"
+            emit("task.finished", message, level, **fields)
+
     def submit_problem_sync(self, options):
         for item in self.tasks.values():
             if item.get("kind") == "题目采集" and item["status"] in {"queued", "running"}:
@@ -146,10 +189,10 @@ class WebTaskManager:
             "progress": {"done": 0, "total": 0},
         }
         self.tasks[task_id] = item
-        item["_task"] = asyncio.create_task(self.problem_sync.run(options, item))
+        item["_task"] = asyncio.create_task(self._logged_task(self.problem_sync.run, item, options, item))
         return {"id": task_id, "merged": False}
 
-    def submit_account_sync(self, qq_id, platforms, days=0):
+    async def submit_account_sync(self, qq_id, platforms, days=0, *, expected_epoch=None):
         normalized = []
         for platform in platforms or ():
             value = "codeforces" if platform == "cf" else str(platform).strip()
@@ -164,11 +207,19 @@ class WebTaskManager:
         except (TypeError, ValueError):
             days = 0
 
+        async with aiosqlite.connect(str(self.sync_engine.db_path)) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM users WHERE qq_id=? AND account_state='active'", (str(qq_id),)) as cursor:
+                user = await cursor.fetchone()
+        if not user or expected_epoch is not None and user["account_epoch"] != expected_epoch:
+            return None
         task_id = uuid.uuid4().hex[:12]
         item = {
             "id": task_id,
             "kind": "账号全量同步",
             "qq_id": str(qq_id),
+            "account_epoch": user["account_epoch"],
+            "bindings": SyncEngine.binding_snapshot(user, normalized),
             "platform": ",".join(normalized),
             "days": days,
             "status": "queued",
@@ -178,11 +229,11 @@ class WebTaskManager:
         }
         self.tasks[task_id] = item
         item["_task"] = asyncio.create_task(
-            self.sync_engine.sync_account(str(qq_id), normalized, item, days=days)
+            self._logged_task(self.sync_engine.sync_account, item, str(qq_id), normalized, item, days=days)
         )
         return {"id": task_id}
 
-    def submit_all_accounts_sync(self, days=0):
+    async def submit_all_accounts_sync(self, days=0):
         if any(
             item.get("status") in {"queued", "running"}
             for item in self.tasks.values()
@@ -192,11 +243,21 @@ class WebTaskManager:
             days = max(0, min(3650, int(days)))
         except (TypeError, ValueError):
             days = 0
+        async with aiosqlite.connect(str(self.sync_engine.db_path)) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM users WHERE account_state='active' ORDER BY qq_id") as cursor:
+                members = [dict(row) for row in await cursor.fetchall()]
+        # Reading the durable snapshots yields control. Reserve only if another
+        # request has not queued a task while that read was in progress.
+        if any(item.get("status") in {"queued", "running"} for item in self.tasks.values()):
+            return None
         task_id = uuid.uuid4().hex[:12]
         item = {
             "id": task_id,
             "kind": "全员平台同步",
             "qq_id": "*",
+            "_account_snapshots": members,
+            "_account_epochs": {user["qq_id"]: user["account_epoch"] for user in members},
             "platform": "all",
             "days": days,
             "status": "queued",
@@ -206,7 +267,7 @@ class WebTaskManager:
         }
         self.tasks[task_id] = item
         item["_task"] = asyncio.create_task(
-            self.sync_engine.sync_all_accounts(item, days=days)
+            self._logged_task(self.sync_engine.sync_all_accounts, item, item, days=days)
         )
         return {"id": task_id}
 
@@ -214,9 +275,36 @@ class WebTaskManager:
         keys = (
             "id", "kind", "qq_id", "platform", "days", "status",
             "started_at", "finished_at", "result",
-            "progress", "bindings",
+            "progress", "bindings", "account_epoch",
         )
         return [{key: item.get(key) for key in keys} for item in self.tasks.values()]
+
+    async def public_snapshots(self):
+        # Compare generations, including already re-registered QQs. A callback
+        # can cancel only this process; other workers must consult durable state.
+        async with aiosqlite.connect(str(self.sync_engine.db_path)) as db:
+            async with db.execute("SELECT qq_id,account_state,account_epoch FROM users") as cursor:
+                active = {row[0]: row[2] for row in await cursor.fetchall() if row[1] == "active"}
+        snapshots = self.snapshots()
+        for item in snapshots:
+            qq_id = item.get("qq_id")
+            original = self.tasks[item["id"]]
+            if qq_id and qq_id != "*" and active.get(qq_id) != original.get("account_epoch", 1):
+                item.update(qq_id=None, bindings={}, result=None, status="cancelled")
+            elif qq_id == "*" and isinstance(item.get("result"), dict):
+                epochs = original.get("_account_epochs", {})
+                filtered = {key: value for key, value in item["result"].items()
+                            if key != "error" and active.get(key) == epochs.get(key, 1)}
+                if "error" in item["result"]:
+                    filtered["error"] = "后台同步失败，请重试"
+                item["result"] = filtered
+        return snapshots
+
+    def revoke_account_tasks(self, qq_id):
+        for item in self.tasks.values():
+            if item.get("qq_id") == str(qq_id):
+                self.cancel(item["id"])
+                item.update(bindings={}, result=None, status="cancelled")
 
     def cancel(self, task_id):
         item = self.tasks.get(str(task_id))

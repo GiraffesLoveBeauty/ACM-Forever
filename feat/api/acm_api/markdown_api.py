@@ -7,7 +7,9 @@ import secrets
 import time
 from pathlib import Path
 from quart import Blueprint, Response, current_app, jsonify, request, send_file
+from .account_closure_service import closed_content_sql
 from .backend_api import _session_identity, get_db, member_required
+from .account_lifecycle_service import require_web_actor
 from .markdown_content import ContentError, asset_public
 from .wiki_api import attachment, endpoint
 from .wiki_service import WikiError, integer, one
@@ -89,6 +91,8 @@ async def upload():
         destination = folder / name
         with destination.open("xb") as stream:
             stream.write(content)
+        await db.execute("BEGIN IMMEDIATE")
+        await require_web_actor(db, request.web_identity)
         await db.execute(
             "INSERT INTO markdown_assets VALUES(?,?,?,?,?,?,?,?,?,?)",
             (
@@ -135,17 +139,17 @@ async def asset(asset_id):
         return Response(status=404)
     db = await get_db()
     try:
-        row = await one(db, "SELECT * FROM markdown_assets WHERE id=?", (asset_id,))
+        row = await one(db, "SELECT * FROM markdown_assets WHERE id=? AND NOT EXISTS(SELECT 1 FROM account_closure_resource_revocations v WHERE v.resource_kind='markdown' AND v.resource_id=markdown_assets.id)", (asset_id,))
         if not row:
             return Response(status=404)
         public = await asset_public(db, asset_id)
         identity = await _session_identity() if not public else None
         forum_reference_access = False
         if identity and not identity["must_change_password"]:
-            forum_reference_access = bool(await one(db, """SELECT 1 FROM markdown_asset_references a
+            forum_reference_access = bool(await one(db, f"""SELECT 1 FROM markdown_asset_references a
  LEFT JOIN forum_posts p ON a.document_type='forum_post' AND p.id=a.document_id
  LEFT JOIN forum_drafts d ON a.document_type='forum_draft' AND d.id=a.document_id
- WHERE a.asset_id=? AND (p.author_qq_id=? OR d.author_qq_id=? OR (? AND p.status IN ('pending','published','rejected'))) LIMIT 1""",
+ WHERE a.asset_id=? AND ((p.author_qq_id=? AND NOT {closed_content_sql('forum_post', 'p')}) OR d.author_qq_id=? OR (? AND p.status IN ('pending','published','rejected'))) LIMIT 1""",
                 (asset_id, identity["qq_id"], identity["qq_id"], identity["role"] in {"admin", "root"})))
         if not public and (
             not identity

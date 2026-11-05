@@ -24,6 +24,11 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
+      path: '/account-closure.html',
+      component: () => import('./views/AccountClosure.vue'),
+      meta: { public: true, title: '注销账号' },
+    },
+    {
       path: '/',
       alias: '/index.html',
       component: () => import('./views/Forum.vue'),
@@ -208,10 +213,11 @@ router.beforeEach(async (to) => {
       query.tab &&
       !(
         {
+          accounts: ['import'],
           'cf-practice': ['recent', 'check'],
           moderation: ['posts', 'reports'],
           wiki: ['categories', 'pages'],
-        }[query.section] || []
+        }[query.section || 'accounts'] || []
       ).includes(query.tab)
     ) {
       delete query.tab;

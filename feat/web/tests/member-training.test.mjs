@@ -98,7 +98,7 @@ beforeEach(() => {
     if (url.includes('/verification'))
       return response({
         verification_id: 'server-verification',
-        account: 'NewHandle',
+        account: options.body ? JSON.parse(options.body).account : 'NewHandle',
         code: 'ACM-code',
         expires_at: 1900000000,
       });
@@ -416,6 +416,115 @@ test('binding form requires current password and confirmation; cancellation clea
     '',
   );
   assert.equal(calls.filter((item) => item.url.includes('/bindings/')).length, 0);
+});
+
+test('imported CF account can verify its current handle without a destructive rebind warning', async () => {
+  const binding = {
+    platform: 'codeforces',
+    label: 'Codeforces',
+    account: 'Imported84',
+    binding_status: 'bound',
+    self_service: true,
+    sync_status: 'success',
+    provenance: { source: 'admin_import', owner_verified_at: null },
+  };
+  mounted = await mount({ render: () => h(Bindings, { bindings: [binding] }) }, routes);
+  assert.equal(buttons('核验当前账号').length, 1);
+  assert.equal(buttons('改绑账号').length, 1);
+  await click(buttons('核验当前账号')[0]);
+  const account = find(
+    mounted.root,
+    (node) => node.type === 'input' && node.props.maxlength === '64',
+  )[0];
+  assert.equal(account.value, 'Imported84');
+  assert.equal(account.props.readonly, true);
+  assert(textOf(mounted.root).includes('保留现有绑定、AC、提交证据和训练挑战'));
+  const form = find(mounted.root, (node) => node.type === 'form')[0];
+  await form.props.onSubmit({ preventDefault() {} });
+  await settle();
+  assert.equal(calls.find((item) => item.url.endsWith('/verification')).body.account, 'Imported84');
+  assert(!textOf(mounted.root).includes('解绑或成功改绑会清理'));
+  const confirm = buttons('确认核验')[0];
+  assert(confirm.props.disabled);
+  find(mounted.root, (node) => node.type === 'input' && node.props.type === 'password')[0].props[
+    'onUpdate:modelValue'
+  ]('MemberPassword');
+  find(mounted.root, (node) => node.type === 'input' && node.props.type === 'checkbox')[0].props[
+    'onUpdate:modelValue'
+  ](true);
+  await settle();
+  assert.equal(buttons('确认核验')[0].props.disabled, false);
+  await click(buttons('确认核验')[0]);
+  assert.deepEqual(calls.find((item) => item.url.endsWith('/confirm')).body, {
+    verification_id: 'server-verification',
+    password: 'MemberPassword',
+    confirmed: true,
+    current_account: 'Imported84',
+  });
+  assert.equal(
+    find(mounted.root, (node) => node.type === 'input' && node.props.type === 'password').length,
+    0,
+  );
+});
+
+test('pending current-handle verification resumes separately from changing the account', async () => {
+  const binding = {
+    platform: 'codeforces',
+    label: 'Codeforces',
+    account: 'Imported84',
+    binding_status: 'pending',
+    self_service: true,
+    provenance: { source: 'admin_import', owner_verified_at: null },
+    verification: {
+      account: 'imported84',
+      verification_id: 'pending-id',
+      code: 'ACM-pending',
+      expires_at: 1900000000,
+    },
+  };
+  mounted = await mount({ render: () => h(Bindings, { bindings: [binding] }) }, routes);
+  await click(buttons('核验当前账号')[0]);
+  assert(textOf(mounted.root).includes('ACM-pending'));
+  assert.equal(buttons('确认核验').length, 1);
+  await click(buttons('取消')[0]);
+  await click(buttons('改绑账号')[0]);
+  const input = find(
+    mounted.root,
+    (node) => node.type === 'input' && node.props.maxlength === '64',
+  )[0];
+  assert.equal(Boolean(input.props.readonly), false);
+  assert.equal(input.value, '');
+  assert(!textOf(mounted.root).includes('ACM-pending'));
+  assert.equal(calls.filter((item) => item.url.includes('/bindings/')).length, 0);
+});
+
+test('current-handle verification is offered only for an unverified self-service import', async () => {
+  const bindings = [
+    {
+      platform: 'codeforces',
+      label: 'Codeforces',
+      account: 'Verified',
+      self_service: true,
+      provenance: { source: 'member_verified', owner_verified_at: 100 },
+    },
+    {
+      platform: 'atcoder',
+      label: 'AtCoder',
+      account: 'Imported',
+      self_service: false,
+      provenance: { source: 'admin_import', owner_verified_at: null },
+    },
+    {
+      platform: 'luogu',
+      label: '洛谷',
+      account: 'AlreadyVerified',
+      self_service: true,
+      provenance: { source: 'admin_import', owner_verified_at: 100 },
+    },
+  ];
+  mounted = await mount({ render: () => h(Bindings, { bindings }) }, routes);
+  assert.equal(buttons('核验当前账号').length, 0);
+  assert.equal(buttons('改绑账号').length, 2);
 });
 
 let guardId = 0;

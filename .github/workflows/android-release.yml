@@ -1,0 +1,122 @@
+name: Android tag release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-tag-release
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_CHANNEL: ${{ vars.ANDROID_RELEASE_CHANNEL || 'debug' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate reviewed tag and bundled version
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_TYPE" = tag
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor HEAD origin/main
+          python Android_APP/tools/tag_release.py validate --tag "$RELEASE_TAG"
+          case "$RELEASE_CHANNEL" in debug|release) ;; *) echo 'Invalid release channel'; exit 1 ;; esac
+
+      - name: Test release contracts and publication failures
+        run: python -m unittest discover -s Android_APP/tests -p 'test_*release*.py' -v
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install Android SDK platform
+        run: sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Configure fixed channel signing key
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          RELEASE_CERTIFICATE: ${{ vars.ANDROID_RELEASE_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key_path="$RUNNER_TEMP/acmforever-signing.jks"
+          if [ "$RELEASE_CHANNEL" = debug ]; then
+            test -n "$DEBUG_KEYSTORE_BASE64" || { echo 'Missing ANDROID_DEBUG_KEYSTORE_BASE64'; exit 1; }
+            printf '%s' "$DEBUG_KEYSTORE_BASE64" | base64 --decode > "$key_path"
+            certificate='88c9f163cbf379aeca7bc110f66c542a838d0d8e3970f24fd96582bec8e93fe4'
+          else
+            test -n "$RELEASE_KEYSTORE_BASE64" && test -n "$RELEASE_KEY_ALIAS"
+            test -n "$RELEASE_KEYSTORE_PASSWORD" && test -n "$RELEASE_KEY_PASSWORD"
+            test -n "$RELEASE_CERTIFICATE"
+            printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$key_path"
+            certificate="$(printf '%s' "$RELEASE_CERTIFICATE" | tr -d ':' | tr 'A-F' 'a-f')"
+          fi
+          test -s "$key_path"
+          [[ "$certificate" =~ ^[0-9a-f]{64}$ ]]
+          echo "ANDROID_KEYSTORE_PATH=$key_path" >> "$GITHUB_ENV"
+          echo "EXPECTED_CERTIFICATE=$certificate" >> "$GITHUB_ENV"
+
+      - name: Test and build signed APK
+        working-directory: Android_APP/app
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          if [ "$RELEASE_CHANNEL" = debug ]; then
+            ./gradlew --no-daemon "-PlocalDebugKeystore=$ANDROID_KEYSTORE_PATH" testDebugUnitTest lintDebug assembleDebug
+          else
+            ./gradlew --no-daemon testReleaseUnitTest lintRelease assembleRelease
+          fi
+
+      - name: Create manifest from verified signed APK
+        run: |
+          set -euo pipefail
+          python Android_APP/tools/create_update_manifest.py \
+            --apk "Android_APP/app/app/build/outputs/apk/$RELEASE_CHANNEL/app-$RELEASE_CHANNEL.apk" \
+            --aapt "$ANDROID_HOME/build-tools/35.0.0/aapt" \
+            --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner" \
+            --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY" --server "$GITHUB_SERVER_URL" \
+            --channel "$RELEASE_CHANNEL" --certificate "$EXPECTED_CERTIFICATE" \
+            --output-dir "$RUNNER_TEMP/release-assets"
+
+      - name: Publish only after draft assets pass read-back verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python Android_APP/tools/tag_release.py publish --tag "$RELEASE_TAG" \
+            --directory "$RUNNER_TEMP/release-assets" --repository "$GITHUB_REPOSITORY" \
+            --source-commit "$GITHUB_SHA"
+
+      - name: Remove temporary signing key
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/acmforever-signing.jks"

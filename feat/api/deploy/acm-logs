@@ -1,0 +1,5 @@
+#!/bin/sh
+# The viewer never loads the service .env or opens the business database.
+set -eu
+cd /root/acm-forever-feat
+exec /root/acm-forever-data/venv/bin/python -m api.acm_api.log_viewer "$@"

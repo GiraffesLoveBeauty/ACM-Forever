@@ -1,0 +1,93 @@
+plugins {
+    id 'com.android.application'
+}
+
+def releaseKeyStorePath = System.getenv('ANDROID_KEYSTORE_PATH')
+
+// AGP asset merging does not honour AndroidSourceDirectorySet's exclude filter.
+// Preserve reader/ and templates/ paths while leaving the archived admin shell out.
+def mobileAssets = layout.buildDirectory.dir('mobile-assets')
+def prepareMobileAssets = tasks.register('prepareMobileAssets', Sync) {
+    from('src/main/assets')
+    exclude('admin/**')
+    into(mobileAssets)
+}
+
+android {
+    namespace 'com.giraffeslovebeauty.acmforever'
+    compileSdk 35
+    buildToolsVersion '35.0.0'
+
+    defaultConfig {
+        applicationId 'com.giraffeslovebeauty.acmforever'
+        minSdk 26
+        targetSdk 35
+        versionCode 29
+        versionName '0.2.15'
+        testInstrumentationRunner 'com.giraffeslovebeauty.acmforever.ReaderSmoke'
+    }
+
+    sourceSets {
+        main {
+            java.exclude '**/AdminActivity.java', '**/BrowserActivity.java', '**/UpdateManager.java'
+            assets.srcDirs = [mobileAssets]
+        }
+    }
+
+    // Reuse the local key for updates. An ASCII build copy can supply its path explicitly.
+    signingConfigs {
+        release {
+            if (releaseKeyStorePath) {
+                storeFile file(releaseKeyStorePath)
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+            }
+        }
+        debug {
+            def savedKey = file(project.findProperty('localDebugKeystore') ?: rootProject.file('../dist/signing/debug.keystore'))
+            if (savedKey.isFile()) {
+                storeFile savedKey
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (releaseKeyStorePath) signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
+}
+
+def verifyReleaseHistory = tasks.register('verifyReleaseHistory') {
+    def historyFile = file('src/main/assets/releases/history.json')
+    inputs.file(historyFile)
+    inputs.property('versionName', android.defaultConfig.versionName)
+    inputs.property('versionCode', android.defaultConfig.versionCode)
+    doLast {
+        def history = new groovy.json.JsonSlurper().parse(historyFile, 'UTF-8')
+        if (history.schemaVersion != 1 || history.currentVersionCode != android.defaultConfig.versionCode ||
+                !history.entries || history.entries[0].versionName != android.defaultConfig.versionName) {
+            throw new GradleException('Add the current version to the bundled release history before packaging.')
+        }
+    }
+}
+tasks.named('preBuild') { dependsOn prepareMobileAssets, verifyReleaseHistory }
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+}
