@@ -2229,8 +2229,12 @@ async def api_me_problems():
             query += " AND p.platform=?"
             params.append(platform)
         if tag:
-            query += " AND (p.problem_name LIKE ? OR p.problem_id LIKE ? OR p.id_key LIKE ? OR p.tags LIKE ?)"
+            query += (
+                " AND (p.problem_name LIKE ? OR p.problem_id LIKE ? OR p.id_key LIKE ? OR p.tags LIKE ?"
+                " OR (p.platform='codeforces' AND p.id_key=?))"
+            )
             params.extend([f"%{tag}%"] * 4)
+            params.append(problem_id_key("codeforces", tag))
         if problem_tag:
             await db.create_function("problem_has_tag", 2, has_problem_tag, deterministic=True)
             query += " AND problem_has_tag(p.tags,?)=1"

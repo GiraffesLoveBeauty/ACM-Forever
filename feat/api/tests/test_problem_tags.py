@@ -221,6 +221,70 @@ class MemberProblemTagTests(unittest.IsolatedAsyncioTestCase):
                 data = await (await client.get(endpoint + query)).get_json()
                 self.assertEqual(data["total"], 0)
 
+    async def test_legacy_hyphenated_codeforces_ids_share_one_problem(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            headers = await self.account_login(client, role="member")
+            statement = "<p>Collected 1706A statement</p>"
+            db = await connect_db(self.db_path)
+            try:
+                await save_metadata_batch(db, [{
+                    "platform": "codeforces", "problem_id": "cf_1706A",
+                    "contest_id": "1706", "problem_index": "A",
+                    "problem_name": "Another String Minimization Problem",
+                    "problem_url": "https://codeforces.com/contest/1706/problem/A",
+                    "tags": ["greedy"],
+                }])
+                await db.execute(
+                    "UPDATE crawler_problems SET statement_html=?,last_fetch_status='ok' "
+                    "WHERE platform='codeforces' AND problem_id='cf_1706A'", (statement,),
+                )
+                await db.executemany(
+                    "INSERT INTO recommendations(platform,problem_id,problem_name,problem_url,tags) "
+                    "VALUES('codeforces',?,?,?,?)",
+                    [("1706-A", "Another String Minimization Problem",
+                      "https://codeforces.com/problemset/problem/1706/A", "math"),
+                     ("2097-A", "Sports Betting", "", "dp")],
+                )
+                await db.execute(
+                    "INSERT INTO submissions(user_qq_id,platform,problem_id,tags,submit_time) "
+                    "VALUES('12345678','codeforces','1706-a','implementation',10)"
+                )
+                await db.execute(
+                    "INSERT INTO user_problem_state(owner_qq_id,platform,problem_id,is_favorite,updated_at) "
+                    "VALUES('12345678','codeforces','1706-A',1,1)"
+                )
+                await db.commit()
+            finally:
+                await db.close()
+
+            base = "/api/me/problems"
+            platform = "?platform=codeforces"
+            listing = await (await client.get(base + platform)).get_json()
+            self.assertEqual(listing["total"], 2)
+            tags = await (await client.get(base + "/tags" + platform)).get_json()
+            self.assertEqual(tags["tags"], ["dp", "greedy"])
+
+            filters = platform + "&problem_tag=greedy&scope=solved&state=favorite"
+            listing = await (await client.get(base + filters + "&tag=cf_1706-A")).get_json()
+            self.assertEqual(listing["total"], 1)
+            self.assertEqual(listing["items"][0]["ac_at"], 10)
+            tracker = await (await client.get(base + "/tracker" + filters + "&tag=1706-A")).get_json()
+            self.assertEqual([p["problem_id"] for c in tracker["items"] for p in c["problems"]],
+                             ["cf_1706A"])
+            legacy_only = await (await client.get(base + "/tracker" + platform + "&tag=2097-A")).get_json()
+            self.assertEqual([p["problem_id"] for c in legacy_only["items"] for p in c["problems"]],
+                             ["cf_2097A"])
+
+            response = await client.get(base + "/codeforces/1706-A")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual((await response.get_json())["statement_html"], statement)
+            response = await client.put(base + "/codeforces/cf_1706A/state",
+                                        json={"is_favorite": False}, headers=headers)
+            self.assertEqual(response.status_code, 200)
+            for endpoint in (base, base + "/tracker"):
+                self.assertEqual((await (await client.get(endpoint + filters)).get_json())["total"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
