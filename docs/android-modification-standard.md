@@ -30,6 +30,8 @@ Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/a
 
 默认顺序为 **用户 → 论坛 → Wiki → 题目**。顺序、启用模块和最近十条记录仅保存在本机，键为 `global_search_modules`、`search_history`、`record_search`。空模块列表是有效用户选择。结果按优先级两列排列，每个模块独立分页，每页六条。
 
+首页通过Intent传入的首次非空 `query` 与搜索页按钮/键盘提交共用 `SearchActivity.submit`，统一去除首尾空白、限制100个Unicode码点，并按记录开关更新最近十条、去重。Activity状态恢复只渲染已保存查询，不能将旧词重新置顶；进入搜索设置等非搜索模式也不写入查询记录。
+
 | 模块 | 复用接口 | 边界/缺失情况 |
 | --- | --- | --- |
 | 用户 | 按能力选择 `/api/mobile/v1/leaderboard` 或 `/api/community/leaderboard` | `days=all&positive_only=0&search=…`；搜公开昵称/身份，包含零 AC。这是排行榜公开成员范围，**不是完整成员目录 API**。缺少 `public_member_id` 时禁用主页跳转，不猜 QQ |
