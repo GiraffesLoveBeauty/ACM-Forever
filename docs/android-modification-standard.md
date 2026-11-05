@@ -1,4 +1,4 @@
-# Android 修改标准与模块关联（v0.2.17）
+# Android 修改标准与模块关联（v0.2.18）
 
 状态：本轮实现说明，待跨人评审；2026-11-05。以实际代码与测试结果为准。适用工程 `Android_APP/app/`，不改变仓库协作规范。
 
@@ -20,6 +20,7 @@ Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/a
 | `PdfActivity`、`ContentView`、阅读器资源 | PDF、Markdown/公式/代码与图片 | 缩放/翻页/复制、受限媒体地址、缓存边界 |
 | `AppAppearance`、`MobileStyle`、`ProfileCover`、`LocalThemes` | 主题、主辅色、全屏背景、模块/控件透明度 | 深浅色、状态栏、原位变色、保存/预览/删除本机主题 |
 | `ThemePackage`、`LocalThemes`、`ProfileCover` | `.acmtheme`格式、隔离安装、原图字节与非破坏性裁剪 | [格式规范](android-theme-package-v1.md)；布尔选项、主辅色/透明度、模板浅深配色、原图及裁剪同时往返；文件I/O不在主线程，先校验后登记，导入不覆盖当前外观 |
+| `ThemeShareProvider`、`AppearanceActivity` | 后台生成私人主题文件并调用系统分享 | 独立只读附件、ClipData读取授权、随机文件名与缓存回收；不共用APK Provider，不包含账号字段，不自动发送QQ/微信消息 |
 | `OfficialThemeView`、`theme-renderer/` | 原Vue/CSS/SVG离线主题层，无原生JS桥 | [源文件关联](android-official-theme-adaptation-v0.2.17.md)；原源变化重跑构建工具和指纹检查，禁止用重新描摹替代；原生控件仍使用共享样式 |
 | `AppUpdates`、`UpdateManifest`、更新页面与 Provider | 检查、下载、校验及系统安装 | 当前GitHub单源、取消/重建/进程恢复、包名版本签名、更新日志 |
 | `tools/create_update_manifest.py`、`tag_release.py` | 同一 APK 的清单和GitHub Release事务 | `.github/workflows/android-release.yml`、签名渠道、不可变目录和 latest |
@@ -28,7 +29,7 @@ Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/a
 
 ## 搜索接口矩阵
 
-默认顺序为 **用户 → 论坛 → Wiki → 题目**。顺序、启用模块和最近十条记录仅保存在本机，键为 `global_search_modules`、`search_history`、`record_search`。空模块列表是有效用户选择。结果按优先级两列排列，每个模块独立分页，每页六条。
+默认顺序为 **用户 → 论坛 → Wiki → 题目**。顺序、启用模块和最近十条记录仅保存在本机，键为 `global_search_modules`、`search_history`、`record_search`。空模块列表是有效用户选择。结果按优先级单列排列，每个模块独立分页，每页六条；空搜索页只保留顶部一个搜索设置入口。
 
 首页通过Intent传入的首次非空 `query` 与搜索页按钮/键盘提交共用 `SearchActivity.submit`，统一去除首尾空白、限制100个Unicode码点，并按记录开关更新最近十条、去重。Activity状态恢复只渲染已保存查询，不能将旧词重新置顶；进入搜索设置等非搜索模式也不写入查询记录。
 
@@ -92,7 +93,7 @@ Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/a
 - 先读仓库 README、[协作规范](TCrB-AI项目工程规范.md)和本文件，核对最新 `main`、Git 差异与实际运行入口。
 - 用既有公开/本人/管理 API，缺失时明确挂空；新增后端接口或改变业务契约先告知用户并约定范围。
 - 版本同时更新 `build.gradle` 与 `assets/releases/history.json`。同渠道必须沿用签名且 versionCode 递增。
-- 单元测试、Lint、构建及受影响的真实 Activity 流程通过后再打包；回归见 [本轮实施与验收](android-v0.2.17.md)。不要把测试夹具当线上数据。
+- 单元测试、Lint、构建及受影响的真实 Activity 流程通过后再打包；回归见 [本轮实施与验收](android-v0.2.18.md)。不要把测试夹具当线上数据。
 - 只暂存本任务路径，检查敏感信息、`git diff --cached --check`，源码与文档分别提交；PR 写清测试与尚未部署的配置。新增文档在根 README 添加入口。
 
 当前GitHub发布配置见 [Tag发布](android-tag-release-v0.2.14.md)。自站更新另开PR；原讨论保留在 [PR #100](https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/100)。

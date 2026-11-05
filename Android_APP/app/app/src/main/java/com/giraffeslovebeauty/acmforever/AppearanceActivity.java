@@ -20,7 +20,7 @@ import java.util.function.IntSupplier;
 
 /** Local personalization. Colour changes repaint existing views without navigation. */
 public final class AppearanceActivity extends Activity {
-    private static final int PICK_IMAGE=71,PICK_THEME=72,CROP_IMAGE=73,IMPORT_LOCAL=74,EXPORT_LOCAL=75;
+    private static final int PICK_IMAGE=71,PICK_THEME=72,CROP_IMAGE=73,IMPORT_LOCAL=74;
     private static final int[] COLORS={0xffc8eb21,0xff82c7aa,0xff83b8e5,0xffbaa4df,0xffebafc5,0xffe9c786,0xffffffff,0xfff4f5f7,0xff292c29};
     private static final String[] NAMES={"黄绿","薄荷","天蓝","薰衣草","樱粉","暖杏","纯白","雾灰","墨色"};
     private String page="menu",pickerTarget="background";
@@ -95,7 +95,7 @@ public final class AppearanceActivity extends Activity {
         }else{
             box.addView(button("预览",()->launch(new Intent(this,ThemePreviewActivity.class).putExtra(LocalThemes.EXTRA,themeId))),new LinearLayout.LayoutParams(-1,dp(64)));
             box.addView(button("重命名",this::rename),new LinearLayout.LayoutParams(-1,dp(64)));
-            box.addView(button("导出",this::exportTheme),new LinearLayout.LayoutParams(-1,dp(64)));
+            box.addView(button("分享",this::shareTheme),new LinearLayout.LayoutParams(-1,dp(64)));
             box.addView(button("删除",this::confirmDelete),new LinearLayout.LayoutParams(-1,dp(64)));
         }
     }
@@ -120,9 +120,16 @@ public final class AppearanceActivity extends Activity {
         }
     }
     private void applyTheme(String id){if(saving)return;saving=true;files.execute(()->{Exception failure=null;try{LocalThemes.apply(getApplicationContext(),id);}catch(Exception e){failure=e;}Exception error=failure;runOnUiThread(()->{saving=false;if(isDestroyed())return;if(error!=null)notice(error.getMessage());else{repaint();Toast.makeText(this,"主题已应用",Toast.LENGTH_SHORT).show();}});});}
-    private void exportTheme(){
-        if(themeId==null||choosing||saving)return;choosing=true;Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/zip");intent.putExtra(Intent.EXTRA_TITLE,"ACMforever-"+LocalThemes.name(getApplicationContext(),themeId).replaceAll("[\\\\/:*?\"<>|]","_")+ThemePackage.EXTENSION);
-        try{startActivityForResult(intent,EXPORT_LOCAL);}catch(Exception e){choosing=false;notice("没有可用的文件保存器");}
+    private void shareTheme(){
+        if(themeId==null||choosing||saving)return;String owner=themeId;saving=true;
+        files.execute(()->{Intent attachment=null;Exception error=null;
+            try{attachment=ThemeShareProvider.prepare(getApplicationContext(),LocalThemes.pack(getApplicationContext(),owner));}catch(Exception failure){error=failure;}
+            Intent send=attachment;Exception failure=error;runOnUiThread(()->{saving=false;if(isDestroyed()||isFinishing())return;
+                if(failure!=null){notice("分享失败："+failure.getMessage());return;}
+                try{choosing=true;startActivityForResult(Intent.createChooser(send,"分享主题（QQ / 微信等）"),0);}
+                catch(ActivityNotFoundException unavailable){choosing=false;notice("没有可用的分享应用，请先安装支持文件分享的应用");}
+            });
+        });
     }
     private void rename(){
         EditText name=new EditText(this);name.setSingleLine(true);name.setText(LocalThemes.name(getApplicationContext(),themeId));name.setSelection(name.length());name.setContentDescription("主题名称");
@@ -278,14 +285,13 @@ public final class AppearanceActivity extends Activity {
     }
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
-        if(request==PICK_IMAGE||request==PICK_THEME||request==IMPORT_LOCAL||request==EXPORT_LOCAL)choosing=false;
+        if(request==PICK_IMAGE||request==PICK_THEME||request==IMPORT_LOCAL||request==0)choosing=false;
         if(request==CROP_IMAGE){saving=false;if(result==RESULT_OK)save(prefs.edit().putString("bg_mode","image"));return;}
-        if(request==IMPORT_LOCAL||request==EXPORT_LOCAL){
+        if(request==IMPORT_LOCAL){
             if(result!=RESULT_OK||data==null||data.getData()==null||saving)return;Uri chosen=data.getData();String owner=themeId;saving=true;
             files.execute(()->{Exception error=null;String importedId=null;try{
-                if(request==IMPORT_LOCAL){ThemePackage pack;try(InputStream in=getContentResolver().openInputStream(chosen)){pack=ThemePackage.read(in);}importedId=LocalThemes.install(getApplicationContext(),pack);}
-                else{ThemePackage pack=LocalThemes.pack(getApplicationContext(),owner);try(OutputStream out=getContentResolver().openOutputStream(chosen,"wt")){if(out==null)throw new IOException("无法写入文件");pack.write(out);}}
-            }catch(Exception e){error=e;}Exception failure=error;String installed=importedId;runOnUiThread(()->{saving=false;if(isDestroyed())return;if(failure!=null)notice((request==IMPORT_LOCAL?"导入失败：":"导出失败：")+failure.getMessage());else if(request==IMPORT_LOCAL){Toast.makeText(this,"已导入 "+LocalThemes.name(getApplicationContext(),installed)+"，可到我的主题点击名称或预览图应用",Toast.LENGTH_LONG).show();if(themeId==null)go("saved");}else Toast.makeText(this,"主题及背景原图已导出",Toast.LENGTH_SHORT).show();});});return;
+                ThemePackage pack;try(InputStream in=getContentResolver().openInputStream(chosen)){pack=ThemePackage.read(in);}importedId=LocalThemes.install(getApplicationContext(),pack);
+            }catch(Exception e){error=e;}Exception failure=error;String installed=importedId;runOnUiThread(()->{saving=false;if(isDestroyed())return;if(failure!=null)notice("导入失败："+failure.getMessage());else{Toast.makeText(this,"已导入 "+LocalThemes.name(getApplicationContext(),installed)+"，可到我的主题点击名称或预览图应用",Toast.LENGTH_LONG).show();if(themeId==null)go("saved");}});});return;
         }
         if((request!=PICK_IMAGE&&request!=PICK_THEME)||result!=RESULT_OK||data==null||data.getData()==null||saving)return;
         if(request==PICK_IMAGE){saving=true;startActivityForResult(new Intent(this,BackgroundCropActivity.class).putExtra(LocalThemes.EXTRA,themeId).setData(data.getData()).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),CROP_IMAGE);return;}

@@ -20,9 +20,13 @@ final class AppearanceUiSmoke {
     private void run(){
         Bundle result=new Bundle();int outcome=Activity.RESULT_CANCELED;ApiClient api=((AcmApplication)app.getApplicationContext()).api();String original=api.getBaseUrl();
         Map<String,?> settings=new HashMap<>(prefs.getAll());
+        File cover=new File(app.getFilesDir(),"profile-cover.jpg");byte[] originalCover;
+        try{originalCover=cover.isFile()?java.nio.file.Files.readAllBytes(cover.toPath()):null;}catch(IOException error){throw new AssertionError(error);}
         try{
             URL.setURLStreamHandlerFactory(protocol->"https".equals(protocol)?new URLStreamHandler(){@Override protected URLConnection openConnection(URL url)throws IOException{if(!"appearance.test.invalid".equals(url.getHost()))throw new IOException("External traffic blocked in this test");return new Fixture(url);}}:null);
-            prefs.edit().clear().putString("api_base_url","https://appearance.test.invalid").putBoolean("remember_account",false).apply();
+            // A previous theme test may leave a valid original image. Specify the
+            // intended fixture rather than invoking legacy background migration.
+            prefs.edit().clear().putString("bg_mode","solid").putString("bg_source","custom").putString("api_base_url","https://appearance.test.invalid").putBoolean("remember_account",false).apply();
             api.setBaseUrl("https://appearance.test.invalid");api.setNetworkAvailable(()->true);api.login("90000001","Synthetic-Test!");
             activity=test.startActivitySync(new Intent().setClassName(app,MainActivity.class.getName()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             await(()->description("筛选社区话题")!=null,8000,"forum ready");clickDescription("发帖");
@@ -51,6 +55,7 @@ final class AppearanceUiSmoke {
         finally{
             if(activity!=null)main(()->{ModalDialogs.close(activity);activity.finish();});try{api.logout();}catch(Exception ignored){}ProfileCover.clear(app);SharedPreferences.Editor edit=prefs.edit().clear();for(Map.Entry<String,?> e:settings.entrySet()){Object v=e.getValue();if(v instanceof String)edit.putString(e.getKey(),(String)v);else if(v instanceof Boolean)edit.putBoolean(e.getKey(),(Boolean)v);else if(v instanceof Integer)edit.putInt(e.getKey(),(Integer)v);else if(v instanceof Long)edit.putLong(e.getKey(),(Long)v);else if(v instanceof Float)edit.putFloat(e.getKey(),(Float)v);}edit.apply();AppAppearance.load(app);api.setBaseUrl(original);
         }
+        try{if(originalCover!=null)try(FileOutputStream out=new FileOutputStream(cover)){out.write(originalCover);}ProfileCover.invalidate();}catch(IOException error){throw new AssertionError(error);}
         test.finish(outcome,result);
     }
     private void checkRows(WrapLayout layout){for(int i=0;i<layout.getChildCount();i++){View a=layout.getChildAt(i);check(a.getLeft()>=0&&a.getRight()<=layout.getWidth(),"button within page");for(int j=i+1;j<layout.getChildCount();j++){View b=layout.getChildAt(j);if(a.getTop()==b.getTop())check(b.getLeft()-a.getRight()>=MobileStyle.dp(app,8),"horizontal gap");else if(b.getTop()>a.getTop())check(b.getTop()-a.getBottom()>=MobileStyle.dp(app,8),"vertical gap");}}}

@@ -17,6 +17,11 @@ const state=reactive({scene:'background',design:'original'});
 const app=createApp({setup(){return ()=>state.scene==='background'?null:h('section',{class:'forum-welcome'},[state.scene==='graph'?h(GraphArt):h(CommunityArt,{scene:state.scene})]);}});
 app.provide('getDesignTemplate',()=>state.design);
 app.mount('#app');
+// Lay out the original scene at its SVG's design size, then scale the entire
+// scene (including CSS decorations and hit targets) into the native host.
+const fitArt=()=>document.documentElement.style.setProperty('--mobile-art-scale',String(Math.min(innerWidth/400,innerHeight/300)));
+window.addEventListener('resize',fitArt);
+fitArt();
 window.applyTheme=(config)=>{
   state.design=config.design;state.scene=config.scene;
   document.documentElement.dataset.designTemplate=config.design;
