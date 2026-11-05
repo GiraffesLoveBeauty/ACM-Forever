@@ -10,7 +10,7 @@ from annotation_api.storage import atomic_json, now
 from .repository import data_root
 from tag_management.storage import Journal
 
-TRANSLATION_VERSION = "translation-4-layout"
+TRANSLATION_VERSION = "translation-5-literal-text"
 # Output acceptance is separate from the request policy: changing it must not
 # invalidate already paid results or silently resend historical requests.
 TRANSLATION_RESULT_MODE = "parse_only"

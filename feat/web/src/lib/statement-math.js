@@ -8,7 +8,7 @@ const command = /\\(?:leq?|geq?|times|cdot|frac|sum|prod|dots|ldots|in|neq?|sqrt
 const atom = String.raw`(?:\{(?:[^{}\n]|\{[^{}\n]*\})*\}|\\[A-Za-z]+|\\[{},;! ]|(?<![A-Za-z])[A-Za-z](?:_(?:\{[^{}\n]*\}|[A-Za-z0-9']+))?(?![A-Za-z])|\d+(?:\.\d+)?|[{}\[\]()+*/^_=<>|,;:'-])`;
 const inlineTex = new RegExp(`(?:${atom}[ \\t]*)*?\\\\[A-Za-z]+(?:[ \\t]*${atom})*`, 'g');
 // Protect code, links and tag attributes before interpreting any mathematical syntax.
-const protectedBlock = /(?<fence>^ {0,3}(?<marker>`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\k<marker>[ \t]*(?:\n|$))|(?<indented>(?:^(?: {4}|\t).*(?:\n|$))+)|(?<code>(?<ticks>`+)[^`\n]*\k<ticks>)|(?<htmlCode><(?:pre|code)\b[^>]*>[\s\S]*?<\/(?:pre|code)>)|(?<link>!?\[[^\]\n]*\]\((?:[^()\n]|\([^()\n]*\))*\)|https?:\/\/[^\s<>\u3000-\u303f]+)|(?<tag><[A-Za-z/!][^>\n]*>)|(?<dollars>\${6}|\${3}|\${2}|\$)(?!\$)(?<content>[\s\S]+?)\k<dollars>(?!\$)|\\\((?<parens>[\s\S]*?)\\\)|\\\[(?<bracket>[\s\S]*?)\\\]|(?<environment>\\begin\{(?<env>aligned|gathered|cases|[pbBvV]?matrix)\}[\s\S]*?\\end\{\k<env>\})/gm;
+const protectedBlock = /(?<fence>^ {0,3}(?<marker>`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\k<marker>[ \t]*(?:\n|$))|(?<indented>(?:^(?: {4}|\t).*(?:\n|$))+)|(?<code>(?<ticks>`+)(?!`)[^\n]*?(?<!`)\k<ticks>(?!`))|(?<htmlCode><(?:pre|code)\b[^>]*>[\s\S]*?<\/(?:pre|code)>)|(?<link>!?\[[^\]\n]*\]\((?:[^()\n]|\([^()\n]*\))*\)|https?:\/\/[^\s<>\u3000-\u303f]+)|(?<tag><[A-Za-z/!][^>\n]*>)|(?<dollars>\${6}|\${3}|\${2}|\$)(?!\$)(?<content>[\s\S]+?)\k<dollars>(?!\$)|\\\((?<parens>[\s\S]*?)\\\)|\\\[(?<bracket>[\s\S]*?)\\\]|(?<environment>\\begin\{(?<env>aligned|gathered|cases|[pbBvV]?matrix)\}[\s\S]*?\\end\{\k<env>\})/gm;
 let group = String.raw`\{[^{}\n]*\}`;
 for (let depth = 0; depth < 4; depth++) group = String.raw`\{(?:[^{}\n]|${group})*\}`;
 const suffix = String.raw`(?:['′]+|[_^](?:${group}|[A-Za-z0-9]+))`;
@@ -111,7 +111,7 @@ export function renderStatementMarkdown(source, doc = document) {
     return match[1] + body;
   }).join('\n');
   // Only code slots are restored before parsing; MathML bypasses untrusted HTML parsing.
-  for (const [token, html, kind] of slots) if (kind === 'markdown') prepared = prepared.replaceAll(token, html);
+  for (const [token, html, kind] of slots) if (kind === 'markdown') prepared = prepared.replaceAll(token, () => html);
   const purifier = createDOMPurify(doc.defaultView);
   const root = doc.createElement('div');
   const escape = value => value.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');

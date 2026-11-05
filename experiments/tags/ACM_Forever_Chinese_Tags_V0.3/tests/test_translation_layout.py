@@ -88,7 +88,7 @@ class LayoutTests(unittest.TestCase):
         value = self.response()
         value['segments'][0]['text'] = '# 新标题\n\n![fake](https://evil.invalid/x)<script>bad()</script>'
         result = self.fill(value)
-        self.assertIn('\\!\\[fake\\]', result)
+        self.assertIn('\\!&#91;fake&#93;', result)
         self.assertIn('&lt;script&gt;', result)
         self.assertEqual(result.count('\n'), self.source.count('\n'))
 

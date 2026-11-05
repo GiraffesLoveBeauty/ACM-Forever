@@ -6,6 +6,15 @@ from functools import lru_cache
 from urllib.parse import urljoin, urlsplit
 
 from label_pipeline import BASE
+from .markdown_text import escape_text
+
+
+TEXT_MATH = re.compile(
+    r'(?<![\\$])(?P<dollars>\${1,6})(?!\$)[\s\S]+?(?<!\\)(?P=dollars)(?!\$)'
+    r'|(?<!\\)(?P<paren_slash>\\{1,2})\([\s\S]+?(?P=paren_slash)\)'
+    r'|(?<!\\)(?P<bracket_slash>\\{1,2})\[[\s\S]+?(?P=bracket_slash)\]'
+    r'|\\begin\{(?P<env>aligned|gathered|cases|[pbBvV]?matrix)\}[\s\S]+?\\end\{(?P=env)\}'
+)
 
 
 @lru_cache(maxsize=1)
@@ -118,10 +127,24 @@ def html_statement(raw, source_url="", language="en"):
                 parts.append(render(child))
         return '\n\n' + ''.join(parts).strip() + '\n\n'
 
-    def render(node, item_marker=None):
+    def prose(text):
+        result, position = [], 0
+        for match in TEXT_MATH.finditer(text):
+            result.append(escape_text(re.sub(r'\s+', ' ', text[position:match.start()])))
+            result.append(match[0])
+            position = match.end()
+        result.append(escape_text(re.sub(r'\s+', ' ', text[position:])))
+        return ''.join(result)
+
+    def render(node, item_marker=None, math_context=False):
         if isinstance(node, str):
-            return re.sub(r"\s+", " ", node)
+            return re.sub(r'\s+', ' ', node) if math_context else prose(node)
         tag = node.tag
+        if math_context:
+            if tag not in {'var', 'span', 'sup', 'sub'}:
+                issues.append('unsupported_math_markup')
+            body = ''.join(render(c, math_context=True) for c in node.children)
+            return ('^' if tag == 'sup' else '_') + '{' + body + '}' if tag in {'sup', 'sub'} else body
         if tag in {'ol', 'ul', 'li', 'style'} and re.search(
                 r'list-style|counter(?:-reset|-increment|-set)?\s*:|display\s*:',
                 node.attrs.get('style') or (''.join(c for c in node.children if isinstance(c, str)) if tag == 'style' else ''), re.I):
@@ -146,24 +169,32 @@ def html_statement(raw, source_url="", language="en"):
             return "\n\n" + fence + "\n" + text + ("" if text.endswith("\n") else "\n") + fence + "\n\n"
         if tag in {'ol', 'ul'}:
             return render_list(node)
+        if tag == 'code':
+            if any(n is not node and n.tag not in {'span', 'b', 'strong', 'em', 'i', 's', 'small', 'var', 'br'}
+                   for n in node.walk()):
+                issues.append('unsupported_code_markup')
+            body = newline(node.text())
+            if '\n' in body:
+                issues.append('multiline_inline_code_requires_review')
+            fence = '`' * max(1, 1 + max((len(x) for x in re.findall(r'`+', body)), default=0))
+            padding = ' ' if body.startswith('`') or body.endswith('`') or (
+                body.startswith(' ') and body.endswith(' ') and body.strip()) else ''
+            return fence + padding + body + padding + fence
+        if tag == 'var':
+            return '$' + render(node, math_context=True) + '$'
+        if tag in {'sup', 'sub'}:
+            return render(node, math_context=True)
         body = "".join(render(c) for c in node.children)
         if tag == "img":
             issues.append("image_requires_review")
             url = link(node.attrs.get("src"))
-            alt = (node.attrs.get("alt") or "图片").replace("[", "\\[").replace("]", "\\]")
+            alt = escape_text(node.attrs.get('alt') or '图片')
             return f"![{alt}]({url})" if url else "[图片链接待检查]"
         if tag == "a":
             url = link(node.attrs.get("href"))
             return f"[{body}]({url})" if url else body
         if tag == "br":
             return "\n"
-        if tag == "code":
-            fence = "`" * max(1, 1 + max((len(x) for x in re.findall(r"`+", body)), default=0))
-            return fence + body + fence
-        if tag == "var":
-            return "$" + body + "$"
-        if tag in {"sup", "sub"}:
-            return ("^" if tag == "sup" else "_") + "{" + body + "}"
         if tag in {"strong", "b"}:
             return "**" + body + "**"
         if tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
