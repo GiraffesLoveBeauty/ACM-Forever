@@ -67,6 +67,20 @@ public class AccountClosureTest {
         failed.details = new JSONObject().put("code", "RATE_LIMITED");
         assertFalse(AccountClosure.refused(failed));
     }
+    @Test public void explicitSubmitAuthenticationFailureIsPreCommitRefusal() throws Exception {
+        ApiClient.ApiException failure = new ApiClient.ApiException(401, "请先登录。", false);
+        failure.details = new JSONObject().put("code", "AUTH_REQUIRED");
+        assertTrue(AccountClosure.refused(failure));
+    }
+    @Test public void unclassifiedAuthenticationOrWrongStatusStillNeedsReceipt() throws Exception {
+        ApiClient.ApiException failure = new ApiClient.ApiException(401, "Unauthorized", false);
+        assertFalse(AccountClosure.refused(failure));
+        failure.details = new JSONObject().put("code", "UPSTREAM_AUTH_FAILED");
+        assertFalse(AccountClosure.refused(failure));
+        ApiClient.ApiException unavailable = new ApiClient.ApiException(503, "Unavailable", false);
+        unavailable.details = new JSONObject().put("code", "AUTH_REQUIRED");
+        assertFalse(AccountClosure.refused(unavailable));
+    }
     @Test public void featureDisabledIsNotMissingOrSuccess() throws Exception {
         ApiClient.ApiException failure = new ApiClient.ApiException(404, "Closed", false);
         assertFalse(AccountClosure.disabled(failure)); failure.details = new JSONObject().put("code", "FEATURE_DISABLED");

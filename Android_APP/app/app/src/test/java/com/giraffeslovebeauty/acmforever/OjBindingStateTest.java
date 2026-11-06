@@ -40,23 +40,35 @@ public class OjBindingStateTest {
     @Test public void firstBindingDoesNotSendAnOjOrLoginPassword() throws Exception {
         OjBindingState value = state(summary("", true));
         assertEquals("NewHandle", value.verificationBody(" NewHandle ").getString("account"));
-        JSONObject payload = value.confirmationBody(pending(101), "should-not-be-sent", false, 100);
+        JSONObject payload = value.confirmationBody(pending(101), "NewHandle", "should-not-be-sent", false, 100);
         assertFalse(payload.has("password")); assertEquals("", payload.getString("current_account"));
         assertEquals("proof-1", payload.getString("verification_id"));
     }
     @Test public void rebindRequiresPasswordAndExplicitConfirmation() throws Exception {
         OjBindingState value = state(summary("OldHandle", true));
-        assertThrows(IllegalArgumentException.class, () -> value.confirmationBody(pending(101), "", true, 100));
-        assertThrows(IllegalArgumentException.class, () -> value.confirmationBody(pending(101), "local-secret", false, 100));
-        JSONObject payload = value.confirmationBody(pending(101), "local-secret", true, 100);
+        assertThrows(IllegalArgumentException.class, () -> value.confirmationBody(pending(101), "NewHandle", "", true, 100));
+        assertThrows(IllegalArgumentException.class, () -> value.confirmationBody(pending(101), "NewHandle", "local-secret", false, 100));
+        JSONObject payload = value.confirmationBody(pending(101), "NewHandle", "local-secret", true, 100);
         assertEquals("OldHandle", payload.getString("current_account")); assertTrue(payload.getBoolean("confirmed"));
     }
     @Test public void staleProofAndInvalidHandlesAreRejected() throws Exception {
         OjBindingState value = state(summary("", true));
-        assertThrows(IllegalArgumentException.class, () -> value.confirmationBody(pending(100), "", false, 100));
+        assertThrows(IllegalArgumentException.class, () -> value.confirmationBody(pending(100), "NewHandle", "", false, 100));
         assertThrows(IllegalArgumentException.class, () -> value.verificationBody("https://codeforces.com/profile/example"));
         assertThrows(IllegalArgumentException.class, () -> value.verificationBody("user/name"));
         assertThrows(IllegalArgumentException.class, () -> value.verificationBody(""));
+    }
+    @Test public void confirmationRejectsProofForAnotherSelectedAccount() throws Exception {
+        OjBindingState value = state(summary("", true));
+        for (String selected : new String[]{"OtherHandle", "", "   ", null})
+            assertThrows(IllegalArgumentException.class, () -> value.confirmationBody(pending(101), selected, "", false, 100));
+        OjBindingState bound = state(summary("OldHandle", true));
+        assertThrows(IllegalArgumentException.class, () -> bound.confirmationBody(pending(101), "OtherHandle", "local-secret", true, 100));
+    }
+    @Test public void confirmationMatchesActualProofAccountWithCaseAndWhitespaceTolerance() throws Exception {
+        JSONObject payload = state(summary("", true)).confirmationBody(pending(101), " newhandle ", "", false, 100);
+        assertEquals("proof-1", payload.getString("verification_id"));
+        assertEquals(3, payload.length()); assertFalse(payload.has("password"));
     }
     @Test public void unbindWorksForBoundPlatformsWithoutSelfServiceVerification() throws Exception {
         OjBindingState value = state(summary("OldHandle", false));

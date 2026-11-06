@@ -18,7 +18,7 @@ final class AccountClosureUiSmoke {
     private final Context context;
     private ApiClient api; private AcmApplication app; private Activity activity;
     private final List<Activity> pages = new ArrayList<>();
-    private volatile boolean enabled, authenticated = true, closed, pending, loseResponse, wrongPassword, delay, rateLimited, receiptRateLimited;
+    private volatile boolean enabled, authenticated = true, closed, pending, loseResponse, wrongPassword, delay, rateLimited, receiptRateLimited, authRequired, receiptAuthRequired;
     private volatile String role = "member", account = "90000001";
     private volatile long epoch = 1;
     private volatile int posts, previews, receipts;
@@ -72,6 +72,17 @@ final class AccountClosureUiSmoke {
             finish(); resetController(); activity = open(AccountClosureActivity.class); await(() -> input() != null, "fresh controller does not restore refused receipt");
             check(posts == ratePosts + 1 && receipts == rateReads && app.vault().readClosure().isEmpty(), "restart after refusal stays out of receipt recovery");
             progress("rate-limit refusal, rotation, manual recheck and controller restart checked");
+            authRequired = true; int authPosts = posts, authReads = receipts; String authRequest = requestId;
+            edit("Test-Password!"); click("狠心注销"); await(() -> has("请返回重新登录后重新检查") && app.closure().state().phase == AccountClosureFlow.Phase.ERROR, "submit authentication refusal is recoverable");
+            check(posts == authPosts + 1 && receipts == authReads && app.vault().readClosure().isEmpty(), "authentication refusal clears receipt without polling or repeated POST");
+            check(!api.isLoggedIn() && !closed, "expired session is not mistaken for successful closure");
+            recreate(); await(() -> has("请返回重新登录后重新检查"), "authentication refusal survives rotation");
+            check(posts == authPosts + 1 && receipts == authReads && app.vault().readClosure().isEmpty(), "rotation never restores refused authentication receipt");
+            click("知道了"); authRequired = false; login("90000001", 1); click("重新检查"); await(() -> input() != null, "login and manual recheck recover after authentication refusal");
+            check(!authRequest.equals(requestId) && input().length() == 0 && posts == authPosts + 1, "fresh preview after login never automatically submits");
+            finish(); resetController(); activity = open(AccountClosureActivity.class); await(() -> input() != null, "controller restart after authentication refusal permits a fresh preview");
+            check(posts == authPosts + 1 && receipts == authReads && app.vault().readClosure().isEmpty(), "authentication refusal leaves no persisted pending recovery");
+            progress("authentication refusal, rotation, login/recheck and controller restart checked");
             wrongPassword = true; edit("Incorrect-Password!"); click("狠心注销"); await(() -> has("当前密码不正确") && input() != null, "wrong password is not success");
             check(input().length() == 0 && api.isLoggedIn(), "password cleared and original session retained"); wrongPassword = false;
             edit("Test-Password!"); recreate(); await(() -> input() != null, "confirmation survives rotation"); check(input().length() == 0, "password not in instance state");
@@ -95,6 +106,8 @@ final class AccountClosureUiSmoke {
             recreate(); await(() -> has("尚未确认注销成功"), "rotation recovers pending read"); check(posts == count + 1, "pending rotate never POSTs");
             receiptRateLimited = true; click("查询注销结果"); await(() -> has("请求过于频繁") && app.closure().state().phase == AccountClosureFlow.Phase.UNCERTAIN, "receipt rate limit remains uncertain");
             check(saved.equals(app.vault().readClosure()) && posts == count + 1, "receipt throttle retains encrypted recovery and never resubmits"); receiptRateLimited = false;
+            receiptAuthRequired = true; click("查询注销结果"); await(() -> has("登录已失效") && app.closure().state().phase == AccountClosureFlow.Phase.UNCERTAIN, "receipt authentication failure remains uncertain");
+            check(saved.equals(app.vault().readClosure()) && posts == count + 1 && api.isLoggedIn(), "receipt authentication failure keeps recovery and does not invalidate normal session"); receiptAuthRequired = false;
             // Simulate loss of the in-memory controller; recover from the encrypted on-device receipt.
             finish(); resetController();
             activity = open(AccountClosureActivity.class); await(() -> has("尚未确认注销成功"), "persistent recovery"); check(posts == count + 1, "persistent recovery only reads");
@@ -102,7 +115,7 @@ final class AccountClosureUiSmoke {
             check(api.isLoggedIn() && "90000001".equals(api.accountKey()), "new account epoch preserved by old receipt");
             click("返回登陆界面"); await(() -> app.closure().state().phase == AccountClosureFlow.Phase.IDLE, "old receipt acknowledged");
             check(api.isLoggedIn(), "return never logs out replacement account");
-            output.putString("stream", "PASS: entry below logout; fresh feature switch; consequences and crying cat; equal 50% red/theme actions; cancel; admin/root and role-change blocks; current password/CSRF/idempotency/receipt/epoch contract; submit RATE_LIMITED clears receipt with manual recheck after rotation/restart, no polling or auto-POST; wrong password; rotation without password or duplicate POST; confirmed success clears credentials; parent login; lost-response receipt recovery; pending truthful; receipt RATE_LIMITED retains recovery; encrypted receipt process-controller recovery; anonymous receipt headers; newer account epoch protected.\n"); status = Activity.RESULT_OK;
+            output.putString("stream", "PASS: entry below logout; fresh feature switch; consequences and crying cat; equal 50% red/theme actions; cancel; admin/root and role-change blocks; current password/CSRF/idempotency/receipt/epoch contract; submit RATE_LIMITED clears receipt with manual recheck after rotation/restart, no polling or auto-POST; submit AUTH_REQUIRED clears receipt with login/manual recheck after rotation/restart, no polling or auto-POST; wrong password; rotation without password or duplicate POST; confirmed success clears credentials; parent login; lost-response receipt recovery; pending truthful; receipt RATE_LIMITED retains recovery; receipt AUTH_REQUIRED retains recovery and normal session; encrypted receipt process-controller recovery; anonymous receipt headers; newer account epoch protected.\n"); status = Activity.RESULT_OK;
         } catch (Throwable e) {
             StringBuilder visible = new StringBuilder(); if (activity != null) main(() -> walk(decor(), v -> { if (v instanceof TextView && !(v instanceof EditText)) visible.append(((TextView) v).getText()).append(" | "); return false; }));
             output.putString("stream", "FAIL: " + android.util.Log.getStackTraceString(e) + "\nUI: " + visible + "\nCounts: posts=" + posts + " previews=" + previews + " receipts=" + receipts);
@@ -168,6 +181,7 @@ final class AccountClosureUiSmoke {
                     check(requestId.equals(getRequestProperty("Idempotency-Key")) && receiptToken.equals(getRequestProperty("X-Closure-Receipt")), "preview-bound secret headers");
                     JSONObject body = new JSONObject(bytes.toString("UTF-8")); check(body.length() == 4 && "注销账号".equals(body.getString("confirm_text")) && body.getLong("expected_account_epoch") == epoch && "closure-v2".equals(body.getString("policy_version")), "exact account intent");
                     if (rateLimited) { code = 429; response = "{\"code\":\"RATE_LIMITED\",\"message\":\"操作过于频繁，请稍后再试。\"}"; return; }
+                    if (authRequired) { authenticated = false; code = 401; response = "{\"code\":\"AUTH_REQUIRED\",\"message\":\"请先登录。\"}"; return; }
                     if (wrongPassword) { code = 403; response = "{\"code\":\"REAUTH_FAILED\",\"message\":\"当前密码不正确。\"}"; return; }
                     check("Test-Password!".equals(body.getString("current_password")), "current password");
                     if (delay) Thread.sleep(1800);
@@ -178,6 +192,7 @@ final class AccountClosureUiSmoke {
                     receipts++; check(receiptToken.equals(getRequestProperty("X-Closure-Receipt")), "secret receipt header");
                     check(getRequestProperty("Cookie") == null && getRequestProperty("X-CSRF-Token") == null, "receipt has no unrelated account credentials");
                     if (receiptRateLimited) { code = 429; response = "{\"code\":\"RATE_LIMITED\",\"message\":\"操作过于频繁，请稍后再试。\"}"; return; }
+                    if (receiptAuthRequired) { code = 401; response = "{\"code\":\"AUTH_REQUIRED\",\"message\":\"请先登录。\"}"; return; }
                     response = receipt(); return;
                 }
                 if (path.equals("/api/me/profile")) { response = "{\"user\":{\"name\":\"Synthetic member\"},\"platform_counts\":{},\"recent_ac\":[],\"bindings\":[]}"; return; }

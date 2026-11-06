@@ -75,8 +75,10 @@ final class OjBindingState {
         if (sameAccount(account, value) && !needsOwnership) throw new IllegalArgumentException("该账号已经绑定，无需重复绑定。");
         return new JSONObject().put("account", value);
     }
-    JSONObject confirmationBody(Pending challenge, String password, boolean confirmed, long now) throws Exception {
+    JSONObject confirmationBody(Pending challenge, String selectedAccount, String password, boolean confirmed, long now) throws Exception {
         if (!selfService || challenge == null || !challenge.valid(now)) throw new IllegalArgumentException("验证已过期，请重新申请验证码。");
+        if (!sameAccount(challenge.account, selectedAccount == null ? null : selectedAccount.trim()))
+            throw new IllegalArgumentException("目标账号已修改，请重新申请验证码。");
         JSONObject result = credentials(password, confirmed);
         return result.put("verification_id", challenge.id);
     }

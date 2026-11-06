@@ -22,7 +22,7 @@ final class OjBindingsUiSmoke {
     private final List<String> requests = Collections.synchronizedList(new ArrayList<>());
     private volatile String account = "", target = "", proof = "", sync = "never";
     private volatile int writes;
-    private volatile boolean rejectConfirmation;
+    private volatile boolean rejectConfirmation, verificationUnavailable;
     private OjBindingsUiSmoke(Instrumentation test) { this.test = test; context = test.getTargetContext(); }
     static void run(Instrumentation test) { new OjBindingsUiSmoke(test).run(); }
 
@@ -48,6 +48,15 @@ final class OjBindingsUiSmoke {
             await(() -> has("申请验证码"), "native binding form");
             edit("OJ 账号标识", "FirstHandle"); click("申请验证码");
             await(() -> has("确认验证并绑定"), "proof instructions"); check(input("当前 ACMForever 登录密码") == null, "first binding asks for no password");
+            int proofWrites = writes; String originalProof = proof;
+            edit("OJ 账号标识", "bad/name"); click("申请验证码"); await(() -> has("不要填写网址或密码"), "new target fails local validation");
+            click("确认验证并绑定"); await(() -> has("目标账号已修改"), "old proof cannot confirm an invalid changed target");
+            check(writes == proofWrites && account.isEmpty() && originalProof.equals(proof), "invalid reapplication never binds old proof target");
+            edit("OJ 账号标识", "OtherHandle"); verificationUnavailable = true; click("申请验证码");
+            await(() -> has("请求超时"), "new verification fails before server receives it"); verificationUnavailable = false;
+            click("确认验证并绑定"); await(() -> has("目标账号已修改"), "old proof cannot confirm changed target after transport failure");
+            check(writes == proofWrites && account.isEmpty() && originalProof.equals(proof), "failed reapplication preserves original proof without binding another account");
+            edit("OJ 账号标识", " FirstHandle ");
             screenshot("oj-bindings-proof.png");
             click("确认验证并绑定"); await(() -> has("当前账号：FirstHandle"), "first bind saved");
             main(activity::onBackPressed); activity = parent;
@@ -76,7 +85,7 @@ final class OjBindingsUiSmoke {
             api.logout(); main(() -> { test.callActivityOnPause(activity); test.callActivityOnResume(activity); });
             await(() -> has("登录已失效") || has("请返回并重新登录") || has("无访问权限"), "session loss removes private controls");
             check(!has("申请验证码") && !has("确认解绑"), "old account cannot write after logout");
-            output.putString("stream", "PASS: real profile bind CTA; no CTA for bound zero-AC; account settings username/modify; CF first bind, rebind with current password and explicit confirmation; pending proof restored after Activity recreation without password/checkbox; failed proof retains old account; CSRF and expected-account payloads; manual sync; confirmed unbind; unsupported-platform explanation; session-loss guard; return refresh.\n");
+            output.putString("stream", "PASS: real profile bind CTA; no CTA for bound zero-AC; account settings username/modify; changed verification target blocked after local validation and pre-server transport failures; original proof target can still bind when explicitly selected; CF first bind, rebind with current password and explicit confirmation; pending proof restored after Activity recreation without password/checkbox; failed proof retains old account; CSRF and expected-account payloads; manual sync; confirmed unbind; unsupported-platform explanation; session-loss guard; return refresh.\n");
             status = Activity.RESULT_OK;
         } catch (Throwable failure) {
             StringBuilder visible = new StringBuilder();
@@ -138,7 +147,10 @@ final class OjBindingsUiSmoke {
         private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         Fixture(URL url) { super(url); } public void connect() { } public void disconnect() { } public boolean usingProxy() { return false; }
         public OutputStream getOutputStream() { return bytes; }
-        public int getResponseCode() { return rejectConfirmation && url.getPath().endsWith("/confirm") ? 400 : 200; }
+        public int getResponseCode() throws IOException {
+            if (verificationUnavailable && url.getPath().endsWith("/verification")) throw new SocketTimeoutException("Synthetic verification request did not reach server");
+            return rejectConfirmation && url.getPath().endsWith("/confirm") ? 400 : 200;
+        }
         public Map<String, List<String>> getHeaderFields() { return url.getPath().endsWith("/login") ? Collections.singletonMap("Set-Cookie", Collections.singletonList("session=synthetic-binding; Path=/; Secure; HttpOnly; Max-Age=600")) : Collections.emptyMap(); }
         public InputStream getErrorStream() { return stream("{\"message\":\"公开资料中未找到验证码\"}"); }
         public InputStream getInputStream() throws IOException {

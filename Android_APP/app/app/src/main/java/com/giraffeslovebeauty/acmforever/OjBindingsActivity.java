@@ -157,15 +157,14 @@ public final class OjBindingsActivity extends MobilePageActivity {
 
     private void requestVerification() {
         try {
-            candidate = accountInput.getText().toString().trim();
-            JSONObject payload = binding.verificationBody(candidate);
+            String target = accountInput.getText().toString().trim();
+            JSONObject payload = binding.verificationBody(target); candidate = target;
             perform("POST", "verification", payload, result -> { challenge = new OjBindingState.Pending(result); candidate = challenge.account; load(); });
         } catch (Exception e) { notice.show("申请验证", e); }
     }
     private void confirm() {
         try {
-            if (!OjBindingState.sameAccount(candidate, accountInput.getText().toString().trim())) throw new IllegalArgumentException("目标账号已修改，请重新申请验证码。");
-            perform("POST", "confirm", binding.confirmationBody(challenge, password(), confirmed(), System.currentTimeMillis() / 1000), this::completed);
+            perform("POST", "confirm", binding.confirmationBody(challenge, accountInput.getText().toString(), password(), confirmed(), System.currentTimeMillis() / 1000), this::completed);
         } catch (Exception e) { notice.show("确认绑定", e); }
     }
     private void unbind() {
