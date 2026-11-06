@@ -22,8 +22,8 @@ android {
         applicationId 'com.giraffeslovebeauty.acmforever'
         minSdk 26
         targetSdk 35
-        versionCode 33
-        versionName '0.2.19'
+        versionCode 34
+        versionName '0.2.20'
         testInstrumentationRunner 'com.giraffeslovebeauty.acmforever.ReaderSmoke'
     }
 

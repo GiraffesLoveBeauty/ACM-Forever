@@ -18,6 +18,7 @@ final class ModuleOrderView extends ViewGroup {
     private View candidate,selected;
     private float downX,downY,pointerY,grip;
     private boolean dragging;
+    private ModuleDragPhysics physics;private long lastFrame;
     private int pointer=-1;
     private final Runnable hold=()->begin();
     private final Runnable edge=new Runnable(){public void run(){
@@ -25,7 +26,7 @@ final class ModuleOrderView extends ViewGroup {
         int[] screen=new int[2];scroll.getLocationOnScreen(screen);
         float local=pointerY-screen[1];int zone=MobileStyle.dp(getContext(),64);
         int delta=local<zone?-MobileStyle.dp(getContext(),9):local>scroll.getHeight()-zone?MobileStyle.dp(getContext(),9):0;
-        if(delta!=0){scroll.scrollBy(0,delta);position();}postOnAnimation(this);
+        if(delta!=0)scroll.scrollBy(0,delta);position();postOnAnimation(this);
     }};
     ModuleOrderView(Context context,ScrollView scroll,Consumer<List<String>> saved){
         super(context);this.scroll=scroll;this.saved=saved;gap=MobileStyle.dp(context,14);slop=ViewConfiguration.get(context).getScaledTouchSlop();setClipChildren(false);setClipToPadding(false);
@@ -40,34 +41,35 @@ final class ModuleOrderView extends ViewGroup {
     @Override protected void onLayout(boolean changed,int l,int t,int r,int b){if(dragging)return;int top=0;for(View v:order){v.layout(0,top,r-l,top+v.getMeasuredHeight());v.setTranslationY(0);top+=v.getMeasuredHeight()+gap;}}
     @Override public boolean onInterceptTouchEvent(MotionEvent e){
         if(e.getActionMasked()==MotionEvent.ACTION_DOWN){removeCallbacks(hold);candidate=null;pointer=e.getPointerId(0);downX=e.getRawX();downY=pointerY=e.getRawY();for(View v:order)if(e.getY()>=v.getTop()&&e.getY()<=v.getBottom()){candidate=v;break;}if(candidate!=null)postDelayed(hold,ViewConfiguration.getLongPressTimeout());}
-        if(dragging){if(e.getActionMasked()==MotionEvent.ACTION_UP||e.getActionMasked()==MotionEvent.ACTION_CANCEL)end(e.getActionMasked()==MotionEvent.ACTION_UP);return true;}
+        // The first intercepted event cancels the child's gesture and may not reach
+        // onTouchEvent. Consume its position/end here too, including a hold-only UP.
+        if(dragging){dragEvent(e);return true;}
         if(e.getActionMasked()==MotionEvent.ACTION_MOVE&&(Math.abs(e.getRawY()-downY)>slop||Math.abs(e.getRawX()-downX)>slop))removeCallbacks(hold);
         if(e.getActionMasked()==MotionEvent.ACTION_CANCEL||e.getActionMasked()==MotionEvent.ACTION_UP)removeCallbacks(hold);
         return false;
     }
     private void begin(){if(candidate==null||!isAttachedToWindow())return;selected=candidate;before.clear();before.addAll(order);dragging=true;
         int[] p=new int[2];selected.getLocationOnScreen(p);grip=downY-(p[1]+selected.getHeight()/2f);pointerY=downY;
+        float[] heights=new float[before.size()];for(int i=0;i<before.size();i++)heights[i]=before.get(i).getHeight();physics=new ModuleDragPhysics(heights,before.indexOf(selected),gap,MobileStyle.dp(getContext(),8));lastFrame=System.nanoTime();
         getParent().requestDisallowInterceptTouchEvent(true);selected.bringToFront();performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
         for(View v:order){v.animate().cancel();v.animate().scaleX(.9f).scaleY(.9f).setDuration(160).start();}position();postOnAnimation(edge);
     }
     @Override public boolean onTouchEvent(MotionEvent e){
         if(!dragging)return super.onTouchEvent(e);
-        if(e.getActionMasked()==MotionEvent.ACTION_MOVE){if(e.findPointerIndex(pointer)<0){end(false);return true;}pointerY=e.getRawY();position();}
-        else if(e.getActionMasked()==MotionEvent.ACTION_UP)end(true);
-        else if(e.getActionMasked()==MotionEvent.ACTION_CANCEL||e.getActionMasked()==MotionEvent.ACTION_POINTER_DOWN)end(false);
-        return true;
+        dragEvent(e);return true;
     }
-    private float top(int index){float y=0;for(int i=0;i<index;i++)y+=order.get(i).getHeight()+gap;return y;}
-    private void position(){if(!dragging)return;int[] p=new int[2];getLocationOnScreen(p);float center=pointerY-p[1]-grip;
-        int from=order.indexOf(selected),to=from;while(to>0&&center<top(to-1)+order.get(to-1).getHeight()*.5f)to--;
-        while(to<order.size()-1&&center>top(to+1)+order.get(to+1).getHeight()*.5f)to++;
-        if(to!=from){order.remove(from);order.add(to,selected);}
-        for(int i=0;i<order.size();i++){View v=order.get(i);if(v==selected)continue;v.animate().translationY(top(i)-v.getTop()).setDuration(150).setInterpolator(new DecelerateInterpolator()).start();}
-        float min=selected.getHeight()*.5f,max=top(order.size()-1)+order.get(order.size()-1).getHeight()-selected.getHeight()*.5f;
-        selected.setTranslationX(0);selected.setTranslationY(Math.max(min,Math.min(max,center))-selected.getTop()-selected.getHeight()/2f);
+    private void dragEvent(MotionEvent e){
+        if(e.getActionMasked()==MotionEvent.ACTION_MOVE){if(e.findPointerIndex(pointer)<0){end(false);return;}pointerY=e.getRawY();}
+        else if(e.getActionMasked()==MotionEvent.ACTION_UP){pointerY=e.getRawY();position();end(true);}
+        else if(e.getActionMasked()==MotionEvent.ACTION_CANCEL||e.getActionMasked()==MotionEvent.ACTION_POINTER_DOWN)end(false);
+    }
+    private void position(){if(!dragging||physics==null)return;int[] p=new int[2];getLocationOnScreen(p);float top=pointerY-p[1]-grip-selected.getHeight()/2f;
+        long now=System.nanoTime();physics.step(top,(now-lastFrame)/1_000_000_000f);lastFrame=now;
+        order.clear();for(int id:physics.order())order.add(before.get(id));
+        for(int i=0;i<before.size();i++){View v=before.get(i);v.setTranslationX(0);v.setTranslationY(physics.position(i)-v.getTop());}
     }
     private void end(boolean commit){if(!dragging)return;removeCallbacks(edge);removeCallbacks(hold);if(!commit){order.clear();order.addAll(before);}dragging=false;getParent().requestDisallowInterceptTouchEvent(false);
-        int y=0;for(View v:order){v.animate().cancel();float old=v.getY();v.layout(0,y,getWidth(),y+v.getHeight());v.setTranslationY(old-y);v.animate().translationY(0).scaleX(1).scaleY(1).setDuration(180).setInterpolator(new DecelerateInterpolator()).start();y+=v.getHeight()+gap;}selected=null;candidate=null;if(commit)persist();
+        int y=0;for(View v:order){v.animate().cancel();float old=v.getY();v.layout(0,y,getWidth(),y+v.getHeight());v.setTranslationY(old-y);v.animate().translationY(0).scaleX(1).scaleY(1).setDuration(180).setInterpolator(new DecelerateInterpolator()).start();y+=v.getHeight()+gap;}physics=null;selected=null;candidate=null;if(commit)persist();
     }
     private void persist(){ArrayList<String> ids=new ArrayList<>();for(View v:order)ids.add((String)v.getTag());saved.accept(ids);}
     @Override protected void onDetachedFromWindow(){removeCallbacks(hold);removeCallbacks(edge);if(dragging)end(false);super.onDetachedFromWindow();}

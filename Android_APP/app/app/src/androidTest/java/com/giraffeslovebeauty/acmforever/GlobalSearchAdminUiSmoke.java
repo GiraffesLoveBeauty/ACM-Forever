@@ -32,7 +32,7 @@ final class GlobalSearchAdminUiSmoke {
             main(()->{View a=find("用户"),b=find("论坛"),c=find("Wiki");int[] x=new int[2],y=new int[2],z=new int[2];a.getLocationOnScreen(x);b.getLocationOnScreen(y);c.getLocationOnScreen(z);check(x[0]==y[0]&&y[0]==z[0]&&y[1]>x[1]&&z[1]>y[1]&&a.getWidth()==b.getWidth(),"single-column priority layout");});
             pullSearch();click("搜索设置");reorder(prefs);clickDescription("移除 Wiki");check(!SearchModules.decode(prefs.getString(SearchModules.KEY,null)).contains("wiki"),"remove module saved");click("添加模块");clickDescription("添加 Wiki");check(SearchModules.decode(prefs.getString(SearchModules.KEY,null)).get(3).equals("wiki"),"added module appended");back();click("历史记录");back();back();await(()->has("Forum needle"),"search restored on return");
             wikiDown=true;activity=open(SearchActivity.class,new Intent().putExtra("query","needle"));await(()->has("API连接失败")&&has("Forum needle"),"one failed module retains other results");wikiDown=false;closeCurrent();
-            activity=open(SearchActivity.class,new Intent());main(()->{check(countText(decor(),"搜索设置")==1,"empty search has exactly one settings entry");EditText field=(EditText)walk(decor(),v->v instanceof EditText);field.setText("needle");});clickDescription("搜索");await(()->has("Forum needle"),"submit search");check(new JSONArray(prefs.getString("search_history","[]")).getString(0).equals("needle"),"history stored on device");
+            activity=open(SearchActivity.class,new Intent());searchLanding();main(()->{check(countText(decor(),"搜索设置")==1,"empty search has exactly one settings entry");EditText field=(EditText)walk(decor(),v->v instanceof EditText);field.setText("needle");});clickDescription("搜索");await(()->has("Forum needle"),"submit search");check(new JSONArray(prefs.getString("search_history","[]")).getString(0).equals("needle"),"history stored on device");
             click("搜索设置");click("添加模块");clickDescription("添加 社团题单");back();back();await(()->has("无API接口"),"missing module has honest error");
             click("搜索设置");click("添加模块");clickDescription("添加 比赛进度");back();back();await(()->has("AtCoder fixture"),"cross-platform contest result");
             Activity searchPage=activity;Instrumentation.ActivityMonitor trackerMonitor=test.addMonitor(WebFeaturesActivity.class.getName(),null,false);
@@ -51,22 +51,48 @@ final class GlobalSearchAdminUiSmoke {
         test.finish(code,result);
     }
     private void event(long down,int action,float x,float y){MotionEvent e=MotionEvent.obtain(down,SystemClock.uptimeMillis(),action,x,y,0);test.sendPointerSync(e);e.recycle();}
+    private void settleWindow()throws Exception{await(()->{boolean[] ready={false};main(()->{ViewGroup content=activity.findViewById(android.R.id.content);ready[0]=decor().hasWindowFocus()&&content.getChildCount()>0&&Math.abs(content.getChildAt(0).getTranslationX())<.1f;});return ready[0];},"touch window focused and page slide complete");Thread.sleep(300);}
+    private boolean keyboardVisible(){boolean[] visible={false};main(()->{WindowInsets insets=decor().getRootWindowInsets();visible[0]=insets!=null&&insets.isVisible(WindowInsets.Type.ime());});return visible[0];}
+    private void searchLanding()throws Exception{
+        await(()->has("1  Hot six")&&has("4  Hot three"),"real-view-count hot candidates rendered in descending order");
+        main(()->{EditText field=(EditText)walk(decor(),v->v instanceof EditText);check(field.hasFocus(),"search focuses the editor on entry");View back=walk(decor(),v->"返回".contentEquals(String.valueOf(v.getContentDescription()))),go=walk(decor(),v->"搜索".contentEquals(String.valueOf(v.getContentDescription())));int[] a=new int[2],b=new int[2],c=new int[2];back.getLocationOnScreen(a);field.getLocationOnScreen(b);go.getLocationOnScreen(c);check(a[0]<b[0]&&b[0]<c[0]&&Math.abs(a[1]-b[1])<8&&Math.abs(b[1]-c[1])<8,"back input and icon share the top bar");check(go instanceof TextView&&((TextView)go).getText().length()==0,"search action has icon only");});
+        await(this::keyboardVisible,"search opens the actual soft keyboard");
+        main(()->((android.view.inputmethod.InputMethodManager)context.getSystemService(Context.INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(decor().getWindowToken(),0));
+        await(()->!keyboardVisible(),"search keyboard closes");
+        main(()->{int[] a=new int[2],b=new int[2],c=new int[2];find("热搜").getLocationOnScreen(a);find("最近 10 条搜索").getLocationOnScreen(b);find("搜索设置").getLocationOnScreen(c);check(a[1]<b[1]&&b[1]<c[1],"hot history and settings are three ordered modules");});
+        android.graphics.Bitmap picture=test.getUiAutomation().takeScreenshot();if(picture!=null){try(FileOutputStream out=new FileOutputStream(new File(context.getExternalFilesDir(null),"search-home-v0220.png"))){picture.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out);}finally{picture.recycle();}}
+    }
+    private void tapEditor(String description)throws Exception{
+        settleWindow();
+        final int[] p=new int[2];main(()->{EditText field=(EditText)walk(decor(),v->v instanceof EditText&&(description==null||description.contentEquals(v.getContentDescription())));check(field!=null,"editable field exists");check((field.getRootView().getWindowVisibility()==View.VISIBLE),"form window visible");field.getLocationOnScreen(p);p[0]+=field.getWidth()/2;p[1]+=field.getHeight()/2;});
+        Thread.sleep(280);long down=SystemClock.uptimeMillis();event(down,MotionEvent.ACTION_DOWN,p[0],p[1]);event(down,MotionEvent.ACTION_UP,p[0],p[1]);await(this::keyboardVisible,"form tap opens actual soft keyboard");
+    }
     private void pullSearch()throws Exception{
+        settleWindow();
         final int[] p=new int[2];final int[] height={0};main(()->{View v=walk(decor(),w->w instanceof PullRefreshLayout);v.getLocationOnScreen(p);height[0]=v.getHeight();((android.view.inputmethod.InputMethodManager)context.getSystemService(Context.INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(v.getWindowToken(),0);});Thread.sleep(200);
         int before=requests.size();long down=SystemClock.uptimeMillis();float x=p[0]+40,y=p[1]+30;event(down,MotionEvent.ACTION_DOWN,x,y);for(int i=1;i<=16;i++){event(down,MotionEvent.ACTION_MOVE,x,y+i*MobileStyle.dp(context,11));Thread.sleep(16);}event(down,MotionEvent.ACTION_UP,x,y+MobileStyle.dp(context,176));await(()->requests.size()>before+2,"pull refresh repeats module reads");check(approvals.get()==0&&challenges.get()==0,"pull never resends writes");
     }
     private void reorder(SharedPreferences prefs)throws Exception{
-        ModuleOrderView[] order={null};View[] first={null};final int[] origin=new int[2],next=new int[2];
-        main(()->{order[0]=(ModuleOrderView)walk(decor(),v->v instanceof ModuleOrderView);first[0]=order[0].getChildAt(0);first[0].getLocationOnScreen(origin);order[0].getChildAt(1).getLocationOnScreen(next);});
+        settleWindow();
+        ModuleOrderView[] order={null};View[] first={null},neighbour={null};final int[] origin=new int[2],next=new int[2];
+        main(()->{order[0]=(ModuleOrderView)walk(decor(),v->v instanceof ModuleOrderView);first[0]=order[0].getChildAt(0);neighbour[0]=order[0].getChildAt(1);first[0].getLocationOnScreen(origin);neighbour[0].getLocationOnScreen(next);});
+        long held=SystemClock.uptimeMillis();float heldX=origin[0]+30,heldY=origin[1]+first[0].getHeight()/2f;event(held,MotionEvent.ACTION_DOWN,heldX,heldY);Thread.sleep(ViewConfiguration.getLongPressTimeout()+230);event(held,MotionEvent.ACTION_UP,heldX,heldY);Thread.sleep(250);
+        main(()->{for(int i=0;i<order[0].getChildCount();i++)check(Math.abs(order[0].getChildAt(i).getScaleX()-1)<.015,"hold-only release restores row size without a stuck gesture");});
         long down=SystemClock.uptimeMillis();float x=origin[0]+30,y=origin[1]+first[0].getHeight()/2f;event(down,MotionEvent.ACTION_DOWN,x,y);Thread.sleep(ViewConfiguration.getLongPressTimeout()+230);
         main(()->{for(int i=0;i<order[0].getChildCount();i++)check(Math.abs(order[0].getChildAt(i).getScaleX()-.9f)<.015,"all modules shrink to 90 percent");});
+        event(down,MotionEvent.ACTION_MOVE,x,y+MobileStyle.dp(context,5));Thread.sleep(48);
+        // bringToFront changes child drawing order; keep the original adjacent row reference.
+        main(()->{check(neighbour[0].getTranslationY()>0,"next row starts yielding before overlap");check(first[0].getY()+first[0].getHeight()*.95f<neighbour[0].getY()+neighbour[0].getHeight()*.05f,"visual row borders have not overlapped");});
         float end=next[1]+first[0].getHeight()*.8f;for(int i=1;i<=12;i++){event(down,MotionEvent.ACTION_MOVE,x+60,y+(end-y)*i/12);Thread.sleep(18);}main(()->check(first[0].getTranslationX()==0&&first[0].getTranslationY()>0,"selected row follows vertically only"));event(down,MotionEvent.ACTION_UP,x+60,end);Thread.sleep(250);
         check(SearchModules.decode(prefs.getString(SearchModules.KEY,null)).equals(Arrays.asList("forum","users","wiki","problems")),"drag reorders exactly one module and persists");
         prefs.edit().remove(SearchModules.KEY).commit();back();click("搜索设置");
+        settleWindow();main(()->{order[0]=(ModuleOrderView)walk(decor(),v->v instanceof ModuleOrderView);first[0]=order[0].getChildAt(0);first[0].getLocationOnScreen(origin);});
+        String prior=prefs.getString(SearchModules.KEY,null);long cancelled=SystemClock.uptimeMillis();x=origin[0]+30;y=origin[1]+first[0].getHeight()/2f;event(cancelled,MotionEvent.ACTION_DOWN,x,y);Thread.sleep(ViewConfiguration.getLongPressTimeout()+230);event(cancelled,MotionEvent.ACTION_MOVE,x,y+MobileStyle.dp(context,75));Thread.sleep(60);event(cancelled,MotionEvent.ACTION_CANCEL,x,y+MobileStyle.dp(context,75));Thread.sleep(250);
+        check(Objects.equals(prior,prefs.getString(SearchModules.KEY,null)),"cancelled drag does not persist a new order");main(()->{check(first[0].getTop()==0&&Math.abs(first[0].getTranslationY())<.1f&&Math.abs(first[0].getScaleX()-1)<.015,"cancelled drag restores its original slot and scale");});
     }
     private void memberOperations()throws Exception{
-        click("修改成员资料");main(()->{EditText name=(EditText)walk(decor(),v->v instanceof EditText&&"用户名（昵称）".contentEquals(v.getContentDescription()));name.setText("Renamed fixture");});click("核对修改");click("确认保存");await(()->memberWrites.get()==1&&has("Renamed fixture"),"revision-bound member rename saved");
-        click("重置登录密码");main(()->((EditText)walk(decor(),v->v instanceof EditText)).setText("Synthetic-New!2026"));click("确认重置");await(()->passwordWrites.get()==1&&has("重置登录密码"),"one CSRF protected password reset");
+        click("修改成员资料");tapEditor("用户名（昵称）");main(()->{EditText name=(EditText)walk(decor(),v->v instanceof EditText&&"用户名（昵称）".contentEquals(v.getContentDescription()));name.setText("Renamed fixture");});click("核对修改");click("确认保存");await(()->memberWrites.get()==1&&has("Renamed fixture"),"revision-bound member rename saved");
+        click("重置登录密码");tapEditor(null);main(()->((EditText)walk(decor(),v->v instanceof EditText)).setText("Synthetic-New!2026"));click("确认重置");await(()->passwordWrites.get()==1&&has("重置登录密码"),"one CSRF protected password reset");
     }
     private void searchEntryHistory(SharedPreferences prefs)throws Exception{
         Activity first=activity;String recorded=prefs.getString("search_history","[]");
@@ -129,7 +155,7 @@ final class GlobalSearchAdminUiSmoke {
             else if(p.equals("/api/auth/me"))value="{\"authenticated\":true,\"csrf_token\":\"synthetic-csrf\",\"qq_id\":\"90000001\",\"role\":\""+role+"\"}";
             else if(p.endsWith("/capabilities"))value="{\"api_version\":1,\"features\":{\"public_member_ids\":true}}";
             else if(p.endsWith("/leaderboard"))value="{\"rows\":[{\"name\":\"Zero AC member\",\"public_member_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"total_count\":0}],\"total\":1}";
-            else if(p.equals("/api/mobile/v1/forum/posts"))value="{\"items\":[{\"id\":101,\"title\":\"Forum needle\"}],\"total\":1}";
+            else if(p.equals("/api/mobile/v1/forum/posts")){if(url.getQuery()!=null&&url.getQuery().contains("sort=hot"))value="{\"items\":[{\"id\":1,\"title\":\"Hot one\",\"views_count\":1},{\"id\":6,\"title\":\"Hot six\",\"views_count\":600},{\"id\":2,\"title\":\"Hot two\",\"views_count\":2},{\"id\":4,\"title\":\"Hot four\",\"views_count\":400},{\"id\":5,\"title\":\"Hot five\",\"views_count\":500},{\"id\":3,\"title\":\"Hot three\",\"views_count\":300}],\"total\":6}";else value="{\"items\":[{\"id\":101,\"title\":\"Forum needle\"}],\"total\":1}";}
             else if(p.equals("/api/wiki/search"))value="{\"items\":[{\"title\":\"Wiki needle\",\"slug\":\"basics\"}],\"total\":1}";
             else if(p.equals("/api/me/problems"))value="{\"items\":[{\"platform\":\"codeforces\",\"problem_id\":\"1A\",\"problem_name\":\"Problem needle\"}],\"total\":1}";
             else if(p.equals("/api/me/problems/tracker"))value="{\"items\":[{\"platform\":\"atcoder\",\"contest_id\":\"abc100\",\"contest_name\":\"AtCoder fixture\",\"total_count\":0,\"solved_count\":0,\"problems\":[]}],\"total\":1}";

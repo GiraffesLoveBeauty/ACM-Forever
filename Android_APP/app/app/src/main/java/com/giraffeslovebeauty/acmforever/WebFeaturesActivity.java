@@ -41,8 +41,8 @@ public final class WebFeaturesActivity extends Activity {
     @Override protected void onResume(){super.onResume();active=true;ui.removeCallbacks(poll);ui.postDelayed(poll,30000);}
     @Override protected void onPause(){active=false;ui.removeCallbacks(poll);super.onPause();}
     @Override protected void onDestroy(){serial++;ui.removeCallbacksAndMessages(null);io.shutdownNow();refresh.close();ModalDialogs.close(this);super.onDestroy();}
-    @Override public void onBackPressed(){if(writing)return;if(history.isEmpty()){finish();return;}try{route=new JSONObject(history.pop());render();}catch(Exception e){finish();}}
-    private void nav(JSONObject next){if(writing)return;history.push(route.toString());route=next;scroll.scrollTo(0,0);render();}
+    @Override public void onBackPressed(){if(writing)return;if(history.isEmpty()){finish();return;}PageMotion.change(this,false,()->{try{route=new JSONObject(history.pop());render();}catch(Exception e){finish();}});}
+    private void nav(JSONObject next){if(writing)return;PageMotion.change(this,true,()->{history.push(route.toString());route=next;scroll.scrollTo(0,0);render();});}
     private void filter(String key,Object value){if(writing)return;put(route,key,value);put(route,"page",1);render();}
     private LinearLayout column(){LinearLayout box=new SpacedLayout(this);box.setOrientation(LinearLayout.VERTICAL);return box;}
     private LinearLayout row(){LinearLayout box=new SpacedLayout(this);box.setOrientation(LinearLayout.HORIZONTAL);box.setGravity(Gravity.CENTER_VERTICAL);return box;}

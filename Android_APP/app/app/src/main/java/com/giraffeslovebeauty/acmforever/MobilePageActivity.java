@@ -12,7 +12,7 @@ import org.json.JSONObject;
 /** Shared lifecycle and presentation for native utility pages. Writes are never retried. */
 abstract class MobilePageActivity extends Activity {
     interface Display {void show(Object value)throws Exception;}
-    protected ApiClient api;protected LinearLayout root,body;protected ScrollView scroll;protected TextView title;
+    protected ApiClient api;protected LinearLayout root,body,header;protected ScrollView scroll;protected TextView title;
     protected PageRefresh refresh;protected ActionNotice notice;protected int serial;protected boolean writing,opening;
     protected final ExecutorService io=Executors.newSingleThreadExecutor();
     protected int dp(float n){return MobileStyle.dp(this,n);}
@@ -26,7 +26,7 @@ abstract class MobilePageActivity extends Activity {
     protected void createPage(String heading){
         AppAppearance.load(this);AppAppearance.window(this);api=((AcmApplication)getApplication()).api();
         root=column();root.setFitsSystemWindows(true);root.setBackground(ProfileCover.drawable(this));AppAppearance.content(this,root);
-        LinearLayout header=row();header.setBackgroundColor(MobileStyle.CHROME);header.setPadding(dp(10),dp(8),dp(12),dp(8));header.addView(button("返回",this::onBackPressed));title=text(heading,21);header.addView(title,new LinearLayout.LayoutParams(0,-2,1));root.addView(header);
+        header=row();header.setBackgroundColor(MobileStyle.CHROME);header.setPadding(dp(10),dp(8),dp(12),dp(8));header.addView(button("返回",this::onBackPressed));title=text(heading,21);header.addView(title,new LinearLayout.LayoutParams(0,-2,1));root.addView(header);
         refresh=new PageRefresh(this,root,1);notice=new ActionNotice(this,root,2);scroll=new ScrollView(this);root.addView(PullRefreshLayout.forPage(this,scroll,refresh,()->!writing),new LinearLayout.LayoutParams(-1,0,1));body=column();body.setPadding(dp(14),dp(16),dp(14),dp(24));scroll.addView(body);
     }
     protected void resetPage(String heading){serial++;refresh.reset(serial);refresh.userAction();notice.hide();title.setText(heading);body.removeAllViews();}

@@ -336,9 +336,9 @@ public final class MainActivity extends Activity {
         leaveComposeOnce=false;ModalDialogs.close(this);
         boolean returningFromDetail="detail".equals(screen)||"member".equals(screen);
         Bundle previous=navigation.pop();
-        if(previous!=null){restoreNavigation(previous);if("forum".equals(screen)&&!returningFromDetail){query="";page=1;pendingScroll=0;}root.requestFocus();search.setText(query);updateSearchHeader();refreshNav();readFromAction=true;loadScreen();return;}
+        if(previous!=null){boolean parallel=PageMotion.parallel(screen,previous.getString("screen","forum"));Runnable restore=()->{restoreNavigation(previous);if("forum".equals(screen)&&!returningFromDetail){query="";page=1;pendingScroll=0;}root.requestFocus();search.setText(query);updateSearchHeader();refreshNav();readFromAction=true;loadScreen();};if(parallel)restore.run();else PageMotion.change(this,false,restore);return;}
         if(externalRoot){finish();return;}
-        if(!"forum".equals(screen)||!query.isEmpty()){screen="forum";query="";page=1;pendingScroll=0;root.requestFocus();search.setText("");updateSearchHeader();refreshNav();loadScreen();return;}
+        if(!"forum".equals(screen)||!query.isEmpty()){Runnable restore=()->{screen="forum";query="";page=1;pendingScroll=0;root.requestFocus();search.setText("");updateSearchHeader();refreshNav();loadScreen();};if(PageMotion.parallel(screen,"forum"))restore.run();else PageMotion.change(this,false,restore);return;}
         super.onBackPressed();
     }
 
@@ -602,14 +602,8 @@ public final class MainActivity extends Activity {
         if (forumFilterDialog != null) forumFilterDialog.dismiss();
         if(java.util.Arrays.asList("club","sheets","discussions","mistakes","reviews","templates","checkin").contains(next)){openTrainingCenter(next);return;}
         if(!next.equals(screen)||prepare!=null){navigation.push(pageSnapshot());pendingScroll=0;}
-        if(prepare!=null)prepare.run();
-        screen = next;
-        query = "";
-        page = 1;
-        search.setText("");
-        updateSearchHeader();
-        refreshNav();
-        loadScreen();
+        Runnable change=()->{if(prepare!=null)prepare.run();screen=next;query="";page=1;search.setText("");updateSearchHeader();refreshNav();loadScreen();};
+        if(PageMotion.parallel(screen,next)||screen.equals(next))change.run();else PageMotion.change(this,true,change);
     }
 
     private void openPost(int id){navigate("detail",()->{postId=id;notificationComment=0;});}

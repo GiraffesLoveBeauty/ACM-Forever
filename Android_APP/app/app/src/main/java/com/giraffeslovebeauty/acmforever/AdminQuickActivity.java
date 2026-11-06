@@ -13,14 +13,14 @@ public final class AdminQuickActivity extends MobilePageActivity {
     private final ArrayDeque<String> back=new ArrayDeque<>();private boolean verified,firstResume=true;private long account;
     @Override public void onCreate(Bundle saved){super.onCreate(saved);if(saved!=null){mode=saved.getString("mode","home");member=saved.getString("member","");contest=saved.getString("contest","");query=saved.getString("query","");page=saved.getInt("page",1);school=saved.getString("school","");statusFilter=saved.getString("statusFilter","");taskFilter=saved.getString("taskFilter","全部");ArrayList<String> stack=saved.getStringArrayList("back");if(stack!=null)back.addAll(stack);}createPage("便捷管理");account=api.sessionGeneration();verify();}
     @Override protected void onSaveInstanceState(Bundle out){super.onSaveInstanceState(out);out.putString("mode",mode);out.putString("member",member);out.putString("contest",contest);out.putString("query",query);out.putInt("page",page);out.putString("school",school);out.putString("statusFilter",statusFilter);out.putString("taskFilter",taskFilter);out.putStringArrayList("back",new ArrayList<>(back));}
-    @Override public void onBackPressed(){if(writing)return;if(back.isEmpty()){super.onBackPressed();return;}mode=back.pop();render();}
+    @Override public void onBackPressed(){if(writing)return;if(back.isEmpty()){super.onBackPressed();return;}PageMotion.change(this,false,()->{mode=back.pop();render();});}
     private void verify(){
         verified=false;resetPage("正在确认管理权限…");LinearLayout slot=card(body);slot.addView(text("正在验证会话…",14));
         body.addView(button("重新确认权限",this::verify));
         read(()->{api.refreshSession();if(!api.isAdministrator())throw new ApiClient.ApiException(403,"仅限管理员",false);return Boolean.TRUE;},slot,false,value->{account=api.sessionGeneration();verified=true;render();});
     }
     @Override protected void onResume(){super.onResume();if(firstResume){firstResume=false;}else if(api!=null){verified=false;verify();}}
-    private void nav(String next){if(!verified)return;back.push(mode);mode=next;page=1;render();}
+    private void nav(String next){if(!verified||mode.equals(next))return;PageMotion.change(this,true,()->{back.push(mode);mode=next;page=1;render();});}
     private void render(){resetPage(title());if(!verified||account!=api.sessionGeneration()||!api.isAdministrator()){verified=false;error(card(body),new ApiClient.ApiException(403,"管理权限已失效，请返回重新登录",false));return;}
         switch(mode){case "posts":case "reports":moderation();break;case "tasks":tasks();break;case "members":members();break;case "member":member();break;case "training":training();break;case "contests":contests();break;case "settings":settings();break;default:home();}AppAppearance.paintFields(root);}
     private String title(){switch(mode){case "posts":return "话题审核";case "reports":return "举报处理";case "tasks":return "同步任务";case "members":case "member":return "成员查询";case "training":return "训练管理";case "contests":return "复盘管理";case "settings":return "比赛播报";default:return "便捷管理";}}

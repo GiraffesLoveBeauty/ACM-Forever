@@ -27,7 +27,7 @@ final class NavigationUiSmoke {
             activity=test.startActivitySync(new Intent().setClassName(context,MainActivity.class.getName()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK));opened.add(activity);
             await(()->find("社区话题")!=null&&((ImageView)description("常用工具")).getDrawable().getBounds().width()>=MobileStyle.dp(context,28),"home and enlarged plus drawn");main(()->{ImageView plus=(ImageView)description("常用工具");check(plus.getScaleType()==ImageView.ScaleType.FIT_CENTER,"plus fits its button without stretching");plus.performClick();});
             main(()->{Button settings=(Button)find("个性化设置");check(settings!=null&&settings.getGravity()==Gravity.CENTER&&settings.getCompoundDrawables()[0]==null,"personalization text is centered");ModalDialogs.close(activity);});
-            testForumMembers();
+            testPageMotion();testForumMembers();
             testManualSessionRecreation(api,prefs);
             testHomeSearch(prefs);
             click("排名");await(()->find("榜单导航成员")!=null,"mobile leaderboard with public identity");
@@ -48,6 +48,13 @@ final class NavigationUiSmoke {
         finally{for(Activity item:opened)main(()->{ModalDialogs.close(item);item.finish();});try{api.logout();}catch(Exception ignored){}SharedPreferences.Editor edit=prefs.edit().clear();for(Map.Entry<String,?> item:before.entrySet()){Object value=item.getValue();if(value instanceof String)edit.putString(item.getKey(),(String)value);else if(value instanceof Integer)edit.putInt(item.getKey(),(Integer)value);else if(value instanceof Boolean)edit.putBoolean(item.getKey(),(Boolean)value);else if(value instanceof Long)edit.putLong(item.getKey(),(Long)value);else if(value instanceof Float)edit.putFloat(item.getKey(),(Float)value);}edit.apply();api.setBaseUrl(base);AppAppearance.load(context);}
         test.finish(outcome,result);
     }
+    private void testPageMotion()throws Exception{
+        click("排名");main(()->check(content().getTranslationX()==0,"parallel tab changes immediately without a slide"));
+        main(()->{try{java.lang.reflect.Method show=MainActivity.class.getDeclaredMethod("show",String.class);show.setAccessible(true);show.invoke(activity,"account");}catch(Exception e){throw new AssertionError(e);}if(android.animation.ValueAnimator.areAnimatorsEnabled())check(content().getTranslationX()>0,"child page begins at the right edge");});
+        await(()->content().getTranslationX()==0,"child page slide completes");back();await(()->"rank".equals(field("screen"))&&content().getTranslationX()==0,"return restores the originating tab without a leftover transform");
+        back();await(()->"forum".equals(field("screen"))&&content().getTranslationX()==0,"parallel back stays immediate");
+    }
+    private View content(){return ((ViewGroup)activity.findViewById(android.R.id.content)).getChildAt(0);}
     private void testForumMembers()throws Exception{
         await(()->find("导航话题")!=null,"forum list loaded");
         main(()->description("查看论坛导航作者的公开主页").performClick());

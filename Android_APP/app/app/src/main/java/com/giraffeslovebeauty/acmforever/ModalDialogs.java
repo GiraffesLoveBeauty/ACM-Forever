@@ -29,7 +29,7 @@ final class ModalDialogs {
             previous.dismiss();
         }
         visible.put(owner,new WeakReference<>(dialog));dialog.show();
-        if(!(dialog instanceof DetailPage))decorate(dialog);AppAppearance.paintFields(dialog.getWindow().getDecorView());
+        if(!(dialog instanceof DetailPage))decorate(dialog);AppAppearance.paintFields(dialog.getWindow().getDecorView());KeyboardInputs.allow(dialog.getWindow());
         TextView message=dialog.findViewById(android.R.id.message);if(message!=null)message.setTextColor(MobileStyle.TEXT);
         return dialog;
     }
