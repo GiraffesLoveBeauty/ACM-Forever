@@ -73,12 +73,14 @@ final class AccountClosureUiSmoke {
             check(posts == ratePosts + 1 && receipts == rateReads && app.vault().readClosure().isEmpty(), "restart after refusal stays out of receipt recovery");
             progress("rate-limit refusal, rotation, manual recheck and controller restart checked");
             authRequired = true; int authPosts = posts, authReads = receipts; String authRequest = requestId;
-            edit("Test-Password!"); click("狠心注销"); await(() -> has("请返回重新登录后重新检查") && app.closure().state().phase == AccountClosureFlow.Phase.ERROR, "submit authentication refusal is recoverable");
+            activity = follow(MainActivity.class, () -> { edit("Test-Password!"); click("狠心注销"); });
+            await(() -> has("账号登录") && app.closure().state().phase == AccountClosureFlow.Phase.ERROR, "authentication refusal forces login without a pending receipt");
             check(posts == authPosts + 1 && receipts == authReads && app.vault().readClosure().isEmpty(), "authentication refusal clears receipt without polling or repeated POST");
             check(!api.isLoggedIn() && !closed, "expired session is not mistaken for successful closure");
-            recreate(); await(() -> has("请返回重新登录后重新检查"), "authentication refusal survives rotation");
+            recreateMain(); await(() -> has("账号登录"), "authentication refusal stays at login after rotation");
             check(posts == authPosts + 1 && receipts == authReads && app.vault().readClosure().isEmpty(), "rotation never restores refused authentication receipt");
-            click("知道了"); authRequired = false; login("90000001", 1); click("重新检查"); await(() -> input() != null, "login and manual recheck recover after authentication refusal");
+            authRequired = false; login("90000001", 1); parent = activity; activity = open(AccountClosureActivity.class);
+            await(() -> input() != null, "login and reopening closure recover after authentication refusal");
             check(!authRequest.equals(requestId) && input().length() == 0 && posts == authPosts + 1, "fresh preview after login never automatically submits");
             finish(); resetController(); activity = open(AccountClosureActivity.class); await(() -> input() != null, "controller restart after authentication refusal permits a fresh preview");
             check(posts == authPosts + 1 && receipts == authReads && app.vault().readClosure().isEmpty(), "authentication refusal leaves no persisted pending recovery");

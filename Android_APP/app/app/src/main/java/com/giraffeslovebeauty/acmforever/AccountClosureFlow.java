@@ -122,6 +122,6 @@ final class AccountClosureFlow {
     }
     void acknowledge() {
         if (state.phase != Phase.CLOSED) return;
-        io.execute(() -> { app.vault().clearClosure(); update(Phase.IDLE, null, ""); });
+        io.execute(() -> { app.vault().clearClosure(); update(Phase.IDLE, null, ""); app.closureReceiptChanged(); });
     }
 }

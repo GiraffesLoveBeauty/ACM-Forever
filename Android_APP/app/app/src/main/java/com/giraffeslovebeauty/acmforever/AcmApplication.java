@@ -17,12 +17,15 @@ public class AcmApplication extends Application {
     private PdfFiles pdfFiles;
     private AppUpdates updates;
     private AccountClosureFlow closure;
+    private LoginGate loginGate;
 
     @Override public void onCreate() {
         super.onCreate();
         AppAppearance.load(this);
         preferences = getSharedPreferences("acmforever_settings", MODE_PRIVATE);
         vault = new SessionVault(preferences);
+        loginGate = new LoginGate(this);
+        registerActivityLifecycleCallbacks(loginGate);
         try {
             String base=ApiClient.checkedBaseUrl(preferences.getString("api_base_url",""));
             api.setBaseUrl(base.isEmpty()?getString(R.string.default_api_base_url):base);
@@ -32,6 +35,7 @@ public class AcmApplication extends Application {
         }
         api.setNetworkAvailable(this::networkAvailable);
         api.setSessionChanged(() -> {
+            loginGate.sessionChanged();
             drafts.bind(api.isLoggedIn()?api.getBaseUrl()+"/"+api.accountKey():"",api.sessionGeneration());
             if(!api.isLoggedIn())clearPdfFiles();
             try { if(api.isLoggedIn()&&!vault.save(api.getBaseUrl(),api.exportSession()))sessionSaveFailed.set(true);
@@ -47,6 +51,7 @@ public class AcmApplication extends Application {
     }
 
     ApiClient api() { return api; }
+    void closureReceiptChanged() { loginGate.receiptChanged(); }
     synchronized AccountClosureFlow closure() { if (closure == null) closure = new AccountClosureFlow(this); return closure; }
     synchronized AppUpdates updates(){if(updates==null)updates=new AppUpdates(this,api);return updates;}
     CloudDrafts drafts() { return drafts; }

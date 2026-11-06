@@ -17,6 +17,8 @@ public final class UpdateActivity extends Activity {
     private boolean painting;
     private boolean initialCheck;
     private PullRefreshLayout pull;
+    private GithubCredits credits;
+    private CreditsViews creditsViews;
     private int dp(int n){return MobileStyle.dp(this,n);}
     @Override public void onCreate(Bundle state){
         super.onCreate(state);initialCheck=state==null;AppAppearance.load(this);AppAppearance.window(this);updates=((AcmApplication)getApplication()).updates();
@@ -27,7 +29,9 @@ public final class UpdateActivity extends Activity {
         error=text("",14);error.setTextColor(ErrorModule.ink());error.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);banner.addView(error,new LinearLayout.LayoutParams(0,-2,1));
         ImageButton close=new ImageButton(this);MobileStyle.flat(close);close.setBackgroundColor(Color.TRANSPARENT);close.setImageDrawable(AppIcons.get(this,"close",0xffaf2424));close.setContentDescription("关闭更新错误提示");close.setOnClickListener(v->updates.dismissError());banner.addView(close,new LinearLayout.LayoutParams(dp(48),dp(48)));LinearLayout.LayoutParams bannerBounds=new LinearLayout.LayoutParams(-1,-2);bannerBounds.setMargins(dp(12),dp(16),dp(12),dp(8));root.addView(banner,bannerBounds);
         ScrollView scroll=new ScrollView(this);pull=new PullRefreshLayout(this,scroll,()->!updates.busy()&&!ModalDialogs.isShowing(this),()->updates.check(true));root.addView(pull,new LinearLayout.LayoutParams(-1,0,1));body=new SpacedLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(dp(16),dp(16),dp(16),dp(24));scroll.addView(body);
+        try{credits=GithubCredits.load(this);creditsViews=new CreditsViews(this,credits);}catch(Exception ignored){}
         LinearLayout current=card();current.addView(text("ACMforever "+updates.currentName(),20));status=text("",16);status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);current.addView(status);notes=text("",14);current.addView(notes);
+        if(creditsViews!=null)creditsViews.version(current,updates.currentName());else current.addView(text("本地人员记录读取失败",12));
         last=text("",12);current.addView(last);check=button(current,"检查更新",()->updates.check(true));download=button(current,"下载新版安装包",()->updates.openDownload(this));install=button(current,"安装新版",()->updates.install(this));cancel=button(current,"取消下载",updates::cancelDownload);
         LinearLayout options=card();options.addView(text("自动更新选项",18));automatic=new CheckBox(this);automatic.setText("启动时自动检查更新");automatic.setMinHeight(dp(48));options.addView(automatic);
         options.addView(text("自动检查默认开启，启动时在会话处理后发起，检查成功后间隔 6 小时；失败可在下一次启动重试。进入本页与手动检查始终立即检查。发现新版先询问，点击下载后进入猫娘下载页；安装仍需系统确认。",12));
@@ -41,19 +45,23 @@ public final class UpdateActivity extends Activity {
     private Button button(LinearLayout box,String label,Runnable action){Button b=new Button(this);b.setText(label);MobileStyle.button(b,false);b.setOnClickListener(v->{if(!ModalDialogs.isShowing(this))action.run();});box.addView(b,new LinearLayout.LayoutParams(-1,-2));return b;}
     private void releaseHistory(){
         LinearLayout intro=card();TextView heading=text("更新日志与说明",20);heading.setContentDescription("更新日志与说明");intro.addView(heading);intro.addView(text("随安装包保存，可离线查看。按版本从新到旧排列；历史记录不代表服务器已上线对应功能。",13));
+        if(credits!=null)intro.addView(text("人员记录快照 · "+credits.capturedOn+"；发起 Review 与执行评审分别记录，机器人评审不等于人工批准。",12));
         try(java.io.InputStream in=getAssets().open(ReleaseHistory.ASSET);java.io.ByteArrayOutputStream bytes=new java.io.ByteArrayOutputStream()){
             byte[] buffer=new byte[4096];int n;while((n=in.read(buffer))!=-1){if(bytes.size()+n>131072)throw new java.io.IOException("更新日志过大");bytes.write(buffer,0,n);}
             ReleaseHistory history=ReleaseHistory.parse(new String(bytes.toByteArray(),java.nio.charset.StandardCharsets.UTF_8),updates.currentName());
             for(ReleaseHistory.Entry entry:history.entries){
                 LinearLayout version=card();version.setContentDescription("更新记录 "+entry.versionName);version.addView(text("v"+entry.versionName+(entry.versionName.equals(updates.currentName())?" · 当前版本":""),18));
                 if(!entry.date.isEmpty())version.addView(text("记录日期 · "+entry.date,12));version.addView(text(entry.summary,14));
+                if(creditsViews!=null)creditsViews.version(version,entry.versionName);
                 Button open=button(version,"查看更新日志与说明",()->showReleaseNotes(entry));open.setContentDescription("查看 v"+entry.versionName+" 更新说明");
             }
         }catch(Exception failure){TextView unavailable=text("本地更新日志读取失败，请重新安装完整安装包。",14);unavailable.setTextColor(ErrorModule.ink());intro.addView(unavailable);}
     }
     private void showReleaseNotes(ReleaseHistory.Entry entry){
         TextView details=text(entry.details(),15);details.setTextIsSelectable(true);details.setLineSpacing(dp(4),1.1f);details.setPadding(dp(16),dp(16),dp(16),dp(16));details.setBackground(MobileStyle.panel(this,MobileStyle.MODULE,16,0));details.setContentDescription("版本更新详情 "+entry.versionName);
-        new ModalDialogs.Builder(this).fullPage().setTitle("v"+entry.versionName+" 更新说明").setView(details).show();
+        LinearLayout page=new SpacedLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.addView(details);
+        if(creditsViews!=null)creditsViews.version(page,entry.versionName);
+        new ModalDialogs.Builder(this).fullPage().setTitle("v"+entry.versionName+" 更新说明").setView(page).show();
     }
     private void refresh(){
         if(isFinishing()||isDestroyed())return;painting=true;pull.loading(updates.checking());

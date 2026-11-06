@@ -58,6 +58,7 @@ public final class MainActivity extends Activity {
     private Exception sessionRestoreFailure;
     private boolean openingPdf;
     private boolean openingUpdates;
+    private boolean closureRecoveryVisible;
     private String recoveryOffered="";
     private int BACKGROUND = Color.rgb(244, 245, 247);
     private int PANEL = Color.WHITE;
@@ -136,7 +137,7 @@ public final class MainActivity extends Activity {
     private boolean filterLoading;
     private AlertDialog forumFilterDialog;
     private String loginIdentifier = "";
-    private String loginDestination = "account";
+    private String loginDestination = "forum";
     private String problemState = "";
     private String problemScope="all";
     private String problemKeyword="", problemKeywordDraft="", problemTag="";
@@ -190,7 +191,7 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onResume() {
-        super.onResume();openingSpace=false;openingSearch=false;openingBindings=false;
+        super.onResume();openingSpace=false;openingSearch=false;openingBindings=false;openingAbout=false;
         if(navigationOwner!=api.sessionGeneration()){ModalDialogs.close(this);problemKeyword="";problemKeywordDraft="";problemTag="";navigation.clear();navigationOwner=api.sessionGeneration();refreshComposer();if(!"compose".equals(screen))loadScreen();}
         else{
             CloudDrafts.State draft=cloud.state();
@@ -344,6 +345,7 @@ public final class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
+        if (!api.isLoggedIn() && !loginBusy) { navigation.clear(); moveTaskToBack(true); return; }
         if (loginBusy || composeBusy) { message("正在处理，请稍候…"); return; }
         if(navigationOwner!=api.sessionGeneration()){navigation.clear();navigationOwner=api.sessionGeneration();}
         if(!allowLeavingEditor(this::onBackPressed))return;
@@ -613,6 +615,7 @@ public final class MainActivity extends Activity {
 
     private void navigate(String next,Runnable prepare) {
         if (loginBusy || composeBusy) return;
+        if (!api.isLoggedIn()) { loadScreen(); return; }
         if(!next.equals(screen)&&!allowLeavingEditor(()->navigate(next,prepare)))return;
         readFromAction=true;
         leaveComposeOnce = false;
@@ -638,6 +641,17 @@ public final class MainActivity extends Activity {
 
     private void loadScreen() {
         if (loginBusy) return;
+        if (!api.isLoggedIn()) {
+            ++requestSerial; navigation.clear(); screen="account"; query=""; pendingScroll=0;
+            pageRefresh.reset(requestSerial); actionNotice.hide(); ModalDialogs.close(this);
+            detailUi=null; composeEditorShown=false; composeBodyInput=null; loadingRegion=null;
+            content.removeAllViews(); root.getChildAt(0).setVisibility(View.GONE); nav.setVisibility(View.GONE);
+            content.addView(label("登录 ACMForever", 25, TEXT, true));
+            if(sessionRestoreFailure!=null){failureBox(card(),FailureState.title(sessionRestoreFailure),160,null);Button retry=action("重试自动登录",false);retry.setOnClickListener(v->{sessionRestoreAttempted=false;sessionRestoreFailure=null;restoreWebSession();});content.addView(retry);}
+            showLogin(); return;
+        }
+        root.getChildAt(0).setVisibility(View.VISIBLE); nav.setVisibility(View.VISIBLE);
+        if(!externalRoot)application.updates().startupCheck();
         if(navigationOwner!=api.sessionGeneration()){navigation.clear();navigationOwner=api.sessionGeneration();}
         if(api.isLoggedIn()&&api.requiresPasswordChange())screen="account";
         int serial = ++requestSerial;
@@ -1659,6 +1673,7 @@ public final class MainActivity extends Activity {
             .setPositiveButton("恢复为新草稿",(d,w)->{try{JSONObject draft=new JSONObject(preferences.getString(key,"{}"));cloud.reset();syncCloudEditor();composeTitle=draft.optString("title");composeBody=draft.optString("body");composeCategoryId=draft.optInt("category_id");composeDraftId=0;composerChanged();loadScreen();}catch(Exception e){failureDialog(e);}}).show();
     }
     private void restoreWebSession(){
+        if(getIntent().getBooleanExtra("force_login",false)){getIntent().removeExtra("force_login");sessionRestoreAttempted=true;loadScreen();return;}
         if(api.isLoggedIn()||sessionRestoreAttempted||!preferences.getBoolean("auto_login",false)){loadAfterSession();return;}
         sessionRestoreAttempted=true;String destination=screen;showLoginWaiting();
         java.lang.ref.WeakReference<MainActivity> owner=new java.lang.ref.WeakReference<>(this);
@@ -1677,7 +1692,7 @@ public final class MainActivity extends Activity {
     private void loadAfterSession(){
         // Startup step 5: dispatch once after session recovery and before page requests.
         // The check stays asynchronous, so an unavailable release server cannot block home.
-        if(!externalRoot)application.updates().startupCheck();
+        if(!externalRoot&&api.isLoggedIn())application.updates().startupCheck();
         loadScreen();
     }
 
@@ -2056,7 +2071,6 @@ public final class MainActivity extends Activity {
             });
         });
         box.addView(submit);
-        Button updates=action("检查更新",false);updates.setOnClickListener(v->checkForUpdates());box.addView(updates);
     }
 
     private void showLoginWaiting() {
@@ -2129,7 +2143,7 @@ public final class MainActivity extends Activity {
         menuRow(settings, "检查更新", "下载新版 · 自动更新选项", this::checkForUpdates);
 
 
-        menuRow(settings, "关于 ACMforever", appVersion()+" · 调试版", () -> message("打一辈子爱臭美 / ACMforever\n版本 "+appVersion()+" · 调试版"));
+        menuRow(settings, "关于 ACMforever", appVersion()+" · 特别鸣谢", this::openAbout);
         Button logout = action("退出登录", false);
         logout.setOnClickListener(view -> {
             logout.setEnabled(false);
@@ -2154,7 +2168,8 @@ public final class MainActivity extends Activity {
     }
 
     private void addClosureRecovery() {
-        if (!sessionVault.hasClosure()) return;
+        closureRecoveryVisible=sessionVault.hasClosure();
+        if (!closureRecoveryVisible) return;
         LinearLayout box = card();
         box.addView(label("待确认的账户注销", 17, TEXT, true));
         box.addView(label("本机保存了注销回执，无需登录即可查询结果；不会再次提交注销。", 13, MUTED, false));
@@ -2390,6 +2405,12 @@ public final class MainActivity extends Activity {
     }
 
     private void checkForUpdates() { if(openingUpdates)return;openingUpdates=true;startActivity(new Intent(this,UpdateActivity.class)); }
+    void enforceLogin() {
+        if(api==null||root==null||api.isLoggedIn()||loginBusy||isFinishing()||isDestroyed())return;
+        if(!"account".equals(screen)||nav.getVisibility()!=View.GONE||closureRecoveryVisible!=sessionVault.hasClosure()){loginDestination="forum";loadScreen();}
+    }
+    private boolean openingAbout;
+    private void openAbout() { if(openingAbout||ModalDialogs.isShowing(this))return;openingAbout=true;startActivity(new Intent(this,AboutActivity.class)); }
 
 
     private String draftKey() {
