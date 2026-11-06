@@ -60,6 +60,10 @@ final class AccountClosure {
     }
     // Only explicit pre-commit refusals are safe to leave. Other errors require a receipt read.
     static boolean refused(Exception failure) {
-        return java.util.Arrays.asList("FEATURE_DISABLED", "ROLE_HANDOVER_REQUIRED", "LAST_ROOT_PROTECTED", "REAUTH_FAILED", "ACCOUNT_CHANGED", "POLICY_CHANGED", "CSRF_INVALID", "INVALID_REQUEST", "MUST_CHANGE_PASSWORD").contains(code(failure));
+        return rateLimited(failure) || java.util.Arrays.asList("FEATURE_DISABLED", "ROLE_HANDOVER_REQUIRED", "LAST_ROOT_PROTECTED", "REAUTH_FAILED", "ACCOUNT_CHANGED", "POLICY_CHANGED", "CSRF_INVALID", "INVALID_REQUEST", "MUST_CHANGE_PASSWORD").contains(code(failure));
+    }
+    static boolean rateLimited(Exception failure) {
+        // The closure API emits this response before its commit transaction. Bare 429s are ambiguous.
+        return failure instanceof ApiClient.ApiException && ((ApiClient.ApiException) failure).status == 429 && "RATE_LIMITED".equals(code(failure));
     }
 }

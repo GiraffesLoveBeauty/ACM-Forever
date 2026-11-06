@@ -18,7 +18,7 @@ final class AccountClosureUiSmoke {
     private final Context context;
     private ApiClient api; private AcmApplication app; private Activity activity;
     private final List<Activity> pages = new ArrayList<>();
-    private volatile boolean enabled, authenticated = true, closed, pending, loseResponse, wrongPassword, delay;
+    private volatile boolean enabled, authenticated = true, closed, pending, loseResponse, wrongPassword, delay, rateLimited, receiptRateLimited;
     private volatile String role = "member", account = "90000001";
     private volatile long epoch = 1;
     private volatile int posts, previews, receipts;
@@ -61,6 +61,17 @@ final class AccountClosureUiSmoke {
             role = "root"; edit("Test-Password!"); click("狠心注销"); await(() -> has("需要先交接权限"), "fresh role revalidation"); check(posts == 0, "changed administrator blocked before POST"); finish();
 
             role = "member"; activity = open(AccountClosureActivity.class); await(() -> input() != null, "password required");
+            rateLimited = true; int ratePosts = posts, rateReads = receipts; String refusedRequest = requestId;
+            edit("Test-Password!"); click("狠心注销"); await(() -> has("本次未执行注销") && app.closure().state().phase == AccountClosureFlow.Phase.ERROR, "submit rate limit is a known refusal");
+            check(posts == ratePosts + 1 && receipts == rateReads, "rate limit does not start receipt polling or repeat POST");
+            check(app.vault().readClosure().isEmpty() && api.isLoggedIn() && !closed, "rate refusal clears saved receipt and preserves account");
+            recreate(); await(() -> has("本次未执行注销"), "rate refusal survives rotation without uncertain state");
+            check(posts == ratePosts + 1 && app.vault().readClosure().isEmpty(), "rotation never restores refused receipt or resubmits");
+            click("知道了"); rateLimited = false; click("重新检查"); await(() -> input() != null, "manual recheck available after rate limit lifts");
+            check(!requestId.equals(refusedRequest) && input().length() == 0 && posts == ratePosts + 1, "recheck creates fresh preview without POST or saved password");
+            finish(); resetController(); activity = open(AccountClosureActivity.class); await(() -> input() != null, "fresh controller does not restore refused receipt");
+            check(posts == ratePosts + 1 && receipts == rateReads && app.vault().readClosure().isEmpty(), "restart after refusal stays out of receipt recovery");
+            progress("rate-limit refusal, rotation, manual recheck and controller restart checked");
             wrongPassword = true; edit("Incorrect-Password!"); click("狠心注销"); await(() -> has("当前密码不正确") && input() != null, "wrong password is not success");
             check(input().length() == 0 && api.isLoggedIn(), "password cleared and original session retained"); wrongPassword = false;
             edit("Test-Password!"); recreate(); await(() -> input() != null, "confirmation survives rotation"); check(input().length() == 0, "password not in instance state");
@@ -82,14 +93,16 @@ final class AccountClosureUiSmoke {
             check(app.closure().state().phase == AccountClosureFlow.Phase.UNCERTAIN && posts == count + 1, "pending receipt not success and no repeated write");
             String saved = app.vault().readClosure(); check(!saved.contains("Test-Password!") && !prefs.getString("closure_cipher", "").contains(receiptToken), "only encrypted receipt persisted");
             recreate(); await(() -> has("尚未确认注销成功"), "rotation recovers pending read"); check(posts == count + 1, "pending rotate never POSTs");
+            receiptRateLimited = true; click("查询注销结果"); await(() -> has("请求过于频繁") && app.closure().state().phase == AccountClosureFlow.Phase.UNCERTAIN, "receipt rate limit remains uncertain");
+            check(saved.equals(app.vault().readClosure()) && posts == count + 1, "receipt throttle retains encrypted recovery and never resubmits"); receiptRateLimited = false;
             // Simulate loss of the in-memory controller; recover from the encrypted on-device receipt.
-            finish(); java.lang.reflect.Field field = AcmApplication.class.getDeclaredField("closure"); field.setAccessible(true); field.set(app, new AccountClosureFlow(app));
+            finish(); resetController();
             activity = open(AccountClosureActivity.class); await(() -> has("尚未确认注销成功"), "persistent recovery"); check(posts == count + 1, "persistent recovery only reads");
             login("90000001", 4); pending = false; closed = true; click("查询注销结果"); await(() -> has("注销成功"), "old result displayed");
             check(api.isLoggedIn() && "90000001".equals(api.accountKey()), "new account epoch preserved by old receipt");
             click("返回登陆界面"); await(() -> app.closure().state().phase == AccountClosureFlow.Phase.IDLE, "old receipt acknowledged");
             check(api.isLoggedIn(), "return never logs out replacement account");
-            output.putString("stream", "PASS: entry below logout; fresh feature switch; consequences and crying cat; equal 50% red/theme actions; cancel; admin/root and role-change blocks; current password/CSRF/idempotency/receipt/epoch contract; wrong password; rotation without password or duplicate POST; confirmed success clears credentials; parent login; lost-response receipt recovery; pending truthful; encrypted receipt process-controller recovery; anonymous receipt headers; newer account epoch protected.\n"); status = Activity.RESULT_OK;
+            output.putString("stream", "PASS: entry below logout; fresh feature switch; consequences and crying cat; equal 50% red/theme actions; cancel; admin/root and role-change blocks; current password/CSRF/idempotency/receipt/epoch contract; submit RATE_LIMITED clears receipt with manual recheck after rotation/restart, no polling or auto-POST; wrong password; rotation without password or duplicate POST; confirmed success clears credentials; parent login; lost-response receipt recovery; pending truthful; receipt RATE_LIMITED retains recovery; encrypted receipt process-controller recovery; anonymous receipt headers; newer account epoch protected.\n"); status = Activity.RESULT_OK;
         } catch (Throwable e) {
             StringBuilder visible = new StringBuilder(); if (activity != null) main(() -> walk(decor(), v -> { if (v instanceof TextView && !(v instanceof EditText)) visible.append(((TextView) v).getText()).append(" | "); return false; }));
             output.putString("stream", "FAIL: " + android.util.Log.getStackTraceString(e) + "\nUI: " + visible + "\nCounts: posts=" + posts + " previews=" + previews + " receipts=" + receipts);
@@ -103,6 +116,7 @@ final class AccountClosureUiSmoke {
         test.finish(status, output);
     }
     private void login(String who, long generation) throws Exception { authenticated = true; account = who; epoch = generation; api.login(who, "Test-Password!"); }
+    private void resetController() throws Exception { java.lang.reflect.Field field = AcmApplication.class.getDeclaredField("closure"); field.setAccessible(true); field.set(app, new AccountClosureFlow(app)); }
     private void progress(String step) { Bundle message = new Bundle(); message.putString("stream", "STEP: " + step + "\n"); test.sendStatus(1, message); }
     private Activity open(Class<?> type) { Activity page = test.startActivitySync(new Intent(context, type).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); pages.add(page); return page; }
     private Activity follow(Runnable work) { Instrumentation.ActivityMonitor monitor = test.addMonitor(AccountClosureActivity.class.getName(), null, false); try { work.run(); Activity page = test.waitForMonitorWithTimeout(monitor, 8000); check(page != null, "closure Activity started"); pages.add(page); return page; } finally { test.removeMonitor(monitor); } }
@@ -153,6 +167,7 @@ final class AccountClosureUiSmoke {
                     check("closure-csrf".equals(getRequestProperty("X-CSRF-Token")), "closure CSRF");
                     check(requestId.equals(getRequestProperty("Idempotency-Key")) && receiptToken.equals(getRequestProperty("X-Closure-Receipt")), "preview-bound secret headers");
                     JSONObject body = new JSONObject(bytes.toString("UTF-8")); check(body.length() == 4 && "注销账号".equals(body.getString("confirm_text")) && body.getLong("expected_account_epoch") == epoch && "closure-v2".equals(body.getString("policy_version")), "exact account intent");
+                    if (rateLimited) { code = 429; response = "{\"code\":\"RATE_LIMITED\",\"message\":\"操作过于频繁，请稍后再试。\"}"; return; }
                     if (wrongPassword) { code = 403; response = "{\"code\":\"REAUTH_FAILED\",\"message\":\"当前密码不正确。\"}"; return; }
                     check("Test-Password!".equals(body.getString("current_password")), "current password");
                     if (delay) Thread.sleep(1800);
@@ -161,7 +176,9 @@ final class AccountClosureUiSmoke {
                 }
                 if (path.startsWith("/api/account-closures/")) {
                     receipts++; check(receiptToken.equals(getRequestProperty("X-Closure-Receipt")), "secret receipt header");
-                    check(getRequestProperty("Cookie") == null && getRequestProperty("X-CSRF-Token") == null, "receipt has no unrelated account credentials"); response = receipt(); return;
+                    check(getRequestProperty("Cookie") == null && getRequestProperty("X-CSRF-Token") == null, "receipt has no unrelated account credentials");
+                    if (receiptRateLimited) { code = 429; response = "{\"code\":\"RATE_LIMITED\",\"message\":\"操作过于频繁，请稍后再试。\"}"; return; }
+                    response = receipt(); return;
                 }
                 if (path.equals("/api/me/profile")) { response = "{\"user\":{\"name\":\"Synthetic member\"},\"platform_counts\":{},\"recent_ac\":[],\"bindings\":[]}"; return; }
                 if (path.equals("/api/mobile/v1/capabilities")) { response = "{\"api_version\":1,\"features\":{}}"; return; }

@@ -53,6 +53,20 @@ public class AccountClosureTest {
         ApiClient.ApiException password = new ApiClient.ApiException(403, "Wrong password", false);
         password.details = new JSONObject().put("code", "REAUTH_FAILED"); assertTrue(AccountClosure.refused(password));
     }
+    @Test public void explicitSubmitRateLimitIsPreCommitRefusal() throws Exception {
+        ApiClient.ApiException limited = new ApiClient.ApiException(429, "操作过于频繁", false);
+        limited.details = new JSONObject().put("code", "RATE_LIMITED");
+        assertTrue(AccountClosure.refused(limited));
+    }
+    @Test public void unclassifiedThrottleOrServerFailureStillNeedsReceipt() throws Exception {
+        ApiClient.ApiException limited = new ApiClient.ApiException(429, "Too many requests", false);
+        assertFalse(AccountClosure.refused(limited));
+        limited.details = new JSONObject().put("code", "UPSTREAM_BUSY");
+        assertFalse(AccountClosure.refused(limited));
+        ApiClient.ApiException failed = new ApiClient.ApiException(503, "Storage unavailable", false);
+        failed.details = new JSONObject().put("code", "RATE_LIMITED");
+        assertFalse(AccountClosure.refused(failed));
+    }
     @Test public void featureDisabledIsNotMissingOrSuccess() throws Exception {
         ApiClient.ApiException failure = new ApiClient.ApiException(404, "Closed", false);
         assertFalse(AccountClosure.disabled(failure)); failure.details = new JSONObject().put("code", "FEATURE_DISABLED");

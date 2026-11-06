@@ -88,6 +88,7 @@ final class AccountClosureFlow {
                 if (AccountClosure.disabled(e)) update(Phase.DISABLED, null, "注销窗口关闭");
                 else if ("ROLE_HANDOVER_REQUIRED".equals(AccountClosure.code(e)) || "LAST_ROOT_PROTECTED".equals(AccountClosure.code(e))) update(Phase.BLOCKED, null, "管理员无法执行注销，需要先交接权限、降为普通成员。");
                 else if ("REAUTH_FAILED".equals(AccountClosure.code(e))) update(Phase.READY, ticket, "当前密码不正确，请重新输入。");
+                else if (AccountClosure.rateLimited(e)) update(Phase.ERROR, null, "注销请求过于频繁，本次未执行注销。请稍后重新检查。");
                 else update(Phase.ERROR, null, message(e));
             }
         });
