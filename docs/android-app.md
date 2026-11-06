@@ -1,6 +1,10 @@
-# ACMforever Android v0.2.20（候选版）
+# ACMforever Android v0.2.21（待评审版）
 
-当前候选版为 `0.2.20` / code `34`，重做搜索首页、修复表单软键盘，增加子页面右入右出及搜索卡片提前避让，详见[本轮说明](android-v0.2.20.md)。本轮提交新PR等待跨人review，不创建Tag或发布；已公开的v0.2.19仍沿用GitHub更新源，自站继续等待管理员配置。
+当前待评审版本为 `0.2.21` / code `35`，包含搜索模块拖动边界/滚动速度修复，以及本人OJ绑定、账户注销、原始题目标签筛选和Wiki完整目录/阅读导航，详见[本轮说明](android-v0.2.21.md)。按2026-11-06用户最新指示，提交源码PR交其他成员review；本轮不合并、不创建Tag或发布，自站继续等待管理员配置。
+
+本版实施与验证记录：[本人OJ绑定/改绑/解绑](android-oj-bindings-local-2026-11-06.md)、[本人账户注销/结果回执](android-account-closure-local-2026-11-06.md)、[题目原始标签筛选与搜索](android-problem-tags-local-2026-11-06.md)和[Wiki完整目录与阅读导航](android-wiki-navigation-local-2026-11-06.md)。其中“仅本地”保留原开发阶段的记录，本次源码已纳入待评审范围。原 `dist/acmforever-0.2.21-debug.apk` 及功能比较节点仍保留上一轮构建/核对结果，尚未包含这些后续功能；本轮不发布新安装包。
+
+已发布版为 `v0.2.20` / code `34`，PR #108 已合并，沿用 GitHub 更新源。[Release](https://github.com/GiraffesLoveBeauty/ACM-Forever/releases/tag/v0.2.20) 的 APK 由 Actions 构建，与原本地候选不是同一文件；发布制品已经下载并核对哈希、版本与固定调试签名。本轮网站增量核对见[web-updates-since-android-v0.2.20.md](web-updates-since-android-v0.2.20.md)，不修改网站或业务后端。以下 v0.2.20 验收文档保留当时的候选构建记录。
 
 v0.2.19 / code33的整卡排序、下拉刷新、便捷成员管理与主题分层说明保存在[上一版记录](android-v0.2.19.md)，已随PR #107合入并Tag发布。以下更早版本的测试与限制仍作为历史记录保留。
 
@@ -12,7 +16,7 @@ v0.2.19 / code33的整卡排序、下拉刷新、便捷成员管理与主题分�
 
 `Android_APP/app/` 为 Java 原生 Android 工程，`app/app/src/androidTest/` 是独立测试包，`Android_APP/prototype/` 是历史浏览器原型，不代表当前 Android 版本。`Android_APP/docs/` 保留每版安装、美术与需求记录；本文与根 `docs/api.md` 说明当前工程行为。`dist/`、SDK/JDK/Gradle、依赖、数据库、签名密钥及构建缓存不入 Git。
 
-底部入口为论坛主页、排行榜、发帖、题库和个人中心，顶部头像进入账号设置。现有接口复用于登录、论坛、收藏、多草稿及自动保存、投稿进度、Markdown 预览/图片、题库与 PDF、通知、Wiki、训练与赛事复盘。手机不直接连接数据库，不携带服务端 Bot Token。重管理与 OJ 绑定操作留在 Web，App 提示转网页或联系管理员。
+底部入口为论坛主页、排行榜、发帖、题库和个人中心，顶部头像进入账号设置。现有接口复用于登录、论坛、收藏、多草稿及自动保存、投稿进度、Markdown 预览/图片、题库与 PDF、通知、Wiki、训练与赛事复盘。手机不直接连接数据库，不携带服务端 Bot Token。重管理留在 Web；本人OJ绑定按服务端开放能力接入，尚未开放的平台提示联系管理员。
 
 个人中心包含公开资料、各平台通过题数和本人最近 AC；公开逐题记录不向他人开放。外观支持独立主辅色、模块/控件透明度、相册裁剪全屏背景、网页主题的原生适配及本机主题保存/编辑/预览/删除。背景、主题、历史与凭据仅保存在设备，凭据使用 Keystore AES-GCM。相同包名与证书覆盖安装保留这些数据；卸载或清除应用数据会删除。
 
@@ -42,7 +46,7 @@ PR 复用主线 Web 会话、CSRF 和业务 API，仅为公开成员身份/资�
 
 ## 更新渠道与说明
 
-- `assets/releases/history.json` 保存 30 版更新日志，检查更新页离线可读，构建时检查当前版本一致。早期没有详细记录的版本明确标作存档。
+- `assets/releases/history.json` 保存 35 版更新日志，检查更新页离线可读，构建时检查当前版本一致。早期没有详细记录的版本明确标作存档。
 - 当前App PR沿用 `default_update_manifest_url` 的公开GitHub Release清单与原APK下载流程，不依赖业务API。自站清单、备用源与镜像事务从原#100拆到另一PR，当前分支不包含。
 - 用户可覆盖为独立 HTTPS 清单地址，留空恢复GitHub默认地址；自定义源保持独立。新清单包含 channel，不同渠道被拒绝；旧的无 channel 清单仍兼容，实际 APK 签名校验继续保留。
 - 清单至多跟随五次 HTTPS 跳转，每次拒绝 HTTP 降级、URL 凭据和 fragment，大小上限 32 KiB；不附业务登录 Cookie。
@@ -55,11 +59,11 @@ PR 复用主线 Web 会话、CSRF 和业务 API，仅为公开成员身份/资�
 
 ## 当前调试安装包怎样分发
 
-不把 APK 提交进 Git。当前0.2.20为本地候选构建，尚未对外分发。评审合并后，负责人另行确认并推送Tag，由现有Action编译并发布到GitHub Release；APK不进源码仓库。
+不把 APK 提交进 Git。当前0.2.21为本地候选，尚未对外分发；已公开发布版为0.2.20。后续评审合并后，负责人另行确认并推送Tag，由现有Action编译并发布到GitHub Release；本轮不执行这些步骤。
 
-本仓库已公开，沿用原签名Secret。当前App分支的GitHub发布不需要自站SSH；自站另一个PR仍待管理员配置并review。当前候选为0.2.20/code34，评审和发布确认后才创建新Tag。只推PR不会使手机收到新版；直连GitHub仍可能超时。
+本仓库已公开，沿用原签名Secret。GitHub发布不需要自站SSH；自站另一个PR仍待管理员配置并review。当前候选为0.2.21/code35，评审和发布确认后才创建新Tag。只推PR不会使手机收到新版；直连GitHub仍可能超时。
 
-客户端只提示 `versionCode` 严格更大的版本。本次为 `0.2.20` / code `34`，上一已发布版为 `0.2.19` / code `33`；同code不提示。后续继续递增并补日志。正式签名与当前调试签名不同，首次切换正式版需重装；之后保持正式密钥连续更新。单一latest流不同时分发两个签名渠道。
+客户端只提示 `versionCode` 严格更大的版本。本地候选为 `0.2.21` / code `35`，已发布版为 `0.2.20` / code `34`；同code不提示。后续继续递增并补日志。正式签名与当前调试签名不同，首次切换正式版需重装；之后保持正式密钥连续更新。单一latest流不同时分发两个签名渠道。
 
 ## 构建与 CI
 
@@ -70,7 +74,7 @@ cd Android_APP/app
 ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
 ```
 
-Windows 的 `Android_APP/tools/*local-v0214.ps1` 保留历史用途，其中打包脚本固定检查code28，不能用于新版。本轮本机使用 `build-local-v0216.ps1` 和 `package-local-v0216.ps1`，也可用上面的标准Gradle命令；发布由Tag Action构建并核验实际APK。现有本机离线工具位于 `%TEMP%/acmforever-build-v0.2.0`，不是从零安装脚本。调试密钥放 `Android_APP/dist/signing/debug.keystore`；缺少原密钥会生成不同签名，不能覆盖已有包。
+Windows 的 `Android_APP/tools/` 内带历史版本号的本地脚本保留当时用途，打包脚本会固定检查对应版本，不能直接用于新版。当前构建可使用上面的标准Gradle命令；本轮本机另使用忽略目录的 `dist/build-v0221.ps1`、`ui-v0221.ps1` 和 `package-v0221.ps1`，发布仍由Tag Action构建并核验实际APK。现有本机离线工具位于 `%TEMP%/acmforever-build-v0.2.0`，不是从零安装脚本。调试密钥放 `Android_APP/dist/signing/debug.keystore` 或通过 `localDebugKeystore` 指定原密钥；缺少原密钥会生成不同签名，不能覆盖已有包。
 
 `android-ci.yml` 在 App/相关工作流的 PR 变更时执行 Python 发布合同/失败重试测试和 Android JVM/Lint/构建。`api-tests.yml` 按既有触发范围执行 Vue 构建、后端合同和 Web 单测。十三组模拟器测试目前是本机验收，没有加入 Actions。
 
