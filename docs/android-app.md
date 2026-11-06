@@ -1,10 +1,10 @@
-# ACMforever Android v0.2.21（待评审版）
+# ACMforever Android v0.2.22（待评审版）
 
-当前待评审版本为 `0.2.21` / code `35`，包含搜索模块拖动边界/滚动速度修复，以及本人OJ绑定、账户注销、原始题目标签筛选和Wiki完整目录/阅读导航，详见[本轮说明](android-v0.2.21.md)。按2026-11-06用户最新指示，提交源码PR交其他成员review；本轮不合并、不创建Tag或发布，自站继续等待管理员配置。
+当前待评审版本为 `0.2.22` / code `36`，增加版本人员署名、特别鸣谢、维护交接规范和未登录门禁，详见[本轮说明](android-v0.2.22.md)、[维护交接规范](android-maintainer-handover.md)及[署名来源](android-credits-v0.2.22.md)。按2026-11-07用户指示，完成本地检查后提交新PR，交其他成员review；本轮不合并、不创建Tag或发布，自站保持独立。
 
-本版实施与验证记录：[本人OJ绑定/改绑/解绑](android-oj-bindings-local-2026-11-06.md)、[本人账户注销/结果回执](android-account-closure-local-2026-11-06.md)、[题目原始标签筛选与搜索](android-problem-tags-local-2026-11-06.md)和[Wiki完整目录与阅读导航](android-wiki-navigation-local-2026-11-06.md)。其中“仅本地”保留原开发阶段的记录，本次源码已纳入待评审范围。原 `dist/acmforever-0.2.21-debug.apk` 及功能比较节点仍保留上一轮构建/核对结果，尚未包含这些后续功能；本轮不发布新安装包。
+上一版实施与验证记录：[本人OJ绑定/改绑/解绑](android-oj-bindings-local-2026-11-06.md)、[本人账户注销/结果回执](android-account-closure-local-2026-11-06.md)、[题目原始标签筛选与搜索](android-problem-tags-local-2026-11-06.md)和[Wiki完整目录与阅读导航](android-wiki-navigation-local-2026-11-06.md)。其中“仅本地”和待评审字样保留当时开发记录；PR #110 已合并并通过Tag发布。原 `dist/acmforever-0.2.21-debug.apk` 及功能比较节点仍是冻结的早期候选，不能与发布包混用。
 
-已发布版为 `v0.2.20` / code `34`，PR #108 已合并，沿用 GitHub 更新源。[Release](https://github.com/GiraffesLoveBeauty/ACM-Forever/releases/tag/v0.2.20) 的 APK 由 Actions 构建，与原本地候选不是同一文件；发布制品已经下载并核对哈希、版本与固定调试签名。本轮网站增量核对见[web-updates-since-android-v0.2.20.md](web-updates-since-android-v0.2.20.md)，不修改网站或业务后端。以下 v0.2.20 验收文档保留当时的候选构建记录。
+已发布版为 `v0.2.21` / code `35`，PR #110 已合并，沿用 GitHub 更新源。[Release](https://github.com/GiraffesLoveBeauty/ACM-Forever/releases/tag/v0.2.21) 的 APK 由 Actions 构建，已回下载核对哈希、版本、内置日志与固定调试签名。发布包位于本机 `dist/releases/v0.2.21/`，不同于冻结候选。网站增量核对见[web-updates-since-android-v0.2.20.md](web-updates-since-android-v0.2.20.md)，不修改网站或业务后端。以下旧版验收文档保留当时的候选记录。
 
 v0.2.19 / code33的整卡排序、下拉刷新、便捷成员管理与主题分层说明保存在[上一版记录](android-v0.2.19.md)，已随PR #107合入并Tag发布。以下更早版本的测试与限制仍作为历史记录保留。
 
@@ -46,7 +46,7 @@ PR 复用主线 Web 会话、CSRF 和业务 API，仅为公开成员身份/资�
 
 ## 更新渠道与说明
 
-- `assets/releases/history.json` 保存 35 版更新日志，检查更新页离线可读，构建时检查当前版本一致。早期没有详细记录的版本明确标作存档。
+- `assets/releases/history.json` 保存 36 版更新日志，人员信息使用 `assets/releases/credits.json`；登录后的检查更新页离线可读，构建时检查当前版本一致。早期没有独立记录的版本明确标明范围。
 - 当前App PR沿用 `default_update_manifest_url` 的公开GitHub Release清单与原APK下载流程，不依赖业务API。自站清单、备用源与镜像事务从原#100拆到另一PR，当前分支不包含。
 - 用户可覆盖为独立 HTTPS 清单地址，留空恢复GitHub默认地址；自定义源保持独立。新清单包含 channel，不同渠道被拒绝；旧的无 channel 清单仍兼容，实际 APK 签名校验继续保留。
 - 清单至多跟随五次 HTTPS 跳转，每次拒绝 HTTP 降级、URL 凭据和 fragment，大小上限 32 KiB；不附业务登录 Cookie。

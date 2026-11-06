@@ -1,0 +1,828 @@
+{
+  "schemaVersion": 1,
+  "capturedOn": "2026-11-07",
+  "repository": "GiraffesLoveBeauty/ACM-Forever",
+  "maintainers": [
+    "MiaoJJ13445"
+  ],
+  "people": [
+    {
+      "login": "AquaticLife",
+      "kind": "user",
+      "profileUrl": "https://github.com/AquaticLife",
+      "avatar": "credits/avatars/282278496.png",
+      "avatarSource": "https://avatars.githubusercontent.com/u/282278496?v=4",
+      "avatarSha256": "2f469b6308b8b3994a6ccdc49c1762f10f31d14935451b381d7ebd06b551acad",
+      "role": "仓库代码贡献（GitHub 记录）"
+    },
+    {
+      "login": "BlinB209",
+      "kind": "user",
+      "profileUrl": "https://github.com/BlinB209",
+      "avatar": "credits/avatars/263852352.png",
+      "avatarSource": "https://avatars.githubusercontent.com/u/263852352?v=4",
+      "avatarSha256": "315d94422203bc6fb0a7863f17e9f855735824739718ea28bce3b3eece32c9e0",
+      "role": "仓库代码贡献（GitHub 记录）"
+    },
+    {
+      "login": "chatgpt-codex-connector[bot]",
+      "kind": "bot",
+      "profileUrl": "https://github.com/apps/chatgpt-codex-connector",
+      "avatar": "credits/avatars/199175422.png",
+      "avatarSource": "https://avatars.githubusercontent.com/in/1144995?v=4",
+      "avatarSha256": "56cca637bdaf7a79eee412fb49cc4ea192e8329fd693a34fc02ca71264a764ae",
+      "role": "自动代码评审 · 非人工批准"
+    },
+    {
+      "login": "codex",
+      "kind": "user",
+      "profileUrl": "https://github.com/codex",
+      "avatar": "credits/avatars/267193182.png",
+      "avatarSource": "https://avatars.githubusercontent.com/u/267193182?v=4",
+      "avatarSha256": "a3009e35307a00503d4562fa2717f40b7ee37e5855019e76d2bd9ea007e81d88",
+      "role": "仓库代码贡献（GitHub 记录）"
+    },
+    {
+      "login": "github-actions[bot]",
+      "kind": "bot",
+      "profileUrl": "https://github.com/apps/github-actions",
+      "avatar": "credits/avatars/41898282.png",
+      "avatarSource": "https://avatars.githubusercontent.com/in/15368?v=4",
+      "avatarSha256": "1c3abf89a4b5f41a80bb133a2a655bed5af05b1a0040f7b72e0e5e02d343c5bf",
+      "role": "自动构建与发布"
+    },
+    {
+      "login": "KianaaKaslana",
+      "kind": "user",
+      "profileUrl": "https://github.com/KianaaKaslana",
+      "avatar": "credits/avatars/190714078.png",
+      "avatarSource": "https://avatars.githubusercontent.com/u/190714078?v=4",
+      "avatarSha256": "dd5bab4215d97b9cd2c33bc73c39af756b53fe45a29c78cd5dfe1d6c8402b3d2",
+      "role": "仓库代码贡献（GitHub 记录）"
+    },
+    {
+      "login": "MiaoJJ13445",
+      "kind": "user",
+      "profileUrl": "https://github.com/MiaoJJ13445",
+      "avatar": "credits/avatars/334467941.png",
+      "avatarSource": "https://avatars.githubusercontent.com/u/334467941?v=4",
+      "avatarSha256": "0c6575304d0f2b1f7e2c734ccf592c0de2dd6ed8cfa5d7c06793d9e4f5f35ead",
+      "role": "App 制作与提交 · 当前维护"
+    },
+    {
+      "login": "MnMeizz",
+      "kind": "user",
+      "profileUrl": "https://github.com/MnMeizz",
+      "avatar": "credits/avatars/183781735.png",
+      "avatarSource": "https://avatars.githubusercontent.com/u/183781735?v=4",
+      "avatarSha256": "b49d384d111dc89f6be86deb82644dfacff1fe2829d2b0b5118954bd1ff1ddf0",
+      "role": "仓库代码贡献（GitHub 记录）"
+    },
+    {
+      "login": "Setsuna-Yukirin",
+      "kind": "user",
+      "profileUrl": "https://github.com/Setsuna-Yukirin",
+      "avatar": "credits/avatars/268625483.png",
+      "avatarSource": "https://avatars.githubusercontent.com/u/268625483?v=4",
+      "avatarSha256": "fff39b49eb31092db3b2b8994a75b0345ce502d68f12ec18204200962759f457",
+      "role": "发起 App Review"
+    },
+    {
+      "login": "T-CrB",
+      "kind": "user",
+      "profileUrl": "https://github.com/T-CrB",
+      "avatar": "credits/avatars/224936987.png",
+      "avatarSource": "https://avatars.githubusercontent.com/u/224936987?v=4",
+      "avatarSha256": "d731321d37059d15b405783180356d20fee94e293a39a75c2758bd26ea2f3a95",
+      "role": "仓库代码贡献（GitHub 记录）"
+    },
+    {
+      "login": "Vanilla-Yukirin",
+      "kind": "user",
+      "profileUrl": "https://github.com/Vanilla-Yukirin",
+      "avatar": "credits/avatars/51521470.png",
+      "avatarSource": "https://avatars.githubusercontent.com/u/51521470?v=4",
+      "avatarSha256": "18dc473f087e7a1226522c0afab2d8ebe7e77715cf845555eec1044bf687af52",
+      "role": "仓库代码贡献（GitHub 记录）"
+    },
+    {
+      "login": "xingjiang0",
+      "kind": "user",
+      "profileUrl": "https://github.com/xingjiang0",
+      "avatar": "credits/avatars/244661655.png",
+      "avatarSource": "https://avatars.githubusercontent.com/u/244661655?v=4",
+      "avatarSha256": "b388ee1a3140888a020b0aa2d4454eb2d0a1f66c60daab8a6ac3ecf0b1e12b19",
+      "role": "仓库代码贡献（GitHub 记录）"
+    }
+  ],
+  "thanks": [
+    "MiaoJJ13445",
+    "Setsuna-Yukirin",
+    "KianaaKaslana",
+    "T-CrB",
+    "codex",
+    "xingjiang0",
+    "MnMeizz",
+    "BlinB209",
+    "AquaticLife",
+    "Vanilla-Yukirin",
+    "chatgpt-codex-connector[bot]",
+    "github-actions[bot]"
+  ],
+  "versions": {
+    "0.2.22": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [],
+      "reviewers": [],
+      "publishers": [],
+      "pr": 0,
+      "status": "development",
+      "scope": "当前开发版本；尚未产生本轮评审记录。",
+      "evidence": []
+    },
+    "0.2.21": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [
+        "github-actions[bot]"
+      ],
+      "pr": 110,
+      "status": "published",
+      "scope": "对应 PR 的参与记录；机器人评审不等于人工批准。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/110#issuecomment-6689054372",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/110#issuecomment-6689115272"
+      ]
+    },
+    "0.2.20": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [
+        "github-actions[bot]"
+      ],
+      "pr": 108,
+      "status": "published",
+      "scope": "对应 PR 的参与记录；机器人评审不等于人工批准。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/108#issuecomment-6680285372",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/108#issuecomment-6680323194"
+      ]
+    },
+    "0.2.19": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [
+        "github-actions[bot]"
+      ],
+      "pr": 107,
+      "status": "published",
+      "scope": "对应 PR 的参与记录；机器人评审不等于人工批准。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/107#issuecomment-6665982257",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/107#issuecomment-6666029773"
+      ]
+    },
+    "0.2.18": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [
+        "github-actions[bot]"
+      ],
+      "pr": 106,
+      "status": "published",
+      "scope": "对应 PR 的参与记录；机器人评审不等于人工批准。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/106#issuecomment-6660985594",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/106#issuecomment-6661036236"
+      ]
+    },
+    "0.2.17": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [
+        "github-actions[bot]"
+      ],
+      "pr": 104,
+      "status": "published",
+      "scope": "对应 PR 的参与记录；机器人评审不等于人工批准。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/104#issuecomment-6657141133",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/104#issuecomment-6657188850"
+      ]
+    },
+    "0.2.16": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 100,
+      "status": "unpublished",
+      "scope": "PR #100 后续已拆分，未作为独立公开 APK 发布；以下为原 PR 的参与记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/100#issuecomment-6649857638",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/100#issuecomment-6649894809"
+      ]
+    },
+    "0.2.15": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [
+        "github-actions[bot]"
+      ],
+      "pr": 97,
+      "status": "published",
+      "scope": "对应 PR 的参与记录；机器人评审不等于人工批准。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/97#issuecomment-6646514775",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/97#issuecomment-6646545922"
+      ]
+    },
+    "0.2.14": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 96,
+      "status": "unpublished",
+      "scope": "对应 PR 的参与记录；机器人评审不等于人工批准。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/96#issuecomment-6639131296",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/96#issuecomment-6639169860"
+      ]
+    },
+    "0.2.13": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "对应 PR 的参与记录；机器人评审不等于人工批准。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.2.12": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.2.11": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.2.10": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.2.9": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.2.8": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.2.7": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.2.6": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.2.5": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.2.4": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.2.3": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.2.2": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.2.1": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.2.0": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.1.12": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.1.11": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.1.10": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.1.9": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.1.8": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.1.7": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.1.6": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.1.5": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.1.4": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.1.3": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.1.2": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.1.1": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    },
+    "0.1.0": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "Setsuna-Yukirin"
+      ],
+      "reviewers": [
+        "chatgpt-codex-connector[bot]"
+      ],
+      "publishers": [],
+      "pr": 48,
+      "status": "unpublished",
+      "scope": "早期版本随 PR #48 汇总提交，以下为该 PR 的参与记录，未找到本版本独立评审记录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
+      ]
+    }
+  },
+  "sources": [
+    "https://github.com/GiraffesLoveBeauty/ACM-Forever/graphs/contributors",
+    "https://github.com/GiraffesLoveBeauty/ACM-Forever/releases"
+  ],
+  "historyOwnerNote": "截至 0.2.21 的所有 App 历史版本均由 MiaoJJ13445 制作，依据本人确认及 Android PR 作者记录；上传/提交负责人不等于 Actions 自动发布账号。"
+}

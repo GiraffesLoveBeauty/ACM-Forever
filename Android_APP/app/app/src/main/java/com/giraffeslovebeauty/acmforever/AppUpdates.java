@@ -72,7 +72,7 @@ final class AppUpdates {
     boolean automatic(){return prefs.getBoolean(KEY+"automatic",true);}
     void automatic(boolean value){prefs.edit().putBoolean(KEY+"automatic",value).apply();changed();}
     void maybeCheck(){if(!automatic()||busy())return;long now=System.currentTimeMillis(),success=prefs.getLong(KEY+"success",0),attempt=prefs.getLong(KEY+"attempt",0);boolean sameBuild=prefs.getLong(KEY+"checked_build",-1)==currentVersion();if((!sameBuild||now-success>=6*60*60*1000L||now<success)&&(attempt==0||now-attempt>=60000||now<attempt))check(false);}
-    void startupCheck(){if(startupChecked)return;startupChecked=true;maybeCheck();}
+    void startupCheck(){if(!api.isLoggedIn()||startupChecked)return;startupChecked=true;maybeCheck();}
     long currentVersion(){try{PackageInfo p=context.getPackageManager().getPackageInfo(context.getPackageName(),0);return Build.VERSION.SDK_INT>=28?p.getLongVersionCode():p.versionCode;}catch(Exception e){return 0;}}
     String currentName(){try{return context.getPackageManager().getPackageInfo(context.getPackageName(),0).versionName;}catch(Exception e){return "未知";}}
     private String channel(){return (context.getApplicationInfo().flags&ApplicationInfo.FLAG_DEBUGGABLE)!=0?"debug":"release";}
@@ -168,7 +168,7 @@ final class AppUpdates {
         throw new IllegalArgumentException("更新清单重定向次数过多。");
     }
     private void presentOffer(){
-        Activity a=activity();if(a==null||busy()||offerDialog!=null)return;
+        Activity a=activity();if(a==null||!api.isLoggedIn()||busy()||offerDialog!=null)return;
         if(!pendingOffer&&pendingResult.isEmpty())return;
         if(ModalDialogs.isShowing(a)){ui.removeCallbacks(presentOffer);ui.postDelayed(presentOffer,500);return;}
         if(!pendingResult.isEmpty()){

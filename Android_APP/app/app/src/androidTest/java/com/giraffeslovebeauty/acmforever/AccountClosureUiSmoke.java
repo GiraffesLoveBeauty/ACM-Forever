@@ -22,6 +22,7 @@ final class AccountClosureUiSmoke {
     private volatile String role = "member", account = "90000001";
     private volatile long epoch = 1;
     private volatile int posts, previews, receipts;
+    private volatile boolean earlyAuthGateChecked;
     private String requestId = "", receiptToken = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFG";
     private AccountClosureUiSmoke(Instrumentation test) { this.test = test; context = test.getTargetContext(); }
     static void run(Instrumentation test) { new AccountClosureUiSmoke(test).run(); }
@@ -73,16 +74,36 @@ final class AccountClosureUiSmoke {
             check(posts == ratePosts + 1 && receipts == rateReads && app.vault().readClosure().isEmpty(), "restart after refusal stays out of receipt recovery");
             progress("rate-limit refusal, rotation, manual recheck and controller restart checked");
             authRequired = true; int authPosts = posts, authReads = receipts; String authRequest = requestId;
-            edit("Test-Password!"); click("狠心注销"); await(() -> has("请返回重新登录后重新检查") && app.closure().state().phase == AccountClosureFlow.Phase.ERROR, "submit authentication refusal is recoverable");
+            java.lang.reflect.Field listenerField = ApiClient.class.getDeclaredField("sessionChanged"); listenerField.setAccessible(true);
+            Runnable sessionListener = (Runnable) listenerField.get(api);
+            Activity closurePage = activity;
+            api.setSessionChanged(() -> {
+                sessionListener.run();
+                if (authRequired && !api.isLoggedIn()) {
+                    // Drain the first gate callback before the API returns 401 to the flow.
+                    // The receipt still exists, so only its later removal can force login.
+                    main(() -> {
+                        check(app.vault().hasClosure(), "first authentication gate runs before receipt cleanup");
+                        check(!closurePage.isFinishing() && closurePage.getWindow().getDecorView().getVisibility() == View.VISIBLE,
+                                "first gate allows existing receipt page");
+                        earlyAuthGateChecked = true;
+                    });
+                }
+            });
+            try { activity = follow(MainActivity.class, () -> { edit("Test-Password!"); click("狠心注销"); }); }
+            finally { api.setSessionChanged(sessionListener); }
+            check(earlyAuthGateChecked, "authentication race ordering was exercised");
+            await(() -> has("账号登录") && app.closure().state().phase == AccountClosureFlow.Phase.ERROR, "authentication refusal forces login without a pending receipt");
             check(posts == authPosts + 1 && receipts == authReads && app.vault().readClosure().isEmpty(), "authentication refusal clears receipt without polling or repeated POST");
             check(!api.isLoggedIn() && !closed, "expired session is not mistaken for successful closure");
-            recreate(); await(() -> has("请返回重新登录后重新检查"), "authentication refusal survives rotation");
+            recreateMain(); await(() -> has("账号登录"), "authentication refusal stays at login after rotation");
             check(posts == authPosts + 1 && receipts == authReads && app.vault().readClosure().isEmpty(), "rotation never restores refused authentication receipt");
-            click("知道了"); authRequired = false; login("90000001", 1); click("重新检查"); await(() -> input() != null, "login and manual recheck recover after authentication refusal");
+            authRequired = false; login("90000001", 1); parent = activity; activity = open(AccountClosureActivity.class);
+            await(() -> input() != null, "login and reopening closure recover after authentication refusal");
             check(!authRequest.equals(requestId) && input().length() == 0 && posts == authPosts + 1, "fresh preview after login never automatically submits");
             finish(); resetController(); activity = open(AccountClosureActivity.class); await(() -> input() != null, "controller restart after authentication refusal permits a fresh preview");
             check(posts == authPosts + 1 && receipts == authReads && app.vault().readClosure().isEmpty(), "authentication refusal leaves no persisted pending recovery");
-            progress("authentication refusal, rotation, login/recheck and controller restart checked");
+            progress("authentication refusal with gate-before-cleanup ordering, rotation, login/recheck and controller restart checked");
             wrongPassword = true; edit("Incorrect-Password!"); click("狠心注销"); await(() -> has("当前密码不正确") && input() != null, "wrong password is not success");
             check(input().length() == 0 && api.isLoggedIn(), "password cleared and original session retained"); wrongPassword = false;
             edit("Test-Password!"); recreate(); await(() -> input() != null, "confirmation survives rotation"); check(input().length() == 0, "password not in instance state");
