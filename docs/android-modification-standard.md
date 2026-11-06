@@ -21,7 +21,7 @@ Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/a
 | `WikiCatalog`、`WikiOutline`、`WikiReaderNavigation`、`ContentView`及`reader/content.js` | Wiki分类路径、文章标签、章节目录/高亮与阅读位置 | 只读公开接口；分类和文章独立失败；从清理后的实际DOM取标题，代码块不算目录、重复标题ID唯一；无JS应用桥，章内偏移/历史版本/转屏/返回及动态布局必须联查 |
 | `ProblemTags`、`ProblemTagPicker`、题库与搜索/比赛进度 | 原始标签候选搜索、完整标签精确筛选 | `tag`关键词与`problem_tag`完整标签分开编码；真实候选、平台切换清标签、筛选归第一页、翻页/返回/重建保留、单窗防重及会话代次 |
 | `OjBindingsActivity`、`OjBindingState` | 本人 OJ 绑定列表、归属核验、绑定/改绑/解绑与同步 | 复用 `/api/me/profile` 的 `bindings` 能力；是否绑定取账号字段而非 AC 数；确认请求必须核对实际输入与验证码所属账号；密码/确认不持久化，写入不自动重试，返回个人中心/账号页刷新 |
-| `AccountClosureActivity`、`AccountClosureFlow`、`AccountClosure`、`SessionVault` | 本人账户注销、实时开关、确认和结果回执 | 独立加密回执先保存再提交；当前密码不持久化；管理员不能提交；转屏/断网/重启只查询，不重放POST；已明确的提交前拒绝可清回执，查询限流不得清理；必须匹配回执与提交时间才报成功，同QQ新代账号不可被旧回执退出 |
+| `AccountClosureActivity`、`AccountClosureFlow`、`AccountClosure`、`SessionVault`及`MainActivity`登录页 | 本人账户注销、实时开关、确认和结果回执 | 独立加密回执先保存再提交；未登录时仍须有本机回执查询入口；当前密码不持久化；管理员不能提交；转屏/断网/重启只查询，不重放POST；已明确的提交前拒绝可清回执，查询限流不得清理；必须匹配回执与提交时间才报成功，同QQ新代账号不可被旧回执退出 |
 | `ClubActivity`、`TrainingReminder` | 题单、讨论、错题、复习、打卡和本地提醒 | 缺失接口保留真实报错，通知授权、返回来源页 |
 | `CloudDrafts` 与主页面编辑器 | 云端多草稿和自动保存 | 账号+草稿代次；切换草稿、返回旧页、迟到写入、Markdown 导入归属 |
 | `PdfActivity`、`ContentView`、阅读器资源 | PDF、Markdown/公式/代码与图片 | 缩放/翻页/复制、受限媒体地址、缓存边界 |
@@ -94,6 +94,8 @@ CF申请验证码后，将验证码保存到公开资料再确认；改绑、解
 注销错误分类必须区分提交与回执查询：现有服务端在提交事务前返回的 `429 / RATE_LIMITED` 是明确拒绝，客户端清除待确认回执，保留会话并允许手动重新检查，不自动再次POST。只有状态码与业务码同时匹配才使用此规则；裸429、未知业务码、超时及5xx继续保留恢复信息。回执GET即使返回同样的 `429 / RATE_LIMITED` 也不能证明注销未发生，不得清回执或切换到新提交。
 
 注销POST的 `401 / AUTH_REQUIRED` 也属于明确提交前拒绝，可清除待确认回执并引导重新登录后手动检查。不能将该规则扩大到裸401、未知业务码或5xx；回执GET的认证失败仍属结果不明，必须保留原回执，且不能清理当前正常会话。
+
+注销回执的恢复入口不能依赖正常登录。`MainActivity.showLogin()` 同时覆盖启动时未登录和刷新会话失败后显示登录表单的路径；有本机密文时显示“查询注销结果”。UI只检查密文存在，不解密、不取Keystore、不获取ApiClient网络锁；真正读取在注销工作线程执行。恢复只能查询旧回执，不能自动登录、重新预览或重放POST；服务器注销开关关闭也不能封住回执查询。普通退出登录与会话失效不得删除待确认回执；只有明确拒绝或用户确认已完成结果时按现有规则清理。
 
 账号设置仅在服务端会话确认为 `admin/root` 时显示入口。页面进入、重新可见及每次管理读写前在后台验证会话；实际 API 仍由服务器鉴权。普通成员即使启动内部 Activity 也不能看到管理数据。
 
