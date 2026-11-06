@@ -93,6 +93,7 @@ final class WebFeaturesUiSmoke {
             if(p.equals("/api/mobile/v1/members/"+HASH))return "{\"public_member_id\":\""+HASH+"\",\"name\":\"公开成员\",\"platform_counts\":{\"codeforces\":60},\"total_count\":60}";
             if(p.equals("/api/mobile/v1/members/"+HASH+"/posts"))return "{\"rows\":[],\"total\":0}";
             if(p.endsWith("/wiki/navigation"))return "{\"categories\":[{\"id\":1,\"name\":\"测试算法分类\",\"parent_id\":null}]}";
+            if(p.equals("/api/wiki/categories/1"))return "{\"category\":{\"id\":1,\"name\":\"测试算法分类\",\"parent_id\":null},\"path\":[{\"id\":1,\"name\":\"测试算法分类\"}],\"children\":[]}";
             if(p.equals("/api/wiki/pages")||p.equals("/api/wiki/search"))return "{\"items\":[{\"slug\":\"test-algorithm\",\"title\":\"测试算法条目\",\"summary\":\"测试摘要\"}],\"total\":1}";
             if(p.endsWith("/revisions"))return "[{\"id\":2,\"title\":\"测试算法旧版\",\"published_at\":1700000000}]";
             if(p.startsWith("/api/wiki/pages/"))return new JSONObject().put("title",p.endsWith("/2")?"测试算法旧版":"测试算法条目").put("body","# Test\n**Actual Markdown**").put("source","测试来源").put("license","CC BY 4.0").put("exercises",new JSONArray("[{\"label\":\"站内练习\",\"url\":\"/problem.html?platform=luogu&problem_id=P1000\"},{\"label\":\"外部练习\",\"url\":\"https://codeforces.com/problemset/problem/1843/A\"},{\"label\":\"缺少题号的练习\",\"url\":\"/problem.html?platform=luogu\"}]")).toString();

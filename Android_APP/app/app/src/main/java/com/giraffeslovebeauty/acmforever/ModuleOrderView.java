@@ -15,21 +15,22 @@ final class ModuleOrderView extends ViewGroup {
     private final ScrollView scroll;
     private final Consumer<List<String>> saved;
     private final int gap,slop;
+    private final ModuleEdgeScroll edgeScroll;
     private View candidate,selected;
     private float downX,downY,pointerY,grip;
     private boolean dragging;
-    private ModuleDragPhysics physics;private long lastFrame;
+    private ModuleDragPhysics physics;private long lastFrame,lastEdgeFrame;
     private int pointer=-1;
     private final Runnable hold=()->begin();
     private final Runnable edge=new Runnable(){public void run(){
         if(!dragging)return;
         int[] screen=new int[2];scroll.getLocationOnScreen(screen);
-        float local=pointerY-screen[1];int zone=MobileStyle.dp(getContext(),64);
-        int delta=local<zone?-MobileStyle.dp(getContext(),9):local>scroll.getHeight()-zone?MobileStyle.dp(getContext(),9):0;
-        if(delta!=0)scroll.scrollBy(0,delta);position();postOnAnimation(this);
+        long now=System.nanoTime();float elapsed=(now-lastEdgeFrame)/1_000_000_000f;lastEdgeFrame=now;
+        int delta=edgeScroll.step(pointerY-screen[1],scroll.getHeight(),MobileStyle.dp(getContext(),64),elapsed);
+        if(delta!=0){int beforeY=scroll.getScrollY();scroll.scrollBy(0,delta);if(scroll.getScrollY()==beforeY)edgeScroll.reset();}position();postOnAnimation(this);
     }};
     ModuleOrderView(Context context,ScrollView scroll,Consumer<List<String>> saved){
-        super(context);this.scroll=scroll;this.saved=saved;gap=MobileStyle.dp(context,14);slop=ViewConfiguration.get(context).getScaledTouchSlop();setClipChildren(false);setClipToPadding(false);
+        super(context);this.scroll=scroll;this.saved=saved;gap=MobileStyle.dp(context,14);slop=ViewConfiguration.get(context).getScaledTouchSlop();edgeScroll=new ModuleEdgeScroll(context.getResources().getDisplayMetrics().density);setClipChildren(true);setClipToPadding(true);
     }
     void addModule(View row,String id){row.setTag(id);row.setClickable(true);row.setFocusable(true);order.add(row);addView(row,new LayoutParams(-1,-2));
         row.setAccessibilityDelegate(new View.AccessibilityDelegate(){
@@ -50,7 +51,7 @@ final class ModuleOrderView extends ViewGroup {
     }
     private void begin(){if(candidate==null||!isAttachedToWindow())return;selected=candidate;before.clear();before.addAll(order);dragging=true;
         int[] p=new int[2];selected.getLocationOnScreen(p);grip=downY-(p[1]+selected.getHeight()/2f);pointerY=downY;
-        float[] heights=new float[before.size()];for(int i=0;i<before.size();i++)heights[i]=before.get(i).getHeight();physics=new ModuleDragPhysics(heights,before.indexOf(selected),gap,MobileStyle.dp(getContext(),8));lastFrame=System.nanoTime();
+        float[] heights=new float[before.size()];for(int i=0;i<before.size();i++)heights[i]=before.get(i).getHeight();physics=new ModuleDragPhysics(heights,before.indexOf(selected),gap,MobileStyle.dp(getContext(),8));lastFrame=lastEdgeFrame=System.nanoTime();edgeScroll.reset();
         getParent().requestDisallowInterceptTouchEvent(true);selected.bringToFront();performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
         for(View v:order){v.animate().cancel();v.animate().scaleX(.9f).scaleY(.9f).setDuration(160).start();}position();postOnAnimation(edge);
     }
@@ -68,7 +69,7 @@ final class ModuleOrderView extends ViewGroup {
         order.clear();for(int id:physics.order())order.add(before.get(id));
         for(int i=0;i<before.size();i++){View v=before.get(i);v.setTranslationX(0);v.setTranslationY(physics.position(i)-v.getTop());}
     }
-    private void end(boolean commit){if(!dragging)return;removeCallbacks(edge);removeCallbacks(hold);if(!commit){order.clear();order.addAll(before);}dragging=false;getParent().requestDisallowInterceptTouchEvent(false);
+    private void end(boolean commit){if(!dragging)return;removeCallbacks(edge);removeCallbacks(hold);edgeScroll.reset();if(!commit){order.clear();order.addAll(before);}dragging=false;getParent().requestDisallowInterceptTouchEvent(false);
         int y=0;for(View v:order){v.animate().cancel();float old=v.getY();v.layout(0,y,getWidth(),y+v.getHeight());v.setTranslationY(old-y);v.animate().translationY(0).scaleX(1).scaleY(1).setDuration(180).setInterpolator(new DecelerateInterpolator()).start();y+=v.getHeight()+gap;}physics=null;selected=null;candidate=null;if(commit)persist();
     }
     private void persist(){ArrayList<String> ids=new ArrayList<>();for(View v:order)ids.add((String)v.getTag());saved.accept(ids);}

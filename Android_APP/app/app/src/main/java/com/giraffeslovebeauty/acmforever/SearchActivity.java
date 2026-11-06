@@ -14,15 +14,17 @@ public final class SearchActivity extends MobilePageActivity {
     private android.content.SharedPreferences prefs;private String mode="search",query="";
     private final ArrayDeque<String> history=new ArrayDeque<>();private List<String> modules;private long account;
     private EditText searchField;private String draftQuery="";private boolean focusSearch;
+    private String problemTag="",trackerTag="";
     @Override public void onCreate(Bundle state){super.onCreate(state);prefs=AppAppearance.prefs(this);mode=state==null?getIntent().getStringExtra("mode"):state.getString("mode");if(mode==null)mode="search";
         query=state==null?getIntent().getStringExtra("query"):state.getString("query","");if(query==null)query="";if(state!=null){ArrayList<String> back=state.getStringArrayList("history");if(back!=null)history.addAll(back);}createPage("全局搜索");account=api.sessionGeneration();
+        if(state!=null&&state.getLong("tag_owner",-1)==account){problemTag=ProblemTags.restore(state.getString("problem_tag",""));trackerTag=ProblemTags.restore(state.getString("tracker_tag",""));}
         draftQuery=state==null?query:state.getString("draft_query",query);focusSearch="search".equals(mode)&&(state==null?query.isEmpty():state.getBoolean("focus_search",false));
         // A fresh home-page search is a submission; restoring a page must not rewrite history.
         if(state==null&&"search".equals(mode)&&!query.trim().isEmpty())submit(query);else render();}
-    @Override protected void onSaveInstanceState(Bundle out){super.onSaveInstanceState(out);out.putString("mode",mode);out.putString("query",query);out.putString("draft_query",draftQuery);out.putBoolean("focus_search","search".equals(mode)&&searchField!=null&&searchField.hasFocus());out.putStringArrayList("history",new ArrayList<>(history));}
+    @Override protected void onSaveInstanceState(Bundle out){super.onSaveInstanceState(out);out.putString("mode",mode);out.putString("query",query);out.putString("draft_query",draftQuery);out.putBoolean("focus_search","search".equals(mode)&&searchField!=null&&searchField.hasFocus());out.putStringArrayList("history",new ArrayList<>(history));out.putLong("tag_owner",account);out.putString("problem_tag",problemTag);out.putString("tracker_tag",trackerTag);}
     @Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(focused)focusInput();}
     private void focusInput(){if(focusSearch&&"search".equals(mode)&&searchField!=null&&searchField.hasWindowFocus()){KeyboardInputs.show(this,searchField);focusSearch=false;}}
-    @Override protected void onResume(){super.onResume();if(api!=null&&account!=api.sessionGeneration()){account=api.sessionGeneration();render();}}
+    @Override protected void onResume(){super.onResume();if(api!=null&&account!=api.sessionGeneration()){ModalDialogs.close(this);problemTag="";trackerTag="";account=api.sessionGeneration();render();}}
     @Override public void onBackPressed(){if(writing)return;if(history.isEmpty()){super.onBackPressed();return;}PageMotion.change(this,false,()->{mode=history.pop();render();});}
     private void nav(String next){if(mode.equals(next))return;focusSearch=false;hideKeyboard();PageMotion.change(this,true,()->{history.push(mode);mode=next;render();});}
     private void saveModules(){prefs.edit().putString(SearchModules.KEY,SearchModules.encode(modules)).apply();}
@@ -42,10 +44,21 @@ public final class SearchActivity extends MobilePageActivity {
         if(focusSearch){field.requestFocus();field.post(this::focusInput);}else{root.setFocusableInTouchMode(true);root.requestFocus();}
         if(query.isEmpty()){hotPosts();recent(body);searchSettings();return;}
         body.addView(text("搜索结果 · "+query,21));body.addView(text("按搜索设置的优先级，从上到下展示。",12));
-        searchSettings();if(modules.isEmpty()){card(body).addView(text("尚未启用搜索模块，请在搜索设置中添加。",15));return;}
+        searchSettings();if(modules.isEmpty()){card(body).addView(text("尚未启用搜索模块，请在搜索设置中添加。",15));return;}tagFilters();
         for(String id:modules)loadModule(id,1,card(body));
     }
     private void searchSettings(){LinearLayout box=card(body);box.addView(button("搜索设置",()->nav("settings")),new LinearLayout.LayoutParams(-1,dp(48)));}
+    private void tagFilters(){
+        if(!api.isLoggedIn()||!modules.contains("problems")&&!modules.contains("tracker"))return;
+        LinearLayout tools=card(body);tools.addView(text("题目标签筛选",16));tools.addView(text("与当前关键词共同生效；只影响对应结果区块。",12));
+        for(String id:Arrays.asList("problems","tracker"))if(modules.contains(id)){
+            String selected="problems".equals(id)?problemTag:trackerTag;
+            Button tags=button(SearchModules.NAMES.get(id)+"标签："+(selected.isEmpty()?"全部标签":selected),()->{
+                int token=serial;long owner=api.sessionGeneration();
+                ProblemTagPicker.show(this,api,io,"",selected,()->token==serial&&owner==api.sessionGeneration()&&"search".equals(mode),tag->{if("problems".equals(id))problemTag=tag;else trackerTag=tag;focusSearch=false;render();});
+            });tags.setContentDescription("筛选"+SearchModules.NAMES.get(id)+"搜索标签");tools.addView(tags,new LinearLayout.LayoutParams(-1,dp(48)));
+        }
+    }
     private void hotPosts(){LinearLayout slot=card(body);slot.setContentDescription("热搜模块");slot.addView(text("热搜",18));slot.addView(text("正在读取热门话题…",12));read(()->api.get(api.publicPostsPath("")+"?sort=hot&page=1&page_size=30"),slot,true,value->{slot.addView(text("热搜",18));slot.addView(text("热门话题中阅读量较高的4条",12));List<JSONObject> posts=SearchHotPosts.select((JSONObject)value);if(posts.isEmpty())slot.addView(text("暂无热门话题",14));for(int i=0;i<posts.size();i++){JSONObject post=posts.get(i);Button open=button((i+1)+"  "+post.optString("title"),()->openResult("forum",post));open.setMaxLines(2);open.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);slot.addView(open,new LinearLayout.LayoutParams(-1,-2));}});}
     private TextView historyChip(String term,Runnable action){TextView chip=text(term,14);chip.setPadding(dp(10),dp(8),dp(10),dp(8));chip.setBackground(MobileStyle.panel(this,MobileStyle.controlFill(MobileStyle.PANEL),10,MobileStyle.LINE));chip.setFocusable(true);chip.setContentDescription("搜索历史 "+term);chip.setOnClickListener(v->action.run());return chip;}
     private void recent(LinearLayout parent){LinearLayout box=card(parent);box.addView(text("最近 10 条搜索",18));JSONArray items=terms();if(items.length()==0)box.addView(text("暂无历史搜索",14));WrapLayout words=new WrapLayout(this);words.setContentDescription("搜索历史词条");for(int i=0;i<items.length();i++){String term=items.optString(i);words.addView(historyChip(term,()->submit(term)));}box.addView(words,new LinearLayout.LayoutParams(-1,-2));box.addView(button("历史记录",()->nav("history")),new LinearLayout.LayoutParams(-1,-2));}
@@ -62,8 +75,8 @@ public final class SearchActivity extends MobilePageActivity {
     private void loadModule(String id,int page,LinearLayout slot){slot.removeAllViews();slot.addView(text(SearchModules.NAMES.get(id),18));slot.addView(text("正在搜索…",12));
         if(!SearchModules.available(id)){error(slot,new ApiClient.UnavailableEndpointException(SearchModules.NAMES.get(id)+"搜索"));slot.addView(text(SearchModules.NAMES.get(id),16));return;}
         if(SearchModules.privateModule(id)&&!api.isLoggedIn()){error(slot,new ApiClient.ApiException(401,"请先登录",false));slot.addView(text(SearchModules.NAMES.get(id),16));return;}
-        final String term=query;slot.setContentDescription(SearchModules.NAMES.get(id)+"搜索");
-        read(()->{String path=SearchModules.path(id,term,page);if("users".equals(id))path=api.leaderboardPath("")+path.substring(path.indexOf('?'));else if("forum".equals(id))path=api.publicPostsPath("")+path.substring(path.indexOf('?'));return api.get(path);},slot,true,value->showModule(id,page,slot,value));
+        final String term=query,exactTag="problems".equals(id)?problemTag:"tracker".equals(id)?trackerTag:"";slot.setContentDescription(SearchModules.NAMES.get(id)+"搜索");
+        read(()->{String path=SearchModules.path(id,term,page,exactTag);if("users".equals(id))path=api.leaderboardPath("")+path.substring(path.indexOf('?'));else if("forum".equals(id))path=api.publicPostsPath("")+path.substring(path.indexOf('?'));return api.get(path);},slot,true,value->showModule(id,page,slot,value));
     }
     private void showModule(String id,int page,LinearLayout slot,Object value)throws Exception{
         slot.addView(text(SearchModules.NAMES.get(id),18));slot.addView(text(SearchModules.description(id),11));JSONArray items;int total;
@@ -81,7 +94,7 @@ public final class SearchActivity extends MobilePageActivity {
             case "posts":next=new Intent(this,WebFeaturesActivity.class).putExtra("feature","progress").putExtra("post_id",item.optInt("id"));break;
             case "drafts":next=new Intent(this,MainActivity.class).putExtra("cloud_draft_id",item.optInt("id"));break;
             case "wiki":next=new Intent(this,WebFeaturesActivity.class).putExtra("feature","wiki-article").putExtra("wiki_slug",item.optString("slug"));break;
-            case "tracker":next=new Intent(this,WebFeaturesActivity.class).putExtra("feature","tracker").putExtra("initial_query",item.optString("contest_id")).putExtra("initial_platform",item.optString("platform"));break;
+            case "tracker":next=new Intent(this,WebFeaturesActivity.class).putExtra("feature","tracker").putExtra("initial_query",item.optString("contest_id")).putExtra("initial_platform",item.optString("platform")).putExtra("initial_problem_tag",trackerTag);break;
             default:next=new Intent(this,MainActivity.class).putExtra("web_problem_platform",item.optString("platform")).putExtra("web_problem_id",item.optString("problem_id"));}
         opening=true;startActivity(next);
     }

@@ -27,6 +27,7 @@ final class ApiClient {
     private volatile boolean mustChangePassword;
     private volatile String role = "";
     private volatile String memberAccount = "";
+    private volatile long accountEpoch;
     private volatile String currentAvatar = "";
     String currentAvatarUrl(){return currentAvatar;}
     private volatile long sessionGeneration;
@@ -137,6 +138,7 @@ final class ApiClient {
             mustChangePassword = false;
             role = "";
             memberAccount = "";
+            accountEpoch = 0;
             mobileFeatures = null;
             mobileCheckedAt = 0;
             baseUrl = checked;
@@ -174,6 +176,7 @@ final class ApiClient {
         csrfToken = result.optString("csrf_token", "");
         role = result.optString("role", "");
         memberAccount = result.optString("qq_id", memberAccount);
+        accountEpoch = result.optLong("account_epoch", 1);
         mustChangePassword = result.optBoolean("must_change_password");
         sessionChanged.run();
         if (mustChangePassword) throw new IllegalStateException("请先修改初始密码。");
@@ -254,7 +257,7 @@ final class ApiClient {
 
     Object get(String path) throws Exception {
         String key=cacheKey(path);Replay state=replay.get();
-        boolean cacheable=!path.startsWith("/api/auth/");
+        boolean cacheable=!path.startsWith("/api/auth/")&&!path.contains("account-closure");
         if(state!=null){
             Object cached=cacheable?responses.get(key):null;
             if(cached!=null){state.hits++;return cached;}
@@ -303,6 +306,7 @@ final class ApiClient {
             mustChangePassword = session.optBoolean("must_change_password");
             role = session.optString("role", "");
             memberAccount = session.optString("qq_id", identifier);
+            accountEpoch = session.optLong("account_epoch", 1);
             sessionChanged.run();
             return session;
         } catch (Exception e) { clearSession(); throw e; }
@@ -314,7 +318,7 @@ final class ApiClient {
         avatarCache.clear();currentAvatar="";
         responses.clear();
         readFailures.clear();
-        csrfToken = ""; mustChangePassword = false; role = ""; memberAccount = "";
+        csrfToken = ""; mustChangePassword = false; role = ""; memberAccount = ""; accountEpoch = 0;
         cookies.getCookieStore().removeAll();
         cookieExpiry.clear();
         sessionChanged.run();
@@ -509,7 +513,43 @@ final class ApiClient {
         } finally { connection.disconnect(); }
     }
 
+    synchronized JSONObject closurePreview(long owner) throws Exception {
+        requireClosureOwner(owner);
+        return (JSONObject) request("GET", "/api/me/account-closure/preview", null);
+    }
+    synchronized JSONObject closeAccount(long owner, AccountClosure.Ticket ticket, JSONObject body) throws Exception {
+        requireClosureOwner(owner);
+        if (!ticket.origin.equals(baseUrl) || !ticket.account.equals(memberAccount) || ticket.epoch != accountEpoch)
+            throw new IllegalStateException("登录账号已变化，注销已取消。");
+        if (isAdministrator()) throw new IllegalArgumentException("管理员无法注销，请先交接权限并降为普通成员。");
+        Map<String,String> headers = new java.util.HashMap<>();
+        headers.put("Idempotency-Key", ticket.requestId); headers.put("X-Closure-Receipt", ticket.token);
+        return (JSONObject) request("POST", "/api/me/account-closure", body, headers);
+    }
+    private void requireClosureOwner(long owner) {
+        if (owner != sessionGeneration || !isLoggedIn()) throw new IllegalStateException("登录账号已切换，请返回重新登录。");
+    }
+    synchronized boolean forgetClosedAccount(AccountClosure.Ticket ticket) {
+        if (!ticket.origin.equals(baseUrl)) return false;
+        if (isLoggedIn()) {
+            if (!ticket.account.equals(memberAccount) || ticket.epoch != accountEpoch) return false;
+            clearSession(); loggedOut.run();
+        }
+        return true;
+    }
+    /** Receipt credentials are narrowly scoped: never attach normal cookies/CSRF or accept Set-Cookie. */
+    JSONObject closureReceipt(AccountClosure.Ticket ticket) throws Exception {
+        if (!networkAvailable.getAsBoolean()) throw new NoNetworkException();
+        HttpURLConnection connection = (HttpURLConnection) new URL(ticket.origin + "/api/account-closures/" + ticket.requestId).openConnection();
+        connection.setConnectTimeout(10000); connection.setReadTimeout(10000); connection.setInstanceFollowRedirects(false);
+        connection.setRequestProperty("Accept", "application/json"); connection.setRequestProperty("Cache-Control", "no-store");
+        connection.setRequestProperty("X-Closure-Receipt", ticket.token);
+        try { return (JSONObject) readResult(connection, null); } finally { connection.disconnect(); }
+    }
     private synchronized Object request(String method, String path, JSONObject body) throws Exception {
+        return request(method, path, body, Collections.emptyMap());
+    }
+    private Object request(String method, String path, JSONObject body, Map<String,String> extraHeaders) throws Exception {
         if(isReplay())throw new CacheMissException(); // Preview work can never perform a write or network request.
         checkConnection();
         if (!path.startsWith("/api/")) throw new IllegalArgumentException("只能调用现有 /api/* 接口。");
@@ -518,9 +558,12 @@ final class ApiClient {
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setRequestMethod(method);
         connection.setConnectTimeout(10000);
-        connection.setReadTimeout(10000);
+        // Ownership checks may wait up to 20 seconds for the OJ; match Web's binding timeout.
+        connection.setReadTimeout(path.startsWith("/api/me/bindings/") ? 25000 : 10000);
         connection.setInstanceFollowRedirects(false);
         connection.setRequestProperty("Accept", "application/json");
+        for (Map.Entry<String,String> extra : extraHeaders.entrySet()) connection.setRequestProperty(extra.getKey(), extra.getValue());
+        if (path.contains("account-closure")) connection.setRequestProperty("Cache-Control", "no-store");
         for (Map.Entry<String, List<String>> header : cookies.get(uri, Collections.emptyMap()).entrySet()) {
             if (header.getKey() != null) connection.setRequestProperty(header.getKey(), String.join("; ", header.getValue()));
         }
@@ -559,8 +602,8 @@ final class ApiClient {
 
     private Object readResult(HttpURLConnection connection, URI uri) throws Exception {
             int status = connection.getResponseCode();
-            cookies.put(uri, connection.getHeaderFields());
-            if (isLoggedIn() && connection.getHeaderFields().keySet().stream().anyMatch(k -> "Set-Cookie".equalsIgnoreCase(k))) sessionChanged.run();
+            if (uri != null) cookies.put(uri, connection.getHeaderFields());
+            if (uri != null && isLoggedIn() && connection.getHeaderFields().keySet().stream().anyMatch(k -> "Set-Cookie".equalsIgnoreCase(k))) sessionChanged.run();
             InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
             StringBuilder text = new StringBuilder();
             if (stream != null) {
@@ -573,14 +616,14 @@ final class ApiClient {
                 String message = "接口返回 HTTP " + status;
                 JSONObject details = null;
                 try { details = new JSONObject(text.toString()); message = details.optString("message", message); } catch (Exception ignored) { }
-                if (status == 401) clearSession();
-                if(status==403||status==404||status==410)responses.removeContaining(uri.getPath());
-                if (status == 428) mustChangePassword = true;
-                boolean missingContent = status == 404 && uri.getPath().matches(".*/(?:members/[A-Za-z0-9_-]{32}(?:/posts)?|posts/[0-9]+)");
+                if (uri != null && status == 401) clearSession();
+                if(uri != null && (status==403||status==404||status==410))responses.removeContaining(uri.getPath());
+                if (uri != null && status == 428) mustChangePassword = true;
+                boolean missingContent = uri != null && status == 404 && uri.getPath().matches(".*/(?:members/[A-Za-z0-9_-]{32}(?:/posts)?|posts/[0-9]+)");
                 ApiException failure = new ApiException(status, message, missingContent); failure.details = details; throw failure;
             }
             Object result=new JSONTokener(text.toString()).nextValue();
-            if(result instanceof JSONObject){JSONObject object=(JSONObject)result;String path=uri.getPath();
+            if(uri != null && result instanceof JSONObject){JSONObject object=(JSONObject)result;String path=uri.getPath();
                 if(("/api/auth/me".equals(path)||"/api/me/avatar".equals(path))&&object.has("avatar_url"))currentAvatar=object.isNull("avatar_url")?"":object.optString("avatar_url");
                 else if("/api/me/profile".equals(path)&&object.optJSONObject("user")!=null&&object.getJSONObject("user").has("avatar_url"))currentAvatar=object.getJSONObject("user").isNull("avatar_url")?"":object.getJSONObject("user").optString("avatar_url");
             }

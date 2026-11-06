@@ -139,6 +139,7 @@ public final class MainActivity extends Activity {
     private String loginDestination = "account";
     private String problemState = "";
     private String problemScope="all";
+    private String problemKeyword="", problemKeywordDraft="", problemTag="";
     private int notificationComment;
     private String contestIdentifier="";
     private JSONObject selectedProblem;
@@ -189,8 +190,8 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onResume() {
-        super.onResume();openingSpace=false;openingSearch=false;
-        if(navigationOwner!=api.sessionGeneration()){navigation.clear();navigationOwner=api.sessionGeneration();refreshComposer();if(!"compose".equals(screen))loadScreen();}
+        super.onResume();openingSpace=false;openingSearch=false;openingBindings=false;
+        if(navigationOwner!=api.sessionGeneration()){ModalDialogs.close(this);problemKeyword="";problemKeywordDraft="";problemTag="";navigation.clear();navigationOwner=api.sessionGeneration();refreshComposer();if(!"compose".equals(screen))loadScreen();}
         else{
             CloudDrafts.State draft=cloud.state();
             if(composeGeneration!=draft.generation||(draft.category>0&&composeCategoryId!=draft.category)||!composeTitle.equals(draft.title)||!composeBody.equals(draft.body))refreshComposer();
@@ -200,6 +201,7 @@ public final class MainActivity extends Activity {
             pendingScroll=pageScroll==null?0:pageScroll.getScrollY();syncAppearance();pageRefresh.close();ModalDialogs.close(this);buildShell();search.setText(query);updateSearchHeader();loadScreen();
         }
         if (returnFromAdmin) { returnFromAdmin = false; loadScreen(); }
+        if (returnFromBindings) { returnFromBindings = false; if ("mine".equals(screen) || "account".equals(screen)) loadScreen(); }
         if(headerAvatar!=null)refreshHeaderAvatar(true);
         openingUpdates=false;application.updates().attach(this,null);
     }
@@ -234,7 +236,9 @@ public final class MainActivity extends Activity {
         state.putInt("rank_page_size", rankPageSize); state.putString("rank_sort", rankSort);
         state.putStringArrayList("rank_platforms", new java.util.ArrayList<>(rankPlatforms));
         state.putString("profile_platform",profilePlatform);state.putInt("post_id", postId); state.putString("problem_state", problemState);
+        state.putBoolean("return_from_bindings",returnFromBindings);
         state.putString("problem_scope",problemScope);state.putInt("notification_comment",notificationComment);
+        state.putString("problem_keyword",problemKeyword);state.putString("problem_keyword_draft",problemKeywordDraft);state.putString("problem_tag",problemTag);
         state.putString("contest_identifier",contestIdentifier);
         state.putString("member_return", memberReturnScreen);
         state.putString("member_preview", memberPreview == null ? "" : memberPreview.toString());
@@ -260,7 +264,9 @@ public final class MainActivity extends Activity {
         java.util.ArrayList<String> platforms = state.getStringArrayList("rank_platforms");
         if (platforms != null && !platforms.isEmpty()) { rankPlatforms.clear(); rankPlatforms.addAll(platforms); }
         profilePlatform=state.getString("profile_platform","all");postId = state.getInt("post_id", 0); problemState = state.getString("problem_state", "");
+        returnFromBindings=state.getBoolean("return_from_bindings",false);
         problemScope=state.getString("problem_scope","all");notificationComment=state.getInt("notification_comment",0);
+        problemKeyword=ProblemTags.keyword(state.getString("problem_keyword",""));problemKeywordDraft=state.getString("problem_keyword_draft",problemKeyword);problemTag=ProblemTags.restore(state.getString("problem_tag",""));
         contestIdentifier=state.getString("contest_identifier","");
         memberReturnScreen = state.getString("member_return", "forum");
         try {
@@ -292,6 +298,14 @@ public final class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if(requestCode==CLOSE_ACCOUNT){
+            openingClosure=false;
+            if(resultCode==RESULT_OK){
+                if(!api.isLoggedIn()){clearComposer();commentBody="";commentParent=0;selectedProblem=null;memberPreview=null;loginIdentifier=preferences.getString("remembered_account","");navigation.clear();}
+                loginDestination="account";show("account");
+            }
+            return;
+        }
         if(requestCode==PICK_POST_IMAGE){choosingPostImage=false;if(resultCode==RESULT_OK&&data!=null&&data.getData()!=null){pendingPostImage=data.getData();consumePostImage();}return;}
         if(requestCode==PICK_COVER&&resultCode==RESULT_OK&&data!=null&&data.getData()!=null){
             android.net.Uri selected=data.getData();
@@ -440,12 +454,15 @@ public final class MainActivity extends Activity {
     }
 
     private LinearLayout card() {
+        return card(content);
+    }
+    private LinearLayout card(LinearLayout parent) {
         LinearLayout box = column();
         box.setPadding(dp(18), dp(18), dp(18), dp(18));
         box.setBackground(shape(MobileStyle.MODULE, 12, 0));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
         params.bottomMargin = dp(10);
-        content.addView(box, params);
+        parent.addView(box, params);
         return box;
     }
 
@@ -1098,35 +1115,34 @@ public final class MainActivity extends Activity {
             content.addView(login);
             return;
         }
+        chips(new String[]{"Codeforces", "洛谷", "AtCoder", "牛客", "校 OJ"},
+                new String[]{"codeforces", "luogu", "atcoder", "nowcoder", "cjlu"}, platform,
+                value -> { if(!platform.equals(value))problemTag="";platform=value;page=1;readFromAction=true;loadScreen(); });
+        chips(new String[]{"全部题目","我已 AC"},new String[]{"all","solved"},problemScope,value->{problemScope=value;page=1;readFromAction=true;loadScreen();});
+        chips(new String[]{"全部收藏状态", "已收藏"},new String[]{"", "favorite"},problemState,value->{problemState=value;page=1;readFromAction=true;loadScreen();});
+        problemFilters();
         loading("正在加载题库…");
+        LinearLayout results=loadingRegion;
+        String path="/api/me/problems?page="+page+"&page_size=20&platform="+encode(platform)+"&tag="+encode(problemKeyword)+"&state="+problemState+"&scope="+problemScope+ProblemTags.parameter(problemTag);
         loadPage(serial,() -> {
             try {
-                String path = "/api/me/problems?page=" + page + "&page_size=20&platform="
-                        + encode(platform) + "&tag=" + encode(query) + "&state=" + problemState+"&scope="+problemScope;
                 JSONObject result = api.getObject(path);
                 result.getJSONArray("items");
-                present(() -> { if (serial == requestSerial) showProblems(result); });
+                present(() -> { if (serial == requestSerial) showProblems(results,result); });
             } catch (Exception e) { present(() -> { if (serial == requestSerial) error(e); }); }
         });
     }
 
-    private void showProblems(JSONObject result) {
-        content.removeAllViews();
-        heading("PROBLEM BANK", "题库", "找一道适合今天的题，继续向 AC 前进。");
-        addClubEntry();
-        chips(new String[]{"Codeforces", "洛谷", "AtCoder", "牛客", "校 OJ"},
-                new String[]{"codeforces", "luogu", "atcoder", "nowcoder", "cjlu"}, platform,
-                value -> { platform = value; page = 1; loadScreen(); });
-        chips(new String[]{"全部题目","我已 AC"},new String[]{"all","solved"},problemScope,value->{problemScope=value;page=1;loadScreen();});
-        chips(new String[]{"全部收藏状态", "已收藏"}, new String[]{"", "favorite"}, problemState, value -> { problemState = value; page = 1; loadScreen(); });
-        content.addView(label("共 " + result.optInt("total") + " 道题目", 12, MUTED, false));
+    private void showProblems(LinearLayout results,JSONObject result) {
+        results.removeAllViews();results.setMinimumHeight(0);results.setGravity(Gravity.TOP);results.setPadding(0,0,0,0);results.setBackgroundColor(Color.TRANSPARENT);
+        results.addView(label("共 " + result.optInt("total") + " 道题目", 12, MUTED, false));
 
         JSONArray items = result.optJSONArray("items");
-        if (items == null || items.length() == 0) status("没有符合条件的题目。");
+        if (items == null || items.length() == 0) card(results).addView(label("没有符合条件的题目。",13,MUTED,false));
         else for (int i = 0; i < items.length(); i++) {
             JSONObject problem = items.optJSONObject(i);
             if (problem == null) continue;
-            LinearLayout box = card();
+            LinearLayout box = card(results);
             box.addView(label(problem.optString("problem_name", problem.optString("problem_id", "题目")), 16, TEXT, true));
             space(box, 5);
             box.addView(label(problem.optString("platform") + "  ·  " + problem.optString("problem_rating", "难度未知"), 12, BRAND, true));
@@ -1137,7 +1153,22 @@ public final class MainActivity extends Activity {
             favorite.setOnClickListener(v -> mutate(favorite, () -> api.favoriteProblem(problem.getString("platform"), problem.getString("problem_id"), !problem.optBoolean("is_favorite")), this::loadScreen));
             box.addView(favorite);
         }
-        addPager(result.optInt("total"), 20);
+        addPager(results,result.optInt("total"), 20);
+    }
+
+    private void problemFilters() {
+        LinearLayout tools=card();tools.addView(label("题目搜索与筛选",16,TEXT,true));
+        LinearLayout line=row();EditText keyword=new EditText(this);keyword.setSingleLine(true);keyword.setHint("搜索题名、题号或标签");keyword.setContentDescription("题库搜索关键词");keyword.setText(problemKeywordDraft);keyword.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
+        keyword.addTextChangedListener(new android.text.TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){}public void onTextChanged(CharSequence s,int a,int b,int c){problemKeywordDraft=s.toString();}public void afterTextChanged(android.text.Editable e){}});
+        line.addView(keyword,new LinearLayout.LayoutParams(0,dp(50),1));
+        Runnable submit=()->{problemKeyword=ProblemTags.keyword(keyword.getText().toString());problemKeywordDraft=problemKeyword;page=1;root.requestFocus();android.view.inputmethod.InputMethodManager ime=(android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);if(ime!=null)ime.hideSoftInputFromWindow(keyword.getWindowToken(),0);readFromAction=true;loadScreen();};
+        Button searchButton=action("搜索",true);searchButton.setContentDescription("搜索题库");searchButton.setOnClickListener(v->submit.run());line.addView(searchButton,new LinearLayout.LayoutParams(dp(80),dp(50)));tools.addView(line);
+        keyword.setOnEditorActionListener((v,id,event)->{if(id==android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH){submit.run();return true;}return false;});
+        Button tags=action("题目标签："+(problemTag.isEmpty()?"全部标签":problemTag),false);tags.setContentDescription("筛选题库标签");tags.setOnClickListener(v->{int token=requestSerial;long owner=api.sessionGeneration();String source=platform;ProblemTagPicker.show(this,api,io,source,problemTag,()->token==requestSerial&&owner==api.sessionGeneration()&&"problems".equals(screen)&&source.equals(platform),tag->{problemTag=tag;page=1;readFromAction=true;loadScreen();});});tools.addView(tags);
+        if(!problemTag.isEmpty()||!problemKeyword.isEmpty()||!problemKeywordDraft.isEmpty()){
+            Button clear=action("清除搜索与标签",false);clear.setOnClickListener(v->{problemKeyword="";problemKeywordDraft="";problemTag="";page=1;readFromAction=true;loadScreen();});tools.addView(clear);
+        }
+        tools.addView(label("关键词与完整标签共同生效；顶部搜索栏仍搜索全站内容。",11,MUTED,false));AppAppearance.paintFields(tools);
     }
 
     private void showRankFilter() {
@@ -1381,6 +1412,9 @@ public final class MainActivity extends Activity {
     }
 
     private void addPager(int total, int size) {
+        addPager(content,total,size);
+    }
+    private void addPager(LinearLayout parent,int total,int size) {
         if (api.isUnconfigured() || total <= size) return;
         LinearLayout pager = row();
         Button previous = action("上一页", false), next = action("下一页", false);
@@ -1391,7 +1425,7 @@ public final class MainActivity extends Activity {
         pager.addView(previous, new LinearLayout.LayoutParams(0, dp(44), 1));
         pager.addView(label("  第 " + page + " 页  ", 12, MUTED, false));
         pager.addView(next, new LinearLayout.LayoutParams(0, dp(44), 1));
-        content.addView(pager);
+        parent.addView(pager);
     }
 
     private void addRankPager(int total) {
@@ -1673,7 +1707,10 @@ public final class MainActivity extends Activity {
                 JSONObject account = result.getJSONObject("user");
                 user = new JSONObject().put("name", account.getString("name")).put("status", account.optString("status"))
                         .put("avatar_url", account.optString("avatar_url", "")).put("platform_counts", result.getJSONObject("platform_counts"))
-                        .put("total_count", result.getInt("total_count")).put("recent_ac",result.optJSONArray("recent_ac"));
+                        .put("total_count", result.getInt("total_count")).put("recent_ac",result.optJSONArray("recent_ac"))
+                        .put("bindings",result.optJSONArray("bindings"));
+                for (String field : new String[]{"cf_handle","luogu_id","atcoder_handle","nowcoder_id","cjlu_username"})
+                    if (!account.isNull(field)) user.put(field,account.optString(field,""));
                 String[] platforms = {"codeforces", "luogu", "atcoder", "nowcoder", "cjlu"};
                 String[] keys = {"cf_count", "luogu_count", "atcoder_count", "nowcoder_count", "cjlu_count"};
                 for (int i = 0; i < keys.length; i++) user.put(keys[i], user.getJSONObject("platform_counts").optInt(platforms[i], 0));
@@ -2066,7 +2103,7 @@ public final class MainActivity extends Activity {
         menuRow(identity, "修改昵称", value(user, "name", "ACM 成员"), () -> showRename(value(user, "name", "")));
         menuRow(identity, "社区头像", "上传图片或恢复默认", this::showAvatarActions);
 
-        menuRow(identity, "OJ 账号绑定", "App 不支持修改，请到网页端或联系管理员", () -> showBindings(user));
+        menuRow(identity, "OJ 账号绑定", "查看账号 · 绑定 · 改绑与解绑", () -> openBindings(""));
         LinearLayout training = card();
         training.addView(label("我的学习 · 仅自己可见", 13, BRAND, true));
         menuRow(training, "通过题数", "累计 " + result.optInt("total_count") + " 题", () -> showTraining(result));
@@ -2110,6 +2147,12 @@ public final class MainActivity extends Activity {
             });
         });
         content.addView(logout);
+        Button closure = action("账户注销", false);
+        closure.setOnClickListener(v -> {
+            if(openingClosure||ModalDialogs.isShowing(this))return;
+            openingClosure=true;startActivityForResult(new Intent(this,AccountClosureActivity.class),CLOSE_ACCOUNT);
+        });
+        content.addView(closure);
     }
 
     private boolean isAdministratorAccount() {
@@ -2172,17 +2215,13 @@ public final class MainActivity extends Activity {
         return new ModalDialogs.Builder(this).setTitle(title).setView(scroll).fullPage().show();
     }
 
-    private void showBindings(JSONObject user) {
-        LinearLayout body = column();
-        body.addView(label("App 不支持账号绑定、改绑、解绑及同步操作，请到网页端或联系管理员。", 14, TEXT, true));
-        space(body,12);body.addView(label("以下绑定信息仅本人及管理员可见。", 12, MUTED, false));
-        String[] fields = {"cf_handle", "luogu_id", "atcoder_handle", "nowcoder_id", "cjlu_username"};
-        String[] names = {"Codeforces", "洛谷", "AtCoder", "牛客", "校 OJ"};
-        for (int i = 0; i < fields.length; i++) {
-            space(body, 12);
-            body.addView(label(names[i] + " · " + value(user, fields[i], "未绑定"), 14, TEXT, false));
-        }
-        detailsDialog("OJ 账号绑定", body);
+    private static final int CLOSE_ACCOUNT=7304;
+    private boolean openingClosure;
+    private boolean openingBindings,returnFromBindings;
+    private void openBindings(String platform) {
+        if(openingBindings||ModalDialogs.isShowing(this)||!requireLogin("mine"))return;
+        openingBindings=true;returnFromBindings=true;
+        startActivity(new Intent(this,OjBindingsActivity.class).putExtra("platform",platform));
     }
 
     private void showTraining(JSONObject profile) {
@@ -2212,7 +2251,13 @@ public final class MainActivity extends Activity {
     private LinearLayout platformCard(LinearLayout panel){LinearLayout box=column();box.setPadding(dp(16),dp(16),dp(16),dp(16));box.setBackground(shape(MobileStyle.MODULE,14,0));LinearLayout.LayoutParams size=new LinearLayout.LayoutParams(-1,-2);size.bottomMargin=dp(12);panel.addView(box,size);return box;}
     private void renderPlatformPanel(LinearLayout panel,JSONObject user,boolean own,String id){
         panel.removeAllViews();JSONObject counts=user.optJSONObject("platform_counts");String number="all".equals(id)?count(user,"total_count"):counts==null||!counts.has(id)?"—":count(counts,id);
-        LinearLayout summary=platformCard(panel);summary.setContentDescription("过题数框");LinearLayout row=row(),copy=column();copy.addView(label(PlatformAssets.name(id),17,TEXT,true));space(copy,14);copy.addView(label(number,34,TEXT,true));copy.addView(label("累计通过题数",11,MUTED,false));row.addView(copy,new LinearLayout.LayoutParams(0,-2,1));
+        OjBindingState binding=own&&!"all".equals(id)?OjBindingState.fromProfile(user,id,System.currentTimeMillis()/1000):null;
+        if(binding!=null&&binding.bound()&&"—".equals(number))number="0";
+        LinearLayout summary=platformCard(panel);summary.setContentDescription("过题数框");LinearLayout row=row(),copy=column();copy.addView(label(PlatformAssets.name(id),17,TEXT,true));space(copy,14);
+        if(binding!=null&&!binding.bound()){
+            Button bind=action("绑定",true);bind.setContentDescription(PlatformAssets.name(id)+"绑定账号");bind.setOnClickListener(v->openBindings(id));copy.addView(bind);
+        }else copy.addView(label(number,34,TEXT,true));
+        copy.addView(label("累计通过题数",11,MUTED,false));row.addView(copy,new LinearLayout.LayoutParams(0,-2,1));
         android.widget.ImageView mark=new android.widget.ImageView(this);mark.setImageDrawable(PlatformAssets.logo(this,id));mark.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);mark.setBackgroundColor(Color.TRANSPARENT);row.addView(mark,new LinearLayout.LayoutParams(dp(88),dp(88)));summary.addView(row);row.setContentDescription(PlatformAssets.name(id)+"通过题数 "+number);
         if(!own){summary.addView(label("公开信息仅展示平台累计通过数。",12,MUTED,false));return;}
         LinearLayout recentBox=platformCard(panel);recentBox.setContentDescription("最近AC框");recentBox.addView(filterSection("最近 AC · 仅自己可见","history"));space(recentBox,10);
