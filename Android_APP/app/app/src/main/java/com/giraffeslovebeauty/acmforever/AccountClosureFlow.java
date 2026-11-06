@@ -84,7 +84,7 @@ final class AccountClosureFlow {
                 readReceipt(ticket);
             } catch (Exception e) {
                 if (mayHaveSubmitted && !AccountClosure.refused(e)) { readReceipt(ticket); return; }
-                if (mayHaveSubmitted) app.vault().clearClosure();
+                if (mayHaveSubmitted) clearReceipt();
                 if (AccountClosure.disabled(e)) update(Phase.DISABLED, null, "注销窗口关闭");
                 else if ("ROLE_HANDOVER_REQUIRED".equals(AccountClosure.code(e)) || "LAST_ROOT_PROTECTED".equals(AccountClosure.code(e))) update(Phase.BLOCKED, null, "管理员无法执行注销，需要先交接权限、降为普通成员。");
                 else if ("REAUTH_FAILED".equals(AccountClosure.code(e))) update(Phase.READY, ticket, "当前密码不正确，请重新输入。");
@@ -122,6 +122,11 @@ final class AccountClosureFlow {
     }
     void acknowledge() {
         if (state.phase != Phase.CLOSED) return;
-        io.execute(() -> { app.vault().clearClosure(); update(Phase.IDLE, null, ""); app.closureReceiptChanged(); });
+        io.execute(() -> { clearReceipt(); update(Phase.IDLE, null, ""); });
+    }
+    private void clearReceipt() {
+        app.vault().clearClosure();
+        // Session invalidation may have already checked the UI before this write completed.
+        app.closureReceiptChanged();
     }
 }

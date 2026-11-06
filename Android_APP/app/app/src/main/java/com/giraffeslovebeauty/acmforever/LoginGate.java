@@ -24,10 +24,8 @@ final class LoginGate implements Application.ActivityLifecycleCallbacks {
         });
     }
     void receiptChanged() {
-        main.post(() -> {
-            Activity current = foreground.get();
-            if (current instanceof MainActivity) ((MainActivity) current).enforceLogin();
-        });
+        // A receipt is the only signed-out exception, including while its page is visible.
+        sessionChanged();
     }
     private void check(Activity activity) {
         if (activity instanceof MainActivity) { ((MainActivity) activity).enforceLogin(); return; }
