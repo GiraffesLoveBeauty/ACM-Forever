@@ -10,6 +10,8 @@
         <item name="android:buttonStyle">@style/AppFlatButton</item>
         <item name="android:imageButtonStyle">@style/AppFlatImageButton</item>
         <item name="android:alertDialogTheme">@style/AppDialogTheme</item>
+        <item name="android:windowAnimationStyle">@style/AppPageAnimations</item>
+        <item name="android:windowSoftInputMode">adjustResize</item>
     </style>
     <style name="AppFlatButton" parent="android:style/Widget.Material.Button">
         <item name="android:stateListAnimator">@null</item>
@@ -40,5 +42,16 @@
         <item name="android:windowBackground">#F4F5F7</item>
         <item name="android:windowElevation">0dp</item>
         <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowAnimationStyle">@style/AppDetailAnimations</item>
+    </style>
+    <style name="AppPageAnimations" parent="@android:style/Animation.Activity">
+        <item name="android:activityOpenEnterAnimation">@anim/page_enter_right</item>
+        <item name="android:activityOpenExitAnimation">@anim/page_stay</item>
+        <item name="android:activityCloseEnterAnimation">@anim/page_stay</item>
+        <item name="android:activityCloseExitAnimation">@anim/page_exit_right</item>
+    </style>
+    <style name="AppDetailAnimations" parent="@android:style/Animation.Dialog">
+        <item name="android:windowEnterAnimation">@anim/page_enter_right</item>
+        <item name="android:windowExitAnimation">@anim/page_exit_right</item>
     </style>
 </resources>

@@ -45,8 +45,8 @@ public final class AppearanceActivity extends Activity {
     @Override protected void onPause(){if(themeId!=null)AppAppearance.load(getApplicationContext());super.onPause();}
     @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("page",page);state.putString("category",category);state.putString("picker_target",pickerTarget);state.putBoolean("choosing",choosing);state.putStringArrayList("history",new ArrayList<>(history));}
     @Override protected void onDestroy(){files.shutdown();ModalDialogs.close(this);super.onDestroy();}
-    @Override public void onBackPressed(){if(saving)return;if(history.isEmpty()){finish();return;}page=history.pop();render();}
-    private void go(String next){if(page.equals(next)||saving)return;history.push(page);page=next;render();}
+    @Override public void onBackPressed(){if(saving)return;if(history.isEmpty()){finish();return;}PageMotion.change(this,false,()->{page=history.pop();render();});}
+    private void go(String next){if(page.equals(next)||saving)return;PageMotion.change(this,true,()->{history.push(page);page=next;render();});}
     private String title(){switch(page){case "saved":return "我的主题";case "background":return "背景选择";case "theme":return "主题选择";case "controls":return "控件背景透明度";case "library":return "主题库";case "picker":return "theme".equals(pickerTarget)?"ACMForever主色":"secondary".equals(pickerTarget)?"ACMForever辅色":"调色盘";default:return themeId==null?"个性化设置":LocalThemes.name(getApplicationContext(),themeId);}}
     private LinearLayout column(){LinearLayout b=new SpacedLayout(this);b.setOrientation(LinearLayout.VERTICAL);return b;}
     private LinearLayout row(){LinearLayout b=new SpacedLayout(this);b.setOrientation(LinearLayout.HORIZONTAL);b.setGravity(Gravity.CENTER_VERTICAL);return b;}
