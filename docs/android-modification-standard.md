@@ -1,4 +1,4 @@
-# Android 修改标准与模块关联（v0.2.19）
+# Android 修改标准与模块关联（v0.2.20）
 
 状态：本轮实现说明，待跨人评审；2026-11-06。以实际代码与测试结果为准。适用工程 `Android_APP/app/`，不改变仓库协作规范。
 
@@ -9,8 +9,10 @@ Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/a
 | 入口 | 职责 | 修改时必须联查 |
 | --- | --- | --- |
 | `AcmApplication`、`ApiClient`、`SessionVault` | 进程共享会话、CSRF、权限、缓存和加密凭据 | 退出、切账号/服务、Activity 重建、禁止主线程等待网络锁 |
-| `MainActivity`、`NavigationStack` | 首页/排名/题库/发帖/个人中心/账号设置及原生详情 | `external_navigation`、详情返回、草稿归属、搜索入口防重 |
-| `SearchActivity`、`SearchModules`、`ModuleOrderView` | 全局搜索、整卡纵向拖拽/缩放与让位、模块顺序、添加/移除、历史记录 | 公开 ID 能力、本人接口范围、缓存及模块独立失败 |
+| `MainActivity`、`NavigationStack`、`PageMotion` | 首页/排名/题库/发帖/个人中心/账号设置及原生详情 | 五个平行栏目无动画，子页面右入/右出；临时快照取消与释放，`external_navigation`、详情返回、草稿归属、搜索入口防重 |
+| `SearchActivity`、`SearchModules`、`SearchHotPosts` | 搜索顶栏、首次聚焦、热搜、结果、模块设置和历史记录 | 热搜仅首批30条热门候选，按真实阅读量选至多4条；异步返回不抢输入焦点，搜索设置入口唯一，公开 ID、本人接口范围、缓存及模块独立失败 |
+| `ModuleOrderView`、`ModuleDragPhysics` | 整卡纵向拖拽、90%缩放、边框提前让位及逐项弹簧传播 | 首个拦截事件也处理移动/松手；原始行身份不等于bringToFront后的绘制次序；取消不保存、松手保存、无障碍排序、父滚动拦截及边缘滚动 |
+| `ModalDialogs`、`KeyboardInputs`、窗口样式 | 普通弹窗/全屏表单和软键盘 | 自定义全屏Dialog安装编辑器后清除阻挡IME的窗口标志；仅搜索入口主动显示，普通表单点击唤起；不绕过权限/防重 |
 | `MobilePageActivity`、`PullRefreshLayout`、`PageRefresh` | 搜索与便捷管理的页面壳、缓存读取、串行后台操作 | 页面代次、会话代次、槽位绑定；下拉只重复注册的读取，排序长按不能被父滚动抢占，不得刷新草稿或重放写操作 |
 | `AdminQuickActivity`、`AdminApiPolicy`、`AdminMemberEdits` | 手机便捷管理和 API 白名单 | 服务端角色重验证、CSRF、审核版本、敏感内容禁止通用缓存 |
 | `SyncTaskResult` | 同步任务的数值结果展示 | `-1`也可能是已有成员抓取失败，显示通用“同步失败”；不能据此推断成员不存在。新增条数与未绑定/抓取异常/暂停仍各自展示 |
@@ -30,7 +32,9 @@ Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/a
 
 ## 搜索接口矩阵
 
-默认顺序为 **用户 → 论坛 → Wiki → 题目**。顺序、启用模块和最近十条记录仅保存在本机，键为 `global_search_modules`、`search_history`、`record_search`。空模块列表是有效用户选择。结果按优先级单列排列，每个模块独立分页，每页六条；空搜索页只保留顶部一个搜索设置入口。
+默认顺序为 **用户 → 论坛 → Wiki → 题目**。顺序、启用模块和最近十条记录仅保存在本机，键为 `global_search_modules`、`search_history`、`record_search`。空模块列表是有效用户选择。结果按优先级单列排列，每个模块独立分页，每页六条。空搜索页顶栏为返回、输入框和圆形猫娘搜索图标，下方依次为热搜、搜索历史/历史记录、唯一一个搜索设置；首次空查询入口自动聚焦并弹键盘，提交与后台返回不抢焦点。
+
+热搜复用 `api.publicPostsPath("")+"?sort=hot&page=1&page_size=30"`，支持移动接口的 `items` 与旧接口的 `rows`，按 `views_count` 降序取最多4条并去重，标题点击进入原生话题。后端 `hot` 是置顶优先的综合热度，不是全站阅读量排序；不能将该候选范围描述为全站前四。空结果、断网和缺少接口继续使用真实状态，不植入默认热搜。
 
 首页通过Intent传入的首次非空 `query` 与搜索页按钮/键盘提交共用 `SearchActivity.submit`，统一去除首尾空白、限制100个Unicode码点，并按记录开关更新最近十条、去重。Activity状态恢复只渲染已保存查询，不能将旧词重新置顶；进入搜索设置等非搜索模式也不写入查询记录。
 
