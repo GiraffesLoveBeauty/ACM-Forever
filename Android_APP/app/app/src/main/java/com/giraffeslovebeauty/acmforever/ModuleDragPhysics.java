@@ -7,7 +7,7 @@ final class ModuleDragPhysics {
     private final float[] height, y, velocity;
     private final ArrayList<Integer> order = new ArrayList<>();
     private final int selected;
-    private final float gap, anticipation;
+    private final float gap, anticipation, total;
     private float lastTop;
     private int direction;
     ModuleDragPhysics(float[] heights, int selected, float gap, float anticipation) {
@@ -15,15 +15,16 @@ final class ModuleDragPhysics {
         y = new float[heights.length]; velocity = new float[heights.length];
         float top = 0;
         for (int i = 0; i < heights.length; i++) { order.add(i); y[i] = top; top += heights[i] + gap; }
+        total = Math.max(0, top - gap);
         lastTop = y[selected];
     }
     float position(int id) { return y[id]; }
     List<Integer> order() { return new ArrayList<>(order); }
     private float slot(int index) { float top = 0; for (int i = 0; i < index; i++) top += height[order.get(i)] + gap; return top; }
+    private float bound(int id, float top) { return Math.max(0, Math.min(total - height[id], top)); }
     void step(float requestedTop, float seconds) {
         float dt = Math.max(.001f, Math.min(.032f, seconds));
-        float total = slot(order.size() - 1) + height[order.get(order.size() - 1)];
-        float top = Math.max(0, Math.min(total - height[selected], requestedTop));
+        float top = bound(selected, requestedTop);
         float delta = top - lastTop;
         if (Math.abs(delta) > .01f) direction = delta > 0 ? 1 : -1;
         float lead = anticipation + Math.min(anticipation * 2, Math.abs(delta) / dt * .025f);
@@ -32,6 +33,10 @@ final class ModuleDragPhysics {
         float center = top + height[selected] / 2;
         while (to > 0 && center < slot(to - 1) + height[order.get(to - 1)] / 2) to--;
         while (to < order.size() - 1 && center > slot(to + 1) + height[order.get(to + 1)] / 2) to++;
+        // Clamping can prevent a taller row's centre from crossing an edge row's
+        // centre. Reaching the list boundary must still permit the end slot.
+        if (top <= 0) to = 0;
+        else if (top >= total - height[selected]) to = order.size() - 1;
         if (to != from) { order.remove(from); order.add(to, selected); }
         float[] target = new float[height.length];
         for (int i = 0; i < order.size(); i++) target[order.get(i)] = slot(i);
@@ -49,8 +54,12 @@ final class ModuleDragPhysics {
             target[current] = Math.min(target[current], limit);
         }
         for (int id : order) if (id != selected) {
+            // Neighbour avoidance must never push a row outside the reorder list.
+            target[id] = bound(id, target[id]);
             velocity[id] = (velocity[id] + (target[id] - y[id]) * 420 * dt) * (float) Math.exp(-26 * dt);
-            y[id] += velocity[id] * dt;
+            float next = y[id] + velocity[id] * dt;
+            y[id] = bound(id, next);
+            if (y[id] != next) velocity[id] = 0;
             if (Math.abs(target[id] - y[id]) < .05f && Math.abs(velocity[id]) < .2f) { y[id] = target[id]; velocity[id] = 0; }
         }
     }

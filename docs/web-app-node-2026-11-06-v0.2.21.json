@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "nodeId": "WEB-APP-20261106-01",
+  "observedAt": "2026-11-06T18:25:42+08:00",
+  "timezone": "Asia/Shanghai",
+  "comparison": "current Web and formal/local backend source versus current Android runtime source; not production acceptance",
+  "mainSha": "040bfb3ce7a55c08cbf23ac066eadb4a50cf1426",
+  "headSha": "040bfb3ce7a55c08cbf23ac066eadb4a50cf1426",
+  "branch": "codex/android-v0.2.21-drag-bounds",
+  "remoteMainVerifiedReadOnly": true,
+  "android": {
+    "versionName": "0.2.21",
+    "versionCode": 35,
+    "hasUncommittedProductChanges": true,
+    "publishedVersionName": "0.2.20",
+    "publishedVersionCode": 34,
+    "publishedTagSha": "b6a9bfe9171cbb55be6b25b9f03d6424489899b6",
+    "candidate": {
+      "path": "Android_APP/dist/acmforever-0.2.21-debug.apk",
+      "bytes": 3334544,
+      "sha256": "68912db326337b0657c840cc5115ee0fc7370680cbaedfe48cb0f0936334df47"
+    }
+  },
+  "fingerprintAlgorithm": "Sort repo-relative POSIX paths; SHA256 of UTF-8 path + NUL + lowercase file SHA256 + LF per entry. Known text suffixes normalize CRLF to LF; other bytes unchanged.",
+  "textSuffixes": [
+    ".css",
+    ".gradle",
+    ".html",
+    ".java",
+    ".js",
+    ".json",
+    ".md",
+    ".properties",
+    ".py",
+    ".sql",
+    ".svg",
+    ".txt",
+    ".vue",
+    ".xml",
+    ".yaml",
+    ".yml"
+  ],
+  "sourceTrees": {
+    "web": {
+      "files": 115,
+      "sha256": "2e0e8a5974450e53b2307207a02927b9be1e9dc243ecc5fc466e5c431f760b6a"
+    },
+    "formal_backend": {
+      "files": 94,
+      "sha256": "61d7f04f6c9539c99e1e982fbcb6e73cbe31e5c24e3d81b7a41c082a2c1d614c"
+    },
+    "local_demo": {
+      "files": 20,
+      "sha256": "8407303f3fd888db0db978bf9684f4c5631728ee6335f51bd778158ceb8869b3"
+    },
+    "android_main": {
+      "files": 146,
+      "sha256": "6e19677deb55a51ed8e5302859a19b78f7a334821b97bb9e4dbbc501ed72068d"
+    },
+    "android_build": {
+      "files": 5,
+      "sha256": "3f2adc9c2644c79747de431eb899b527823435cae44107ec1f8457eec6db1e3d"
+    }
+  },
+  "uncommittedAndroidFiles": [
+    {
+      "path": "Android_APP/app/app/build.gradle",
+      "tracked": true,
+      "exists": true,
+      "sha256_lf_normalized": "9f22a414559a6eba1cf30d8fb96336ed3917aaad2c0d6e46fad404ebdb6cc7d4",
+      "sha256_bytes": "e770e82a543982e4f3425a223097cd01428b4dd6501b2046bcce9bd0477e6a66"
+    },
+    {
+      "path": "Android_APP/app/app/src/androidTest/java/com/giraffeslovebeauty/acmforever/GlobalSearchAdminUiSmoke.java",
+      "tracked": true,
+      "exists": true,
+      "sha256_lf_normalized": "4e85d62b6c5c8ad5888a29e26431e4d737927ebd9e74d9f96ff6f7266cdc5893",
+      "sha256_bytes": "985e0c99e3a06c24ddf4b89490199645e475b1e885673c8d65503efeea5dd783"
+    },
+    {
+      "path": "Android_APP/app/app/src/main/assets/releases/history.json",
+      "tracked": true,
+      "exists": true,
+      "sha256_lf_normalized": "2751c484d2ceb160f48aefd1213a5cfb0aa1020362b17406fbc9f4cc7223402f",
+      "sha256_bytes": "8b227df57e6c0134f1d6a20a5d357c4fd3cd7ed8f389ae9e7d11dd437b90b8ea"
+    },
+    {
+      "path": "Android_APP/app/app/src/main/java/com/giraffeslovebeauty/acmforever/ModuleDragPhysics.java",
+      "tracked": true,
+      "exists": true,
+      "sha256_lf_normalized": "7d88dbfe5efa0aecdd50ccb183a55d89647a5fc7383cf891a2b9d9a016b483e2",
+      "sha256_bytes": "7d88dbfe5efa0aecdd50ccb183a55d89647a5fc7383cf891a2b9d9a016b483e2"
+    },
+    {
+      "path": "Android_APP/app/app/src/main/java/com/giraffeslovebeauty/acmforever/ModuleEdgeScroll.java",
+      "tracked": false,
+      "exists": true,
+      "sha256_lf_normalized": "b655361f0f573c949e6d8e5f73536f8ef2b64c77fc0f53e6563958ecc70d1cfe",
+      "sha256_bytes": "b655361f0f573c949e6d8e5f73536f8ef2b64c77fc0f53e6563958ecc70d1cfe"
+    },
+    {
+      "path": "Android_APP/app/app/src/main/java/com/giraffeslovebeauty/acmforever/ModuleOrderView.java",
+      "tracked": true,
+      "exists": true,
+      "sha256_lf_normalized": "fab8ee455811ab279ee9b33c254d9d32200bce49d2851d3ce69cea6aee406cf3",
+      "sha256_bytes": "9a10bc57ffe2a54bc597dd5c641da793d7c458622f2f73db8518104f90301373"
+    },
+    {
+      "path": "Android_APP/app/app/src/test/java/com/giraffeslovebeauty/acmforever/ModuleDragPhysicsTest.java",
+      "tracked": true,
+      "exists": true,
+      "sha256_lf_normalized": "b2d6023ae644d08b2cecfa8ae02eb5976acc3fb9842e842ac281ec05c36bc90f",
+      "sha256_bytes": "b2d6023ae644d08b2cecfa8ae02eb5976acc3fb9842e842ac281ec05c36bc90f"
+    },
+    {
+      "path": "Android_APP/app/app/src/test/java/com/giraffeslovebeauty/acmforever/ModuleEdgeScrollTest.java",
+      "tracked": false,
+      "exists": true,
+      "sha256_lf_normalized": "8107c2c296e9b2d42c68018ca0752e8e938f801a33e4bf9838226db4e59ad85f",
+      "sha256_bytes": "8107c2c296e9b2d42c68018ca0752e8e938f801a33e4bf9838226db4e59ad85f"
+    }
+  ],
+  "excludedRuntime": [
+    "Android_APP/prototype",
+    "AdminActivity.java",
+    "BrowserActivity.java",
+    "UpdateManager.java",
+    "assets/admin/",
+    "unmerged self-host update PR #105",
+    "local build output and private data"
+  ],
+  "sourceOnly": true,
+  "productionVerified": false,
+  "paidAiRequestsExecuted": false,
+  "uploadOrPublishPerformed": false
+}

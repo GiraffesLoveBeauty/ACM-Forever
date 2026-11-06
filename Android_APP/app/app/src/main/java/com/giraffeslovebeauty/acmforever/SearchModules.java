@@ -44,4 +44,7 @@ final class SearchModules {
             case "users":return "/api/community/leaderboard?days=all&search="+q+"&page="+p+"&page_size=6&positive_only=0";
             default:throw new IllegalArgumentException("无API接口");}
     }
+    static String path(String id,String term,int page,String exactTag){
+        return path(id,term,page)+(Arrays.asList("problems","tracker").contains(id)?ProblemTags.parameter(exactTag):"");
+    }
 }

@@ -16,6 +16,7 @@ public class AcmApplication extends Application {
     private java.util.concurrent.CompletableFuture<Boolean> restoring;
     private PdfFiles pdfFiles;
     private AppUpdates updates;
+    private AccountClosureFlow closure;
 
     @Override public void onCreate() {
         super.onCreate();
@@ -46,6 +47,7 @@ public class AcmApplication extends Application {
     }
 
     ApiClient api() { return api; }
+    synchronized AccountClosureFlow closure() { if (closure == null) closure = new AccountClosureFlow(this); return closure; }
     synchronized AppUpdates updates(){if(updates==null)updates=new AppUpdates(this,api);return updates;}
     CloudDrafts drafts() { return drafts; }
     SessionVault vault() { return vault; }

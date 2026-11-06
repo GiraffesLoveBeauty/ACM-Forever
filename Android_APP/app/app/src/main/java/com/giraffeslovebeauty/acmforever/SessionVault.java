@@ -25,6 +25,32 @@ final class SessionVault {
         return generator.generateKey();
     }
     synchronized void clear() { prefs.edit().remove("session_cipher").remove("session_iv").apply(); }
+    // UI presence check only; decryption and receipt validation stay on the closure worker.
+    boolean hasClosure() { return !prefs.getString("closure_cipher", "").isEmpty(); }
+    synchronized boolean saveClosure(String value) {
+        try {
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE, key());
+            cipher.updateAAD("account-closure-receipt-v1".getBytes(StandardCharsets.UTF_8));
+            return prefs.edit().putString("closure_cipher", Base64.encodeToString(cipher.doFinal(value.getBytes(StandardCharsets.UTF_8)), Base64.NO_WRAP))
+                    .putString("closure_iv", Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP)).commit();
+        } catch (Exception e) { return false; }
+    }
+    synchronized String readClosure() throws Exception {
+        String value = prefs.getString("closure_cipher", ""); if (value.isEmpty()) return "";
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.DECRYPT_MODE, key(), new GCMParameterSpec(128, Base64.decode(prefs.getString("closure_iv", ""), Base64.NO_WRAP)));
+        cipher.updateAAD("account-closure-receipt-v1".getBytes(StandardCharsets.UTF_8));
+        return new String(cipher.doFinal(Base64.decode(value, Base64.NO_WRAP)), StandardCharsets.UTF_8);
+    }
+    @android.annotation.SuppressLint("ApplySharedPref") // Closure worker only; durably remove receipt before acknowledging it.
+    synchronized void clearClosure() { prefs.edit().remove("closure_cipher").remove("closure_iv").commit(); }
+    synchronized void forgetClosedAccount(String origin, String account) {
+        if (origin.equals(prefs.getString("password_origin", "")) && account.equals(prefs.getString("password_account", ""))) clearPassword();
+        if (account.equals(prefs.getString("remembered_account", ""))) {
+            clear();
+            prefs.edit().remove("remembered_account").putBoolean("auto_login", false).apply();
+        }
+    }
     synchronized void clearPassword() {
         prefs.edit().remove("password_cipher").remove("password_iv").remove("password_origin").remove("password_account")
                 .putBoolean("save_password", false).putBoolean("auto_login",false).apply();

@@ -29,6 +29,10 @@ public final class ReaderSmoke extends Instrumentation {
     private boolean settingsMode;
     @Override public void onCreate(Bundle arguments){super.onCreate(arguments);mode=arguments==null?"":arguments.getString("mode","");settingsMode=arguments!=null&&"settings".equals(arguments.getString("mode"));communityMode=arguments!=null&&"community".equals(arguments.getString("mode"));loginMode=arguments!=null&&"login".equals(arguments.getString("mode"));designMode=arguments!=null&&"design".equals(arguments.getString("mode"));appearanceMode=arguments!=null&&"appearance".equals(arguments.getString("mode"));webMode=arguments!=null&&"web".equals(arguments.getString("mode"));start();}
     @Override public void onStart(){
+        if("wikinavigation".equals(mode)){WikiNavigationUiSmoke.run(this);return;}
+        if("problemtags".equals(mode)){ProblemTagsUiSmoke.run(this);return;}
+        if("accountclosure".equals(mode)){AccountClosureUiSmoke.run(this);return;}
+        if("ojbindings".equals(mode)){OjBindingsUiSmoke.run(this);return;}
         if("themetransfer".equals(mode)){ThemeTransferUiSmoke.run(this);return;}
         if(mode.startsWith("officiallayout-")){ThemeTransferUiSmoke.runLayout(this,mode.substring("officiallayout-".length()));return;}
         if("globalsearchadmin".equals(mode)){GlobalSearchAdminUiSmoke.run(this);return;}

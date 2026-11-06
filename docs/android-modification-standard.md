@@ -1,4 +1,4 @@
-# Android 修改标准与模块关联（v0.2.20）
+# Android 修改标准与模块关联（v0.2.21）
 
 状态：本轮实现说明，待跨人评审；2026-11-06。以实际代码与测试结果为准。适用工程 `Android_APP/app/`，不改变仓库协作规范。
 
@@ -11,13 +11,17 @@ Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/a
 | `AcmApplication`、`ApiClient`、`SessionVault` | 进程共享会话、CSRF、权限、缓存和加密凭据 | 退出、切账号/服务、Activity 重建、禁止主线程等待网络锁 |
 | `MainActivity`、`NavigationStack`、`PageMotion` | 首页/排名/题库/发帖/个人中心/账号设置及原生详情 | 五个平行栏目无动画，子页面右入/右出；临时快照取消与释放，`external_navigation`、详情返回、草稿归属、搜索入口防重 |
 | `SearchActivity`、`SearchModules`、`SearchHotPosts` | 搜索顶栏、首次聚焦、热搜、结果、模块设置和历史记录 | 热搜仅首批30条热门候选，按真实阅读量选至多4条；异步返回不抢输入焦点，搜索设置入口唯一，公开 ID、本人接口范围、缓存及模块独立失败 |
-| `ModuleOrderView`、`ModuleDragPhysics` | 整卡纵向拖拽、90%缩放、边框提前让位及逐项弹簧传播 | 首个拦截事件也处理移动/松手；原始行身份不等于bringToFront后的绘制次序；取消不保存、松手保存、无障碍排序、父滚动拦截及边缘滚动 |
+| `ModuleOrderView`、`ModuleDragPhysics`、`ModuleEdgeScroll` | 整卡纵向拖拽、90%缩放、边框提前让位、逐项弹簧传播与慢速边缘滚动 | 所有行均受列表上下边界约束，不能只限制选中行；开启列表裁剪；边缘速度按经过时间及密度计算，不能按每帧固定距离；原始行身份不等于bringToFront后的绘制次序；首个拦截事件、取消不保存、松手保存、无障碍及父滚动拦截继续联查 |
 | `ModalDialogs`、`KeyboardInputs`、窗口样式 | 普通弹窗/全屏表单和软键盘 | 自定义全屏Dialog安装编辑器后清除阻挡IME的窗口标志；仅搜索入口主动显示，普通表单点击唤起；不绕过权限/防重 |
 | `MobilePageActivity`、`PullRefreshLayout`、`PageRefresh` | 搜索与便捷管理的页面壳、缓存读取、串行后台操作 | 页面代次、会话代次、槽位绑定；下拉只重复注册的读取，排序长按不能被父滚动抢占，不得刷新草稿或重放写操作 |
 | `AdminQuickActivity`、`AdminApiPolicy`、`AdminMemberEdits` | 手机便捷管理和 API 白名单 | 服务端角色重验证、CSRF、审核版本、敏感内容禁止通用缓存 |
 | `SyncTaskResult` | 同步任务的数值结果展示 | `-1`也可能是已有成员抓取失败，显示通用“同步失败”；不能据此推断成员不存在。新增条数与未绑定/抓取异常/暂停仍各自展示 |
 | `ChallengeDifficulty` | 管理员单题训练的难度选项和默认值 | 与 `acm_api/difficulty.py` 的有效值及网页训练默认值一致；切换平台同步难度，空选项不得发送请求 |
 | `WebFeaturesActivity` | 通知/投稿进度/比赛进度/Wiki | Wiki 站内练习相对链接进入原生题面，外链 HTTPS 校验 |
+| `WikiCatalog`、`WikiOutline`、`WikiReaderNavigation`、`ContentView`及`reader/content.js` | Wiki分类路径、文章标签、章节目录/高亮与阅读位置 | 只读公开接口；分类和文章独立失败；从清理后的实际DOM取标题，代码块不算目录、重复标题ID唯一；无JS应用桥，章内偏移/历史版本/转屏/返回及动态布局必须联查 |
+| `ProblemTags`、`ProblemTagPicker`、题库与搜索/比赛进度 | 原始标签候选搜索、完整标签精确筛选 | `tag`关键词与`problem_tag`完整标签分开编码；真实候选、平台切换清标签、筛选归第一页、翻页/返回/重建保留、单窗防重及会话代次 |
+| `OjBindingsActivity`、`OjBindingState` | 本人 OJ 绑定列表、归属核验、绑定/改绑/解绑与同步 | 复用 `/api/me/profile` 的 `bindings` 能力；是否绑定取账号字段而非 AC 数；确认请求必须核对实际输入与验证码所属账号；密码/确认不持久化，写入不自动重试，返回个人中心/账号页刷新 |
+| `AccountClosureActivity`、`AccountClosureFlow`、`AccountClosure`、`SessionVault`及`MainActivity`登录页 | 本人账户注销、实时开关、确认和结果回执 | 独立加密回执先保存再提交；未登录时仍须有本机回执查询入口；当前密码不持久化；管理员不能提交；转屏/断网/重启只查询，不重放POST；已明确的提交前拒绝可清回执，查询限流不得清理；必须匹配回执与提交时间才报成功，同QQ新代账号不可被旧回执退出 |
 | `ClubActivity`、`TrainingReminder` | 题单、讨论、错题、复习、打卡和本地提醒 | 缺失接口保留真实报错，通知授权、返回来源页 |
 | `CloudDrafts` 与主页面编辑器 | 云端多草稿和自动保存 | 账号+草稿代次；切换草稿、返回旧页、迟到写入、Markdown 导入归属 |
 | `PdfActivity`、`ContentView`、阅读器资源 | PDF、Markdown/公式/代码与图片 | 缩放/翻页/复制、受限媒体地址、缓存边界 |
@@ -43,12 +47,16 @@ Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/a
 | 用户 | 按能力选择 `/api/mobile/v1/leaderboard` 或 `/api/community/leaderboard` | `days=all&positive_only=0&search=…`；搜公开昵称/身份，包含零 AC。这是排行榜公开成员范围，**不是完整成员目录 API**。缺少 `public_member_id` 时禁用主页跳转，不猜 QQ |
 | 论坛 | `api.publicPostsPath` 按能力选择移动/旧论坛接口 | 标题与正文搜索；移动接口保留作者公开 ID；不要写死旧 `/api/forum/posts` |
 | Wiki | `GET /api/wiki/search` | 公开文章搜索；文章直达使用 `wiki_slug` |
-| 题目 | `GET /api/me/problems` | 需登录，`tag=关键词&scope=all`；全局搜索允许跨平台，不改变独立题库的默认 CF 筛选 |
-| 比赛进度 | `GET /api/me/problems/tracker` | 需登录，本人目录中的比赛/题目，仍受已采集目录限制 |
+| 题目 | `GET /api/me/problems` | 需登录，`tag=关键词&scope=all`；可组合`problem_tag=完整标签`；全局搜索允许跨平台，不改变独立题库的默认 CF 筛选 |
+| 比赛进度 | `GET /api/me/problems/tracker` | 需登录，本人目录中的比赛/题目；可独立组合关键词与完整标签，仍受已采集目录限制 |
 | 我的话题/话题收藏/云端草稿 | `/api/forum/mine/posts`、`/api/forum/mine/bookmarks`、`/api/forum/drafts` | 需登录，在各接口最近至多 100 条内本地筛选返回字段；不能描述为全历史服务端搜索 |
 | 社团题单/按题讨论/错题本 | 尚无可复用的对应搜索接口 | 保留可添加模块，显示红色圆角“无API接口”，不补假内容 |
 
 缺失搜索接口并不意味着可以把 `/api/admin/members` 暴露给普通用户；管理员成员查询会返回 QQ、学校等私有资料。完整公开成员目录如需超出公开排行榜范围，须另行约定接口。
+
+题库、比赛进度及全局对应模块共用 `GET /api/me/problems/tags?platform=…` 的真实原始标签候选；候选窗口可以模糊搜索标签名，但提交时使用忽略大小写的完整标签匹配。不要以 `labels` 二次分类或拆分后的词代替。题库独立关键词与输入草稿进入页面栈，后台结果只更新列表，不能重建正在编辑的输入框。详情和本轮本地验证见[原始标签筛选与搜索](android-problem-tags-local-2026-11-06.md)。
+
+Wiki完整目录与阅读导航的本地适配见[android-wiki-navigation-local-2026-11-06.md](android-wiki-navigation-local-2026-11-06.md)。目录使用`/api/wiki/navigation`、分类说明使用`/api/wiki/categories/{id}`，正文与公开历史使用既有接口。阅读目录不需要新后端：标题与坐标从已清理且完成排版的正文生成，当前章节跟随外层原生滚动。不要把WebView的内部滚动当成整个页面阅读位置，也不要为锚点放开任意文件、脚本或登录Cookie访问。
 
 ## 仍缺的业务接口与不需要接口的部分
 
@@ -65,9 +73,29 @@ Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/a
 
 这些 `/club/` 路径是客户端已有约定，当前仓库尚无对应后端路由；后续需先确定契约，不能把界面存在当作API已实现。本轮搜索还需要对应的关键词/分页契约。
 
-更新分发使用GitHub公开静态 JSON/APK，不需要业务 `/api/mobile/v1/releases/*`；自站客户端与镜像已从本PR拆分，另待配置和review。相册背景、裁剪、主辅色、透明度、本机主题、搜索设置/历史、通知时间均本机保存，不需要上传接口。公开成员ID/平台题数/已发布话题已有移动接口，不再列为缺失；OJ绑定继续提示到网页或联系管理员。
+更新分发使用GitHub公开静态 JSON/APK，不需要业务 `/api/mobile/v1/releases/*`；自站客户端与镜像已从本PR拆分，另待配置和review。相册背景、裁剪、主辅色、透明度、本机主题、搜索设置/历史、通知时间均本机保存，不需要上传接口。公开成员ID/平台题数/已发布话题已有移动接口，不再列为缺失；本人OJ绑定的新本地实现见下节，不改变服务器已开放的平台范围。
+
+## 本人 OJ 绑定（本地新增，2026-11-06）
+
+个人中心的单平台通过题数卡在本人未绑定时显示“绑定”，替代题数位置；已绑定且零AC显示0，不显示绑定按钮；ALL与他人主页不展示操作。账号设置 → 个人资料 → OJ账号绑定进入原生列表，已绑定展示用户名和“修改”，未绑定展示“绑定”。
+
+状态来自 `GET /api/me/profile` 的 `user` 与 `bindings`；不凭平台名称假定服务可用。绑定详情复用 `POST /api/me/bindings/{platform}/verification`、`confirm`、`sync` 和 `DELETE /api/me/bindings/{platform}`。当前正式后端仅CF的 `self_service=true`，其他平台说明联系管理员；已绑定平台仍可按既有接口解绑和同步。旧服务没有 `bindings` 时只读账号，并说明缺少接口。
+
+CF申请验证码后，将验证码保存到公开资料再确认；改绑、解绑及已有账号的归属核验携带当前平台账号、ACMForever登录密码和显式确认。按后端原约束解释清理影响，不收集OJ密码，不使用管理员接口。密码/勾选/验证码不写实例状态；恢复时重新读服务器待验证状态。网络失败不自动重发写入，服务器拒绝时保留原绑定。归属核验写请求读取超时25秒，与网页一致，其余请求及10秒读取预警不变。
+
+`confirmationBody`必须接收当前账号输入并与服务器 `challenge.account` 比较，不能使用可被失败重新申请改写的本地候选值作为验证码归属。改填账号后，本地校验失败或网络请求未到达服务器，均不得让旧 `verification_id` 绑定输入以外的账号；大小写与首尾空白按账号原规则处理。
+
+详情与验证见 [android-oj-bindings-local-2026-11-06.md](android-oj-bindings-local-2026-11-06.md)。此前功能对照节点保留当时结论，不覆盖历史。
 
 ## 便捷管理权限与契约
+
+本人注销复用现成 `/api/me/account-closure/preview`、`POST /api/me/account-closure` 与 `/api/account-closures/{request_id}`，不属于缺失接口。开关从会话实时获取，App不修改后端环境变量。详情见[本人账户注销本地实现](android-account-closure-local-2026-11-06.md)。普通注销需要当前登录密码、CSRF、幂等键与独立回执；admin/root先完成交接降级。后端私有数据删除与公共内容匿名规则不能缩减成“退出即成功”。
+
+注销错误分类必须区分提交与回执查询：现有服务端在提交事务前返回的 `429 / RATE_LIMITED` 是明确拒绝，客户端清除待确认回执，保留会话并允许手动重新检查，不自动再次POST。只有状态码与业务码同时匹配才使用此规则；裸429、未知业务码、超时及5xx继续保留恢复信息。回执GET即使返回同样的 `429 / RATE_LIMITED` 也不能证明注销未发生，不得清回执或切换到新提交。
+
+注销POST的 `401 / AUTH_REQUIRED` 也属于明确提交前拒绝，可清除待确认回执并引导重新登录后手动检查。不能将该规则扩大到裸401、未知业务码或5xx；回执GET的认证失败仍属结果不明，必须保留原回执，且不能清理当前正常会话。
+
+注销回执的恢复入口不能依赖正常登录。`MainActivity.showLogin()` 同时覆盖启动时未登录和刷新会话失败后显示登录表单的路径；有本机密文时显示“查询注销结果”。UI只检查密文存在，不解密、不取Keystore、不获取ApiClient网络锁；真正读取在注销工作线程执行。恢复只能查询旧回执，不能自动登录、重新预览或重放POST；服务器注销开关关闭也不能封住回执查询。普通退出登录与会话失效不得删除待确认回执；只有明确拒绝或用户确认已完成结果时按现有规则清理。
 
 账号设置仅在服务端会话确认为 `admin/root` 时显示入口。页面进入、重新可见及每次管理读写前在后台验证会话；实际 API 仍由服务器鉴权。普通成员即使启动内部 Activity 也不能看到管理数据。
 
@@ -82,7 +110,7 @@ Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/a
 | 指定成员复盘 | `GET/PUT /api/contest/reviews` | 精确携带成员与比赛、题目；六态与网页一致 |
 | 比赛播报 | `GET/PUT /api/settings/contest-report` | 北京时间 HH:MM；修改/关闭前确认全站影响 |
 
-按本轮需求，手机便捷管理增加单个成员的资料/四个OJ绑定、密码和账号启停；Root可改角色。普通成员自身绑定仍转Web。批量开户、Excel/CSV、校OJ、题库采集、CF 选题、Wiki 编辑与复杂全局设置留在 Web。完整后台外链打开系统浏览器，需单独登录，不向浏览器传 Cookie、密码或 Token。管理页面没有在生产执行试写。
+按本轮需求，手机便捷管理增加单个成员的资料/四个OJ绑定、密码和账号启停；Root可改角色。普通成员自身绑定使用上节单独的本人接口，不能借用管理接口。批量开户、Excel/CSV、校OJ、题库采集、CF 选题、Wiki 编辑与复杂全局设置留在 Web。完整后台外链打开系统浏览器，需单独登录，不向浏览器传 Cookie、密码或 Token。管理页面没有在生产执行试写。
 
 ## 不可破坏的关联
 
@@ -110,3 +138,10 @@ Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/a
 - `PullRefreshLayout`只触发`PageRefresh`登记的读取；不能调用发帖/审核/改密等提交函数。新增页面必须考虑滚动顶部判定、长按、输入、无障碍和会话代次。
 - `AppUpdates`将尝试时间与成功时间分开，六小时依据成功结果，失败一分钟防抖；更新页进入即手动检查，同次Activity重建不重复。GitHub发布、自站PR及下载校验链不变。
 - 官方横幅背景与交互画布分层，使用原CSS装饰；不要再覆盖模板内部图谱/地形的不同尺寸。详情见[android-v0.2.19.md（本轮范围、权限与验收）](android-v0.2.19.md)。
+
+## v0.2.21拖动边界与滚动速度
+
+- `ModuleDragPhysics`对选中模块、邻居目标及积分后的实际位置统一限制为`0..列表总高-该行高度`，触界清零该行速度；列表总高由各行实际高度及间距确定。到达上下边界仍允许进入首尾槽位，不能仅依赖不同高度卡片的中心越过。修改避让逻辑须验证首尾受压、不同高度及快速反向，禁止把负坐标当成向上让位成功。
+- `ModuleOrderView`开启子元素裁剪，模块不能覆盖搜索设置的历史记录/添加操作区；90%缩放、纵向跟手和松手保存继续保留。
+- `ModuleEdgeScroll`最高96dp/秒，边缘深度平方调速、120ms加速，离开边缘立即停止，改变方向清旧速度，单帧最多计50ms。保留小数像素并积分加速过程，60Hz/120Hz同时间距离应一致；不能恢复为每帧固定9dp。
+- 按2026-11-06用户最新指示，当前已完成源码提交v0.2.21 PR待跨人评审，不合并或发布；不改自站或发布链。完整范围与验证记录见[android-v0.2.21.md](android-v0.2.21.md)。网站共享后端的新变化另见[网站更新核对](web-updates-since-android-v0.2.20.md)，不代表已部署或已在App专门适配。
