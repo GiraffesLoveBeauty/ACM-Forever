@@ -18,7 +18,7 @@ final class AccountClosureUiSmoke {
     private final Context context;
     private ApiClient api; private AcmApplication app; private Activity activity;
     private final List<Activity> pages = new ArrayList<>();
-    private volatile boolean enabled, authenticated = true, closed, pending, loseResponse, wrongPassword, delay, rateLimited, receiptRateLimited, authRequired, receiptAuthRequired;
+    private volatile boolean enabled, authenticated = true, closed, pending, loseResponse, wrongPassword, delay, rateLimited, receiptRateLimited, authRequired, receiptAuthRequired, receiptUnavailable;
     private volatile String role = "member", account = "90000001";
     private volatile long epoch = 1;
     private volatile int posts, previews, receipts;
@@ -93,13 +93,32 @@ final class AccountClosureUiSmoke {
             check(posts == count + 1 && !api.isLoggedIn(), "rotation never resubmits; success clears session immediately");
             check(!prefs.getBoolean("auto_login", false) && !prefs.getBoolean("save_password", false), "credentials disabled after closure");
             progress("success, password cleanup and rotation checked"); screenshot("closure-success.png"); click("返回登陆界面"); await(() -> app.closure().state().phase == AccountClosureFlow.Phase.IDLE, "success acknowledged");
-            activity = parent; showAccount(); await(() -> has("登录"), "parent account renders login"); check(!has("账户注销"), "logged out account has no closure entry");
+            activity = parent; showAccount(); await(() -> has("账号登录"), "parent account renders login"); check(!has("账户注销") && !has("查询注销结果"), "logged out account without saved receipt has no deletion or recovery entry");
 
             login("90000001", 2); loseResponse = true; closed = false; activity = open(AccountClosureActivity.class); await(() -> input() != null, "lost-response confirmation");
             count = posts; edit("Test-Password!"); click("狠心注销"); await(() -> has("注销成功"), "lost POST response recovered by receipt");
             check(posts == count + 1 && receipts > 0, "only one write with receipt recovery"); click("返回登陆界面"); await(() -> app.closure().state().phase == AccountClosureFlow.Phase.IDLE, "recovery acknowledged"); loseResponse = false;
 
-            login("90000001", 3); closed = false; pending = true; loseResponse = true; activity = open(AccountClosureActivity.class); await(() -> input() != null, "pending confirmation");
+            login("90000001", 3); closed = false; loseResponse = true; receiptUnavailable = true;
+            activity = open(AccountClosureActivity.class); await(() -> input() != null, "offline result confirmation");
+            int offlinePosts = posts, offlinePreviews = previews; edit("Test-Password!"); click("狠心注销");
+            await(() -> app.closure().state().phase == AccountClosureFlow.Phase.UNCERTAIN, "committed result remains unknown while receipt is offline");
+            check(closed && !app.vault().readClosure().isEmpty() && posts == offlinePosts + 1, "committed receipt survives lost POST and query responses");
+            finish(); activity = parent; showAccount(); await(() -> has("账号登录") && !api.isLoggedIn(), "server closure expires normal login after leaving receipt page");
+            await(() -> has("查询注销结果"), "logged-out account keeps saved receipt recovery entrance");
+            check(find("账户注销") == null, "recovery entrance cannot initiate a new deletion");
+            recreateMain(); parent = activity;
+            await(() -> has("账号登录") && has("查询注销结果"), "fresh logged-out Activity keeps receipt entrance");
+            resetController(); enabled = false; receiptUnavailable = false;
+            activity = follow(() -> main(() -> { View entry = find("查询注销结果"); check(entry != null, "saved receipt entry"); entry.performClick(); entry.performClick(); }));
+            await(() -> has("注销成功"), "saved receipt recovers without login even when feature switch closes");
+            check(posts == offlinePosts + 1 && previews == offlinePreviews && !api.isLoggedIn(), "recovery only queries stored receipt with no preview, login or repeated POST");
+            click("返回登陆界面"); await(() -> app.closure().state().phase == AccountClosureFlow.Phase.IDLE, "offline recovery acknowledged");
+            activity = parent; showAccount(); await(() -> has("账号登录") && !has("查询注销结果"), "acknowledged receipt removes recovery entrance");
+            check(app.vault().readClosure().isEmpty(), "acknowledgment clears saved receipt"); enabled = true; loseResponse = false;
+            progress("logged-out receipt entrance, Activity/controller recreation, no-login recovery and acknowledgment checked");
+
+            login("90000001", 4); closed = false; pending = true; loseResponse = true; activity = open(AccountClosureActivity.class); await(() -> input() != null, "pending confirmation");
             count = posts; edit("Test-Password!"); click("狠心注销"); await(() -> has("尚未确认注销成功"), "pending receipt truthful");
             check(app.closure().state().phase == AccountClosureFlow.Phase.UNCERTAIN && posts == count + 1, "pending receipt not success and no repeated write");
             String saved = app.vault().readClosure(); check(!saved.contains("Test-Password!") && !prefs.getString("closure_cipher", "").contains(receiptToken), "only encrypted receipt persisted");
@@ -111,11 +130,11 @@ final class AccountClosureUiSmoke {
             // Simulate loss of the in-memory controller; recover from the encrypted on-device receipt.
             finish(); resetController();
             activity = open(AccountClosureActivity.class); await(() -> has("尚未确认注销成功"), "persistent recovery"); check(posts == count + 1, "persistent recovery only reads");
-            login("90000001", 4); pending = false; closed = true; click("查询注销结果"); await(() -> has("注销成功"), "old result displayed");
+            login("90000001", 5); pending = false; closed = true; click("查询注销结果"); await(() -> has("注销成功"), "old result displayed");
             check(api.isLoggedIn() && "90000001".equals(api.accountKey()), "new account epoch preserved by old receipt");
             click("返回登陆界面"); await(() -> app.closure().state().phase == AccountClosureFlow.Phase.IDLE, "old receipt acknowledged");
             check(api.isLoggedIn(), "return never logs out replacement account");
-            output.putString("stream", "PASS: entry below logout; fresh feature switch; consequences and crying cat; equal 50% red/theme actions; cancel; admin/root and role-change blocks; current password/CSRF/idempotency/receipt/epoch contract; submit RATE_LIMITED clears receipt with manual recheck after rotation/restart, no polling or auto-POST; submit AUTH_REQUIRED clears receipt with login/manual recheck after rotation/restart, no polling or auto-POST; wrong password; rotation without password or duplicate POST; confirmed success clears credentials; parent login; lost-response receipt recovery; pending truthful; receipt RATE_LIMITED retains recovery; receipt AUTH_REQUIRED retains recovery and normal session; encrypted receipt process-controller recovery; anonymous receipt headers; newer account epoch protected.\n"); status = Activity.RESULT_OK;
+            output.putString("stream", "PASS: entry below logout; fresh feature switch; consequences and crying cat; equal 50% red/theme actions; cancel; admin/root and role-change blocks; current password/CSRF/idempotency/receipt/epoch contract; submit RATE_LIMITED clears receipt with manual recheck after rotation/restart, no polling or auto-POST; submit AUTH_REQUIRED clears receipt with login/manual recheck after rotation/restart, no polling or auto-POST; wrong password; rotation without password or duplicate POST; confirmed success clears credentials; parent login; lost-response receipt recovery; logged-out saved receipt entrance survives Activity/controller recreation, only queries without login/preview/POST even with feature disabled, disappears after acknowledgment; pending truthful; receipt RATE_LIMITED retains recovery; receipt AUTH_REQUIRED retains recovery and normal session; encrypted receipt process-controller recovery; anonymous receipt headers; newer account epoch protected.\n"); status = Activity.RESULT_OK;
         } catch (Throwable e) {
             StringBuilder visible = new StringBuilder(); if (activity != null) main(() -> walk(decor(), v -> { if (v instanceof TextView && !(v instanceof EditText)) visible.append(((TextView) v).getText()).append(" | "); return false; }));
             output.putString("stream", "FAIL: " + android.util.Log.getStackTraceString(e) + "\nUI: " + visible + "\nCounts: posts=" + posts + " previews=" + previews + " receipts=" + receipts);
@@ -132,8 +151,10 @@ final class AccountClosureUiSmoke {
     private void resetController() throws Exception { java.lang.reflect.Field field = AcmApplication.class.getDeclaredField("closure"); field.setAccessible(true); field.set(app, new AccountClosureFlow(app)); }
     private void progress(String step) { Bundle message = new Bundle(); message.putString("stream", "STEP: " + step + "\n"); test.sendStatus(1, message); }
     private Activity open(Class<?> type) { Activity page = test.startActivitySync(new Intent(context, type).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); pages.add(page); return page; }
-    private Activity follow(Runnable work) { Instrumentation.ActivityMonitor monitor = test.addMonitor(AccountClosureActivity.class.getName(), null, false); try { work.run(); Activity page = test.waitForMonitorWithTimeout(monitor, 8000); check(page != null, "closure Activity started"); pages.add(page); return page; } finally { test.removeMonitor(monitor); } }
+    private Activity follow(Runnable work) { return follow(AccountClosureActivity.class, work); }
+    private Activity follow(Class<?> type, Runnable work) { Instrumentation.ActivityMonitor monitor = test.addMonitor(type.getName(), null, false); try { work.run(); Activity page = test.waitForMonitorWithTimeout(monitor, 8000); check(page != null, "Activity started: " + type.getSimpleName()); pages.add(page); return page; } finally { test.removeMonitor(monitor); } }
     private void recreate() { Activity old = activity; activity = follow(() -> main(old::recreate)); }
+    private void recreateMain() { Activity old = activity; activity = follow(MainActivity.class, () -> main(old::recreate)); }
     private void finish() { main(() -> { ModalDialogs.close(activity); activity.finish(); }); test.waitForIdleSync(); }
     private View decor() { WeakReferenceHolder holder = new WeakReferenceHolder(); main(() -> { try { java.lang.reflect.Field f = ModalDialogs.class.getDeclaredField("visible"); f.setAccessible(true); Object ref = ((Map<?, ?>) f.get(null)).get(activity); AlertDialog dialog = ref instanceof java.lang.ref.WeakReference ? (AlertDialog) ((java.lang.ref.WeakReference<?>) ref).get() : null; holder.view = dialog != null && dialog.isShowing() ? dialog.getWindow().getDecorView() : activity.getWindow().getDecorView(); } catch (Exception e) { throw new AssertionError(e); } }); return holder.view; }
     private static final class WeakReferenceHolder { View view; }
@@ -191,6 +212,7 @@ final class AccountClosureUiSmoke {
                 if (path.startsWith("/api/account-closures/")) {
                     receipts++; check(receiptToken.equals(getRequestProperty("X-Closure-Receipt")), "secret receipt header");
                     check(getRequestProperty("Cookie") == null && getRequestProperty("X-CSRF-Token") == null, "receipt has no unrelated account credentials");
+                    if (receiptUnavailable) throw new SocketTimeoutException("Synthetic receipt connection unavailable");
                     if (receiptRateLimited) { code = 429; response = "{\"code\":\"RATE_LIMITED\",\"message\":\"操作过于频繁，请稍后再试。\"}"; return; }
                     if (receiptAuthRequired) { code = 401; response = "{\"code\":\"AUTH_REQUIRED\",\"message\":\"请先登录。\"}"; return; }
                     response = receipt(); return;

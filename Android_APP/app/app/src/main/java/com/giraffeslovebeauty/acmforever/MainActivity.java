@@ -1961,6 +1961,7 @@ public final class MainActivity extends Activity {
     }
 
     private void showLogin() {
+        addClosureRecovery();
         LinearLayout box = card();
         box.addView(label("账号登录", 18, TEXT, true));
         space(box, 8);
@@ -2148,11 +2149,23 @@ public final class MainActivity extends Activity {
         });
         content.addView(logout);
         Button closure = action("账户注销", false);
-        closure.setOnClickListener(v -> {
-            if(openingClosure||ModalDialogs.isShowing(this))return;
-            openingClosure=true;startActivityForResult(new Intent(this,AccountClosureActivity.class),CLOSE_ACCOUNT);
-        });
+        closure.setOnClickListener(v -> openClosure());
         content.addView(closure);
+    }
+
+    private void addClosureRecovery() {
+        if (!sessionVault.hasClosure()) return;
+        LinearLayout box = card();
+        box.addView(label("待确认的账户注销", 17, TEXT, true));
+        box.addView(label("本机保存了注销回执，无需登录即可查询结果；不会再次提交注销。", 13, MUTED, false));
+        Button recovery = action("查询注销结果", false);
+        recovery.setOnClickListener(v -> openClosure()); box.addView(recovery);
+    }
+
+    private void openClosure() {
+        if (openingClosure || ModalDialogs.isShowing(this)) return;
+        openingClosure = true;
+        startActivityForResult(new Intent(this, AccountClosureActivity.class), CLOSE_ACCOUNT);
     }
 
     private boolean isAdministratorAccount() {
