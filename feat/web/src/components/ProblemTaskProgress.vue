@@ -46,6 +46,9 @@ const failures = computed(() => result.value.failures || []);
     <p class="muted" v-if="progress.phase === 'metadata'">
       正在导入题目目录 {{ progress.metadata_done || 0 }} / {{ progress.metadata_total || 0 }} 题
     </p>
+    <p class="muted" v-else-if="progress.phase === 'contest_catalog'">
+      正在补全比赛题目列表 {{ progress.contests_done || 0 }} / {{ progress.contests_total || 0 }} 场
+    </p>
     <p class="muted" v-else-if="total || !active">
       已处理 {{ progress.done || 0 }} / {{ progress.total || 0 }} 题 · 成功
       {{ result.success_count || 0 }} 题 · 失败 {{ result.failure_count || 0 }} 题 · 样例
@@ -60,6 +63,14 @@ const failures = computed(() => result.value.failures || []);
       正在读取{{ result.scope === 'platform' ? '全平台题目目录' : '比赛题目列表' }}…
     </p>
     <p v-if="result.error" role="alert">{{ result.error }}</p>
+    <details v-if="result.contest_catalog_failure_count">
+      <summary>比赛题目列表补全失败 {{ result.contest_catalog_failure_count }} 场</summary>
+      <ul>
+        <li v-for="failure in result.contest_catalog_failures" :key="failure.contest_id">
+          {{ failure.contest_id }}：{{ failure.error }}
+        </li>
+      </ul>
+    </details>
     <details v-if="failures.length">
       <summary>
         查看失败原因（{{ failures.length

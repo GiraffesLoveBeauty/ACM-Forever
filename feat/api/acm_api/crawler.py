@@ -9,6 +9,7 @@ import random
 import re
 import time
 import urllib.parse
+import weakref
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -31,6 +32,8 @@ _ATCODER_TITLES = None
 _ATCODER_TITLES_LOCK = asyncio.Lock()
 _ATCODER_DIFFICULTIES = None
 _ATCODER_DIFFICULTIES_LOCK = asyncio.Lock()
+_ATCODER_SUBMISSION_GATES = weakref.WeakKeyDictionary()
+_ATCODER_SUBMISSION_PAGE_SIZE = 500
 
 _LUOGU_GATE_LOCK = asyncio.Lock()
 _LUOGU_NEXT_REQUEST_AT = 0.0
@@ -658,82 +661,102 @@ class Crawler:
         db: aiosqlite.Connection,
         config: dict,
     ) -> int:
-        """通过 kenkoooo (AtCoderProblems) API 获取 AC 记录，无需认证。"""
+        """Page AtCoder Problems submissions without skipping a timestamp boundary."""
         handle = (user_row["atcoder_handle"] or "").strip()
         qq_id = user_row["qq_id"]
         if not handle:
             return 0
 
-        url = (
-            "https://kenkoooo.com/atcoder/atcoder-api/v3/user/submissions"
-            f"?user={urllib.parse.quote(handle)}&from_second={start_timestamp}"
-        )
         try:
-            async with session.get(url, timeout=30) as response:
-                response.raise_for_status()
-                data = await response.json()
-            if not isinstance(data, list):
-                LOG.error(f"AtCoder API 返回异常 (用户: {handle})")
-                return -1
-
-            titles, difficulties = await asyncio.gather(
-                Crawler._get_atcoder_titles(session),
-                Crawler._get_atcoder_difficulties(session),
-            )
-            difficulties = difficulties or {}
-            if difficulties:
-                await db.executemany(
-                    "UPDATE submissions SET problem_rating=? WHERE platform='atcoder' AND problem_id=? AND (problem_rating IS NULL OR problem_rating='')",
-                    [(rating, pid) for pid, rating in difficulties.items() if rating],
-                )
-            insert_tasks = []
-            rating_updates = []
-            processed = set()
             existing_ids = await Crawler._get_existing_problem_ids(db, qq_id, "atcoder")
-            for sub in data:
-                if not isinstance(sub, dict) or sub.get("result") != "AC":
-                    continue
-                pid = sub.get("problem_id")
-                contest_id = sub.get("contest_id")
-                if not pid:
-                    continue
-                if pid in processed:
-                    continue
-                processed.add(pid)
-                rating = difficulties.get(pid, "")
-                if rating:
-                    rating_updates.append((rating, qq_id, pid))
-                if pid in existing_ids:
-                    continue
-                problem_url = (
-                    f"https://atcoder.jp/contests/{contest_id}/tasks/{pid}" if contest_id else "https://atcoder.jp"
+            cursor_timestamp = max(0, int(start_timestamp))
+            added = 0
+            titles = None
+            difficulties = {}
+            gate = _ATCODER_SUBMISSION_GATES.setdefault(
+                asyncio.get_running_loop(), {"lock": asyncio.Lock(), "next": 0.0},
+            )
+            while True:
+                url = (
+                    "https://kenkoooo.com/atcoder/atcoder-api/v3/user/submissions"
+                    f"?user={urllib.parse.quote(handle)}&from_second={cursor_timestamp}"
                 )
-                insert_tasks.append(
-                    (
-                        qq_id,
-                        "atcoder",
-                        pid,
-                        titles.get(pid, pid),
-                        rating,
-                        problem_url,
-                        sub.get("epoch_second", 0),
+                async with gate["lock"]:
+                    await asyncio.sleep(max(0, gate["next"] - time.monotonic()))
+                    try:
+                        async with session.get(url, timeout=30) as response:
+                            response.raise_for_status()
+                            data = await response.json()
+                    finally:
+                        gate["next"] = time.monotonic() + 1.1
+                if not isinstance(data, list) or len(data) > _ATCODER_SUBMISSION_PAGE_SIZE:
+                    raise ValueError("AtCoder 提交分页格式异常")
+                if not data:
+                    return added
+                if any(not isinstance(sub, dict) or type(sub.get("epoch_second")) is not int
+                       or sub["epoch_second"] <= 0 or sub["epoch_second"] < cursor_timestamp
+                       for sub in data):
+                    raise ValueError("AtCoder 提交分页时间异常")
+                if titles is None:
+                    titles, difficulties = await asyncio.gather(
+                        Crawler._get_atcoder_titles(session),
+                        Crawler._get_atcoder_difficulties(session),
                     )
-                )
-
-            if insert_tasks:
-                await db.executemany(
-                    "INSERT OR IGNORE INTO submissions (user_qq_id, platform, problem_id, problem_name, problem_rating, problem_url, submit_time) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    insert_tasks,
-                )
-            if rating_updates:
-                await db.executemany(
-                    "UPDATE submissions SET problem_rating=? WHERE user_qq_id=? AND platform='atcoder' AND problem_id=? AND (problem_rating IS NULL OR problem_rating='')",
-                    rating_updates,
-                )
-            if insert_tasks or rating_updates:
+                    difficulties = difficulties or {}
+                    if difficulties:
+                        await db.executemany(
+                            "UPDATE submissions SET problem_rating=? WHERE platform='atcoder' AND problem_id=? AND (problem_rating IS NULL OR problem_rating='')",
+                            [(rating, pid) for pid, rating in difficulties.items() if rating],
+                        )
+                insert_tasks = []
+                rating_updates = []
+                processed = set()
+                for sub in data:
+                    if sub.get("result") != "AC":
+                        continue
+                    pid = sub.get("problem_id")
+                    contest_id = sub.get("contest_id")
+                    if not isinstance(pid, str) or not pid:
+                        raise ValueError("AtCoder AC 记录缺少题号")
+                    if pid in processed:
+                        continue
+                    processed.add(pid)
+                    rating = difficulties.get(pid, "")
+                    if rating:
+                        rating_updates.append((rating, qq_id, pid))
+                    if pid in existing_ids:
+                        continue
+                    problem_url = (
+                        f"https://atcoder.jp/contests/{contest_id}/tasks/{pid}" if contest_id else "https://atcoder.jp"
+                    )
+                    insert_tasks.append((qq_id, "atcoder", pid, titles.get(pid, pid), rating,
+                                         problem_url, sub["epoch_second"]))
+                if insert_tasks:
+                    await db.executemany(
+                        "INSERT OR IGNORE INTO submissions (user_qq_id, platform, problem_id, problem_name, problem_rating, problem_url, submit_time) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        insert_tasks,
+                    )
+                if rating_updates:
+                    await db.executemany(
+                        "UPDATE submissions SET problem_rating=? WHERE user_qq_id=? AND platform='atcoder' AND problem_id=? AND (problem_rating IS NULL OR problem_rating='')",
+                        rating_updates,
+                    )
                 await db.commit()
-            return len(insert_tasks)
+                existing_ids.update(row[2] for row in insert_tasks)
+                added += len(insert_tasks)
+                if len(data) < _ATCODER_SUBMISSION_PAGE_SIZE:
+                    return added
+                # from_second is inclusive. Repeat the final second so a page
+                # ending partway through that second does not drop submissions.
+                next_timestamp = max(sub["epoch_second"] for sub in data)
+                if next_timestamp <= cursor_timestamp:
+                    raise ValueError("AtCoder 提交分页无法推进，保留旧同步游标")
+                cursor_timestamp = next_timestamp
+        except asyncio.CancelledError:
+            await db.rollback()
+            raise
         except Exception as e:
+            await db.rollback()
             LOG.error(f"处理 AtCoder 用户 {handle} 时出错: {e}")
             return -1
 

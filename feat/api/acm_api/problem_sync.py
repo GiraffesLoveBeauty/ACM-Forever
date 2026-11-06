@@ -15,6 +15,7 @@ from .problem_tracker import problem_id_key
 from .cf_client import CFUnavailable, cf_page, cf_request, problem_url
 from .cf_practice import normalize_problem
 from .contest_metadata import contest_metadata, refresh_contests, save_contests
+from .cf_contest_catalog import complete_cf_catalog, save_cf_contest_catalog
 
 ATCODER_CATALOG_URL = "https://kenkoooo.com/atcoder/resources/problems.json"
 DAILY_STATEMENT_LIMIT = 100
@@ -250,6 +251,12 @@ class ProblemSync:
                                                lambda url: self.download(http, url))
                 except (aiohttp.ClientError, OSError, ValueError, aiosqlite.Error, CFUnavailable) as error:
                     result["contest_metadata_error"] = str(error)[:1000]
+                if full and options["platform"] == "codeforces":
+                    items, errors = await complete_cf_catalog(
+                        db, http, items, cf_metadata, progress=task["progress"], refresh=options["refresh"],
+                    )
+                    result["contest_catalog_failure_count"] = len(errors)
+                    result["contest_catalog_failures"] = errors[:100]
                 result["discovered_count"] = len(items)
                 if full:
                     task["progress"].update(phase="metadata", metadata_done=0, metadata_total=len(items))
@@ -262,6 +269,8 @@ class ProblemSync:
                 unknown = requested - {item["problem_id"] for item in items}
                 if unknown:
                     raise ValueError("比赛题目列表中不存在题号：" + ", ".join(sorted(unknown)))
+                if not full and options["platform"] == "codeforces":
+                    await save_cf_contest_catalog(db, options["contest_id"], items)
                 items = [item for item in items if not requested or item["problem_id"] in requested]
                 result["scope_count"] = len(items)
                 if scheduled:
@@ -308,6 +317,7 @@ class ProblemSync:
                     if task["progress"]["done"] % batch_size == 0 or task["progress"]["done"] == len(selected):
                         result["completed_batches"] += 1
                 task["status"] = (
+                    "partial" if result.get("contest_catalog_failure_count") else
                     "completed" if not result["failure_count"] else
                     "partial" if result["success_count"] else "failed"
                 )

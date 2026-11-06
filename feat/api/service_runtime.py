@@ -110,7 +110,7 @@ class SyncEngine(SyncMixin):
         finally:
             task["finished_at"] = int(time.time())
 
-    async def sync_all_accounts(self, task, days=0):
+    async def sync_all_accounts(self, task, days=0, *, incremental=False):
         """Run the configured platforms for all users as one serialized API task."""
         task["status"] = "running"
         task["started_at"] = int(time.time())
@@ -118,23 +118,30 @@ class SyncEngine(SyncMixin):
         try:
             async with self._sync_cycle_lock:
                 members = task.get("_account_snapshots", [])
+                task["progress"] = {"done": 0, "total": len(members)}
                 for user in members:
                     qq_id = user["qq_id"]
                     results[str(qq_id)] = {}
                     for platform in ("codeforces", "luogu", "nowcoder", "atcoder", "cjlu"):
+                        snapshot = self.binding_snapshot(user, [platform])[platform]
+                        if incremental and not snapshot["account"].strip():
+                            continue
                         try:
                             count = await self.sync_single_platform_for_days(
-                                qq_id, platform, days,
-                                expected_binding=self.binding_snapshot(user, [platform])[platform],
+                                qq_id, platform, days, incremental=incremental,
+                                expected_binding=snapshot,
                             )
                         except asyncio.CancelledError:
                             raise
                         except Exception:
-                            count = -1
-                        if count is not None and count != -2:
-                            results[str(qq_id)][platform] = count
+                            count = -3
+                        if count != -2:
+                            results[str(qq_id)][platform] = -3 if count is None else count
+                    task["progress"]["done"] += 1
             task["result"] = results
-            task["status"] = "completed"
+            failed = any(count < 0 and count != SYNC_PAUSED
+                         for platforms in results.values() for count in platforms.values())
+            task["status"] = "partial" if failed else "completed"
         except asyncio.CancelledError:
             task["status"] = "cancelled"
             raise
@@ -152,6 +159,8 @@ class WebTaskManager:
         self.problem_sync = ProblemSync(sync_engine.db_path)
         self._daily_problem_sync_task = None
         self._claiming_daily_problem_sync = False
+        self._member_sync_task = None
+        self._claiming_all_accounts_sync = False
 
     async def _logged_task(self, operation, item, *args, **kwargs):
         fields = {"task_id": item["id"], "task_kind": item.get("kind", "后台任务")}
@@ -190,7 +199,7 @@ class WebTaskManager:
                      if item.get("kind") == "题目采集" and item["status"] in {"queued", "running"}), None)
 
     def submit_problem_sync(self, options):
-        if self._claiming_daily_problem_sync:
+        if self._claiming_daily_problem_sync or self._claiming_all_accounts_sync:
             return None
         active = self._active_problem_sync()
         if active is not None:
@@ -227,7 +236,7 @@ class WebTaskManager:
         for platform in ("atcoder", "codeforces"):
             if datetime.now(PROBLEM_SYNC_TIMEZONE).date() != day:
                 break
-            if self._claiming_daily_problem_sync or self._active_problem_sync() is not None:
+            if self._claiming_daily_problem_sync or self._claiming_all_accounts_sync or self._active_problem_sync() is not None:
                 return False
             # Hold admission across the SQLite claim so manual work cannot
             # take the slot after today's run has been recorded.
@@ -265,6 +274,8 @@ class WebTaskManager:
             await asyncio.sleep(max(0, delay))
 
     async def submit_account_sync(self, qq_id, platforms, days=0, *, expected_epoch=None):
+        if self._claiming_all_accounts_sync:
+            return None
         normalized = []
         for platform in platforms or ():
             value = "codeforces" if platform == "cf" else str(platform).strip()
@@ -284,6 +295,8 @@ class WebTaskManager:
             async with db.execute("SELECT * FROM users WHERE qq_id=? AND account_state='active'", (str(qq_id),)) as cursor:
                 user = await cursor.fetchone()
         if not user or expected_epoch is not None and user["account_epoch"] != expected_epoch:
+            return None
+        if self._claiming_all_accounts_sync:
             return None
         task_id = uuid.uuid4().hex[:12]
         item = {
@@ -305,8 +318,8 @@ class WebTaskManager:
         )
         return {"id": task_id}
 
-    async def submit_all_accounts_sync(self, days=0):
-        if any(
+    async def submit_all_accounts_sync(self, days=0, *, incremental=False, scheduled=False, interval_seconds=3600):
+        if self._claiming_all_accounts_sync or self._claiming_daily_problem_sync or any(
             item.get("status") in {"queued", "running"}
             for item in self.tasks.values()
         ):
@@ -315,33 +328,78 @@ class WebTaskManager:
             days = max(0, min(3650, int(days)))
         except (TypeError, ValueError):
             days = 0
-        async with aiosqlite.connect(str(self.sync_engine.db_path)) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute("SELECT * FROM users WHERE account_state='active' ORDER BY qq_id") as cursor:
-                members = [dict(row) for row in await cursor.fetchall()]
-        # Reading the durable snapshots yields control. Reserve only if another
-        # request has not queued a task while that read was in progress.
-        if any(item.get("status") in {"queued", "running"} for item in self.tasks.values()):
-            return None
+        self._claiming_all_accounts_sync = True
+        try:
+            async with aiosqlite.connect(str(self.sync_engine.db_path)) as db:
+                db.row_factory = aiosqlite.Row
+                if scheduled:
+                    now = int(time.time())
+                    await db.execute("BEGIN IMMEDIATE")
+                    async with db.execute(
+                        "INSERT INTO settings(key,value) VALUES('member_sync_last_started_at',?) "
+                        "ON CONFLICT(key) DO UPDATE SET value=excluded.value "
+                        "WHERE CAST(settings.value AS INTEGER)<=?",
+                        (str(now), now - interval_seconds),
+                    ) as cursor:
+                        if cursor.rowcount != 1:
+                            return None
+                query = "SELECT * FROM users WHERE account_state='active'"
+                if scheduled:
+                    query += (
+                        " AND (TRIM(COALESCE(cf_handle,''))<>'' OR TRIM(COALESCE(luogu_id,''))<>''"
+                        " OR TRIM(COALESCE(nowcoder_id,''))<>'' OR TRIM(COALESCE(atcoder_handle,''))<>''"
+                        " OR TRIM(COALESCE(cjlu_username,''))<>'')"
+                    )
+                async with db.execute(query + " ORDER BY qq_id") as cursor:
+                    members = [dict(row) for row in await cursor.fetchall()]
+                await db.commit()
+        finally:
+            self._claiming_all_accounts_sync = False
+        if scheduled:
+            for task_id, item in list(self.tasks.items()):
+                if item.get("scheduled") and item["_task"].done():
+                    del self.tasks[task_id]
         task_id = uuid.uuid4().hex[:12]
         item = {
             "id": task_id,
-            "kind": "全员平台同步",
+            "kind": "全员定时同步" if scheduled else "全员平台同步",
             "qq_id": "*",
             "_account_snapshots": members,
             "_account_epochs": {user["qq_id"]: user["account_epoch"] for user in members},
             "platform": "all",
             "days": days,
+            "scheduled": scheduled,
             "status": "queued",
             "started_at": None,
             "finished_at": None,
             "result": None,
         }
         self.tasks[task_id] = item
+        options = {"days": days}
+        if incremental:
+            options["incremental"] = True
         item["_task"] = asyncio.create_task(
-            self._logged_task(self.sync_engine.sync_all_accounts, item, item, days=days)
+            self._logged_task(self.sync_engine.sync_all_accounts, item, item, **options)
         )
         return {"id": task_id}
+
+    def start_member_sync(self, interval_seconds=3600):
+        if self._member_sync_task is None:
+            self._member_sync_task = asyncio.create_task(
+                self._member_sync_loop(interval_seconds), name="periodic-member-sync",
+            )
+
+    async def _member_sync_loop(self, interval_seconds):
+        while True:
+            try:
+                submitted = await self.submit_all_accounts_sync(
+                    incremental=True, scheduled=True, interval_seconds=interval_seconds,
+                )
+                if submitted:
+                    await asyncio.gather(self.tasks[submitted["id"]]["_task"], return_exceptions=True)
+            except (OSError, aiosqlite.Error):
+                emit("member_sync.schedule_failed", "全员过题记录暂无法安排同步，稍后重试", "warning")
+            await asyncio.sleep(60)
 
     def snapshots(self):
         keys = (
@@ -389,6 +447,10 @@ class WebTaskManager:
         return True
 
     async def close(self):
+        if self._member_sync_task is not None:
+            self._member_sync_task.cancel()
+            await asyncio.gather(self._member_sync_task, return_exceptions=True)
+            self._member_sync_task = None
         if self._daily_problem_sync_task is not None:
             self._daily_problem_sync_task.cancel()
             await asyncio.gather(self._daily_problem_sync_task, return_exceptions=True)
