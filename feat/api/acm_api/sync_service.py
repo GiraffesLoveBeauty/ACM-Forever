@@ -49,7 +49,7 @@ class SyncMixin:
             await connection.commit()
             return state
 
-    async def _mark_platform_sync(self, qq_id, platform, status, now, *, success=False, error_code=None, error_message=None, cursor=None):
+    async def _mark_platform_sync(self, qq_id, platform, status, now, *, success=False, error_code=None, error_message=None, cursor=None, full_history=False):
         async with isolated_connection(self.db) as connection:
             if status == "running":
                 clause, values = "last_attempt_at=?,last_status=?,updated_at=?", [now, status, now]
@@ -63,8 +63,8 @@ class SyncMixin:
                         state = await state_cursor.fetchone()
                     if state and state["coverage_through_at"]:
                         cursor = state["coverage_through_at"]
-                clause = "cursor_timestamp=?,last_attempt_at=?,last_success_at=?,last_status=?,last_error_code=NULL,last_error_message=NULL,consecutive_failures=0,next_retry_at=0,updated_at=?"
-                values = [int(cursor or now), now, now, status, now]
+                clause = "cursor_timestamp=?,last_attempt_at=?,last_success_at=?,last_status=?,last_error_code=NULL,last_error_message=NULL,consecutive_failures=0,next_retry_at=0,updated_at=?,full_history_at=CASE WHEN ? THEN ? ELSE full_history_at END"
+                values = [int(cursor or now), now, now, status, now, full_history, now]
             else:
                 clause = "last_attempt_at=?,last_status=?,last_error_code=?,last_error_message=?,consecutive_failures=consecutive_failures+1,updated_at=?"
                 values = [now, status, error_code, error_message, now]
@@ -266,6 +266,10 @@ class SyncMixin:
                     state["full_history_at"] and state["coverage_through_at"]
                     and state["binding_key"] == binding_key(user)
                 ) else 0
+            elif incremental:
+                # Confirmed cursors belong to this binding generation. Revisit
+                # recent days for delayed upstream records.
+                start_timestamp = max(0, int(state["cursor_timestamp"] or 0) - 7 * 86400) if state["full_history_at"] else 0
             LOG.info("  -> 为用户 %s 执行 %s 平台 [%s] 同步...", user["name"], platform, "增量刷新" if incremental and start_timestamp else "全部历史" if days == 0 else f"近{days}天")
             attempt_at = int(time.time())
             await self._mark_platform_sync(qq_id, normalized_platform, "running", attempt_at)
@@ -286,6 +290,7 @@ class SyncMixin:
                     if not await self._mark_platform_sync(
                         qq_id, normalized_platform, "success", finished_at,
                         success=True, cursor=finished_at,
+                        full_history=normalized_platform != "codeforces",
                     ):
                         return -4
                 else:

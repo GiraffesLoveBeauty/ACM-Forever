@@ -90,7 +90,7 @@ async def _write_admins(db_path, root_ids, admins, identity):
         await db.close()
 
 
-def create_app(*, daily_problem_sync=False):
+def create_app(*, daily_problem_sync=False, member_sync=False):
     app = Quart(__name__, static_folder=None)
 
     @app.errorhandler(AccountLifecycleError)
@@ -132,6 +132,9 @@ def create_app(*, daily_problem_sync=False):
 
     sync_engine = SyncEngine(db_path, crawler_config)
     task_manager = WebTaskManager(sync_engine)
+    member_sync_minutes = int(os.getenv("ACM_MEMBER_SYNC_INTERVAL_MINUTES", "60"))
+    if not 1 <= member_sync_minutes <= 1440:
+        raise ValueError("ACM_MEMBER_SYNC_INTERVAL_MINUTES must be between 1 and 1440")
     data_ttl_hours = int(os.getenv("ACM_CF_DATA_TTL_HOURS", "24"))
     problem_ttl_hours = int(os.getenv("ACM_CF_PROBLEM_TTL_HOURS", "6"))
     if not 1 <= data_ttl_hours <= 720 or not 1 <= problem_ttl_hours <= 720:
@@ -221,6 +224,8 @@ def create_app(*, daily_problem_sync=False):
         app.extensions["account_import_maintenance"] = asyncio.create_task(maintenance_loop(app))
         if daily_problem_sync:
             task_manager.start_daily_problem_sync()
+        if member_sync:
+            task_manager.start_member_sync(member_sync_minutes * 60)
 
     @app.after_serving
     async def close_service():
@@ -405,4 +410,7 @@ _RETIRED_PAGES = {"reviews.html", "submissions.html", "workspace.html"}
 _LEGACY_ADMIN_PAGES = {"member.html": "members", "problem-bank.html": "problems", "tasks.html": "tasks", "settings.html": "settings", "forum-moderation.html": "moderation", "cf-practice.html": "cf-practice"}
 
 
-app = create_app(daily_problem_sync=_bool_env("ACM_DAILY_PROBLEM_SYNC_ENABLED", True))
+app = create_app(
+    daily_problem_sync=_bool_env("ACM_DAILY_PROBLEM_SYNC_ENABLED", True),
+    member_sync=_bool_env("ACM_MEMBER_SYNC_ENABLED", True),
+)

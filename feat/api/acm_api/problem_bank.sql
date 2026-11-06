@@ -41,3 +41,13 @@ CREATE TABLE IF NOT EXISTS crawler_contests (
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (platform, contest_id)
 );
+
+-- Complete per-contest lists, including shared Div. 1 / Div. 2 problems that
+-- are omitted from Codeforces' bulk problemset catalog.
+CREATE TABLE IF NOT EXISTS crawler_contest_catalogs (
+    platform TEXT NOT NULL,
+    contest_id TEXT NOT NULL,
+    problem_ids TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (platform, contest_id)
+);

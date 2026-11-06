@@ -58,7 +58,9 @@ onBeforeUnmount(() => {
         ><ProblemTaskProgress v-if="task.kind === '题目采集'" :task="task" />
         <template v-else
           ><br />成员 {{ task.qq_id || '全部' }} · 平台 {{ task.platform || '全部' }} ·
-          {{ task.status }}<br /><small>{{ describe(task.result) }}</small></template
+          {{ task.status }}<br /><small v-if="task.progress"
+            >已处理 {{ task.progress.done }} / {{ task.progress.total }} 位成员<br /></small
+          ><small>{{ describe(task.result) }}</small></template
         >
         <br /><small>{{ date(task.finished_at || task.started_at) }}</small></span
       ><button

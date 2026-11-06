@@ -83,6 +83,14 @@ API 服务默认在北京时间每天 04:00 依次更新 AtCoder 和 Codeforces 
 
 如果服务在 04:00 后启动，会补跑当天尚未启动的平台。遇到手动采集时自动任务会等待，同一天每个平台只自动启动一次。每日记录保存在 SQLite 中，重启服务也会沿用。设置 `ACM_DAILY_PROBLEM_SYNC_ENABLED=false` 可关闭自动任务。
 
+### 定时同步成员 AC 记录
+
+API 服务默认每 60 分钟同步所有正常且已绑定 OJ 的成员，启动时会补跑到期的任务。同步范围包含当前启用的平台，洛谷沿用暂停策略。任务以“全员定时同步”显示在管理后台的 **同步任务**，可以查看进度、各成员结果和取消。
+
+首次同步从平台可获取的历史记录开始，后续使用成功游标并回看最近七天。AtCoder 按提交时间分页补齐。某成员或平台失败后继续处理其他成员，下次从成功游标重试。上次自动任务的启动时间保存在 SQLite 中，服务重启后按此判断是否到期。同步任务会等待正在执行的后台任务。
+
+可用 `ACM_MEMBER_SYNC_INTERVAL_MINUTES` 调整间隔（1–1440 分钟），或用 `ACM_MEMBER_SYNC_ENABLED=false` 关闭。手动同步仍可通过个人中心、管理后台和内部 API 发起。
+
 ### 补全已有题库的比赛时间
 
 比赛进度按真实开始时间倒序排列。启动或初始化会补齐 `crawler_contests` 表，初始化仍只建立表结构；已有题库升级后，在 API 部署目录执行以下命令补全比赛名称与开始时间：
@@ -95,6 +103,8 @@ python3 -m api.sync_contests --database /root/acm-forever-data/acm_forever.db --
 
 后续 CF 单场采集保存 standings 返回的比赛时间，AtCoder 和 CF 全平台采集按需更新过期的比赛缓存（24 小时）。附属元数据刷新失败会在任务结果中记录 `contest_metadata_error`，已有缓存和题面采集继续保留；可重试上述补全命令。比赛进度页面只读取本地缓存，缺少时间的比赛排在最后并标注“比赛时间未收录”。
 
+CF 的全平台题库接口可能只返回 Div.1 / Div.2 共用题的一份入口。采集会对同一轮、同一开始时间的 Div.1 / Div.2 比赛，通过官方 `contest.standings` 补齐各场完整题单，保留各自的题号和题序；成功题单缓存七天，“重新拉取已有题目”会同时更新题单缓存。单场采集也会先保存整场目录，再按题数上限下载题面。补目录保留已有题面、样例和提交记录，比赛页仍只读取本地数据。已有题库可重新运行 CF 全平台采集来补齐遗漏的比赛入口；补全失败会在任务中列出比赛号，后续同步可重试。
+
 ## 环境变量
 
 | 变量 | 用途 |
@@ -102,6 +112,8 @@ python3 -m api.sync_contests --database /root/acm-forever-data/acm_forever.db --
 | `ACM_API_HOST` / `ACM_API_PORT` | 监听地址和端口，默认 `127.0.0.1:8088`，沿用原 WebUI 端口 |
 | `ACM_ACCOUNT_IMPORT_ENABLED` | Excel 导入尚未保存页面开关时的后备默认值，默认 `true`；页面保存的数据库设置优先，关闭后仍可查已有结果 |
 | `ACM_DAILY_PROBLEM_SYNC_ENABLED` | 是否每天自动更新 AtCoder 和 Codeforces 题库，默认 `true` |
+| `ACM_MEMBER_SYNC_ENABLED` | 是否自动同步全员 AC 记录，默认 `true` |
+| `ACM_MEMBER_SYNC_INTERVAL_MINUTES` | 全员 AC 自动同步间隔，默认 60 分钟，可设 1–1440 |
 | `ACM_DATABASE_PATH` | SQLite 数据库文件路径，默认 `./data/acm_forever.db` |
 | `ACM_MARKDOWN_UPLOAD_DIR` | Wiki/论坛持久化图片目录，默认数据库同级 `uploads/markdown`；必须在代码同步目录外 |
 | `ACM_PUBLIC_BASE_URL` | Markdown 导出图片的公开站点根地址，例如 `https://实际域名`，不带路径 |
