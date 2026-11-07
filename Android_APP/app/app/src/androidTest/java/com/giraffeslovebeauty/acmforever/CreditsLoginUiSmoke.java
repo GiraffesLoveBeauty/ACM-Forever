@@ -46,7 +46,7 @@ final class CreditsLoginUiSmoke {
             activity=test.startActivitySync(new Intent(context,UpdateActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             await(()->has("已是最新版本"),"update check still works");main(()->{View confirm=findText("确认");if(confirm!=null)confirm.performClick();});
             main(()->{
-                View current=findDescription("更新记录 0.2.22"),previous=findDescription("更新记录 0.2.21");
+                View current=findDescription("更新记录 "+app.updates().currentName()),previous=findDescription("更新记录 0.2.21");
                 check(current!=null&&previous!=null,"current and historical cards");
                 check(walk(current,v->v instanceof TextView&&((TextView)v).getText().toString().contains("待评审与发布"))!=null,"current does not invent review");
                 check(countImages(previous)>=4,"historical owner, requester, reviewer and publisher avatars");
