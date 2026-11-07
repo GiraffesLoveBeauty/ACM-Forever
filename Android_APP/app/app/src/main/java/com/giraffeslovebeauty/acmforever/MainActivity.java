@@ -191,7 +191,7 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onResume() {
-        super.onResume();openingSpace=false;openingSearch=false;openingBindings=false;openingAbout=false;
+        super.onResume();openingSpace=false;openingSearch=false;openingBindings=false;openingAbout=false;openingLocalSettings=false;
         if(navigationOwner!=api.sessionGeneration()){ModalDialogs.close(this);problemKeyword="";problemKeywordDraft="";problemTag="";navigation.clear();navigationOwner=api.sessionGeneration();refreshComposer();if(!"compose".equals(screen))loadScreen();}
         else{
             CloudDrafts.State draft=cloud.state();
@@ -2140,6 +2140,8 @@ public final class MainActivity extends Activity {
         menuRow(settings,"个性化设置","背景选择 · 主题选择",this::showCoverSettings);
         menuRow(settings,"搜索设置","搜索模块排序 · 历史记录",()->openSearchSettings());
         menuRow(settings, "修改密码", "保护账号安全", this::showChangePassword);
+        menuRow(settings, "存储管理", "缓存占用 · 临时文件 · 安装包", () -> openLocalSettings(StorageActivity.class));
+        menuRow(settings, "帮助与说明", "统一帮助 · 问题反馈 · 数据与权限", () -> openLocalSettings(HelpActivity.class));
         menuRow(settings, "检查更新", "下载新版 · 自动更新选项", this::checkForUpdates);
 
 
@@ -2266,6 +2268,11 @@ public final class MainActivity extends Activity {
     }
 
     private void appearanceEntry(){LinearLayout panel=card();menuRow(panel,"个性化设置","背景选择 · 主题选择",this::showCoverSettings);}
+    private void openLocalSettings(Class<? extends Activity> target){
+        if(openingLocalSettings||ModalDialogs.isShowing(this))return;
+        openingLocalSettings=true;startActivity(new Intent(this,target));
+    }
+    private boolean openingLocalSettings;
     private void showCoverSettings(){startActivity(new Intent(this,AppearanceActivity.class));}
     private boolean openingSpace;
     private void openSpace(String kind){if(openingSpace)return;openingSpace=true;startActivity(new Intent(this,SpaceActivity.class).putExtra("kind",kind));}

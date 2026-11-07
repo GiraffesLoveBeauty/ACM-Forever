@@ -12,7 +12,7 @@ public final class UpdateActivity extends Activity {
     private AppUpdates updates;
     private LinearLayout body,banner;
     private TextView status,notes,error,source,last;
-    private Button check,download,install,cancel;
+    private Button check,download,install,cancel,clearPackages;
     private CheckBox automatic;
     private boolean painting;
     private boolean initialCheck;
@@ -21,7 +21,7 @@ public final class UpdateActivity extends Activity {
     private CreditsViews creditsViews;
     private int dp(int n){return MobileStyle.dp(this,n);}
     @Override public void onCreate(Bundle state){
-        super.onCreate(state);initialCheck=state==null;AppAppearance.load(this);AppAppearance.window(this);updates=((AcmApplication)getApplication()).updates();
+        super.onCreate(state);initialCheck=state==null&&!getIntent().getBooleanExtra("manage_downloads",false);AppAppearance.load(this);AppAppearance.window(this);updates=((AcmApplication)getApplication()).updates();
         LinearLayout root=new SpacedLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setFitsSystemWindows(true);root.setBackground(ProfileCover.drawable(this));AppAppearance.content(this,root);
         LinearLayout header=new SpacedLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);header.setPadding(dp(12),dp(8),dp(16),dp(8));header.setBackgroundColor(MobileStyle.CHROME);
         ImageButton back=new ImageButton(this);MobileStyle.flat(back);back.setImageDrawable(AppIcons.get(this,"back",MobileStyle.TEXT));back.setBackgroundColor(Color.TRANSPARENT);back.setContentDescription("返回");back.setOnClickListener(v->finish());header.addView(back,new LinearLayout.LayoutParams(dp(48),dp(48)));header.addView(text("应用更新",22));root.addView(header);
@@ -33,6 +33,7 @@ public final class UpdateActivity extends Activity {
         LinearLayout current=card();current.addView(text("ACMforever "+updates.currentName(),20));status=text("",16);status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);current.addView(status);notes=text("",14);current.addView(notes);
         if(creditsViews!=null)creditsViews.version(current,updates.currentName());else current.addView(text("本地人员记录读取失败",12));
         last=text("",12);current.addView(last);check=button(current,"检查更新",()->updates.check(true));download=button(current,"下载新版安装包",()->updates.openDownload(this));install=button(current,"安装新版",()->updates.install(this));cancel=button(current,"取消下载",updates::cancelDownload);
+        clearPackages=button(current,"清理已下载安装包",()->new ModalDialogs.Builder(this).setTitle("清理已下载安装包？").setMessage("仅删除本 App 下载的安装包，不会卸载当前 App，也不影响账号密码、主题或草稿。需要更新时可重新下载。").setNegativeButton("取消",null).setPositiveButton("确认清理",(d,w)->updates.clearDownloadedPackages()).show());
         LinearLayout options=card();options.addView(text("自动更新选项",18));automatic=new CheckBox(this);automatic.setText("启动时自动检查更新");automatic.setMinHeight(dp(48));options.addView(automatic);
         options.addView(text("自动检查默认开启，启动时在会话处理后发起，检查成功后间隔 6 小时；失败可在下一次启动重试。进入本页与手动检查始终立即检查。发现新版先询问，点击下载后进入猫娘下载页；安装仍需系统确认。",12));
         automatic.setOnCheckedChangeListener((b,value)->{if(!painting){updates.automatic(value);if(value)updates.check(false);}});
@@ -66,7 +67,7 @@ public final class UpdateActivity extends Activity {
     private void refresh(){
         if(isFinishing()||isDestroyed())return;painting=true;pull.loading(updates.checking());
         try{status.setText(updates.status());last.setText(updates.lastCheck());error.setText(updates.error());banner.setVisibility(updates.error().isEmpty()?View.GONE:View.VISIBLE);notes.setText(updates.notes());notes.setVisibility(updates.notes().isEmpty()?View.GONE:View.VISIBLE);
-            check.setEnabled(!updates.busy());download.setText(updates.downloadLabel());download.setVisibility(updates.available()&&!updates.ready()?View.VISIBLE:View.GONE);download.setEnabled(!updates.busy());install.setVisibility(updates.ready()?View.VISIBLE:View.GONE);cancel.setVisibility(updates.downloading()?View.VISIBLE:View.GONE);
+            check.setEnabled(!updates.busy());download.setText(updates.downloadLabel());download.setVisibility(updates.available()&&!updates.ready()?View.VISIBLE:View.GONE);download.setEnabled(!updates.busy());install.setVisibility(updates.ready()?View.VISIBLE:View.GONE);install.setEnabled(!updates.busy());cancel.setVisibility(updates.downloading()?View.VISIBLE:View.GONE);clearPackages.setEnabled(!updates.busy());
             automatic.setChecked(updates.automatic());source.setText(updates.endpoint());
         }finally{painting=false;}
     }

@@ -130,6 +130,16 @@
     "github-actions[bot]"
   ],
   "versions": {
+    "0.2.23": {
+      "uploaders": ["MiaoJJ13445"],
+      "reviewRequesters": [],
+      "reviewers": [],
+      "publishers": [],
+      "pr": 0,
+      "status": "development",
+      "scope": "当前开发版本；尚未产生本轮评审记录。",
+      "evidence": []
+    },
     "0.2.22": {
       "uploaders": [
         "MiaoJJ13445"

@@ -96,6 +96,23 @@ final class ApiClient {
         NoNetworkException() { super("无网络"); }
     }
 
+    static final class MediaFormatException extends java.io.IOException {
+        MediaFormatException(String message) { super(message); }
+    }
+
+    /** Called on a storage worker, never on the UI thread. */
+    synchronized long cachedDataBytes() {
+        long bytes = responses.byteSize() + readFailures.byteSize();
+        for (Media item : media.values()) bytes += item.bytes.length;
+        synchronized (avatarCache) {
+            for (android.graphics.Bitmap bitmap : avatarCache.values()) if (!bitmap.isRecycled()) bytes += bitmap.getAllocationByteCount();
+        }
+        return bytes;
+    }
+    synchronized void clearReadCaches() {
+        responses.clear(); readFailures.clear(); avatarCache.clear(); media.clear();
+    }
+
     static final class UnconfiguredException extends IllegalStateException {
         UnconfiguredException() { super("未配置服务器"); }
     }
@@ -588,14 +605,15 @@ final class ApiClient {
 
     static final class Media {final byte[] bytes;final String mime;Media(byte[] bytes,String mime){this.bytes=bytes;this.mime=mime;}}
     private final java.util.LinkedHashMap<String,Media> media=new java.util.LinkedHashMap<>(8,.75f,true);
+    synchronized void discardCommunityMedia(String address){media.remove(baseUrl+"/"+sessionGeneration+"/"+address);}
     String communityImageUrl(String address){try{String resolved=new URI(baseUrl+"/").resolve(address).toString();return isCommunityMedia(resolved)?resolved:"";}catch(Exception ignored){return "";}}
     boolean isCommunityMedia(String address){try{URI uri=new URI(address),base=new URI(baseUrl);String path=uri.getRawPath(),query=uri.getRawQuery();return "https".equals(uri.getScheme())&&java.util.Objects.equals(uri.getHost(),base.getHost())&&(uri.getPort()<0?443:uri.getPort())==(base.getPort()<0?443:base.getPort())&&uri.getUserInfo()==null&&uri.getFragment()==null&&path!=null&&path.matches("/api/forum/images/[a-f0-9]{32}")&&(query==null||"variant=thumb".equals(query));}catch(Exception ignored){return false;}}
     synchronized Media communityMedia(String address)throws Exception{
         if(!isCommunityMedia(address))throw new IllegalArgumentException("图片地址不属于当前社区");String key=baseUrl+"/"+sessionGeneration+"/"+address;
         Media cached=media.get(key);if(cached!=null)return cached;checkConnection();URL url=new URL(address);HttpURLConnection connection=(HttpURLConnection)url.openConnection();connection.setInstanceFollowRedirects(false);connection.setConnectTimeout(10000);connection.setReadTimeout(10000);
         for(Map.Entry<String,List<String>> header:cookies.get(url.toURI(),Collections.emptyMap()).entrySet())if(header.getKey()!=null)connection.setRequestProperty(header.getKey(),String.join("; ",header.getValue()));
-        try{int status=connection.getResponseCode();if(status!=200)throw new ApiException(status,"图片读取失败",status==404);String mime=connection.getContentType();if(mime==null)throw new java.io.IOException("图片缺少格式");mime=mime.split(";",2)[0].trim().toLowerCase(java.util.Locale.ROOT);if(!java.util.Arrays.asList("image/png","image/jpeg","image/webp","image/gif").contains(mime))throw new java.io.IOException("不支持的图片格式");
-            java.io.ByteArrayOutputStream bytes=new java.io.ByteArrayOutputStream();try(InputStream in=connection.getInputStream()){byte[] buffer=new byte[8192];int count;while((count=in.read(buffer))!=-1){if(bytes.size()+count>8*1024*1024)throw new java.io.IOException("图片超过 8 MB");bytes.write(buffer,0,count);}}
+        try{int status=connection.getResponseCode();if(status!=200)throw new ApiException(status,"图片读取失败",status==404);String mime=connection.getContentType();if(mime==null)throw new MediaFormatException("图片缺少格式");mime=mime.split(";",2)[0].trim().toLowerCase(java.util.Locale.ROOT);if(!java.util.Arrays.asList("image/png","image/jpeg","image/webp","image/gif").contains(mime))throw new MediaFormatException("不支持的图片格式");
+            java.io.ByteArrayOutputStream bytes=new java.io.ByteArrayOutputStream();try(InputStream in=connection.getInputStream()){byte[] buffer=new byte[8192];int count;while((count=in.read(buffer))!=-1){if(bytes.size()+count>8*1024*1024)throw new MediaFormatException("图片超过 8 MB");bytes.write(buffer,0,count);}}
             Media result=new Media(bytes.toByteArray(),mime);media.put(key,result);int total=0;for(Media item:media.values())total+=item.bytes.length;java.util.Iterator<Media> oldest=media.values().iterator();while((total>16*1024*1024||media.size()>8)&&oldest.hasNext()){Media item=oldest.next();total-=item.bytes.length;oldest.remove();}return result;
         }finally{connection.disconnect();}
     }

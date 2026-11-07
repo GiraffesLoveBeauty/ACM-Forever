@@ -24,6 +24,7 @@ final class FailureState {
         }
         if (failure instanceof java.net.SocketTimeoutException) return "请求超时";
         if (failure instanceof javax.net.ssl.SSLException) return "安全连接失败";
+        if (failure instanceof ApiClient.MediaFormatException) return "图片无法显示";
         if (failure instanceof java.io.IOException) return "无法连接服务器";
         if (failure instanceof org.json.JSONException || failure instanceof ClassCastException) return "数据格式异常";
         return "请求失败";

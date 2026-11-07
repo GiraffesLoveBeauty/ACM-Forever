@@ -68,7 +68,10 @@ final class StartupUpdatesUiSmoke {
                 Activity page=test.waitForMonitorWithTimeout(monitor,8000);check(page instanceof UpdateDownloadActivity,"download page opened");Activity home=activity;activity=page;opened.add(page);
                 await(()->has("正在下载…"),"cat download heading");main(()->check(walk(decor(),v->v instanceof CodingCatView)!=null,"cat animation present"));screenshot("cat-download-v0214.png");
                 check(monitor.getHits()==1,"duplicate tap starts one download screen");
-                long task=downloadId();check(task!=-1,"real system task exists");((DownloadManager)context.getSystemService(Context.DOWNLOAD_SERVICE)).remove(task);
+                long task=downloadId();check(task!=-1,"real system task exists");
+                main(updates::clearDownloadedPackages);check(downloadId()==task,"package cleanup cannot cancel an active download");
+                check(updates.error().contains("请等待下载"),"busy cleanup explains why it is blocked");
+                ((DownloadManager)context.getSystemService(Context.DOWNLOAD_SERVICE)).remove(task);
                 await(()->has("下载失败"),"removed system download fails visibly");check(updates.error().equals("下载任务不存在，请重新下载。"),"specific download error retained");
                 click("重试下载");await(()->has("正在下载…"),"failed download can retry");check(downloadId()!=-1&&downloadId()!=task,"retry creates a new task");
                 main(()->updates.cancelDownload());await(()->has("下载已取消"),"cancel state");main(page::finish);activity=home;test.waitForIdleSync();
