@@ -28,6 +28,7 @@ final class RecoverySettingsUiSmoke {
         AcmApplication app=(AcmApplication)context.getApplicationContext();ApiClient api=app.api();String original=api.getBaseUrl();
         SharedPreferences prefs=AppAppearance.prefs(context);Map<String,?> saved=new HashMap<>(prefs.getAll());
         File working=new File(context.getCacheDir(),"acm-statement-recovery-test.pdf");
+        File retryCopy=new File(context.getCacheDir(),"acm-statement-recovery-retry.pdf");
         File cachedPackage=new File(new File(context.getCacheDir(),"updates"),"verified-recoverytest.apk");
         try{
             Bitmap bitmap=Bitmap.createBitmap(8,8,Bitmap.Config.ARGB_8888);ByteArrayOutputStream image=new ByteArrayOutputStream();bitmap.compress(Bitmap.CompressFormat.PNG,100,image);bitmap.recycle();png=image.toByteArray();
@@ -41,6 +42,12 @@ final class RecoverySettingsUiSmoke {
             click("清理临时文件");click("确认清理");await(()->has("临时缓存已清理"),"temporary cleanup");
             check(working.exists(),"active PDF working copy retained");check("storage-preserve-test".equals(prefs.getString("remembered_account","")),"account setting retained");
             check(!app.pdfFiles().copyTo("recovery-test",new File(context.getCacheDir(),"unused-copy.pdf")),"PDF cache cleared");
+            app.pdfFiles().save("recovery-refused",working);refuseNextDeletion(app.pdfFiles(),"recovery-refused");
+            click("清理临时文件");click("确认清理");await(()->has("部分 PDF 缓存未能清理，请稍后重试"),"failed PDF cleanup reported");
+            check(!has("临时缓存已清理"),"failed cleanup cannot display success");
+            check(app.pdfFiles().copyTo("recovery-refused",retryCopy),"failed deletion preserves indexed PDF");
+            clickDescription("关闭操作失败提示");click("清理临时文件");click("确认清理");await(()->has("临时缓存已清理"),"failed PDF cleanup can be retried");
+            check(!app.pdfFiles().copyTo("recovery-refused",retryCopy),"retry clears previously retained PDF");
             screenshot("recovery-storage.png");finishPage();
             cachedPackage.getParentFile().mkdirs();Files.write(cachedPackage,new byte[]{1,2,3});
             activity=test.startActivitySync(new Intent(context,UpdateActivity.class).putExtra("manage_downloads",true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
@@ -57,15 +64,24 @@ final class RecoverySettingsUiSmoke {
             invalid=false;click("重新读取图片");await(()->has("双指缩放 · 拖动查看"),"manual recovery from invalid format");finishPage();
             api.logout();Instrumentation.ActivityMonitor monitor=test.addMonitor(MainActivity.class.getName(),null,false);
             try{activity=open(StorageActivity.class);Activity login=test.waitForMonitorWithTimeout(monitor,10000);check(login!=null,"storage requires login");activity=login;await(()->has("账号登录"),"login gate");}finally{test.removeMonitor(monitor);}
-            output.putString("stream","PASS: local help/data information; three storage sections; safe cleanup preserves account/working PDF; package management skips update check; manual and automatic image recovery; warning dismiss keeps retries; success hides in 3s; format errors do not loop; login gate.\n");result=Activity.RESULT_OK;
+            output.putString("stream","PASS: local help/data information; three storage sections; safe cleanup preserves account/working PDF; failed PDF deletion reports error and retains retry access; retry clears retained cache; package management skips update check; manual and automatic image recovery; warning dismiss keeps retries; success hides in 3s; format errors do not loop; login gate.\n");result=Activity.RESULT_OK;
         }catch(Throwable e){output.putString("stream","FAIL: "+android.util.Log.getStackTraceString(e));try{screenshot("recovery-failure.png");}catch(Exception ignored){}}
         finally{
-            finishPage();working.delete();cachedPackage.delete();try{api.logout();}catch(Exception ignored){}api.setBaseUrl(original);
+            finishPage();working.delete();retryCopy.delete();cachedPackage.delete();try{api.logout();}catch(Exception ignored){}api.setBaseUrl(original);
             SharedPreferences.Editor edit=prefs.edit().clear();for(Map.Entry<String,?> e:saved.entrySet()){Object v=e.getValue();String k=e.getKey();if(v instanceof String)edit.putString(k,(String)v);else if(v instanceof Boolean)edit.putBoolean(k,(Boolean)v);else if(v instanceof Integer)edit.putInt(k,(Integer)v);else if(v instanceof Long)edit.putLong(k,(Long)v);else if(v instanceof Float)edit.putFloat(k,(Float)v);}edit.apply();
         }
         test.finish(result,output);
     }
     private Activity open(Class<?> page){return test.startActivitySync(new Intent(context,page).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));}
+    @SuppressWarnings("unchecked")
+    private void refuseNextDeletion(PdfFiles cache,String key)throws Exception{
+        java.lang.reflect.Field field=PdfFiles.class.getDeclaredField("files");field.setAccessible(true);
+        Map<String,File> index=(Map<String,File>)field.get(cache);File cached=index.get(key);
+        index.put(key,new File(cached.getPath()){
+            private boolean refuse=true;
+            @Override public boolean delete(){if(refuse){refuse=false;return false;}return super.delete();}
+        });
+    }
     private void openImage(String id){activity=test.startActivitySync(new Intent(context,ImagePreviewActivity.class).putExtra("url","https://recovery.test.invalid/api/forum/images/"+id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));}
     private void finishPage(){if(activity!=null){Activity current=activity;main(()->{ModalDialogs.close(current);current.finish();});test.waitForIdleSync();activity=null;}}
     private void main(Runnable work){test.runOnMainSync(work);}

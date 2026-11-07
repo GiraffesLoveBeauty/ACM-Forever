@@ -41,7 +41,7 @@ public final class StorageActivity extends MobilePageActivity {
             try {
                 AcmApplication app = (AcmApplication)getApplication();
                 if (clear) {
-                    api.clearReadCaches(); app.pdfFiles().clear();
+                    api.clearReadCaches(); app.pdfFiles().clearChecked();
                     TemporaryStorage.clearExpiredShares(getCacheDir(), System.currentTimeMillis());
                 }
                 long memory = api.cachedDataBytes();

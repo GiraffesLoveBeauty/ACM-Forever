@@ -4,6 +4,7 @@ import org.junit.Test;
 import org.junit.Rule;
 import org.junit.rules.TemporaryFolder;
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import static org.junit.Assert.*;
 
@@ -42,5 +43,45 @@ public final class TemporaryStorageTest {
     @Test public void unsupportedImageIsNotAConnectionFailure() {
         assertEquals("图片无法显示",FailureState.title(new ApiClient.MediaFormatException("invalid")));
         assertFalse(PageRefresh.isConnectionFailure(FailureState.title(new ApiClient.MediaFormatException("invalid"))));
+    }
+    @Test public void missingOptionalDirectoriesAreEmpty() throws Exception {
+        File cache=temporary.newFolder("cache"), downloads=new File(temporary.getRoot(),"missing-downloads");
+        assertEquals(0,TemporaryStorage.bytes(downloads));
+        TemporaryStorage.clearPackages(cache,downloads);
+        TemporaryStorage.clearExpiredShares(cache,System.currentTimeMillis());
+    }
+    @Test public void unreadableDirectoryDoesNotReportZeroBytes() throws Exception {
+        File unreadable=unreadable(temporary.newFolder("unreadable"));
+        assertThrows(IOException.class,()->TemporaryStorage.bytes(unreadable));
+    }
+    @Test public void unreadableNestedDirectoryFailsAccounting() throws Exception {
+        File root=temporary.newFolder("cache"), child=temporary.newFolder("cache","unreadable");
+        File unreadable=unreadable(child);
+        File parent=new File(root.getPath()) {
+            @Override public File getCanonicalFile(){return this;}
+            @Override public File[] listFiles(){return new File[]{unreadable};}
+        };
+        assertThrows(IOException.class,()->TemporaryStorage.bytes(parent));
+    }
+    @Test public void unreadableDownloadsDoNotReportCleanupSuccess() throws Exception {
+        File cache=temporary.newFolder("cache"), downloads=temporary.newFolder("downloads");
+        File apk=data(downloads,"acmforever-37-1234.apk");
+        assertThrows(IOException.class,()->TemporaryStorage.clearPackages(cache,unreadable(downloads)));
+        assertTrue(apk.exists());
+        TemporaryStorage.clearPackages(cache,downloads);
+        assertFalse(apk.exists());
+    }
+    @Test public void existingNonDirectoryDoesNotReportAnEmptyDirectory() throws Exception {
+        File file=data(temporary.getRoot(),"not-a-directory");
+        assertThrows(IOException.class,()->TemporaryStorage.bytes(file));
+        assertThrows(IOException.class,()->TemporaryStorage.clearPackages(temporary.newFolder("cache"),file));
+        assertTrue(file.exists());
+    }
+    private File unreadable(File directory) throws IOException {
+        return new File(directory.getCanonicalPath()) {
+            @Override public File getCanonicalFile(){return this;}
+            @Override public File getAbsoluteFile(){return this;}
+            @Override public File[] listFiles(){return null;}
+        };
     }
 }
