@@ -1,4 +1,4 @@
-# Android 修改标准与模块关联（v0.2.22）
+# Android 修改标准与模块关联（v0.2.23）
 
 状态：本轮实现说明，待跨人评审；2026-11-07。以实际代码与测试结果为准。适用工程 `Android_APP/app/`，不改变仓库协作规范。维护责任、人员署名、修改步骤和发布交接另见[App 修改与维护交接规范](android-maintainer-handover.md)。
 
@@ -27,6 +27,8 @@ Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/a
 | `ClubActivity`、`TrainingReminder` | 题单、讨论、错题、复习、打卡和本地提醒 | 缺失接口保留真实报错，通知授权、返回来源页 |
 | `CloudDrafts` 与主页面编辑器 | 云端多草稿和自动保存 | 账号+草稿代次；切换草稿、返回旧页、迟到写入、Markdown 导入归属 |
 | `PdfActivity`、`ContentView`、阅读器资源 | PDF、Markdown/公式/代码与图片 | 缩放/翻页/复制、受限媒体地址、缓存边界 |
+| `ImagePreviewActivity`、`PageRefresh`、`ApiClient.MediaFormatException` | 图片失败后的原页手动/自动恢复 | 仅连接失败重试；格式/尺寸/权限错误不循环；十秒预警、关闭仍重试、成功三秒消失、会话代次与退出取消 |
+| `StorageActivity`、`TemporaryStorage`、`HelpActivity`、`AppUpdates` | 三块存储管理及本机帮助说明 | 文件操作在后台；保留凭据、主题、草稿、活动PDF与近期分享；安装包单独清理，下载/校验/安装期间拒绝；新页面继续强制登录 |
 | `AppAppearance`、`MobileStyle`、`ProfileCover`、`LocalThemes` | 主题、主辅色、全屏背景、模块/控件透明度 | 深浅色、状态栏、原位变色、保存/预览/删除本机主题 |
 | `ThemePackage`、`LocalThemes`、`ProfileCover` | `.acmtheme`格式、隔离安装、原图字节与非破坏性裁剪 | [格式规范](android-theme-package-v1.md)；布尔选项、主辅色/透明度、模板浅深配色、原图及裁剪同时往返；文件I/O不在主线程，先校验后登记，导入不覆盖当前外观 |
 | `ThemeShareProvider`、`AppearanceActivity` | 后台生成私人主题文件并调用系统分享 | 独立只读附件、ClipData读取授权、随机文件名与缓存回收；不共用APK Provider，不包含账号字段，不自动发送QQ/微信消息 |
