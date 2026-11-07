@@ -1,6 +1,7 @@
 package com.giraffeslovebeauty.acmforever;
 
 import java.io.*;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 
 /** Process-indexed private file cache. Active readers always hold a separate working copy. */
@@ -15,6 +16,18 @@ final class PdfFiles {
         while(files.size()>5||size()>64L*1024*1024){String first=files.keySet().iterator().next();files.remove(first).delete();}
     }
     private long size(){long total=0;for(File file:files.values())total+=file.length();return total;}
+    /** User-requested cleanup must report retained files and keep them available for retry. */
+    synchronized void clearChecked() throws IOException {
+        boolean failed=false;
+        Iterator<File> entries=files.values().iterator();
+        while(entries.hasNext()){
+            File file=entries.next();
+            if(file.delete()||!file.exists())entries.remove();
+            else failed=true;
+        }
+        if(failed)throw new IOException("部分 PDF 缓存未能清理，请稍后重试");
+    }
+    /** Logout must discard access to every indexed document even if disk deletion fails. */
     synchronized void clear(){for(File file:files.values())file.delete();files.clear();}
     private static void copy(File source,File destination)throws IOException{try(InputStream in=new FileInputStream(source);OutputStream out=new FileOutputStream(destination)){byte[] buffer=new byte[8192];int count;while((count=in.read(buffer))!=-1)out.write(buffer,0,count);}}
 }

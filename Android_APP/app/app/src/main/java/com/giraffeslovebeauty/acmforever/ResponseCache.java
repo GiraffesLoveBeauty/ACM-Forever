@@ -20,6 +20,7 @@ final class ResponseCache {
         while(characters>limit||values.size()>160){Map.Entry<String,String> first=values.entrySet().iterator().next();characters-=first.getValue().length();values.remove(first.getKey());}
     }
     synchronized void clear(){values.clear();characters=0;}
+    synchronized long byteSize(){long bytes=0;for(String text:values.values())bytes+=text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;return bytes;}
     synchronized void remove(String key){String old=values.remove(key);if(old!=null)characters-=old.length();}
     synchronized void removeContaining(String path){values.entrySet().removeIf(entry->{if(!entry.getKey().contains(path))return false;characters-=entry.getValue().length();return true;});}
 }

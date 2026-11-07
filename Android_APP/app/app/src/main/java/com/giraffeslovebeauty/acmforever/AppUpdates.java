@@ -33,7 +33,7 @@ final class AppUpdates {
     private UpdateManifest release;
     private String source="",error="",verifiedName="",pendingResult="",downloadState="";
     private long downloadId=-1,generation;
-    private boolean checking,verifying,installRequested;
+    private boolean checking,verifying,installRequested,clearingPackages;
     private int progress=-1;
     private long promptedVersion;
     private boolean startupChecked,pendingOffer,openingDownload,openingInstaller;
@@ -95,7 +95,7 @@ final class AppUpdates {
         prefs.edit().remove(KEY+"attempt").remove(KEY+"success").remove(KEY+"checked_build").apply();
         return true;
     }
-    boolean busy(){return checking||verifying||downloadId!=-1;}
+    boolean busy(){return checking||verifying||clearingPackages||downloadId!=-1;}
     boolean checking(){return checking;}
     boolean downloading(){return downloadId!=-1;}
     boolean verifying(){return verifying;}
@@ -105,6 +105,7 @@ final class AppUpdates {
     String error(){return error;}
     String lastCheck(){long time=prefs.getLong(KEY+"attempt",0),success=prefs.getLong(KEY+"success",0);if(time==0)return "尚未发起检查";String label=new java.text.SimpleDateFormat("MM-dd HH:mm",Locale.CHINA).format(new Date(time));return "最近检查："+label+(checking?" · 检查中":success>=time?" · 成功":" · 未完成或失败，可立即手动重试");}
     String status(){
+        if(clearingPackages)return "正在清理已下载安装包…";
         if(checking)return "正在检查新版本…";
         if(verifying)return "正在校验安装包…";
         if(downloadId!=-1)return !downloadState.isEmpty()?downloadState:progress<0?"正在等待或下载安装包…":"正在下载安装包 · "+progress+"%";
@@ -259,7 +260,7 @@ final class AppUpdates {
         if(a==null||b==null||a.length==0||a.length!=b.length||!new HashSet<>(Arrays.asList(a)).equals(new HashSet<>(Arrays.asList(b))))throw new IllegalArgumentException("安装包签名与当前 App 不一致。");
     }
     void install(Activity a){
-        if(!ready()||openingInstaller)return;
+        if(!ready()||busy()||openingInstaller)return;
         if(!a.getPackageManager().canRequestPackageInstalls()){
             if(ModalDialogs.isShowing(a))return;
             new ModalDialogs.Builder(a).setTitle("允许安装更新").setMessage("打开本 App 的安装权限后，仍由系统确认安装。")
@@ -274,6 +275,22 @@ final class AppUpdates {
         }catch(Exception e){openingInstaller=false;fail(e);}
     }
     void resumeInstall(Activity a){if(installRequested){installRequested=false;if(a.getPackageManager().canRequestPackageInstalls())install(a);}}
+    void clearDownloadedPackages(){
+        if(busy()||openingInstaller){error="请等待下载、校验或安装操作结束后再清理。";changed();return;}
+        clearingPackages=true;installRequested=false;error="";changed();
+        io.execute(()->{
+            Exception issue=null;
+            try{TemporaryStorage.clearPackages(context.getCacheDir(),context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS));}
+            catch(Exception e){issue=e;}
+            Exception failure=issue;
+            ui.post(()->{
+                clearingPackages=false;if(!verifiedFile().isFile())verifiedName="";
+                if(failure!=null)error=failure.getMessage();
+                else {verifiedName="";Activity a=activity();if(a!=null)Toast.makeText(a,"已下载安装包已清理",Toast.LENGTH_SHORT).show();}
+                save();changed();
+            });
+        });
+    }
     void cancelDownload(){++generation;ui.removeCallbacks(poll);if(downloadId!=-1)downloads().remove(downloadId);downloadId=-1;verifying=false;progress=-1;downloadState="";save();changed();}
     private File verifiedFile(){return new File(new File(context.getCacheDir(),"updates"),verifiedName.matches("verified-[A-Za-z0-9_-]+\\.apk")?verifiedName:"missing");}
     private void deleteVerified(){if(!verifiedName.isEmpty())verifiedFile().delete();verifiedName="";}
