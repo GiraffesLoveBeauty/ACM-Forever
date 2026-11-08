@@ -42,8 +42,9 @@ window.AcmReader = {
     return {height:Math.ceil(rect.height),headings:[...article.querySelectorAll('h1,h2,h3,h4,h5,h6')].map(node=>({id:node.id,title:node.textContent,level:Number(node.tagName[1]),top:Math.max(0,node.getBoundingClientRect().top - rect.top)}))};
   },
 };
-function renderContent(source, format, base, wiki = false) {
+function renderContent(source, format, base, wiki = false, problem = false) {
   const article = document.getElementById('article');
+  article.classList.toggle('problem-reader', problem);
   article.innerHTML = AcmReader.html(source, format, base, wiki); AcmReader.math(article);
   if (wiki) AcmReader.outline(article);
   article.querySelectorAll('img').forEach(image=>{try{const url=new URL(image.src),origin=new URL(base);if(url.origin===origin.origin&&/^\/api\/forum\/images\/[a-f0-9]{32}$/.test(url.pathname)&&!url.search){image.tabIndex=0;image.setAttribute('role','button');image.setAttribute('aria-label','放大查看图片');const open=()=>{location.href='acm-image:'+encodeURIComponent(url.href);};image.addEventListener('click',open);image.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();open();}});}}catch{}});

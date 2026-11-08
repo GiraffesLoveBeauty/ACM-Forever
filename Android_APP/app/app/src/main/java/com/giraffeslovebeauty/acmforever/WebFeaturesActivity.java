@@ -106,9 +106,32 @@ public final class WebFeaturesActivity extends Activity {
         LinearLayout tools=card(body);chips(tools,new String[]{"Codeforces","AtCoder"},new String[]{"codeforces","atcoder"},route.optString("platform","codeforces"),v->{if(!v.equals(route.optString("platform","codeforces")))put(route,"problem_tag","");filter("platform",v);});chips(tools,new String[]{"全部题目","我已 AC","已收藏"},new String[]{"all","solved","favorite"},route.optString("scope","all"),v->filter("scope",v));search(tools,"搜索比赛、题号或标签",this::render);
         Button tags=button("题目标签："+(route.optString("problem_tag").isEmpty()?"全部标签":route.optString("problem_tag")),()->{int token=serial;long owner=api.sessionGeneration();String platform=route.optString("platform","codeforces");ProblemTagPicker.show(this,api,io,platform,route.optString("problem_tag"),()->token==serial&&owner==api.sessionGeneration()&&"tracker".equals(view()),tag->filter("problem_tag",tag));});tags.setContentDescription("筛选比赛进度标签");tools.addView(tags,new LinearLayout.LayoutParams(-1,dp(48)));
         String scope=route.optString("scope","all");load("/api/me/problems/tracker?platform="+route.optString("platform","codeforces")+"&scope="+("solved".equals(scope)?"solved":"all")+"&state="+("favorite".equals(scope)?"favorite":"")+"&tag="+encode(route.optString("q"))+"&page="+page()+"&page_size=20"+ProblemTags.parameter(route.optString("problem_tag")),data->{JSONObject result=(JSONObject)data;JSONArray contests=result.getJSONArray("items");LinearLayout slot=displayInto;slot.addView(text("进度依据本人已同步记录；未记录不代表从未提交。",12));if(contests.length()==0)slot.addView(text("暂无比赛记录",15));
-            for(int i=0;i<contests.length();i++){JSONObject contest=contests.getJSONObject(i);LinearLayout box=card(slot);box.addView(text(contest.optString("contest_name",contest.optString("contest_id")),18));box.addView(text(contest.optLong("start_time")>0?date(contest.optLong("start_time")):"比赛时间未收录",12));box.addView(text("已 AC "+contest.getInt("solved_count")+" / "+contest.getInt("total_count")+" · 尝试未通过 "+contest.optInt("attempted_count"),14));JSONArray problems=contest.getJSONArray("problems");WrapLayout wrap=new WrapLayout(this);box.addView(wrap,new LinearLayout.LayoutParams(-1,-2));for(int n=0;n<problems.length();n++){JSONObject problem=problems.getJSONObject(n);String state=problem.getString("status"),label="solved".equals(state)?"已 AC":"attempted".equals(state)?"尝试未通过":"未记录";Button item=button(problem.optString("problem_index",problem.getString("problem_id"))+" · "+label,()->openProblem(problem));item.setContentDescription(problem.optString("problem_name")+" · "+label);if("solved".equals(state)){item.setTextColor(0xff285b32);item.setBackground(MobileStyle.panel(this,0xffe5f2df,10,0xff7fa882));}else if("attempted".equals(state)){item.setTextColor(0xffaf2424);item.setBackground(MobileStyle.panel(this,0xffffe8e6,10,0xffc98b87));}wrap.addView(item);}}
+            for(int i=0;i<contests.length();i++){
+                JSONObject contest=contests.getJSONObject(i);LinearLayout box=card(slot);
+                box.addView(text(contest.optString("contest_name",contest.optString("contest_id")),18));
+                box.addView(text(contest.optLong("start_time")>0?date(contest.optLong("start_time")):"比赛时间未收录",12));
+                box.addView(text("已 AC "+contest.getInt("solved_count")+" / "+contest.getInt("total_count")+" · 尝试未通过 "+contest.optInt("attempted_count"),14));
+                JSONArray problems=contest.getJSONArray("problems");
+                for(int n=0;n<problems.length();n++)trackerProblem(box,problems.getJSONObject(n));
+            }
             pager(slot,result.getInt("total"),20);
         });
+    }
+    private void trackerProblem(LinearLayout parent,JSONObject problem){
+        LinearLayout tile=column();tile.setPadding(dp(12),dp(12),dp(12),dp(12));
+        tile.setBackground(MobileStyle.panel(this,MobileStyle.MODULE,12,MobileStyle.LINE));
+        LinearLayout.LayoutParams size=new LinearLayout.LayoutParams(-1,-2);size.topMargin=dp(10);parent.addView(tile,size);
+        String state=problem.optString("status"),status="solved".equals(state)?"已 AC":"attempted".equals(state)?"尝试未通过":"未记录";
+        String title=problem.optString("problem_index",problem.optString("problem_id"))+". "+problem.optString("problem_name","未命名题目");
+        tile.addView(text(title,16));
+        TextView progress=text(status,13);progress.setTypeface(null,android.graphics.Typeface.BOLD);
+        boolean dark=AppAppearance.prefs(this).getBoolean("theme_dark",false);
+        if("solved".equals(state))progress.setTextColor(dark?0xff9bdca7:0xff285b32);
+        else if("attempted".equals(state))progress.setTextColor(dark?0xffffb3ab:0xffaf2424);
+        tile.addView(progress);ProblemBadges.append(this,tile,problem);
+        tile.addView(text("查看题面与样例 ›",13));
+        tile.setContentDescription(title+" · "+status+" · "+ProblemSummary.description(problem));
+        tile.setFocusable(true);tile.setOnClickListener(v->{if(!ModalDialogs.isShowing(this))openProblem(problem);});
     }
     private void openProblem(JSONObject problem){startActivity(new Intent(this,MainActivity.class).putExtra("web_problem_platform",problem.optString("platform")).putExtra("web_problem_id",problem.optString("problem_id")));}
     private void wiki(){

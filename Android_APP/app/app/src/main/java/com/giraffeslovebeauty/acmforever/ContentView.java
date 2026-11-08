@@ -18,12 +18,19 @@ final class ContentView extends WebView {
     ContentView(Context context, String source, boolean html, java.util.function.Consumer<String> openLink) {
         this(context,source,html,openLink,null);
     }
-    @SuppressLint("SetJavaScriptEnabled")
     ContentView(Context context, String source, boolean html, java.util.function.Consumer<String> openLink,OutlineListener outlineListener) {
+        this(context,source,html,openLink,outlineListener,false);
+    }
+    static ContentView problem(Context context, String source, boolean html, java.util.function.Consumer<String> openLink) {
+        return new ContentView(context,source,html,openLink,null,true);
+    }
+    @SuppressLint("SetJavaScriptEnabled")
+    private ContentView(Context context, String source, boolean html, java.util.function.Consumer<String> openLink,OutlineListener outlineListener,boolean problem) {
         super(context);
         this.outlineListener=outlineListener;
         setBackgroundColor(android.graphics.Color.TRANSPARENT);
         getSettings().setJavaScriptEnabled(true);
+        if(problem)getSettings().setTextZoom(Math.round(100*getResources().getConfiguration().fontScale));
         getSettings().setAllowFileAccess(false);
         getSettings().setAllowContentAccess(false);
         getSettings().setAllowFileAccessFromFileURLs(false);
@@ -52,7 +59,7 @@ final class ContentView extends WebView {
                         "document.documentElement.style.setProperty('--brand','"+css(MobileStyle.BRAND)+"');"+
                         "document.documentElement.style.setProperty('--muted','"+css(MobileStyle.MUTED)+"');";
                 String base=((AcmApplication)context.getApplicationContext()).api().getBaseUrl();
-                evaluateJavascript(colors+"renderContent(" + JSONObject.quote(source) + "," + JSONObject.quote(html ? "html" : "markdown") + ","+JSONObject.quote(base)+","+(outlineListener!=null)+")", ignored -> {if(!disposed){ready=true;resize();}});
+                evaluateJavascript(colors+"renderContent(" + JSONObject.quote(source) + "," + JSONObject.quote(html ? "html" : "markdown") + ","+JSONObject.quote(base)+","+(outlineListener!=null)+","+problem+")", ignored -> {if(!disposed){ready=true;resize();}});
                 postDelayed(() -> resize(), 600);
                 postDelayed(() -> resize(), 1800);
             }
