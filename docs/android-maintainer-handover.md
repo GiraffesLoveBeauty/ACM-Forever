@@ -1,5 +1,7 @@
 # App 修改与维护交接规范
 
+2026-11-08：当前0.2.24/code38继续沿用既有debug构建与Tag发布。1.0.0延期，保留[方案和历史验收记录](android-v1.0.0-release-channels.md)，双渠道代码继续留在本地。恢复正式发布时，versionCode必须高于届时已发布的0.x，不能复用历史候选code38。
+
 状态：v0.2.22 随代码提请评审；记录日期 2026-11-07。适用于 `Android_APP/app/` 原生客户端。它补充[工程协作规范](TCrB-AI项目工程规范.md)及[模块关联标准](android-modification-standard.md)，不替代团队的评审、合并和发布授权。
 
 ## 维护责任与参与记录
