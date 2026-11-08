@@ -90,3 +90,5 @@
 精确构建日志为`Android_APP/dist/build-v0224-pr-exact.log`，后端和发布契约日志为`api-v0224-pr-exact.log`、`release-v0224-pr-exact.log`，模拟器总日志为`smoke-v0224-pr-exact.log`；各模式日志及已人工查看的题面/比赛进度截图位于`pr-v0.2.24-exact/`。测试数据仅用于隔离环境。以上结果不能代替其他Android版本、真机或生产联调。
 
 提交按源码和文档拆为两个commit。等待其他成员review及自动检查；涉及`feat/api/**`，合并前还需运维确认现有main同步流程。本轮不合并、不创建Tag、不发布安装包、不部署。
+
+上传PR后，GitHub的`ubuntu-latest`已迁移到Ubuntu26.04，现有Playwright1.56.1在安装Chromium阶段明确报不支持该系统，网页用例尚未执行。补充将`browser-tests.yml`固定为受支持的`ubuntu-24.04`，恢复可用测试环境；未改动网页业务、Android构建/发布workflow或服务器同步流程。此项与说明分别追加提交，最终PR共26个文件；线上检查以最新提交结果为准。
