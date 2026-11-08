@@ -1,4 +1,6 @@
-# ACMforever Android v0.2.22（待评审版）
+# ACMforever Android
+
+当前待评审版本为 **0.2.24/code38**，题面字号分层，题库和比赛进度直接展示难度及算法标签，详见[本轮说明](android-v0.2.24-problem-reading.md)。1.0.0延期，其[渠道设计与验收记录](android-v1.0.0-release-channels.md)保留；双渠道实现继续留在本地，未纳入本PR。沿用既有0.x debug发布流程，本轮只提交PR，不合并、创建Tag或上传安装包。以下保留历史版本说明。
 
 当前待评审版本为 `0.2.22` / code `36`，增加版本人员署名、特别鸣谢、维护交接规范和未登录门禁，详见[本轮说明](android-v0.2.22.md)、[维护交接规范](android-maintainer-handover.md)及[署名来源](android-credits-v0.2.22.md)。按2026-11-07用户指示，完成本地检查后提交新PR，交其他成员review；本轮不合并、不创建Tag或发布，自站保持独立。
 

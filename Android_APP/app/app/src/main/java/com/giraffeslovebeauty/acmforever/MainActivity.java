@@ -1159,8 +1159,8 @@ public final class MainActivity extends Activity {
             LinearLayout box = card(results);
             box.addView(label(problem.optString("problem_name", problem.optString("problem_id", "题目")), 16, TEXT, true));
             space(box, 5);
-            box.addView(label(problem.optString("platform") + "  ·  " + problem.optString("problem_rating", "难度未知"), 12, BRAND, true));
-            box.addView(label(problem.optString("tags", ""), 12, MUTED, false));
+            box.addView(label(problem.optString("platform") + " · " + problem.optString("problem_id"), 13, MUTED, false));
+            ProblemBadges.append(this, box, problem);
             Button detail = action("查看题面与样例", true);
             detail.setOnClickListener(v -> openProblem(problem)); box.addView(detail);
             Button favorite = action(problem.optBoolean("is_favorite") ? "★ 已收藏 · 取消" : "☆ 收藏", false);
@@ -1236,7 +1236,12 @@ public final class MainActivity extends Activity {
     private void showProblemDetail(JSONObject problem, JSONObject selected) {
         content.removeAllViews();
         Button back = action("← 返回", false); back.setOnClickListener(v -> onBackPressed()); content.addView(back);
-        heading("PROBLEM", value(problem, "problem_name", problem.optString("problem_id")), problem.optString("platform") + " · " + value(problem, "problem_rating", "难度未知"));
+        LinearLayout overview = card();
+        TextView title = label(value(problem, "problem_name", problem.optString("problem_id")), 24, TEXT, true);
+        title.setContentDescription("题目标题");overview.addView(title);
+        space(overview, 8);
+        overview.addView(label(problem.optString("platform") + " · " + problem.optString("problem_id"), 13, MUTED, false));
+        ProblemBadges.append(this, overview, problem);
         Button discussion=action("按题讨论 / 加入错题本",true);content.addView(discussion);
         discussion.setOnClickListener(v->{Intent intent=new Intent(this,ClubActivity.class);intent.putExtra("page","discussions");intent.putExtra("platform",selected.optString("platform"));intent.putExtra("problem_id",selected.optString("problem_id"));startActivity(intent);});
 
@@ -1248,7 +1253,7 @@ public final class MainActivity extends Activity {
         } else if (problem.optBoolean("content_available")) {
             String html = value(problem, "statement_html", "");
             String source = html.isEmpty() ? value(problem, "statement_text", "") : html;
-            box.addView(new ContentView(this, source, !html.isEmpty(), this::openBrowser));
+            box.addView(ContentView.problem(this, source, !html.isEmpty(), this::openBrowser));
         } else {
             box.addView(label("failed".equals(problem.optString("last_fetch_status"))?"上次采集失败，请管理员重新拉取题面。":"已收录目录，题面尚未采集；可等待后重新检查。",14,MUTED,false));
             Button retry=action("重新检查",false);retry.setOnClickListener(v->loadScreen());box.addView(retry);
@@ -1256,7 +1261,7 @@ public final class MainActivity extends Activity {
         JSONArray samples = problem.optJSONArray("samples");
         if (samples != null) for (int i = 0; i < samples.length(); i++) {
             JSONObject sample = samples.optJSONObject(i); if (sample == null) continue;
-            LinearLayout sampleBox = card(); sampleBox.addView(label("样例 " + (i + 1), 16, TEXT, true));
+            LinearLayout sampleBox = card(); sampleBox.addView(label("样例 " + (i + 1), 18, TEXT, true));
             sampleValue(sampleBox, "输入", sample.optString("input")); sampleValue(sampleBox, "输出", sample.optString("output"));
         }
         LinearLayout actions = card();
@@ -1274,8 +1279,8 @@ public final class MainActivity extends Activity {
     }
 
     private void sampleValue(LinearLayout box, String title, String text) {
-        box.addView(label(title, 12, BRAND, true));
-        TextView value = label(text, 13, TEXT, false); value.setTypeface(android.graphics.Typeface.MONOSPACE); value.setTextIsSelectable(true); box.addView(value);
+        space(box, 8);box.addView(label(title, 14, BRAND, true));
+        TextView value = label(text, 14, TEXT, false); value.setTypeface(android.graphics.Typeface.MONOSPACE); value.setLineSpacing(0,1.7f);value.setTextIsSelectable(true); box.addView(value);
         Button copy = action("复制" + title, false);
         copy.setOnClickListener(v -> {
             ((android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(android.content.ClipData.newPlainText(title, text));

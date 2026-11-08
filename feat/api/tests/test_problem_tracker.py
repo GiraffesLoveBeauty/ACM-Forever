@@ -104,6 +104,22 @@ class ProblemTrackerTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("secret source", str(data))
             self.assertNotIn("owner_qq_id", str(data))
 
+    async def test_progress_exposes_catalog_ratings_and_whole_algorithm_labels_without_extra_fetch(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            await self.account_login(client)
+            await self.catalog([
+                self.problem("100", "A", tags=["digit dp", "math"], problem_rating=1800),
+                self.problem("100", "B", tags=[], problem_rating=None),
+            ])
+            with patch("feat.api.acm_api.backend_api.cf_request", new_callable=AsyncMock) as network:
+                data = await (await client.get("/api/me/problems/tracker?platform=codeforces&problem_tag=digit%20dp")).get_json()
+                network.assert_not_awaited()
+            a, b = data["items"][0]["problems"]
+            self.assertEqual((a["problem_rating"], a["tags"]), (1800, ["digit dp", "math"]))
+            self.assertEqual((b["problem_rating"], b["tags"]), (None, []))
+            self.assertEqual(data["items"][0]["total_count"], 2)
+
     async def test_search_scope_and_favorites_filter_contests_without_removing_other_problems(self):
         async with self.app.test_app():
             client = self.app.test_client()

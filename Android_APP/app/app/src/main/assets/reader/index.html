@@ -11,5 +11,21 @@ code{font-family:ui-monospace,Consolas,"Liberation Mono",monospace}
 pre code{display:block;width:max-content;min-width:100%;margin:0;padding:0;border:0;background:transparent;font:inherit;text-align:inherit;white-space:inherit;overflow-wrap:normal;word-break:normal}
 blockquote{margin:12px 0;padding-left:12px;border-left:3px solid var(--brand,#315b36);color:var(--muted,#70776b)}
 table{display:block;max-width:100%;overflow:auto;border-collapse:collapse}td,th{padding:8px;border:1px solid var(--line,#e5e8e0)}img{max-width:100%;height:auto}a{color:var(--brand,#315b36)}math[display=block]{display:block;max-width:100%;overflow:auto}
+/* Follow the Web problem typography without changing forum/comment/Wiki readers. */
+#article.problem-reader{font:16px/1.85 sans-serif;text-align:start}
+.problem-reader h1{font-size:22px;line-height:1.45;font-weight:700;margin:24px 0 12px}
+.problem-reader h2,.problem-reader .section-title{font-size:20px;line-height:1.5;font-weight:650;margin:24px 0 12px}
+.problem-reader h3{font-size:18px;line-height:1.5;font-weight:650;margin:22px 0 10px}
+.problem-reader h4,.problem-reader h5,.problem-reader h6{font-size:16px;line-height:1.6;font-weight:650;margin:18px 0 10px}
+.problem-reader p{margin:12px 0}
+.problem-reader .header{padding-bottom:14px;margin-bottom:18px;border-bottom:1px solid var(--line,#e5e8e0);font-size:13px;line-height:1.7;color:var(--muted,#70776b)}
+.problem-reader .header .title{display:none}
+.problem-reader .time-limit,.problem-reader .memory-limit,.problem-reader .input-file,.problem-reader .output-file{font-size:13px;line-height:1.7;margin:4px 0}
+.problem-reader .property-title{display:inline;margin-right:6px;font-weight:600}
+.problem-reader .sample-test .title,.problem-reader .statement-sample-heading{font-size:15px;font-weight:650;margin-top:16px}
+.problem-reader pre{font-size:14px;line-height:1.7;padding:14px}
+.problem-reader pre.problem-plain{white-space:pre-wrap;overflow-wrap:anywhere}
+.problem-reader ul,.problem-reader ol{padding-inline-start:24px}
+.problem-reader img{display:block;margin:14px auto}
 </style>
 <script src="marked.min.js"></script><script src="purify.min.js"></script><script src="katex.min.js"></script><script src="auto-render.min.js"></script><script src="content.js"></script></head><body><article id="article"></article></body></html>

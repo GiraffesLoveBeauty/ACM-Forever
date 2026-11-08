@@ -195,6 +195,8 @@ response.raise_for_status()
 
 返回 `items/total/page/page_size`，`total` 为比赛数量。每个比赛含 `platform/contest_id/contest_name/start_time/total_count/solved_count/attempted_count/problems`；题目含 `platform/problem_id/problem_index/problem_name/problem_rating/status/ac_at/last_submit_at/is_favorite`。`status` 为 `solved`（已 AC）、`attempted`（有提交记录且未 AC）、`unseen`（未记录），时间为 Unix 秒。`start_time` 为真实比赛开始时间，未收录时为 null；默认按开始时间倒序，未知时间在后，同时间以平台和自然比赛 ID 稳定排序，再进行分页。AC 证据优先于之后的失败提交；收藏和提交状态只关联本人。按自然题序排列 D1 / D2 等题目，筛选先选择比赛，再返回该场全部已入库题目，分页不会切开比赛。前端每页完整展开 20 场，使用页面纵向滚动。仅使用本地目录、比赛缓存和提交数据，不调用 OJ 或触发采集；未记录不代表原站没有提交，目录和尝试记录均可能尚未同步完整。
 
+2026-11-08本地加法扩展：上述每题对象还包含`tags: string[]`，规范化输出与筛选使用的有效原始算法标签，完整名称保留，未知为空数组。不增加采集请求或其他成员数据访问。旧网页可忽略字段；旧服务器缺失字段时App提示“算法标签未提供”。生产是否已有字段需在部署后另验。
+
 前端 `/my-problems.html?view=tracker` 切换比赛进度；默认列表省略 `view`。前端题库的平台筛选默认 Codeforces，不提供“全部平台”；未指定或无效平台回落为 `codeforces`，清除筛选同样恢复该默认值。接口自身仍支持空平台供兼容调用。站内题面返回白名单保留 `view=tracker` 和已有范围、筛选、页码，排除身份参数。
 
 个人中心的最近 AC 和个人题库均打开站内题面。`from` 仅接受 `/home.html`、携带允许筛选参数的 `/problem-bank.html` 或 `/my-problems.html`；外部网址、管理地址和身份参数会被排除，返回时保留实际个人入口。个人列表与收藏对所有角色均使用 `/api/me/problems`，归属只取会话本人；成员详情及 PDF 读取复用 `/api/me/problems/<platform>/<problem_id>` 和后缀 `/statement.pdf`，admin / root 的详情沿用原管理读取接口，两者均不会触发采集。

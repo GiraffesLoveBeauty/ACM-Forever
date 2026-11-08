@@ -66,7 +66,7 @@ final class CommunityUiSmoke {
     private void click(String value){main(()->{View view=desc(value);if(view==null)view=walk(activity.getWindow().getDecorView(),v->v instanceof TextView&&value.contentEquals(((TextView)v).getText()));check(view!=null,"control "+value);view.performClick();});test.waitForIdleSync();}
     private void await(java.util.function.BooleanSupplier ready,long timeout,String message)throws Exception{long end=System.currentTimeMillis()+timeout;while(System.currentTimeMillis()<end){boolean[] ok={false};main(()->ok[0]=ready.getAsBoolean());if(ok[0])return;Thread.sleep(80);}throw new AssertionError(message);}
     private void check(boolean value,String message){if(!value)throw new AssertionError(message);}
-    private void screenshot(String name)throws Exception{Thread.sleep(200);Bitmap b=test.getUiAutomation().takeScreenshot();try(FileOutputStream out=new FileOutputStream(new File(app.getExternalFilesDir(null),name))){b.compress(Bitmap.CompressFormat.PNG,100,out);}finally{b.recycle();}}
+    private void screenshot(String name)throws Exception{Thread.sleep(200);Bitmap b=test.getUiAutomation().takeScreenshot();try(FileOutputStream out=new FileOutputStream(new File(app.getFilesDir(),name))){b.compress(Bitmap.CompressFormat.PNG,100,out);}finally{b.recycle();}}
     private static final class Fixture extends HttpURLConnection {
         private final ByteArrayOutputStream sent=new ByteArrayOutputStream();Fixture(URL url){super(url);}
         public void connect(){}public void disconnect(){}public boolean usingProxy(){return false;}public OutputStream getOutputStream(){return sent;}

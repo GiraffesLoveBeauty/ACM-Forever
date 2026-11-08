@@ -1,4 +1,8 @@
-# Android 修改标准与模块关联（v0.2.23）
+# Android 修改标准与模块关联（v0.2.24）
+
+1.0.0已延期，当前版本0.2.24/code38。题面专用样式由`ContentView.problem`与`reader/`控制，不修改论坛/评论/Wiki样式；`ProblemSummary`解析真实难度、数组或历史文本标签，`ProblemBadges`在题库、详情及比赛进度统一换行展示。比赛进度复用现有接口的`tags: string[]`加法字段；旧服务器缺失时提示“算法标签未提供”，不能逐题抓详情或猜测标签。后端变更需与App联调，详见[0.2.24说明](android-v0.2.24-problem-reading.md)。
+
+本PR不包含延期的1.0.0渠道实现、管理员安装包API或发布workflow改动；这些内容留在本地，待后续独立评审。
 
 状态：本轮实现说明，待跨人评审；2026-11-07。以实际代码与测试结果为准。适用工程 `Android_APP/app/`，不改变仓库协作规范。维护责任、人员署名、修改步骤和发布交接另见[App 修改与维护交接规范](android-maintainer-handover.md)。
 

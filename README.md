@@ -25,7 +25,9 @@
 
 - [TCrB-AI项目工程规范.md（AI 项目工程协作规范 · 讨论稿）](docs/TCrB-AI项目工程规范.md)
 - [api.md（API 调用指南）](docs/api.md)
-- [android-app.md（Android v0.2.22待评审版本、更新渠道、构建与发布）](docs/android-app.md)
+- [android-app.md（Android版本、更新渠道、构建与发布）](docs/android-app.md)
+- [android-v1.0.0-release-channels.md（1.0.0延期保留：渠道、候选包与验收记录）](docs/android-v1.0.0-release-channels.md)
+- [android-v0.2.24-problem-reading.md（题面排版、难度及算法标签 · 待评审）](docs/android-v0.2.24-problem-reading.md)
 - [android-v0.2.22.md（版本署名、特别鸣谢、维护交接与强制登录 · 待评审）](docs/android-v0.2.22.md)
 - [android-completeness-audit-v0.2.22-2026-11-07.md（App完整度检查 · 不含缺失API）](docs/android-completeness-audit-v0.2.22-2026-11-07.md)
 - [android-v0.2.23.md（图片故障恢复、存储管理与帮助说明 · 待评审）](docs/android-v0.2.23.md)

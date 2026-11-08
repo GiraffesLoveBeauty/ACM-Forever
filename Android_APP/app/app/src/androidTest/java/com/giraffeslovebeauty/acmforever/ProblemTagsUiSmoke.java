@@ -33,11 +33,14 @@ final class ProblemTagsUiSmoke {
             prefs.edit().putBoolean("auto_login",false).putBoolean("app_update_automatic",false).putString(SearchModules.KEY,"[\"users\",\"forum\",\"wiki\",\"problems\",\"tracker\"]").apply();
             api.setBaseUrl("https://tags.test.invalid");api.setNetworkAvailable(()->true);api.login("90000001","Synthetic-Test!");
             activity=open(MainActivity.class,new Intent());show("problems");await(()->has("共 27 道题目"),"native catalog");
+            await(()->description("难度 800")!=null&&description("算法标签：dp")!=null&&description("算法标签：math")!=null,"catalog directly exposes real difficulty and whole tags");
             editDescription("题库搜索关键词","Needle");clickDescription("搜索题库");await(()->has("共 26 道题目"),"keyword search");
             clickDescription("筛选题库标签");await(()->candidateCount()>0,"real catalog tags");editDescription("搜索题目标签","DP");await(()->candidateCount()==2,"search candidates includes both dp and digit dp");screenshot("problem-tags-picker.png");pick("dp");
             await(()->has("共 24 道题目")&&has("题目标签：dp"),"exact dp excludes digit-only and title-only");check(!has("digit-only"),"not fuzzy label match");
             click("下一页");await(()->nativePage()==2&&has("共 24 道题目"),"native pagination retains tag");checkParam(last("/api/me/problems"),"problem_tag","dp");checkParam(last("/api/me/problems"),"tag","Needle");
-            click("查看题面与样例");await(()->has("按题讨论 / 加入错题本"),"native detail");main(activity::onBackPressed);await(()->nativePage()==2&&has("题目标签：dp"),"back stack retains keyword tag page");
+            click("查看题面与样例");await(()->has("按题讨论 / 加入错题本"),"native detail");
+            verifyStatementTypography();screenshot("problem-typography-v0224.png");
+            main(activity::onBackPressed);await(()->nativePage()==2&&has("题目标签：dp"),"back stack retains keyword tag page");
             recreate();await(()->nativePage()==2&&has("共 24 道题目"),"native rotation");check("Needle".contentEquals(inputDescription("题库搜索关键词").getText()),"keyword restored");
             click("我已 AC");await(()->has("共 10 道题目"),"AC and exact label combine");click("已收藏");await(()->has("共 2 道题目"),"favorite and solved combine");
             checkParam(last("/api/me/problems"),"scope","solved");checkParam(last("/api/me/problems"),"state","favorite");checkParam(last("/api/me/problems"),"problem_tag","dp");
@@ -63,11 +66,17 @@ final class ProblemTagsUiSmoke {
             recreate();await(()->has("题目标签：dp")&&has("比赛进度标签：dp"),"global selections survive rotation");
             for(String request:requests)if(request.startsWith("/api/forum/")||request.startsWith("/api/wiki/")||request.startsWith("/api/community/leaderboard"))check(param(request,"problem_tag")==null,"exact labels never affect other content modules");
             activity=follow(WebFeaturesActivity.class,()->click("Needle contest"));await(()->has("题目标签：dp"),"tracker inherits exact tag");checkParam(last("/api/me/problems/tracker"),"problem_tag","dp");
+            await(()->description("算法标签：dp")!=null&&description("难度 800")!=null,"tracker exposes difficulty and labels without opening details");
+            int detailReads=detailReads();Thread.sleep(250);check(detailReads()==detailReads,"tracker metadata does not fan out to per-problem requests");
+            screenshot("problem-tracker-v0224.png");Activity tracker=activity;
+            activity=follow(MainActivity.class,()->clickDescription("DP1. Needle DP 1 · 已 AC · 难度 800 · 算法标签：dp、math"));
+            await(()->description("题目标题")!=null,"tracker tile opens native statement");verifyStatementTypography();main(activity::onBackPressed);activity=tracker;
+            await(()->has("题目标签：dp")&&description("算法标签：dp")!=null,"statement returns to the same tracker and filters");
             click("AtCoder");await(()->has("题目标签：全部标签"),"tracker platform reset");clickDescription("筛选比赛进度标签");await(()->candidateCount()==1,"tracker scoped candidates");pick("math");await(()->has("题目标签：math"),"native tracker filter");recreate();await(()->has("题目标签：math"),"tracker rotation retains selection");
             checkParam(last("/api/me/problems/tracker"),"problem_tag","math");checkParam(last("/api/me/problems/tracker"),"platform","atcoder");
             clickDescription("筛选比赛进度标签");await(()->candidateCount()>0,"old picker open");ListView old=candidates();api.logout();main(()->{test.callActivityOnPause(activity);test.callActivityOnResume(activity);});await(()->!ModalDialogs.isShowing(activity),"session change closes picker");
             main(()->old.performItemClick(old.getAdapter().getView(0,null,old),0,0));check(!has("题目标签：math"),"old picker callback cannot apply to new session");
-            output.putString("stream","PASS: original label API candidates and live search; dp exact versus digit dp; keyword AND exact label; Unicode/percent/ampersand encoding; native and global pagination; solved/favorite combinations; clear and platform reset; detail return and Activity rotation; missing API stays honest; cache retained on failure; independent global problem/tracker filters, other modules unaffected; tracker initial tag, platform reset and rotation; stale-session picker discarded; no production calls or business writes.\n");status=Activity.RESULT_OK;
+            output.putString("stream","PASS: catalog and tracker expose real difficulty/whole algorithm labels without per-problem reads; real statement WebView heading/body/time/memory/code typography, sanitized script and math, no page overflow; tracker tile native statement and return; original label candidates and exact search, pagination, favorites, platform reset, rotation and stale-session protection; no production calls or business writes.\n");status=Activity.RESULT_OK;
         }catch(Throwable failure){StringBuilder visible=new StringBuilder();if(activity!=null)main(()->walk(decor(),v->{if(v instanceof TextView)visible.append(((TextView)v).getText()).append(" | ");return false;}));output.putString("stream","FAIL: "+android.util.Log.getStackTraceString(failure)+"\nUI: "+visible+"\nRequests: "+requests);}
         finally{
             for(int i=pages.size()-1;i>=0;i--){Activity page=pages.get(i);main(()->{ModalDialogs.close(page);page.finish();});}
@@ -75,7 +84,15 @@ final class ProblemTagsUiSmoke {
             for(Map.Entry<String,?> entry:before.entrySet()){Object v=entry.getValue();String k=entry.getKey();if(v instanceof String)restore.putString(k,(String)v);else if(v instanceof Boolean)restore.putBoolean(k,(Boolean)v);else if(v instanceof Integer)restore.putInt(k,(Integer)v);else if(v instanceof Long)restore.putLong(k,(Long)v);else if(v instanceof Float)restore.putFloat(k,(Float)v);}restore.apply();AppAppearance.load(context);
         }test.finish(status,output);
     }
-    private JSONObject problem(String platform,String id,String name,JSONArray tags,boolean solved,boolean favorite)throws Exception{return new JSONObject().put("platform",platform).put("problem_id",id).put("problem_name",name).put("tags",tags).put("is_favorite",favorite).put("solved",solved).put("problem_rating",800).put("content_available",false).put("samples",new JSONArray());}
+    private static final String STATEMENT="<div class='header'><div class='title'>Duplicate source title</div><div class='time-limit'><span class='property-title'>time limit per test</span>2 seconds</div><div class='memory-limit'><span class='property-title'>memory limit per test</span>256 megabytes</div></div><p>这是排版与安全测试题面。Find $n + 1$.</p><div class='section-title'>Input</div><h2>Constraints</h2><h3>Notes</h3><p>保留完整算法名称和说明。</p><pre>"+String.join(" ",Collections.nCopies(50,"sample"))+"</pre><script>window.problemInjected=true</script>";
+    private JSONObject problem(String platform,String id,String name,JSONArray tags,boolean solved,boolean favorite)throws Exception{return new JSONObject().put("platform",platform).put("problem_id",id).put("problem_name",name).put("tags",tags).put("is_favorite",favorite).put("solved",solved).put("problem_rating",800).put("content_available",true).put("statement_html",STATEMENT).put("samples",new JSONArray());}
+    private int detailReads(){int count=0;synchronized(requests){for(String path:requests)if(path.matches("/api/me/problems/(codeforces|atcoder)/.*"))count++;}return count;}
+    private void verifyStatementTypography()throws Exception{
+        await(()->walk(decor(),v->v instanceof ContentView)!=null,"native statement reader");
+        java.util.concurrent.atomic.AtomicBoolean passed=new java.util.concurrent.atomic.AtomicBoolean();
+        await(()->{ContentView reader=(ContentView)walk(decor(),v->v instanceof ContentView);reader.evaluateJavascript("(()=>{const a=document.getElementById('article'),style=s=>getComputedStyle(a.querySelector(s)),size=s=>style(s).fontSize;if(!a||!a.classList.contains('problem-reader')||!a.querySelector('pre'))return false;return getComputedStyle(a).fontSize==='16px'&&size('.section-title')==='20px'&&size('h3')==='18px'&&size('.time-limit')==='13px'&&size('.memory-limit')==='13px'&&size('pre')==='14px'&&style('.header .title').display==='none'&&a.querySelector('.time-limit').textContent.includes('2 seconds')&&a.querySelector('.memory-limit').textContent.includes('256 megabytes')&&typeof window.problemInjected==='undefined'&&a.querySelector('math')!==null&&document.documentElement.scrollWidth<=document.documentElement.clientWidth+1;})()",value->passed.set("true".equals(value)));return passed.get();},"statement heading/body/limits/code hierarchy; sanitized script and math; no page horizontal overflow");
+        main(()->{TextView title=(TextView)description("题目标题");check(title!=null&&Math.abs(title.getTextSize()/context.getResources().getDisplayMetrics().scaledDensity-24)<.1,"native title is 24sp");});
+    }
     private Activity open(Class<?> type,Intent intent){Activity page=test.startActivitySync(intent.setClass(context,type).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));pages.add(page);return page;}
     private Activity follow(Class<?> type,Runnable work){Instrumentation.ActivityMonitor monitor=test.addMonitor(type.getName(),null,false);try{work.run();Activity page=test.waitForMonitorWithTimeout(monitor,10000);check(page!=null,"Activity opened "+type.getSimpleName());pages.add(page);return page;}finally{test.removeMonitor(monitor);}}
     private void recreate(){Activity old=activity;activity=follow(old.getClass(),()->main(old::recreate));}
@@ -98,7 +115,11 @@ final class ProblemTagsUiSmoke {
     private static String param(String path,String key){return Uri.parse("https://tags.test.invalid"+path).getQueryParameter(key);}
     private static void checkParam(String path,String key,String expected){check(Objects.equals(expected,param(path,key)),"parameter "+key+" expected="+expected+" got="+param(path,key));}
     private static void check(boolean yes,String message){if(!yes)throw new AssertionError(message);}
-    private void screenshot(String name)throws Exception{android.graphics.Bitmap[] bitmap={null};main(()->{View v=decor();bitmap[0]=android.graphics.Bitmap.createBitmap(v.getWidth(),v.getHeight(),android.graphics.Bitmap.Config.ARGB_8888);v.draw(new android.graphics.Canvas(bitmap[0]));});try(FileOutputStream out=new FileOutputStream(new File(context.getExternalFilesDir(null),name))){bitmap[0].compress(android.graphics.Bitmap.CompressFormat.PNG,100,out);}finally{bitmap[0].recycle();}}
+    private void screenshot(String name)throws Exception{
+        check(name.matches("[a-z0-9-]+\\.png"),"fixed test screenshot name");test.waitForIdleSync();Thread.sleep(200);
+        // Shell-owned output survives the old/new package UID changes in covering tests.
+        try(ParcelFileDescriptor capture=test.getUiAutomation().executeShellCommand("screencap -p /data/local/tmp/"+name);InputStream done=new FileInputStream(capture.getFileDescriptor())){while(done.read()!=-1){}}
+    }
     private final class Fixture extends HttpURLConnection{
         Fixture(URL url){super(url);}public void connect(){}public void disconnect(){}public boolean usingProxy(){return false;}
         public OutputStream getOutputStream(){return new ByteArrayOutputStream();}
@@ -138,7 +159,8 @@ final class ProblemTagsUiSmoke {
             String platform=param(url.getFile(),"platform"),term=param(url.getFile(),"tag"),exact=param(url.getFile(),"problem_tag"),scope=param(url.getFile(),"scope"),state=param(url.getFile(),"state");List<JSONObject> matches=new ArrayList<>();
             for(JSONObject item:catalog){if(platform!=null&&!platform.isEmpty()&&!platform.equals(item.getString("platform")))continue;
                 if("solved".equals(scope)&&!item.getBoolean("solved")||"favorite".equals(state)&&!item.getBoolean("is_favorite"))continue;
-                if(term!=null&&!term.isEmpty()&&!(item.getString("problem_name")+" "+item.getString("problem_id")+" "+item.getJSONArray("tags")).toLowerCase(Locale.ROOT).contains(term.toLowerCase(Locale.ROOT)))continue;
+                String search=item.getString("problem_name")+" "+item.getString("problem_id")+" "+item.getJSONArray("tags")+(url.getPath().equals("/api/me/problems/tracker")?" 123 Needle contest":"");
+                if(term!=null&&!term.isEmpty()&&!search.toLowerCase(Locale.ROOT).contains(term.toLowerCase(Locale.ROOT)))continue;
                 if(exact!=null&&!exact.isEmpty()){boolean found=false;JSONArray tags=item.getJSONArray("tags");for(int i=0;i<tags.length();i++)found|=exact.equalsIgnoreCase(tags.getString(i));if(!found)continue;}matches.add(item);
             }return matches;
         }

@@ -279,7 +279,9 @@ async def contest_tracker(db, owner, options):
         group["solved_count"] = sum(problem["status"] == "solved" for problem in group["problems"])
         group["attempted_count"] = sum(problem["status"] == "attempted" for problem in group["problems"])
         for problem in group["problems"]:
-            problem.pop("tags")
+            # Reuse catalog labels in mobile progress cards; retain the existing
+            # filtering semantics and avoid a detail request for every problem.
+            problem["tags"] = problem_tags(problem["tags"])
             problem.pop("contest_name")
         result.append(group)
     result.sort(key=lambda item: (item["start_time"] is not None, item["start_time"] or 0,
