@@ -12,6 +12,41 @@ from urllib.parse import quote
 PACKAGE = "com.giraffeslovebeauty.acmforever"
 
 
+def module_assets(directory, manifest, repository):
+    """All optional artifacts are part of the same immutable release transaction."""
+    url = manifest.get("modulesUrl", "")
+    if not url:
+        if manifest["versionCode"] >= 39:
+            raise ValueError("Modular app releases require a complete modules.json")
+        return []
+    expected = f'https://github.com/{repository}/releases/download/v{manifest["versionName"]}/modules.json'
+    if url != expected:
+        raise ValueError("Module catalog URL does not match this release")
+    path = directory / "modules.json"
+    if path.stat().st_size > 65536:
+        raise ValueError("Module catalog exceeds 64 KiB")
+    index = json.loads(path.read_text(encoding="utf-8"))
+    if (index.get("schemaVersion") != 1 or index.get("versionCode") != manifest["versionCode"]
+            or index.get("versionName") != manifest["versionName"] or len(index.get("modules", [])) != 4):
+        raise ValueError("Incomplete module catalog")
+    assets, seen = [path], set()
+    for entry in index["modules"]:
+        module = entry.get("id")
+        if module not in ("official-themes", "advanced", "admin", "cat-art") or module in seen:
+            raise ValueError("Unknown or duplicate module")
+        seen.add(module)
+        native = module in ("advanced", "admin")
+        name = "module-" + module + (".apk" if native else ".acmpack")
+        artifact = directory / name
+        if (entry.get("kind") != ("native" if native else "assets")
+                or entry.get("url") != expected.replace("modules.json", name)
+                or type(entry.get("sizeBytes")) is not int or not 0 < entry["sizeBytes"] <= 16*1024*1024
+                or artifact.stat().st_size != entry["sizeBytes"] or digest(artifact) != entry.get("sha256")):
+            raise ValueError("Module file, size, hash or URL differs from its catalog")
+        assets.append(artifact)
+    return assets
+
+
 def validate_source(tag, gradle, history):
     version = re.search(r"\bversionName\s+'(\d+\.\d+\.\d+)'", gradle)
     code = re.search(r"\bversionCode\s+(\d+)\b", gradle)
@@ -174,6 +209,8 @@ def publish(github, tag, directory, source_commit):
             or digest(apk) != manifest["sha256"]
             or checksum.read_text(encoding="ascii").strip() != manifest["sha256"] + "  " + filename):
         raise ValueError("Local release assets no longer match the validated APK")
+    optional = module_assets(directory, manifest, github.repository)
+    all_assets = [apk, checksum, manifest_path] + optional
     if github.repository_info().get("private") is not False:
         raise ValueError("App update assets must be in a public repository")
     current = github.release(tag)
@@ -189,6 +226,10 @@ def publish(github, tag, directory, source_commit):
             remote_checksum = github.download(tag, checksum.name, Path(temp))
             if digest(remote_checksum) != digest(checksum):
                 raise ValueError("Published checksum differs from the APK checksum")
+            for local in optional:
+                remote_optional = github.download(tag, local.name, Path(temp))
+                if digest(remote_optional) != digest(local):
+                    raise ValueError("Published module differs from its immutable artifact")
         return "Already published; identical APK and manifest"
     require_newer(github, manifest)
     with tempfile.TemporaryDirectory() as temp:
@@ -198,12 +239,15 @@ def publish(github, tag, directory, source_commit):
                          + "\n\n" + manifest.get("notes", "") + "\n\nSource commit: `" + source_commit + "`\n", encoding="utf-8")
         if current is None:
             github.create(tag, title, notes)
-        github.upload(tag, [apk, checksum, manifest_path])
+        github.upload(tag, all_assets)
         # Read back each draft asset using gh's authenticated download support.
-        for local in (apk, checksum, manifest_path):
+        for local in all_assets:
             remote = github.download(tag, local.name, Path(temp))
             if digest(remote) != digest(local):
                 raise ValueError("Uploaded asset read-back failed; Release remains a draft")
+        uploaded_names = {entry.get("name") for entry in github.release(tag).get("assets", [])}
+        if uploaded_names != {path.name for path in all_assets}:
+            raise ValueError("Draft contains missing or unexpected assets; do not publish it")
         require_newer(github, manifest)
         github.publish(tag)
     return "Published verified Release " + tag

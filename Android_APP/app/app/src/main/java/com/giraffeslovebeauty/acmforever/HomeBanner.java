@@ -19,7 +19,7 @@ final class HomeBanner {
     static LinearLayout create(Context c,String eyebrow,String title,String subtitle,boolean dark,IntConsumer explore){
         LinearLayout box=column(c);box.setContentDescription("社区主题横幅");box.setPadding(dp(c,18),dp(c,16),dp(c,12),dp(c,16));
         GradientDrawable fill=new GradientDrawable();fill.setColor(ThemePalette.module(MobileStyle.HERO,AppAppearance.prefs(c).getInt("module_transparency",0)));fill.setCornerRadius(dp(c,16));
-        boolean official="web".equals(AppAppearance.prefs(c).getString("theme_source","acm"));
+        boolean official=ModuleStore.available(c,"official-themes")&&"web".equals(AppAppearance.prefs(c).getString("theme_source","acm"));
         if(!official)box.setBackground(new LayerDrawable(new android.graphics.drawable.Drawable[]{fill,new HeroBackdrop()}));
         LinearLayout brand=new SpacedLayout(c);TextView tag=text(c,eyebrow,9,true);tag.setLetterSpacing(.10f);brand.addView(tag,new LinearLayout.LayoutParams(0,-2,1));
         ImageView signature=new ImageView(c);signature.setImageDrawable(new CommunityArtwork(c,dark));signature.setContentDescription("猫娘代码标志");brand.addView(signature,new LinearLayout.LayoutParams(dp(c,27),dp(c,27)));box.addView(brand);gap(c,box,8);

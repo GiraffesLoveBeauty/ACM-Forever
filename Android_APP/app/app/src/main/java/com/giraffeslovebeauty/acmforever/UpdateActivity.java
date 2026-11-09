@@ -13,7 +13,9 @@ public final class UpdateActivity extends Activity {
     private LinearLayout body,banner;
     private TextView status,notes,error,source,last;
     private Button check,download,install,cancel,clearPackages;
-    private CheckBox automatic;
+    private CheckBox automatic,moduleUpdates;
+    private TextView modulesSummary;
+    private LinearLayout moduleActions;
     private boolean painting;
     private boolean initialCheck;
     private PullRefreshLayout pull;
@@ -37,6 +39,12 @@ public final class UpdateActivity extends Activity {
         LinearLayout options=card();options.addView(text("自动更新选项",18));automatic=new CheckBox(this);automatic.setText("启动时自动检查更新");automatic.setMinHeight(dp(48));options.addView(automatic);
         options.addView(text("自动检查默认开启，启动时在会话处理后发起，检查成功后间隔 6 小时；失败可在下一次启动重试。进入本页与手动检查始终立即检查。发现新版先询问，点击下载后进入猫娘下载页；安装仍需系统确认。",12));
         automatic.setOnCheckedChangeListener((b,value)->{if(!painting){updates.automatic(value);if(value)updates.check(false);}});
+        moduleUpdates=new CheckBox(this);moduleUpdates.setText("随 App 更新已下载模块");moduleUpdates.setMinHeight(dp(48));moduleUpdates.setChecked(ModuleStore.updateTogether(this));options.addView(moduleUpdates);
+        moduleUpdates.setOnCheckedChangeListener((b,value)->{if(!painting)ModuleStore.updateTogether(this,value);});
+        options.addView(text("默认勾选，仅更新已下载的模块。关闭后保留原文件和设置；旧资源包兼容时继续使用，原生模块须匹配新版 App，可能暂不可用。安装仍需系统确认。",12));
+        modulesSummary=text("模块：等待版本检查",12);options.addView(modulesSummary);
+        moduleActions=new SpacedLayout(this);moduleActions.setOrientation(LinearLayout.VERTICAL);options.addView(moduleActions);
+        for(String id:ModuleSpec.IDS)if(ModuleStore.acquired(this).contains(id)&&!ModuleStore.current(this,id)&&OptionalModules.allowed(this,id))button(moduleActions,"更新"+ModuleSpec.name(id),()->startActivity(new Intent(this,ModuleDownloadActivity.class).putExtra("module_id",id).putExtra("refresh_module",true).putExtra("next",OptionalModules.target(this,id))));
         LinearLayout publishing=card();publishing.addView(text("版本发布地址",16));source=text("",12);source.setTextIsSelectable(true);publishing.addView(source);button(publishing,"设置发布地址",this::editSource);
         releaseHistory();
         refresh();AppAppearance.paintFields(root);
@@ -68,7 +76,7 @@ public final class UpdateActivity extends Activity {
         if(isFinishing()||isDestroyed())return;painting=true;pull.loading(updates.checking());
         try{status.setText(updates.status());last.setText(updates.lastCheck());error.setText(updates.error());banner.setVisibility(updates.error().isEmpty()?View.GONE:View.VISIBLE);notes.setText(updates.notes());notes.setVisibility(updates.notes().isEmpty()?View.GONE:View.VISIBLE);
             check.setEnabled(!updates.busy());download.setText(updates.downloadLabel());download.setVisibility(updates.available()&&!updates.ready()?View.VISIBLE:View.GONE);download.setEnabled(!updates.busy());install.setVisibility(updates.ready()?View.VISIBLE:View.GONE);install.setEnabled(!updates.busy());cancel.setVisibility(updates.downloading()?View.VISIBLE:View.GONE);clearPackages.setEnabled(!updates.busy());
-            automatic.setChecked(updates.automatic());source.setText(updates.endpoint());
+            automatic.setChecked(updates.automatic());moduleUpdates.setChecked(ModuleStore.updateTogether(this));moduleUpdates.setEnabled(!updates.operationActive());modulesSummary.setText("模块："+updates.modulesStatus());for(int i=0;i<moduleActions.getChildCount();i++)moduleActions.getChildAt(i).setEnabled(!updates.operationActive());source.setText(updates.endpoint());
         }finally{painting=false;}
     }
     private void editSource(){

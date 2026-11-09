@@ -44,4 +44,4 @@ jobs:
         working-directory: Android_APP/app
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+          ./gradlew --no-daemon testDebugUnitTest lintDebug :app:assembleDebug :advanced:assembleDebug :admin:assembleDebug :app:assembleDebugAndroidTest

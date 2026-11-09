@@ -6,7 +6,7 @@ import re
 import unittest
 
 ROOT=Path(__file__).resolve().parents[2]
-ASSETS=ROOT/'Android_APP/app/app/src/main/assets/themes/renderer'
+ASSETS=ROOT/'Android_APP/module-resources/official-themes/payload/themes/renderer'
 
 class ThemeRendererAssetsTest(unittest.TestCase):
     def test_source_fingerprints_match(self):

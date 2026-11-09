@@ -21,7 +21,7 @@ final class OfficialThemeView extends WebView {
                 Uri uri=request.getUrl();String path=uri.getPath();
                 if("https".equals(uri.getScheme())&&"appassets.androidplatform.net".equals(uri.getHost())&&path!=null&&path.startsWith(PREFIX)&&!path.contains("..")&&"GET".equals(request.getMethod()))try{
                     String type=path.endsWith(".js")?"text/javascript":path.endsWith(".css")?"text/css":path.endsWith(".svg")?"image/svg+xml":path.endsWith(".woff2")?"font/woff2":path.endsWith(".html")?"text/html":"application/octet-stream";
-                    return new WebResourceResponse(type,"UTF-8",getContext().getAssets().open(path.substring(1)));
+                    return new WebResourceResponse(type,"UTF-8",ModuleStore.open(getContext(),"official-themes",path.substring(1)));
                 }catch(IOException ignored){}
                 return new WebResourceResponse("text/plain","UTF-8",403,"Blocked",java.util.Collections.emptyMap(),new ByteArrayInputStream(new byte[0]));
             }
@@ -31,7 +31,7 @@ final class OfficialThemeView extends WebView {
         loadUrl(ORIGIN+PREFIX+"index.html");
     }
     @Override public boolean onTouchEvent(android.view.MotionEvent event){return !"background".equals(scene)&&!"banner-background".equals(scene)&&super.onTouchEvent(event);}
-    static boolean background(Context c){android.content.SharedPreferences p=AppAppearance.prefs(c);return "web".equals(p.getString("theme_source","acm"))&&"solid".equals(p.getString("bg_mode","solid"))&&"theme".equals(p.getString("bg_source","custom"));}
+    static boolean background(Context c){android.content.SharedPreferences p=AppAppearance.prefs(c);return ModuleStore.available(c,"official-themes")&&"web".equals(p.getString("theme_source","acm"))&&"solid".equals(p.getString("bg_mode","solid"))&&"theme".equals(p.getString("bg_source","custom"));}
     void refresh(){
         if(!loaded)return;try{
             android.content.SharedPreferences prefs=AppAppearance.prefs(getContext());JSONObject selected=AppAppearance.findPreset(getContext(),prefs.getString("theme_preset","industrial"));boolean dark=prefs.getBoolean("theme_dark",false);

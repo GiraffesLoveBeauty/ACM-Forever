@@ -32,11 +32,16 @@ final class AppUpdates {
     private Runnable listener;
     private UpdateManifest release;
     private String source="",error="",verifiedName="",pendingResult="",downloadState="";
-    private long downloadId=-1,generation;
+    private long downloadId=-1;private volatile long generation;
+    private String checkedModules="尚未检查模块更新";
+    String modulesStatus(){return checkedModules;}
+    private String moduleStatus="";private Intent moduleInstallConfirmation;
     private boolean checking,verifying,installRequested,clearingPackages;
     private int progress=-1;
     private long promptedVersion;
     private boolean startupChecked,pendingOffer,openingDownload,openingInstaller;
+    private volatile boolean awaitingModuleInstall;
+    boolean awaitingModuleInstall(){return awaitingModuleInstall;}
     private AlertDialog offerDialog;
     private final Runnable presentOffer=this::presentOffer;
     private final Runnable poll=this::pollDownload;
@@ -69,6 +74,7 @@ final class AppUpdates {
         owner.clear();listener=null;
     }}
     private Activity activity(){Activity a=owner.get();return a==null||a.isFinishing()||a.isDestroyed()?null:a;}
+    boolean operationActive(){return busy()||openingInstaller;}
     boolean automatic(){return prefs.getBoolean(KEY+"automatic",true);}
     void automatic(boolean value){prefs.edit().putBoolean(KEY+"automatic",value).apply();changed();}
     void maybeCheck(){if(!automatic()||busy())return;long now=System.currentTimeMillis(),success=prefs.getLong(KEY+"success",0),attempt=prefs.getLong(KEY+"attempt",0);boolean sameBuild=prefs.getLong(KEY+"checked_build",-1)==currentVersion();if((!sameBuild||now-success>=6*60*60*1000L||now<success)&&(attempt==0||now-attempt>=60000||now<attempt))check(false);}
@@ -105,9 +111,10 @@ final class AppUpdates {
     String error(){return error;}
     String lastCheck(){long time=prefs.getLong(KEY+"attempt",0),success=prefs.getLong(KEY+"success",0);if(time==0)return "尚未发起检查";String label=new java.text.SimpleDateFormat("MM-dd HH:mm",Locale.CHINA).format(new Date(time));return "最近检查："+label+(checking?" · 检查中":success>=time?" · 成功":" · 未完成或失败，可立即手动重试");}
     String status(){
+        if(awaitingModuleInstall)return "等待系统安装确认…";
         if(clearingPackages)return "正在清理已下载安装包…";
         if(checking)return "正在检查新版本…";
-        if(verifying)return "正在校验安装包…";
+        if(verifying)return moduleStatus.isEmpty()?"正在校验安装包…":moduleStatus;
         if(downloadId!=-1)return !downloadState.isEmpty()?downloadState:progress<0?"正在等待或下载安装包…":"正在下载安装包 · "+progress+"%";
         if(ready())return "新版已下载，等待安装";
         if(!error.isEmpty())return error;
@@ -138,8 +145,11 @@ final class AppUpdates {
                         found.requireChannel(channel());
                     }
                 }finally{connection.disconnect();}
+                String moduleReport="尚未下载可选模块";
+                if(!ModuleStore.acquired(context).isEmpty())try{moduleReport=found.modulesUrl.isEmpty()?"此版本未提供模块更新清单；旧文件与设置会保留":ModuleUpdates.summary(context,(int)found.versionCode,found.versionName);}catch(Exception moduleFailure){moduleReport="模块检查失败："+moduleFailure.getMessage();}
+                final String report=moduleReport;
                 ui.post(()->{
-                    if(ticket!=generation)return;checking=false;
+                    if(ticket!=generation)return;checking=false;checkedModules=report;
                     if(release==null||release.versionCode!=found.versionCode||!release.sha256.equals(found.sha256)){deleteVerified();}
                     release=found;prefs.edit().putLong(KEY+"success",System.currentTimeMillis()).putLong(KEY+"checked_build",currentVersion()).apply();save();changed();
                     if((manual||automatic())&&available()&&!ready()&&(manual||promptedVersion!=found.versionCode)){
@@ -261,6 +271,7 @@ final class AppUpdates {
     }
     void install(Activity a){
         if(!ready()||busy()||openingInstaller)return;
+        if(ModuleDownloads.get(context).active()){error="请先完成或取消正在进行的模块下载/安装。";changed();return;}
         if(!a.getPackageManager().canRequestPackageInstalls()){
             if(ModalDialogs.isShowing(a))return;
             new ModalDialogs.Builder(a).setTitle("允许安装更新").setMessage("打开本 App 的安装权限后，仍由系统确认安装。")
@@ -269,12 +280,29 @@ final class AppUpdates {
                         catch(Exception e){installRequested=false;fail(e);}
                     }).show();return;
         }
+        installRequested=false;verifying=true;moduleStatus="正在检查已下载模块…";error="";changed();final long ticket=generation;final UpdateManifest expected=release;final File base=verifiedFile();
+        io.execute(()->{try{
+            validatePackage(base,expected);
+            Map<String,File> modules=ModuleUpdates.prepare(context,expected,()->ticket!=generation,text->ui.post(()->{if(ticket==generation){moduleStatus=text;changed();}}));
+            if(ticket!=generation)return;
+            if(!modules.isEmpty()||!ModuleStore.installedNative(context).isEmpty()){
+                ModuleInstaller.commit(context,"app-update",base,modules,()->ticket!=generation);
+                ui.post(()->{if(ticket==generation){verifying=false;moduleStatus="";openingInstaller=true;changed();}});
+            }else ui.post(()->{if(ticket==generation){verifying=false;moduleStatus="";openBaseInstaller(a);}});
+        }catch(Exception e){ui.post(()->{if(ticket==generation){verifying=false;moduleStatus="";openingInstaller=false;fail(e);}});}});
+    }
+    private void openBaseInstaller(Activity a){
+        if(a.isFinishing()||a.isDestroyed()){openingInstaller=false;changed();return;}
         try{
-            installRequested=false;openingInstaller=true;Intent intent=new Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse("content://"+context.getPackageName()+".updates/"+verifiedName),"application/vnd.android.package-archive");
+            openingInstaller=true;Intent intent=new Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse("content://"+context.getPackageName()+".updates/"+verifiedName),"application/vnd.android.package-archive");
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);a.startActivity(intent);
         }catch(Exception e){openingInstaller=false;fail(e);}
     }
-    void resumeInstall(Activity a){if(installRequested){installRequested=false;if(a.getPackageManager().canRequestPackageInstalls())install(a);}}
+    void installerResult(int status,String message,Intent confirmation){ui.post(()->{
+        if(status==PackageInstaller.STATUS_PENDING_USER_ACTION){if(confirmation==null){openingInstaller=false;error="系统未提供安装确认窗口，请重试。";changed();return;}awaitingModuleInstall=true;moduleInstallConfirmation=confirmation;Activity a=activity();if(a!=null)resumeInstall(a);changed();}
+        else{awaitingModuleInstall=false;openingInstaller=false;if(status!=PackageInstaller.STATUS_SUCCESS){error=status==PackageInstaller.STATUS_FAILURE_ABORTED?"已取消系统安装，可稍后继续":"系统安装失败："+message;changed();}}
+    });}
+    void resumeInstall(Activity a){if(moduleInstallConfirmation!=null&&api.isLoggedIn()){Intent intent=moduleInstallConfirmation;moduleInstallConfirmation=null;try{a.startActivity(intent);}catch(Exception e){awaitingModuleInstall=false;openingInstaller=false;fail(e);}return;}if(installRequested){installRequested=false;if(a.getPackageManager().canRequestPackageInstalls())install(a);}}
     void clearDownloadedPackages(){
         if(busy()||openingInstaller){error="请等待下载、校验或安装操作结束后再清理。";changed();return;}
         clearingPackages=true;installRequested=false;error="";changed();
@@ -291,7 +319,7 @@ final class AppUpdates {
             });
         });
     }
-    void cancelDownload(){++generation;ui.removeCallbacks(poll);if(downloadId!=-1)downloads().remove(downloadId);downloadId=-1;verifying=false;progress=-1;downloadState="";save();changed();}
+    void cancelDownload(){++generation;ui.removeCallbacks(poll);if(downloadId!=-1)downloads().remove(downloadId);downloadId=-1;verifying=false;moduleStatus="";progress=-1;downloadState="";save();changed();}
     private File verifiedFile(){return new File(new File(context.getCacheDir(),"updates"),verifiedName.matches("verified-[A-Za-z0-9_-]+\\.apk")?verifiedName:"missing");}
     private void deleteVerified(){if(!verifiedName.isEmpty())verifiedFile().delete();verifiedName="";}
     private void clearStored(){if(downloadId!=-1)downloads().remove(downloadId);downloadId=-1;deleteVerified();release=null;prefs.edit().remove(KEY+"manifest").remove(KEY+"download").remove(KEY+"verified").remove(KEY+"source").apply();}

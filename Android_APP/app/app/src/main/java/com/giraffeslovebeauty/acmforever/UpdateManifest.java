@@ -7,7 +7,7 @@ import java.util.Locale;
 /** Public release metadata. It never contains cookies, credentials or an executable instruction. */
 final class UpdateManifest {
     static final long MAX_APK_BYTES=150L*1024*1024;
-    final String packageName,versionName,apkUrl,sha256,notes,channel;
+    final String packageName,versionName,apkUrl,sha256,notes,channel,modulesUrl;
     final long versionCode,sizeBytes;
     final int minSdk;
     private final String json;
@@ -23,6 +23,7 @@ final class UpdateManifest {
         sizeBytes=value.optLong("sizeBytes",0);minSdk=value.optInt("minSdk",26);
         if(sizeBytes<0||sizeBytes>MAX_APK_BYTES||minSdk<1)throw new IllegalArgumentException("安装包大小或系统版本要求无效。");
         notes=value.optString("notes","");if(notes.length()>8000)throw new IllegalArgumentException("更新说明过长。");
+        modulesUrl=value.optString("modulesUrl","");if(!modulesUrl.isEmpty()&&!modulesUrl.equals(ModuleSpec.indexUrl(versionName)))throw new IllegalArgumentException("模块清单地址与版本不一致。");
         json=value.toString();
     }
     String json(){return json;}

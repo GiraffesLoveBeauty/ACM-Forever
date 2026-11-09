@@ -13,7 +13,7 @@ final class CodingCatView extends View {
         setContentDescription("猫娘正在敲代码");setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
     }
     @Override protected void onDraw(Canvas canvas){
-        super.onDraw(canvas);Bitmap illustration=CharacterArt.bitmap(getContext(),R.drawable.catgirl_loading);float phase=SystemClock.uptimeMillis()/480f;
+        super.onDraw(canvas);Bitmap illustration=CharacterArt.bitmap(getContext(),CharacterArt.LOADING);float phase=SystemClock.uptimeMillis()/480f;
         float size=Math.min(getWidth(),getHeight()-MobileStyle.dp(getContext(),12));
         float x=(getWidth()-size)/2,y=(getHeight()-size)/2-4+(float)Math.sin(phase)*2;
         float scale=size/Math.max(illustration.getWidth(),illustration.getHeight()),w=illustration.getWidth()*scale,h=illustration.getHeight()*scale;
