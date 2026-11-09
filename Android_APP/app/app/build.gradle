@@ -16,14 +16,15 @@ def prepareMobileAssets = tasks.register('prepareMobileAssets', Sync) {
 android {
     namespace 'com.giraffeslovebeauty.acmforever'
     compileSdk 35
+    dynamicFeatures = [':advanced', ':admin']
     buildToolsVersion '35.0.0'
 
     defaultConfig {
         applicationId 'com.giraffeslovebeauty.acmforever'
         minSdk 26
         targetSdk 35
-        versionCode 38
-        versionName '0.2.24'
+        versionCode 39
+        versionName '0.2.25'
         testInstrumentationRunner 'com.giraffeslovebeauty.acmforever.ReaderSmoke'
     }
 
@@ -37,6 +38,7 @@ android {
     // Reuse the local key for updates. An ASCII build copy can supply its path explicitly.
     signingConfigs {
         release {
+            v1SigningEnabled true
             if (releaseKeyStorePath) {
                 storeFile file(releaseKeyStorePath)
                 storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
@@ -45,6 +47,7 @@ android {
             }
         }
         debug {
+            v1SigningEnabled true
             def savedKey = file(project.findProperty('localDebugKeystore') ?: rootProject.file('../dist/signing/debug.keystore'))
             if (savedKey.isFile()) {
                 storeFile savedKey

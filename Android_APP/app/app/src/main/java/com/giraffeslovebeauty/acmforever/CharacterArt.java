@@ -8,22 +8,28 @@ import org.json.*;
 
 /** Composites supplied real layers; fixed skin/ears/collar/cuffs/laptop are never tinted. */
 final class CharacterArt {
+    static final int AVATAR=-101,LOADING=-102;
+    static synchronized void clear(){cache.clear();sources.clear();}
+    static InputStream open(Context c,String path)throws IOException{return ModuleStore.open(c,"cat-art",path);}
+    static Bitmap original(Context c,int resource)throws IOException{try(InputStream in=open(c,"character/"+(resource==AVATAR?"avatar":"loading")+"-original.png")){return BitmapFactory.decodeStream(in);}}
+    static Bitmap mask(Context c,int resource)throws IOException{try(InputStream in=open(c,"character/"+(resource==AVATAR?"avatar":"loading")+"-mask.png")){return BitmapFactory.decodeStream(in);}}
     private static final LinkedHashMap<String,Bitmap> cache=new LinkedHashMap<>();
     private static final Map<Integer,Parts> sources=new HashMap<>();
     private static final class Layer {Bitmap bitmap;String group,name;}
     private static final class Parts {int width,height;final List<Layer> layers=new ArrayList<>();}
     private static Parts parts(Context context,int resource){
         Parts ready=sources.get(resource);if(ready!=null)return ready;
-        try(InputStream in=context.getAssets().open("character/catalog.json");ByteArrayOutputStream out=new ByteArrayOutputStream()){
+        try(InputStream in=open(context,"character/catalog.json");ByteArrayOutputStream out=new ByteArrayOutputStream()){
             byte[] bytes=new byte[4096];int count;while((count=in.read(bytes))!=-1)out.write(bytes,0,count);
-            JSONObject item=new JSONObject(out.toString("UTF-8")).getJSONObject("assets").getJSONObject(resource==R.drawable.avatar_catgirl?"avatar":"loading");Parts result=new Parts();result.width=item.getInt("width");result.height=item.getInt("height");JSONArray entries=item.getJSONArray("layers");
-            for(int i=0;i<entries.length();i++){JSONObject entry=entries.getJSONObject(i);Layer layer=new Layer();layer.group=entry.getString("group");layer.name=entry.getString("name");try(InputStream image=context.getAssets().open("character/"+entry.getString("file"))){layer.bitmap=BitmapFactory.decodeStream(image);}if(layer.bitmap==null||layer.bitmap.getWidth()!=result.width||layer.bitmap.getHeight()!=result.height)throw new IOException("角色图层尺寸不一致");result.layers.add(layer);}
+            JSONObject item=new JSONObject(out.toString("UTF-8")).getJSONObject("assets").getJSONObject(resource==CharacterArt.AVATAR?"avatar":"loading");Parts result=new Parts();result.width=item.getInt("width");result.height=item.getInt("height");JSONArray entries=item.getJSONArray("layers");
+            for(int i=0;i<entries.length();i++){JSONObject entry=entries.getJSONObject(i);Layer layer=new Layer();layer.group=entry.getString("group");layer.name=entry.getString("name");try(InputStream image=open(context,"character/"+entry.getString("file"))){layer.bitmap=BitmapFactory.decodeStream(image);}if(layer.bitmap==null||layer.bitmap.getWidth()!=result.width||layer.bitmap.getHeight()!=result.height)throw new IOException("角色图层尺寸不一致");result.layers.add(layer);}
             sources.put(resource,result);return result;
         }catch(Exception error){throw new IllegalStateException("无法读取本机角色图层",error);}
     }
     static synchronized Bitmap bitmap(Context context,int resource){
+        if(!ModuleStore.available(context,"cat-art"))return fallback(context);
         int primary=AppAppearance.palette().primary;String key=resource+":"+primary;Bitmap ready=cache.get(key);if(ready!=null)return ready;
-        Parts parts=parts(context,resource);Bitmap result=Bitmap.createBitmap(parts.width,parts.height,Bitmap.Config.ARGB_8888);Canvas canvas=new Canvas(result);Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);float[] tone=new float[3];Color.colorToHSV(primary,tone);
+        Parts parts;try{parts=parts(context,resource);}catch(RuntimeException e){return fallback(context);}Bitmap result=Bitmap.createBitmap(parts.width,parts.height,Bitmap.Config.ARGB_8888);Canvas canvas=new Canvas(result);Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);float[] tone=new float[3];Color.colorToHSV(primary,tone);
         for(Layer layer:parts.layers){
             if("fixed".equals(layer.group)){canvas.drawBitmap(layer.bitmap,0,0,paint);continue;}
             int[] pixels=new int[parts.width*parts.height];layer.bitmap.getPixels(pixels,0,parts.width,0,0,parts.width,parts.height);float[] color=new float[3];
@@ -39,10 +45,17 @@ final class CharacterArt {
         // Downsampling separate layers can round shared antialiased edges differently
         // from a reference PNG. Restore pixels with no visible tint-layer contribution;
         // this mask is derived from actual layer alpha/occlusion, never colour guessing.
-        Bitmap original=BitmapFactory.decodeResource(context.getResources(),resource),visibility=BitmapFactory.decodeResource(context.getResources(),resource==R.drawable.avatar_catgirl?R.drawable.avatar_color_mask:R.drawable.loading_color_mask);
+        Bitmap original,visibility;
+        try{original=original(context,resource);visibility=mask(context,resource);}catch(IOException e){return fallback(context);}
+        if(original==null||visibility==null)return fallback(context);
         int[] before=new int[parts.width*parts.height],mask=new int[before.length],after=new int[before.length];original.getPixels(before,0,parts.width,0,0,parts.width,parts.height);visibility.getPixels(mask,0,parts.width,0,0,parts.width,parts.height);result.getPixels(after,0,parts.width,0,0,parts.width,parts.height);
         for(int i=0;i<after.length;i++)after[i]=(mask[i]&0xffffff)==0?before[i]:(before[i]&0xff000000)|(after[i]&0xffffff);
         result.setPixels(after,0,parts.width,0,0,parts.width,parts.height);original.recycle();visibility.recycle();
         cache.put(key,result);while(cache.size()>6)cache.remove(cache.keySet().iterator().next());return result;
+    }
+    private static Bitmap fallback(Context context){
+        String key="fallback:"+MobileStyle.BRAND;Bitmap ready=cache.get(key);if(ready!=null)return ready;
+        Bitmap result=Bitmap.createBitmap(96,96,Bitmap.Config.ARGB_8888);Canvas canvas=new Canvas(result);
+        Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);paint.setColor(MobileStyle.BRAND);AppIcons.get(context,"close",MobileStyle.BRAND);AppIcons.cat(canvas,paint,8,8,80);cache.put(key,result);return result;
     }
 }

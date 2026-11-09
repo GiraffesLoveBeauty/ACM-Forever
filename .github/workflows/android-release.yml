@@ -93,9 +93,9 @@ jobs:
           set -euo pipefail
           chmod +x gradlew
           if [ "$RELEASE_CHANNEL" = debug ]; then
-            ./gradlew --no-daemon "-PlocalDebugKeystore=$ANDROID_KEYSTORE_PATH" testDebugUnitTest lintDebug assembleDebug
+            ./gradlew --no-daemon "-PlocalDebugKeystore=$ANDROID_KEYSTORE_PATH" testDebugUnitTest lintDebug :app:assembleDebug :advanced:assembleDebug :admin:assembleDebug
           else
-            ./gradlew --no-daemon testReleaseUnitTest lintRelease assembleRelease
+            ./gradlew --no-daemon testReleaseUnitTest lintRelease :app:assembleRelease :advanced:assembleRelease :admin:assembleRelease
           fi
 
       - name: Create manifest from verified signed APK
@@ -108,6 +108,23 @@ jobs:
             --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY" --server "$GITHUB_SERVER_URL" \
             --channel "$RELEASE_CHANNEL" --certificate "$EXPECTED_CERTIFICATE" \
             --output-dir "$RUNNER_TEMP/release-assets"
+
+      - name: Package signed optional modules and exact-size catalog
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ "$RELEASE_CHANNEL" = debug ]; then
+            export ANDROID_KEYSTORE_PASSWORD=android ANDROID_KEY_PASSWORD=android ANDROID_KEY_ALIAS=androiddebugkey
+          fi
+          python Android_APP/tools/create_module_assets.py \
+            --output-dir "$RUNNER_TEMP/release-assets" --app-root Android_APP/app \
+            --resources Android_APP/module-resources --repository "$GITHUB_REPOSITORY" \
+            --keystore "$ANDROID_KEYSTORE_PATH" --jarsigner "$JAVA_HOME/bin/jarsigner" \
+            --keytool "$JAVA_HOME/bin/keytool" --aapt "$ANDROID_HOME/build-tools/35.0.0/aapt" \
+            --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner" --channel "$RELEASE_CHANNEL"
 
       - name: Publish only after draft assets pass read-back verification
         env:

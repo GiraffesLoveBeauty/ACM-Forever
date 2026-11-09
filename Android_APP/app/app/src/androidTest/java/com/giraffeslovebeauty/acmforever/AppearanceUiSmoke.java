@@ -42,7 +42,7 @@ final class AppearanceUiSmoke {
             main(()->{View row=(View)find("修改昵称").getParent().getParent();check(((ViewGroup)row).getChildCount()==1,"account rows have no arrow icons");ViewGroup tiles=(ViewGroup)description("我的话题").getParent();int height=tiles.getChildAt(0).getHeight();for(int i=1;i<4;i++)check(height==tiles.getChildAt(i).getHeight(),"community entries align");});screenshot("account-v026.png");
             clickDescription("个人中心");await(()->description("切换平台 ALL")!=null,8000,"ALL tab");clickDescription("切换平台 ALL");
             main(()->{check(description("ALL通过题数 30")!=null,"ALL total");check(description("过题数框")!=description("最近AC框"),"counts and recent AC are separate");});screenshot("profile-v025.png");
-            main(()->activity.finish());activity=test.startActivitySync(new Intent().setClassName(app,AppearanceActivity.class.getName()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            main(()->activity.finish());activity=test.startActivitySync(new Intent().setClassName(app,OptionalTestClasses.type("AdvancedAppearanceActivity").getName()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             click("背景选择");main(()->{check(find("使用纯色背景").isSelected(),"solid selected by default");check(!find("使用渐变背景").isSelected(),"one selected mode");});
             click("使用渐变背景");click("与主题同色");main(()->{check(find("与主题同色").isSelected(),"follow theme selected");check(description("打开调色盘")==null,"custom colours hidden while following theme");});
             click("自定义");clickDescription("天蓝");screenshot("background-gradient-v025.png");
@@ -77,18 +77,18 @@ final class AppearanceUiSmoke {
     private void checkBackground()throws Exception{
         main(()->{Bitmap b=Bitmap.createBitmap(200,300,Bitmap.Config.ARGB_8888);android.graphics.drawable.Drawable d=ProfileCover.drawable(app);d.setBounds(0,0,200,300);d.draw(new Canvas(b));check(b.getPixel(100,5)!=b.getPixel(100,285),"background spans screen");check(b.getPixel(100,285)==Color.WHITE,"gradient bottom white");b.recycle();});
         Bitmap image=Bitmap.createBitmap(200,300,Bitmap.Config.ARGB_8888);image.eraseColor(0xff8844cc);File file=new File(app.getCacheDir(),"appearance-test.png");try(FileOutputStream out=new FileOutputStream(file)){image.compress(Bitmap.CompressFormat.PNG,100,out);}ProfileCover.save(app,android.net.Uri.fromFile(file));file.delete();image.recycle();
-        prefs.edit().putString("bg_mode","image").putInt("bg_transparency",2).apply();main(()->activity.finish());activity=test.startActivitySync(new Intent().setClassName(app,AppearanceActivity.class.getName()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));click("背景选择");await(()->description("背景透明度") instanceof SeekBar,3000,"image options restored");
+        prefs.edit().putString("bg_mode","image").putInt("bg_transparency",2).apply();main(()->activity.finish());activity=test.startActivitySync(new Intent().setClassName(app,OptionalTestClasses.type("AdvancedAppearanceActivity").getName()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));click("背景选择");await(()->description("背景透明度") instanceof SeekBar,3000,"image options restored");
         main(()->{SeekBar seek=(SeekBar)description("背景透明度");check(seek.getMax()==5&&seek.getProgress()==2,"six transparency stops default 40 percent");});screenshot("background-image-v025.png");
         click("使用渐变背景");await(()->find("与主题同色")!=null,3000,"background options restored");
     }
-    private void checkArt(){
+    private void checkArt()throws Exception{
         prefs.edit().putString("theme_source","acm").putInt("theme_primary",0xff83b8e5).apply();AppAppearance.load(app);
-        for(int resource:new int[]{R.drawable.avatar_catgirl,R.drawable.catgirl_loading}){
-            Bitmap source=BitmapFactory.decodeResource(app.getResources(),resource),mask=BitmapFactory.decodeResource(app.getResources(),resource==R.drawable.avatar_catgirl?R.drawable.avatar_color_mask:R.drawable.loading_color_mask),colored=CharacterArt.bitmap(app,resource);int[] changes=new int[3];
+        for(int resource:new int[]{CharacterArt.AVATAR,CharacterArt.LOADING}){
+            Bitmap source=CharacterArt.original(app,resource),mask=CharacterArt.mask(app,resource),colored=CharacterArt.bitmap(app,resource);int[] changes=new int[3];
             // The supplied PNGs contain mostly alpha 253/254, not fully opaque pixels.
             // Allow one premultiply/unpremultiply rounding step when checking fixed regions.
             for(int y=0;y<source.getHeight();y++)for(int x=0;x<source.getWidth();x++){int original=source.getPixel(x,y),group=mask.getPixel(x,y)&0xffffff,current=colored.getPixel(x,y);if(Color.alpha(original)<200)continue;if(group==0){for(int shift:new int[]{0,8,16,24})check(Math.abs(((original>>>shift)&255)-((current>>>shift)&255))<=2,"protected skin/ears/collar/cuffs stay unchanged");}else if(original!=current)changes[group==0xff0000?0:group==0x00ff00?1:2]++;}
-            check(changes[0]>100&&changes[2]>30,"hair/eyes and bows respond to theme: resource="+resource+", counts="+Arrays.toString(changes));if(resource==R.drawable.catgirl_loading)check(changes[1]>100,"clothing responds independently");source.recycle();mask.recycle();
+            check(changes[0]>100&&changes[2]>30,"hair/eyes and bows respond to theme: resource="+resource+", counts="+Arrays.toString(changes));if(resource==CharacterArt.LOADING)check(changes[1]>100,"clothing responds independently");source.recycle();mask.recycle();
         }
         prefs.edit().putInt("theme_primary",0xffebafc5).apply();AppAppearance.load(app);
     }

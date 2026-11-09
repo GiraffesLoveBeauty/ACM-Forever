@@ -10,7 +10,7 @@ vite = root / 'feat/web/node_modules/vite/bin/vite.js'
 if not vite.is_file():
     raise SystemExit('First run: pnpm --dir feat/web install --frozen-lockfile')
 subprocess.run(['node', str(vite), 'build', '--config', 'Android_APP/theme-renderer/vite.config.mjs'], cwd=root, check=True)
-output = root / 'Android_APP/app/app/src/main/assets/themes/renderer'
+output = root / 'Android_APP/module-resources/official-themes/payload/themes/renderer'
 sources = list((root / 'Android_APP/theme-renderer').glob('*'))
 sources += list((root / 'feat/web/src/components').glob('*Art.vue'))
 sources += [root / f'feat/web/src/components/Minecraft{x}.vue' for x in ('Podium', 'Journey')]

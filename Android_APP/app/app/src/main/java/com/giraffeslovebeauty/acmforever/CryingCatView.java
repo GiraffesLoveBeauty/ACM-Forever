@@ -12,7 +12,7 @@ final class CryingCatView extends View {
     private final Bitmap character;
     CryingCatView(Context context) {
         super(context); setContentDescription("哭泣的猫娘"); setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
-        character = CharacterArt.bitmap(context, R.drawable.avatar_catgirl);
+        character = CharacterArt.bitmap(context, CharacterArt.AVATAR);
         for (int x : new int[]{177, 291}) {
             float y = x == 177 ? 382 : 400;
             tears.moveTo(x, y); tears.cubicTo(x - 2, y + 14, x - 21, y + 32, x - 17, y + 45);

@@ -15,7 +15,7 @@ final class AppIcons {
     static Drawable get(Context context,String name,int color){return get(context,name,color,false);}
     static Drawable get(Context context,String name,int color,boolean accent){
         if(silhouette==null)silhouette=BitmapFactory.decodeResource(context.getResources(),R.drawable.catgirl_mask);
-        if("avatar".equals(name))return new android.graphics.drawable.BitmapDrawable(context.getResources(),CharacterArt.bitmap(context,R.drawable.avatar_catgirl));
+        if("avatar".equals(name))return new android.graphics.drawable.BitmapDrawable(context.getResources(),CharacterArt.bitmap(context,CharacterArt.AVATAR));
         return new Glyph(name,color,accent);
     }
     static void cat(Canvas canvas,Paint paint,float x,float y,float size){

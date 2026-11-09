@@ -14,6 +14,9 @@
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">
         <receiver android:name=".TrainingReminder" android:exported="false"><intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter></receiver>
+        <activity android:name=".ModuleDownloadActivity" android:exported="false" />
+        <receiver android:name=".ModuleInstallReceiver" android:exported="false" />
+        <provider android:name=".ThemeShareProvider" android:authorities="${applicationId}.themes" android:exported="false" android:grantUriPermissions="true" />
         <activity android:name=".AppearanceActivity" android:exported="false" />
         <activity android:name=".AboutActivity" android:exported="false" />
         <activity android:name=".HelpActivity" android:exported="false" />
@@ -21,14 +24,10 @@
         <activity android:name=".SearchActivity" android:exported="false" />
         <activity android:name=".OjBindingsActivity" android:exported="false" />
         <activity android:name=".AccountClosureActivity" android:exported="false" />
-        <activity android:name=".AdminQuickActivity" android:exported="false" />
-        <activity android:name=".ThemePreviewActivity" android:exported="false" />
         <activity android:name=".SpaceActivity" android:exported="false" />
-        <activity android:name=".BackgroundCropActivity" android:exported="false" />
         <activity android:name=".UpdateActivity" android:exported="false" android:launchMode="singleTop" />
         <activity android:name=".UpdateDownloadActivity" android:exported="false" android:launchMode="singleTop" />
         <provider android:name=".UpdateFileProvider" android:authorities="${applicationId}.updates" android:exported="false" android:grantUriPermissions="true" />
-        <provider android:name=".ThemeShareProvider" android:authorities="${applicationId}.themes" android:exported="false" android:grantUriPermissions="true" />
         <activity android:name=".WebFeaturesActivity" android:exported="false" />
         <activity android:name=".ImagePreviewActivity" android:exported="false" />
         <activity android:name=".ClubActivity" android:exported="false" android:launchMode="singleTop" />

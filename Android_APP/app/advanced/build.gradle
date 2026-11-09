@@ -1,0 +1,22 @@
+plugins { id 'com.android.dynamic-feature' }
+android {
+    namespace 'com.giraffeslovebeauty.acmforever.advanced'
+    compileSdk 35
+    buildToolsVersion '35.0.0'
+    defaultConfig { minSdk 26 }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+dependencies { implementation project(':app') }
+def moduleMetadata = tasks.register('writeModuleMetadata') {
+    def source = rootProject.file('app/build.gradle')
+    def target = layout.buildDirectory.dir('generated/module-assets')
+    inputs.file(source); outputs.dir(target)
+    doLast {
+        def code = (source.text =~ /versionCode (\d+)/)[0][1] as int
+        def out = new File(target.get().asFile, 'modules/advanced.json')
+        out.parentFile.mkdirs()
+        out.setText(groovy.json.JsonOutput.toJson([id:'advanced', api:1, versionCode:code, kind:'native', splitName:'advanced']), 'UTF-8')
+    }
+}
+android.sourceSets.main.assets.srcDir(layout.buildDirectory.dir('generated/module-assets'))
+tasks.named('preBuild') { dependsOn moduleMetadata }
