@@ -1,5 +1,7 @@
 # App 修改与维护交接规范
 
+0.2.25 模块化评审候选：可选代码在 `Android_APP/app/advanced`、`admin`，可选资源在 `Android_APP/module-resources`。不要使用旧历史打包脚本把它们重新塞入基础 APK；发布须同时完成基础包、四个签名模块包与模块索引的回读验证。已下载模块属于持久数据，升级/清临时文件不得删除。详见[模块维护说明](android-v0.2.25-optional-modules.md)。
+
 2026-11-08：当前0.2.24/code38继续沿用既有debug构建与Tag发布。1.0.0延期，保留[方案和历史验收记录](android-v1.0.0-release-channels.md)，双渠道代码继续留在本地。恢复正式发布时，versionCode必须高于届时已发布的0.x，不能复用历史候选code38。
 
 状态：v0.2.22 随代码提请评审；记录日期 2026-11-07。适用于 `Android_APP/app/` 原生客户端。它补充[工程协作规范](TCrB-AI项目工程规范.md)及[模块关联标准](android-modification-standard.md)，不替代团队的评审、合并和发布授权。

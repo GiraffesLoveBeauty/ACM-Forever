@@ -1,14 +1,16 @@
-# Android 修改标准与模块关联（v0.2.24）
+# Android 修改标准与模块关联（v0.2.25）
 
-1.0.0已延期，当前版本0.2.24/code38。题面专用样式由`ContentView.problem`与`reader/`控制，不修改论坛/评论/Wiki样式；`ProblemSummary`解析真实难度、数组或历史文本标签，`ProblemBadges`在题库、详情及比赛进度统一换行展示。比赛进度复用现有接口的`tags: string[]`加法字段；旧服务器缺失时提示“算法标签未提供”，不能逐题抓详情或猜测标签。后端变更需与App联调，详见[0.2.24说明](android-v0.2.24-problem-reading.md)。
+本轮可选模块实现与维护约束见 [android-v0.2.25-optional-modules.md](android-v0.2.25-optional-modules.md)。原生高级设置与便捷管理现位于 `app/advanced/`、`app/admin/`；共用 Provider 留在基础包。不得向基础 DEX 再引入 feature Activity 的 class 字面量，应经 `OptionalModules` 按实际已安装 split 放行。资源在 `module-resources/`，使用已签名的同版本制品，不是下载标记解锁。`ModuleStore` 的持久目录与已下载记录不可随清缓存或普通升级删除；默认随 App 更新已下载模块，开关在检查更新页。
 
-本PR不包含延期的1.0.0渠道实现、管理员安装包API或发布workflow改动；这些内容留在本地，待后续独立评审。
+1.0.0已延期，本轮版本0.2.25/code39，基线为已发布的0.2.24/code38。题面专用样式由`ContentView.problem`与`reader/`控制，不修改论坛/评论/Wiki样式；`ProblemSummary`解析真实难度、数组或历史文本标签，`ProblemBadges`在题库、详情及比赛进度统一换行展示。比赛进度复用现有接口的`tags: string[]`加法字段；旧服务器缺失时提示“算法标签未提供”，不能逐题抓详情或猜测标签。后端变更需与App联调，详见[0.2.24说明](android-v0.2.24-problem-reading.md)。
 
-状态：本轮实现说明，待跨人评审；2026-11-07。以实际代码与测试结果为准。适用工程 `Android_APP/app/`，不改变仓库协作规范。维护责任、人员署名、修改步骤和发布交接另见[App 修改与维护交接规范](android-maintainer-handover.md)。
+本轮不包含延期的1.0.0双渠道实现、管理员安装包API及其发布workflow改动。这些延期内容与本轮源码分开保留；本轮为可选模块新增的编译、签名打包和八附件发布事务属于0.2.25必要改动，随本轮源码PR提请评审，须跨人评审及获授权后才能发布。
+
+状态：本轮源码评审候选，待跨人评审；2026-11-09。以实际代码与测试结果为准。适用工程 `Android_APP/app/`，不改变仓库协作规范。维护责任、人员署名、修改步骤和发布交接另见[App 修改与维护交接规范](android-maintainer-handover.md)。
 
 ## 目录与修改入口
 
-Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/acmforever/`。
+基础包 Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/acmforever/`。高级设置类在 `Android_APP/app/advanced/src/main/java/com/giraffeslovebeauty/acmforever/`，便捷管理 Activity 在 `Android_APP/app/admin/src/main/java/com/giraffeslovebeauty/acmforever/`；共用安全与数据辅助类仍在基础包。
 
 | 入口 | 职责 | 修改时必须联查 |
 | --- | --- | --- |
@@ -35,10 +37,12 @@ Java 路径前缀为 `Android_APP/app/app/src/main/java/com/giraffeslovebeauty/a
 | `StorageActivity`、`TemporaryStorage`、`PdfFiles`、`HelpActivity`、`AppUpdates` | 三块存储管理及本机帮助说明 | 文件操作在后台；目录读取失败不能算作零占用或清理成功；主动清理PDF失败时保留索引供重试并报告错误，退出时仍丢弃全部索引访问；保留凭据、主题、草稿、活动PDF与近期分享；安装包单独清理，下载/校验/安装期间拒绝；新页面继续强制登录 |
 | `AppAppearance`、`MobileStyle`、`ProfileCover`、`LocalThemes` | 主题、主辅色、全屏背景、模块/控件透明度 | 深浅色、状态栏、原位变色、保存/预览/删除本机主题 |
 | `ThemePackage`、`LocalThemes`、`ProfileCover` | `.acmtheme`格式、隔离安装、原图字节与非破坏性裁剪 | [格式规范](android-theme-package-v1.md)；布尔选项、主辅色/透明度、模板浅深配色、原图及裁剪同时往返；文件I/O不在主线程，先校验后登记，导入不覆盖当前外观 |
-| `ThemeShareProvider`、`AppearanceActivity` | 后台生成私人主题文件并调用系统分享 | 独立只读附件、ClipData读取授权、随机文件名与缓存回收；不共用APK Provider，不包含账号字段，不自动发送QQ/微信消息 |
+| `ThemeShareProvider`（基础包）、`AdvancedAppearanceActivity`（高级模块） | 后台生成私人主题文件并调用系统分享 | 独立只读附件、ClipData读取授权、随机文件名与缓存回收；不共用APK Provider，不包含账号字段，不自动发送QQ/微信消息 |
 | `OfficialThemeView`、`theme-renderer/` | 原Vue/CSS/SVG离线主题层，无原生JS桥 | [源文件关联](android-official-theme-adaptation-v0.2.17.md)；原源变化重跑构建工具和指纹检查，禁止用重新描摹替代；原生控件仍使用共享样式 |
 | `AppUpdates`、`UpdateManifest`、更新页面与 Provider | 检查、下载、校验及系统安装 | 当前GitHub单源、取消/重建/进程恢复、包名版本签名、更新日志 |
 | `tools/create_update_manifest.py`、`tag_release.py` | 同一 APK 的清单和GitHub Release事务 | `.github/workflows/android-release.yml`、签名渠道、不可变目录和 latest |
+| `OptionalModules`、`ModuleDownloads`、`ModuleStore`、`ModuleUpdates`、`ModuleInstaller` | 按需下载、真实系统安装及升级保留 | 登录/管理员和账号代次、索引版本、签名叶证书、大小/哈希、分包版本、未来资源隔离、取消和旧目录保留；不得按偏好标记判定已安装原生功能 |
+| `tools/create_module_assets.py`、`module-resources/`、`app/advanced/`、`app/admin/` | 四模块制品、资源源文件与真实拆包 | 与基础APK同版本和证书；八附件必须全部回读通过才能公开，不把模块包或密钥提交源码库 |
 
 `AdminActivity`、`BrowserActivity`、`UpdateManager` 与 `assets/admin/` 被当前 Gradle 排除；它们是历史代码。`prototype/` 也是历史浏览器原型，不能通过修改这些文件来声称 Android 已实现。App 不直接访问数据库，不能内置 `/internal/v1/*` 的 Bot Token。
 
