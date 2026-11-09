@@ -61,6 +61,10 @@ final class OptionalModulesUiSmoke {
                 activity=open(UpdateActivity.class,new Intent().putExtra("manage_downloads",true));Instrumentation.ActivityMonitor monitor=test.addMonitor(ModuleDownloadActivity.class.getName(),null,false);
                 try{click("更新分层猫娘素材");Activity page=test.waitForMonitorWithTimeout(monitor,8000);check(page!=null,"manual compatible resource update entry");activity=page;opened.add(page);await(()->ModuleStore.current(app,"cat-art")&&has("打开模块"),"manual update completes without app upgrade");}finally{test.removeMonitor(monitor);}
                 check(older.isDirectory(),"manual resource update retains the older module files");
+            }else if("modules-admin-entry".equals(mode)){
+                adminEntry();
+            }else if("modules-admin-consent".equals(mode)){
+                adminConsent();
             }else if("modules-native".equals(mode)){
                 role="admin";app.api().refreshSession();
                 check(ModuleStore.available(app,"advanced")&&ModuleStore.available(app,"admin"),"both real native splits installed");
@@ -102,6 +106,50 @@ final class OptionalModulesUiSmoke {
     private void downloadFrom(String label,String id)throws Exception{
         click(label);await(()->has("下载喵"),"consent "+id);Instrumentation.ActivityMonitor monitor=test.addMonitor(ModuleDownloadActivity.class.getName(),null,false);
         try{click("下载喵");Activity page=test.waitForMonitorWithTimeout(monitor,8000);check(page!=null,"download page "+id);activity=page;opened.add(page);await(()->ModuleStore.available(app,id)&&has("打开模块"),"signed installed "+id);}finally{test.removeMonitor(monitor);}
+    }
+    private void administrator(){role="admin";try{app.api().refreshSession();}catch(Exception e){throw new AssertionError(e);}check(app.api().isAdministrator(),"synthetic administrator session");}
+    private void adminClick(){OptionalTestClasses.call(activity,"showAdministratorMenu",new Class<?>[0]);}
+    private boolean adminOpening(){try{java.lang.reflect.Field field=MainActivity.class.getDeclaredField("returnFromAdmin");field.setAccessible(true);return field.getBoolean(activity);}catch(Exception e){throw new AssertionError(e);}}
+    private void adminConsent()throws Exception{
+        administrator();check(!ModuleStore.available(app,"admin")&&!ModuleStore.archive(app,"admin").isFile(),"first-use admin module fixture");
+        activity=open(MainActivity.class,new Intent());
+        for(int i=0;i<2;i++){
+            main(()->{adminClick();adminClick();});await(()->has("下载喵"),"repeatable first-use consent");
+            main(()->check(!adminOpening(),"consent alone does not lock the entry"));click("点错了喵");
+            main(()->check(!adminOpening()&&!ModalDialogs.isShowing(activity),"cancel leaves the entry available"));
+        }
+        check(downloads==0,"cancelled admin consent never downloads payloads");
+        trace("admin consent can be cancelled and reopened without a stuck launch guard");
+    }
+    private void adminEntry()throws Exception{
+        administrator();check(ModuleStore.available(app,"admin"),"real installed admin split");
+        activity=open(MainActivity.class,new Intent());String admin=app.getPackageName()+".AdminQuickActivity";
+        java.util.concurrent.atomic.AtomicInteger launches=new java.util.concurrent.atomic.AtomicInteger();
+        Instrumentation.ActivityMonitor counter=new Instrumentation.ActivityMonitor(){
+            @Override public Instrumentation.ActivityResult onStartActivity(Intent intent){if(intent.getComponent()!=null&&admin.equals(intent.getComponent().getClassName()))launches.incrementAndGet();return null;}
+        };
+        test.addMonitor(counter);Instrumentation.ActivityMonitor monitor=test.addMonitor(admin,null,false);
+        try{
+            main(()->{adminClick();adminClick();});
+            Activity page=test.waitForMonitorWithTimeout(monitor,8000);check(page!=null,"admin page actually opened");opened.add(page);test.waitForIdleSync();
+            check(launches.get()==1,"two same-task entry callbacks start exactly one admin Activity");
+            main(()->check(adminOpening(),"actual launch arms the entry guard"));
+            main(page::finish);await(()->!adminOpening()&&activity.hasWindowFocus(),"return releases the launch guard");
+            // waitForMonitorWithTimeout consumes/removes its monitor after a hit.
+            monitor=test.addMonitor(admin,null,false);
+            main(this::adminClick);Activity again=test.waitForMonitorWithTimeout(monitor,8000);check(again!=null,"entry opens again after return");opened.add(again);
+            check(launches.get()==2,"one new admin launch after return");main(again::finish);await(()->!adminOpening()&&activity.hasWindowFocus(),"second return releases guard");
+        }finally{test.removeMonitor(monitor);test.removeMonitor(counter);}
+        Instrumentation.ActivityMonitor failure=new Instrumentation.ActivityMonitor(){
+            @Override public Instrumentation.ActivityResult onStartActivity(Intent intent){if(intent.getComponent()!=null&&admin.equals(intent.getComponent().getClassName()))throw new ActivityNotFoundException("Synthetic admin launch failure");return null;}
+        };
+        test.addMonitor(failure);
+        try{main(()->{adminClick();check(!adminOpening(),"failed launch never arms the guard");check(ModalDialogs.isShowing(activity),"failed launch is visible");ModalDialogs.close(activity);});}
+        finally{test.removeMonitor(failure);}
+        monitor=test.addMonitor(admin,null,false);
+        try{main(this::adminClick);Activity retry=test.waitForMonitorWithTimeout(monitor,8000);check(retry!=null,"retry works after launch failure");opened.add(retry);main(retry::finish);await(()->!adminOpening()&&activity.hasWindowFocus(),"retry return releases guard");}
+        finally{test.removeMonitor(monitor);}
+        trace("same-task double entry, return/reopen and failed-launch retry passed");
     }
     private void upgrade(boolean optout)throws Exception{
         role="admin";app.api().refreshSession();ModuleStore.updateTogether(app,!optout);

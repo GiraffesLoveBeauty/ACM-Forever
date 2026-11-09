@@ -2200,7 +2200,10 @@ public final class MainActivity extends Activity {
         menuRow(admin,"便捷管理","审核 · 同步任务 · 成员 · 训练与复盘",this::showAdministratorMenu);
     }
 
-    private void showAdministratorMenu() { if(isAdministratorAccount())OptionalModules.open(this,"admin",new Intent().setClassName(this,getPackageName()+".AdminQuickActivity")); }
+    private void showAdministratorMenu() {
+        if(!isAdministratorAccount()||returnFromAdmin)return;
+        OptionalModules.open(this,"admin",new Intent().setClassName(this,getPackageName()+".AdminQuickActivity"),()->returnFromAdmin=true);
+    }
 
     private String value(JSONObject object, String key, String fallback) {
         if (object == null || object.isNull(key)) return fallback;
