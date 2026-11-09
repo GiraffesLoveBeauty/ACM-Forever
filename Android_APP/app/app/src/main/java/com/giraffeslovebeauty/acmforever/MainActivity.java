@@ -882,7 +882,8 @@ public final class MainActivity extends Activity {
         box.addView(label(post.optString("title"), 17, TEXT, true));
         if(!api.communityImageUrl(post.optString("cover_url")).isEmpty())box.addView(new CommunityCover(this,post.optString("cover_url"),true));
         space(box, 6);
-        TextView excerpt=label(post.optString("excerpt"),13,MUTED,false);excerpt.setMaxLines(3);excerpt.setEllipsize(android.text.TextUtils.TruncateAt.END);box.addView(excerpt);
+        String summary=ForumExcerpt.text(post.optString("excerpt"));
+        if(!summary.isEmpty()){TextView excerpt=label(summary,13,MUTED,false);excerpt.setContentDescription("话题摘要");excerpt.setMaxLines(3);excerpt.setEllipsize(android.text.TextUtils.TruncateAt.END);box.addView(excerpt);}
         space(box,10);TextView categoryTag=label("# "+post.optString("category_name", "话题"),11,MUTED,false);
         categoryTag.setPadding(dp(8),dp(4),dp(8),dp(4));categoryTag.setBackground(shape(BACKGROUND,10,0));box.addView(categoryTag,new LinearLayout.LayoutParams(-2,-2));
         space(box,14);LinearLayout interactions=row();interactions.addView(label(post.optInt("views_count")+" 阅读",10,MUTED,false),new LinearLayout.LayoutParams(0,-2,1));

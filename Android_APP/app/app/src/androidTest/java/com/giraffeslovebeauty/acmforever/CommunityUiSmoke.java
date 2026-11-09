@@ -19,6 +19,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 final class CommunityUiSmoke {
     private final Instrumentation test;private final Context app;private Activity activity;private ApiClient api;
     private static final String HASH="0123456789abcdef0123456789abcdef";
+    private static final String MATH="# 公式阅读验证\n\n行内 $a_1+b_2$ 与 \\(\\frac{a_1}{b_2}\\)。\n\n\\[\n\\begin{bmatrix}a&b\\\\c&d\\end{bmatrix}\n\\]\n\n$$\n\\begin{aligned}\nx_1&=y_2\\\\\n\nz_3&=w_4\n\\end{aligned}\n$$\n\n价格 \\$5 与 \\$10。`$literal$`\n\n```tex\n\\(code_1+code_2\\)\n```";
+    private static final String EXPECTED_MATH=new JSONArray(Arrays.asList("a_1+b_2","\\frac{a_1}{b_2}","\\begin{bmatrix}a&b\\\\c&d\\end{bmatrix}","\\begin{aligned}\nx_1&=y_2\\\\\n\nz_3&=w_4\n\\end{aligned}")).toString();
+    private static final String SUMMARY_TAIL=String.join("",Collections.nCopies(8,"这是一段用于检查三行省略的训练讨论摘要。"));
+    private static final String EXCERPT="# 训练预览\n\n**重点** [题解](https://example.invalid/wiki)\n![图片](/api/forum/images/"+HASH+")\n> `代码` ~~删除线~~\n"+SUMMARY_TAIL;
+    private static final String PLAIN_EXCERPT="训练预览 重点 题解 代码 删除线 "+SUMMARY_TAIL;
     private static byte[] png;private static volatile String avatar="/uploads/avatars/first.png",savedBody="";
     private static volatile boolean failUpload,uploadCookie,uploadCsrf,uploadField;
     private static final AtomicInteger uploads=new AtomicInteger();private Uri image;
@@ -37,23 +42,41 @@ final class CommunityUiSmoke {
             main(()->{View code=desc("猫娘代码标志"),copy=desc("社区横幅文字"),art=desc("网页同款最短路径图谱");int[] a=new int[2],b=new int[2],c=new int[2];code.getLocationOnScreen(a);art.getLocationOnScreen(b);copy.getLocationOnScreen(c);check(a[1]<b[1]&&a[0]+code.getWidth()>=b[0]+art.getWidth()-3,"code mark upper right");check(c[0]+copy.getWidth()<=b[0],"copy never overlaps graph");GraphArtView graph=(GraphArtView)art;float scale=Math.min(graph.getWidth()/400f,graph.getHeight()/300f);float x=(graph.getWidth()-400*scale)/2+177*scale,y=(graph.getHeight()-300*scale)/2+47*scale;long time=android.os.SystemClock.uptimeMillis();MotionEvent down=MotionEvent.obtain(time,time,MotionEvent.ACTION_DOWN,x,y,0),up=MotionEvent.obtain(time,time+50,MotionEvent.ACTION_UP,x,y,0);graph.dispatchTouchEvent(down);graph.dispatchTouchEvent(up);down.recycle();up.recycle();check(graph.target()==2&&graph.status().contains("权重 11"),"touch computes a new route");});screenshot("forum-v027.png");
             main(()->{check(desc("放大探索图谱")==null,"explore button removed");desc("网页同款最短路径图谱").performLongClick();check(ModalDialogs.isShowing(activity),"long press opens expanded graph");});screenshot("graph-v027.png");main(()->ModalDialogs.close(activity));
             avatar="/uploads/avatars/second.png";api.refreshSession();click("排名");click("主页");await(()->avatar.equals(desc("进入账号设置").getTag()),5000,"changed avatar refreshes from home");
-            compose();comments();codeBlocks();
+            excerpts();compose();comments();codeBlocks();
             api.logout();main(()->activity.onBackPressed());api.login("90000001","Synthetic-Test!");main(()->activity.onBackPressed());
-            output.putBoolean("passed",true);output.putString("stream","PASS: fast-tab and changed-avatar updates, touch-driven shortest paths and expanded graph, composer/comment previews, system photo selection, WebP multipart image/CSRF/Cookie, Markdown insertion plus cloud autosave, upload failure preserves editor and text.\n");outcome=Activity.RESULT_OK;
+            output.putBoolean("passed",true);output.putString("stream","PASS: homepage/own-post/bookmark cards show cleaned three-line summaries and homepage cards still open the post; forum body and composer/comment previews render four TeX formulas without corrupting code or escaped currency; fast-tab and changed-avatar updates, touch-driven shortest paths and expanded graph, system photo selection, WebP multipart image/CSRF/Cookie, Markdown insertion plus cloud autosave, upload failure preserves editor and text.\n");outcome=Activity.RESULT_OK;
         }catch(Throwable e){output.putBoolean("passed",false);output.putString("stream","FAIL: "+android.util.Log.getStackTraceString(e));}
         finally{if(image!=null)app.getContentResolver().delete(image,null,null);if(activity!=null)main(()->{ModalDialogs.close(activity);activity.finish();});try{api.logout();}catch(Exception ignored){}SharedPreferences.Editor restore=prefs.edit().clear();for(Map.Entry<String,?> entry:settings.entrySet()){String key=entry.getKey();Object v=entry.getValue();if(v instanceof String)restore.putString(key,(String)v);else if(v instanceof Boolean)restore.putBoolean(key,(Boolean)v);else if(v instanceof Integer)restore.putInt(key,(Integer)v);else if(v instanceof Long)restore.putLong(key,(Long)v);else if(v instanceof Float)restore.putFloat(key,(Float)v);}restore.apply();api.setBaseUrl(base);AppAppearance.load(app);}
         completed.set(true);watchdog.interrupt();test.finish(outcome,output);
     }
+    private void excerpts()throws Exception{
+        assertExcerpt();main(()->{View card=desc("话题摘要");while(!card.isClickable()&&card.getParent() instanceof View)card=(View)card.getParent();check(card.isClickable(),"summary belongs to the clickable post card");card.performClick();});await(()->desc("预览评论")!=null,6000,"summary card opens post");main(()->activity.onBackPressed());await(()->desc("筛选社区话题")!=null,6000,"back to forum");
+        Activity home=activity;
+        for(String kind:new String[]{"posts","bookmarks"}){
+            activity=test.startActivitySync(new Intent(app,SpaceActivity.class).putExtra("kind",kind).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));assertExcerpt();main(()->activity.finish());activity=home;
+        }
+    }
+    private void assertExcerpt()throws Exception{
+        await(()->{View view=desc("话题摘要");return view instanceof TextView&&((TextView)view).getLayout()!=null;},6000,"rendered card summary");
+        main(()->{TextView copy=(TextView)desc("话题摘要");check(PLAIN_EXCERPT.contentEquals(copy.getText()),"summary strips heading, emphasis, links, image markup and newlines like Web");check(copy.getMaxLines()==3&&copy.getEllipsize()==android.text.TextUtils.TruncateAt.END&&copy.getLineCount()<=3,"summary stays within three lines");check(copy.getLayout().getEllipsisCount(copy.getLineCount()-1)>0,"long summaries use a real trailing ellipsis");});
+    }
     private void compose()throws Exception{
         ContentValues values=new ContentValues();values.put(MediaStore.Images.Media.DISPLAY_NAME,"acm-ui-smoke.png");values.put(MediaStore.Images.Media.MIME_TYPE,"image/png");image=app.getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,values);check(image!=null,"test image created");try(OutputStream out=app.getContentResolver().openOutputStream(image)){out.write(png);}
-        click("发帖");await(()->desc("发帖正文输入")!=null,6000,"compose editor");View editor=desc("发帖正文输入");main(()->((EditText)editor).setText("Image attachment **preview**"));
+        click("发帖");await(()->desc("发帖正文输入")!=null,6000,"compose editor");View editor=desc("发帖正文输入");main(()->((EditText)editor).setText(MATH));
         pick();await(()->((EditText)desc("发帖正文输入")).getText().toString().contains("![图片](/api/forum/images/"+HASH+")"),6000,"Markdown image inserted");check(editor==desc("发帖正文输入"),"image insert does not rebuild editor");check(uploadCookie&&uploadCsrf&&uploadField,"multipart uses image field and authenticated session");await(()->savedBody.contains(HASH),6000,"attachment auto-saved to cloud");
-        click("预览发帖正文");main(()->check(ModalDialogs.isShowing(activity),"post preview opens"));screenshot("post-preview-v027.png");main(()->ModalDialogs.close(activity));
+        click("预览发帖正文");main(()->check(ModalDialogs.isShowing(activity),"post preview opens"));assertMath(true,"post-math-v0226.png");main(()->ModalDialogs.close(activity));
         String before=((EditText)editor).getText().toString();failUpload=true;int count=uploads.get();pick();await(()->uploads.get()>count&&findPrefix("上传图片失败")!=null,6000,"failed upload red banner");main(()->check(editor==desc("发帖正文输入")&&before.equals(((EditText)editor).getText().toString()),"failed attachment retains all input"));failUpload=false;screenshot("image-failure-v027.png");
     }
     private void pick(){AtomicInteger hits=new AtomicInteger();Instrumentation.ActivityMonitor picker=new Instrumentation.ActivityMonitor(){@Override public Instrumentation.ActivityResult onStartActivity(Intent intent){if(Intent.ACTION_OPEN_DOCUMENT.equals(intent.getAction())){hits.incrementAndGet();return new Instrumentation.ActivityResult(Activity.RESULT_OK,new Intent().setData(image));}return null;}};test.addMonitor(picker);try{click("插入发帖图片");check(hits.get()==1,"system photo picker invoked once");}finally{test.removeMonitor(picker);}}
     private void comments()throws Exception{
-        main(()->activity.finish());activity=test.startActivitySync(new Intent().setClassName(app,MainActivity.class.getName()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK).putExtra("club_post_id",8));await(()->desc("预览评论")!=null,6000,"comment preview button");click("预览评论");main(()->check(ModalDialogs.isShowing(activity),"comment preview opens without submitting"));main(()->ModalDialogs.close(activity));
+        main(()->activity.finish());activity=test.startActivitySync(new Intent().setClassName(app,MainActivity.class.getName()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK).putExtra("club_post_id",8));await(()->desc("预览评论")!=null,6000,"comment preview button");assertMath(false,"forum-math-v0226.png");
+        main(()->{EditText input=(EditText)walk(activity.getWindow().getDecorView(),v->v instanceof EditText&&String.valueOf(((EditText)v).getHint()).contains("支持 Markdown"));check(input!=null,"comment editor");input.setText(MATH);});click("预览评论");main(()->check(ModalDialogs.isShowing(activity),"comment preview opens without submitting"));assertMath(true,"comment-math-v0226.png");main(()->ModalDialogs.close(activity));
+    }
+    private void assertMath(boolean preview,String imageName)throws Exception{
+        java.util.concurrent.atomic.AtomicBoolean passed=new java.util.concurrent.atomic.AtomicBoolean();
+        await(()->{View root=activity.getWindow().getDecorView();if(preview){try{java.lang.reflect.Field field=ModalDialogs.class.getDeclaredField("visible");field.setAccessible(true);java.lang.ref.WeakReference<?> ref=(java.lang.ref.WeakReference<?>)((Map<?,?>)field.get(null)).get(activity);AlertDialog dialog=ref==null?null:(AlertDialog)ref.get();if(dialog==null)return false;root=dialog.getWindow().getDecorView();}catch(Exception e){throw new AssertionError(e);}}
+            ContentView reader=(ContentView)walk(root,v->v instanceof ContentView);if(reader==null)return false;
+            reader.evaluateJavascript("(()=>{const a=document.getElementById('article');if(!a)return false;return JSON.stringify([...a.querySelectorAll('annotation[encoding=\"application/x-tex\"]')].map(n=>n.textContent.trim()))==="+JSONObject.quote(EXPECTED_MATH)+"&&!a.querySelector('.katex-error')&&a.querySelector('pre code')?.textContent.trim()==='\\\\(code_1+code_2\\\\)'&&a.textContent.includes('价格 $5 与 $10')&&document.documentElement.scrollWidth<=document.documentElement.clientWidth+1;})()",value->passed.set("true".equals(value)));return passed.get();},7000,"TeX renders in "+imageName+"; code and escaped currency remain literal");screenshot(imageName);
     }
     private void codeBlocks()throws Exception{
         final ContentView[] reader={null};StringBuilder longLine=new StringBuilder();for(int i=0;i<100;i++)longLine.append("long_code_");String markdown="正文中的 `inline code`。\n\n```cpp\nint main() {\n\tconst char* text = \""+longLine+"\";\n\treturn 0;\n}\n```\n\n> 引用中的代码：\n>\n> ```cpp\n> int x = 1;\n> ```\n\n代码框后的中文正文。";
@@ -79,9 +102,11 @@ final class CommunityUiSmoke {
             if(path.endsWith("/auth/me"))body="{\"authenticated\":true,\"csrf_token\":\"test-only\",\"role\":\"member\",\"qq_id\":\"90000001\",\"avatar_url\":\""+avatar+"\"}";
             else if(path.equals("/api/forum/images")){String multipart=sent.toString("ISO-8859-1");uploadCookie=String.valueOf(getRequestProperty("Cookie")).contains("community-fixture");uploadCsrf="test-only".equals(getRequestProperty("X-CSRF-Token"));uploadField=multipart.contains("name=\"image\"")&&multipart.contains("Content-Type: image/webp")&&multipart.contains("WEBP");body="{\"url\":\"/api/forum/images/"+HASH+"\"}";}
             else if(path.equals("/api/forum/categories"))body="[{\"id\":1,\"name\":\"求助\",\"slug\":\"help\"}]";
-            else if(path.equals("/api/forum/posts/8"))body="{\"id\":8,\"title\":\"Comment test\",\"body\":\"# Markdown\",\"comments\":[]}";
+            else if(path.equals("/api/forum/posts/8"))body="{\"id\":8,\"title\":\"Comment test\",\"body\":"+JSONObject.quote(MATH)+",\"comments\":[]}";
             else if(path.startsWith("/api/forum/drafts")&&sent.size()>0){try{savedBody=new JSONObject(sent.toString("UTF-8")).optString("body");}catch(JSONException e){throw new IOException(e);}body="{\"id\":70,\"edit_version\":1}";}
-            else if(path.equals("/api/forum/posts")||path.equals("/api/community/leaderboard"))body="{\"rows\":[],\"total\":0,\"page\":1}";
+            else if(path.equals("/api/forum/posts"))body="{\"rows\":[{\"id\":8,\"title\":\"摘要格式验证\",\"excerpt\":"+JSONObject.quote(EXCERPT)+"}],\"total\":1,\"page\":1}";
+            else if(path.equals("/api/forum/mine/posts")||path.equals("/api/forum/mine/bookmarks"))body="[{\"id\":8,\"title\":\"摘要格式验证\",\"status\":\"published\",\"excerpt\":"+JSONObject.quote(EXCERPT)+"}]";
+            else if(path.equals("/api/community/leaderboard"))body="{\"rows\":[],\"total\":0,\"page\":1}";
             return new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8));}
     }
 }

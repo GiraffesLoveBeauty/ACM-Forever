@@ -2,7 +2,7 @@ package com.giraffeslovebeauty.acmforever;
 
 /** Time-based edge scrolling, with fractional pixels and a gentle speed ramp. */
 final class ModuleEdgeScroll {
-    private static final float MAX_DP_PER_SECOND = 96, RAMP_SECONDS = .12f;
+    private static final float MAX_DP_PER_SECOND = 192, RAMP_SECONDS = .12f;
     private final float density;
     private float speed, fraction;
     ModuleEdgeScroll(float density) { this.density = density; }

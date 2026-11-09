@@ -64,7 +64,7 @@ public final class SpaceActivity extends Activity {
             String category=item.optString("category_name"),status=drafts()?"草稿":state(item.optString("status"));
             TextView meta=text(category+(category.isEmpty()||status.isEmpty()?"":" · ")+status,12);meta.setTextColor(MobileStyle.BRAND);box.addView(meta);
             String name=item.optString("title");box.addView(text(name.isEmpty()?"未命名草稿":name,19));
-            String excerpt=item.optString("excerpt");if(!excerpt.isEmpty()){TextView copy=text(excerpt,14);copy.setMaxLines(3);copy.setEllipsize(android.text.TextUtils.TruncateAt.END);box.addView(copy);}
+            String excerpt=ForumExcerpt.text(item.optString("excerpt"));if(!excerpt.isEmpty()){TextView copy=text(excerpt,14);copy.setContentDescription("话题摘要");copy.setMaxLines(3);copy.setEllipsize(android.text.TextUtils.TruncateAt.END);box.addView(copy);}
             String by=item.optString("author_name");box.addView(text((by.isEmpty()?"":by+" · ")+date(item),12));
             if(item.has("review_reason")&&!item.optString("review_reason").isEmpty())box.addView(text("退回原因："+item.optString("review_reason"),13));
             WrapLayout actions=new WrapLayout(this);box.addView(actions,new LinearLayout.LayoutParams(-1,-2));
