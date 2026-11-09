@@ -38,6 +38,7 @@ public final class ReaderSmoke extends Instrumentation {
         if("accountclosure".equals(mode)){AccountClosureUiSmoke.run(this);return;}
         if("ojbindings".equals(mode)){OjBindingsUiSmoke.run(this);return;}
         if("themetransfer".equals(mode)){ThemeTransferUiSmoke.run(this);return;}
+        if("themereturn".equals(mode)){ThemeReturnUiSmoke.run(this);return;}
         if(mode.startsWith("officiallayout-")){ThemeTransferUiSmoke.runLayout(this,mode.substring("officiallayout-".length()));return;}
         if("globalsearchadmin".equals(mode)){GlobalSearchAdminUiSmoke.run(this);return;}
         if("startupupdates".equals(mode)){StartupUpdatesUiSmoke.run(this);return;}

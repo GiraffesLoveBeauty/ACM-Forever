@@ -9,10 +9,11 @@ public class ModuleEdgeScrollTest {
         assertEquals(distance(800,60,2.75f),distance(800,120,2.75f),1);
         assertEquals(-distance(0,60,1),distance(800,60,1));
     }
-    @Test public void approachingEdgeGraduallyIncreasesSpeedWithALowerCap(){
+    @Test public void approachingEdgeGraduallyIncreasesSpeedWith192DpCap(){
         int shallow=distance(744,60,1),middle=distance(768,60,1),edge=distance(800,60,1);
         assertTrue(shallow<middle&&middle<edge);
-        assertTrue(edge>60&&edge<=96);
+        // 192 * (1 - .12 * (1 - exp(-1/.12))) = 168.96dp after the first second.
+        assertEquals(169,edge,1);
         assertEquals(0,distance(400,60,1));
     }
     @Test public void leavingBandStopsImmediatelyAndDropsFractionalCarry(){
@@ -31,7 +32,7 @@ public class ModuleEdgeScrollTest {
         ModuleEdgeScroll motion=new ModuleEdgeScroll(1);
         for(int i=0;i<60;i++)motion.step(800,800,64,1f/60);
         int delta=motion.step(800,800,64,2);
-        assertTrue(delta>=0&&delta<=5);
+        assertTrue(delta>=0&&delta<=10);
     }
     @Test public void smallViewportsKeepANeutralZoneAndInvalidGeometryStops(){
         ModuleEdgeScroll motion=new ModuleEdgeScroll(1);

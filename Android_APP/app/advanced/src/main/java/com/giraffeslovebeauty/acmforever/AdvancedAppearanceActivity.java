@@ -27,6 +27,11 @@ public final class AdvancedAppearanceActivity extends Activity {
     private String category="all";
     private final ArrayDeque<String> history=new ArrayDeque<>();
     private final ArrayList<Runnable> paints=new ArrayList<>();
+    private Bundle scrollPositions=new Bundle();
+    private ScrollView pageScroll;
+    private String renderedKey;
+    private int pendingScroll=-1;
+    private boolean resumed;
     private SharedPreferences prefs;
     private String themeId;
     @Override public SharedPreferences getSharedPreferences(String name,int mode){return "acmforever_settings".equals(name)&&LocalThemes.valid(themeId)?super.getSharedPreferences("local_theme_"+themeId,mode):super.getSharedPreferences(name,mode);}
@@ -38,12 +43,12 @@ public final class AdvancedAppearanceActivity extends Activity {
         super.onCreate(state);themeId=getIntent().getStringExtra(LocalThemes.EXTRA);
         if(themeId!=null&&(!LocalThemes.valid(themeId)||!LocalThemes.exists(getApplicationContext(),themeId))){finish();return;}
         prefs=AppAppearance.prefs(this);if(state==null&&getIntent().hasExtra("page"))page=getIntent().getStringExtra("page");
-        if(state!=null){page=state.getString("page","menu");category=state.getString("category","all");pickerTarget=state.getString("picker_target","background");choosing=state.getBoolean("choosing",false);ArrayList<String> saved=state.getStringArrayList("history");if(saved!=null)history.addAll(saved);}
+        if(state!=null){page=state.getString("page","menu");category=state.getString("category","all");pickerTarget=state.getString("picker_target","background");choosing=state.getBoolean("choosing",false);ArrayList<String> saved=state.getStringArrayList("history");if(saved!=null)history.addAll(saved);Bundle positions=state.getBundle("scroll_positions");if(positions!=null)scrollPositions=new Bundle(positions);}
         render();
     }
-    @Override protected void onResume(){super.onResume();navigating=false;if(prefs!=null)render();}
-    @Override protected void onPause(){if(themeId!=null)AppAppearance.load(getApplicationContext());super.onPause();}
-    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("page",page);state.putString("category",category);state.putString("picker_target",pickerTarget);state.putBoolean("choosing",choosing);state.putStringArrayList("history",new ArrayList<>(history));}
+    @Override protected void onResume(){super.onResume();navigating=false;if(resumed&&prefs!=null)render();resumed=true;}
+    @Override protected void onPause(){rememberScroll();if(themeId!=null)AppAppearance.load(getApplicationContext());super.onPause();}
+    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);rememberScroll();state.putBundle("scroll_positions",new Bundle(scrollPositions));state.putString("page",page);state.putString("category",category);state.putString("picker_target",pickerTarget);state.putBoolean("choosing",choosing);state.putStringArrayList("history",new ArrayList<>(history));}
     @Override protected void onDestroy(){files.shutdown();ModalDialogs.close(this);super.onDestroy();}
     @Override public void onBackPressed(){if(saving)return;if(history.isEmpty()){finish();return;}PageMotion.change(this,false,()->{page=history.pop();render();});}
     private void go(String next){if(page.equals(next)||saving)return;PageMotion.change(this,true,()->{history.push(page);page=next;render();});}
@@ -71,17 +76,25 @@ public final class AdvancedAppearanceActivity extends Activity {
         root.setBackground(ProfileCover.drawable(this));AppAppearance.window(this);
         for(Runnable paint:paints)paint.run();AppAppearance.paintFields(root);
     }
-    /** Only navigation builds a page. Selecting colours and opacity never calls render(). */
+    private void rememberScroll(){if(pageScroll!=null&&renderedKey!=null)scrollPositions.putInt(renderedKey,pendingScroll>=0?pendingScroll:pageScroll.getScrollY());}
+    /** Returning refreshes edited tiles; colour and opacity changes only repaint. */
     private void render(){
+        rememberScroll();renderedKey="picker".equals(page)?page+":"+pickerTarget:page;
         AppAppearance.load(this);paints.clear();root=column();root.setContentDescription("个性化页面");AppAppearance.content(this,root);
         LinearLayout header=row();header.setPadding(dp(12),dp(8),dp(12),dp(8));bind(()->header.setBackgroundColor(MobileStyle.CHROME));
         ImageButton back=new ImageButton(this);MobileStyle.flat(back);back.setBackgroundColor(Color.TRANSPARENT);back.setPadding(dp(12),dp(12),dp(12),dp(12));
         bind(()->back.setImageDrawable(AppIcons.get(this,"back",MobileStyle.TEXT)));back.setContentDescription("返回");back.setOnClickListener(v->onBackPressed());
         header.addView(back,new LinearLayout.LayoutParams(dp(48),dp(48)));TextView title=text(title(),21,true);title.setGravity(Gravity.CENTER);title.setSingleLine(true);title.setEllipsize(android.text.TextUtils.TruncateAt.END);header.addView(title,new LinearLayout.LayoutParams(0,dp(48),1));header.addView(new View(this),new LinearLayout.LayoutParams(dp(48),dp(48)));root.addView(header);
-        ScrollView scroll=new ScrollView(this);scroll.setContentDescription("个性化滚动区域");scroll.setFillViewport(true);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        ScrollView scroll=new ScrollView(this);pageScroll=scroll;scroll.setContentDescription("个性化滚动区域");scroll.setFillViewport(true);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         body=column();body.setPadding(dp(16),dp(16),dp(16),dp(24));scroll.addView(body);
         switch(page){case "saved":savedThemes();break;case "background":background();break;case "theme":theme();break;case "controls":controls();break;case "library":library();break;case "picker":picker();break;default:menu();}
         repaint();
+        pendingScroll=Math.max(0,scrollPositions.getInt(renderedKey,0));
+        // Restore after measuring the refreshed tiles. A recreated Activity's first
+        // onResume must not rebuild again and overwrite the saved offset with zero.
+        scroll.addOnLayoutChangeListener(new View.OnLayoutChangeListener(){@Override public void onLayoutChange(View view,int l,int t,int r,int b,int oldL,int oldT,int oldR,int oldB){
+            scroll.removeOnLayoutChangeListener(this);scroll.post(()->{if(pageScroll!=scroll||isDestroyed())return;scroll.scrollTo(0,pendingScroll);pendingScroll=-1;});
+        }});
     }
     private void menu(){
         LinearLayout box=card();

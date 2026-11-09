@@ -1,4 +1,8 @@
-# Android 修改标准与模块关联（v0.2.25）
+# Android 修改标准与模块关联（v0.2.26）
+
+当前源码评审候选0.2.26/code40的论坛、主题返回和搜索拖动修复见[实施记录](android-v0.2.26-reader-and-theme-return.md)。Markdown公式须在解析前保留原文，不能全局替换代码块或二次扫描转义货币；共享阅读器变更须联查论坛、预览、Wiki和题面。高级个性化的页面位置须随页面及Activity状态保存，首次恢复不能被onResume的重复渲染覆盖。以下0.2.25段落保留模块实施时的记录。
+
+首页及我的空间话题卡片统一用`ForumExcerpt`执行网页`postExcerpt`的文字摘要规则，最多三行，末尾省略；不要直接显示原始`excerpt`，也不要为摘要逐卡增加WebView。0.2.26搜索拖动边缘滚动上限为192dp/秒，旧版96是历史值；调整时须联查帧率无关性、掉帧限速、反向/离开即停以及列表边界。
 
 本轮可选模块实现与维护约束见 [android-v0.2.25-optional-modules.md](android-v0.2.25-optional-modules.md)。原生高级设置与便捷管理现位于 `app/advanced/`、`app/admin/`；共用 Provider 留在基础包。不得向基础 DEX 再引入 feature Activity 的 class 字面量，应经 `OptionalModules` 按实际已安装 split 放行。资源在 `module-resources/`，使用已签名的同版本制品，不是下载标记解锁。`ModuleStore` 的持久目录与已下载记录不可随清缓存或普通升级删除；默认随 App 更新已下载模块，开关在检查更新页。
 

@@ -112,7 +112,7 @@ final class GlobalSearchAdminUiSmoke {
         long down=SystemClock.uptimeMillis();event(down,MotionEvent.ACTION_DOWN,point[0],point[1]);Thread.sleep(ViewConfiguration.getLongPressTimeout()+230);
         float edge=upward?viewport[1]+1:viewport[1]+height[0]-1;for(int i=1;i<=12;i++){event(down,MotionEvent.ACTION_MOVE,point[0],point[1]+(edge-point[1])*i/12);Thread.sleep(16);}
         main(()->beforeY[0]=((SearchActivity)activity).scroll.getScrollY());long start=SystemClock.uptimeMillis();Thread.sleep(900);main(()->{afterY[0]=((SearchActivity)activity).scroll.getScrollY();assertRowsBounded(moduleOrder());});long elapsed=SystemClock.uptimeMillis()-start;
-        int travelled=upward?beforeY[0]-afterY[0]:afterY[0]-beforeY[0];check(travelled>0,"holding the edge scrolls in the intended direction");check(travelled<=MobileStyle.dp(context,96*elapsed/1000f+8),"edge scrolling stays below its time-based slow speed cap");
+        int travelled=upward?beforeY[0]-afterY[0]:afterY[0]-beforeY[0];check(travelled>0,"holding the edge scrolls in the intended direction");check(travelled<=MobileStyle.dp(context,192*elapsed/1000f+8),"edge scrolling stays below its doubled time-based speed cap");
         float center=viewport[1]+height[0]/2f;event(down,MotionEvent.ACTION_MOVE,point[0],center);Thread.sleep(80);main(()->beforeY[0]=((SearchActivity)activity).scroll.getScrollY());Thread.sleep(180);main(()->check(((SearchActivity)activity).scroll.getScrollY()==beforeY[0],"leaving edge band immediately stops automatic scrolling"));event(down,MotionEvent.ACTION_CANCEL,point[0],center);Thread.sleep(250);
     }
     private void memberOperations()throws Exception{
