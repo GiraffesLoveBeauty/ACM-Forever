@@ -96,7 +96,7 @@ test('a closed QQ can receive a fresh account and its old receipt keeps the new 
     ).status(),
   ).toBe(200);
   await page.goto('/admin.html');
-  await page.getByText('单个创建账号', { exact: true }).click();
+  await page.getByRole('link', { name: '开通账号', exact: true }).click();
   await expect(page.getByText('已注销的 QQ 可在这里创建全新账号', { exact: false })).toBeVisible();
   await page.getByLabel('成员 QQ', { exact: true }).fill(qq);
   await page.getByLabel('昵称', { exact: true }).fill('重新开户的测试成员');

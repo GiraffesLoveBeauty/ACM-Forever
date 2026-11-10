@@ -1,440 +1,629 @@
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount } from 'vue';
-import { api, auth, useRequests, notify, showError, date } from '../lib/api.js';
-import { useLeaveGuard } from '../lib/admin.js';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
+import { api, auth, date, notify, showError, useRequests } from '../lib/api.js';
+import { adminSessionVersion, useLeaveGuard, useParams } from '../lib/admin.js';
+import { credentialsWorkbook } from '../lib/account-import-credentials.js';
 import Pager from '../components/Pager.vue';
-const request = useRequests(),
-  candidates = ref({ items: [], total: 0, page: 1, page_size: 20 }),
-  accounts = ref([]),
-  selected = ref(new Set()),
+
+const route = useRoute(),
+  update = useParams(),
+  request = useRequests();
+const accounts = ref([]),
+  loading = ref(true),
+  loadError = ref('');
+const search = ref(route.query.account_search || ''),
+  selected = ref(new Map());
+const sessionChanged = ref(false);
+const busy = ref(false),
+  results = ref([]),
   credentials = ref([]),
-  skipped = ref([]),
-  filter = reactive({ search: '', include_issued: false }),
-  busy = ref(false),
-  fallback = ref('');
-const form = reactive({
-  qq_id: '',
-  name: '',
-  initial_password: '',
-  status: '',
-  school: '',
-  role: 'member',
+  exported = ref(true);
+const batchRole = ref('member'),
+  roleDrafts = ref({}),
+  downloadError = ref('');
+const sessionVersion = adminSessionVersion();
+const owner = [auth.qq_id, auth.account_epoch, auth.role];
+let disposed = false,
+  invalidated = false;
+const sameSession = () => !disposed && !invalidated && sessionVersion === adminSessionVersion();
+const writeBlocked = computed(
+  () => busy.value || loading.value || Boolean(loadError.value) || sessionChanged.value,
+);
+const roles = { member: '成员', admin: '管理员', root: '超级管理员' };
+const filtered = computed(() => {
+  const term = String(route.query.account_search || '')
+    .trim()
+    .toLowerCase();
+  return accounts.value.filter(
+    (row) =>
+      !term ||
+      [row.qq_id, row.display_qq_id, row.real_name, row.name, roles[row.role]].some((value) =>
+        String(value || '')
+          .toLowerCase()
+          .includes(term),
+      ),
+  );
 });
-const names = new Map();
-let disposed = false;
-async function loadCandidates(page = 1) {
-  try {
-    candidates.value = await request(
-      '/admin/web-account-candidates?' +
-        new URLSearchParams({
-          search: filter.search,
-          page,
-          page_size: 20,
-          ...(filter.include_issued ? { include_issued: 1 } : {}),
-        }),
-      {},
-      'candidates',
-    );
-    for (const row of candidates.value.items) names.set(row.qq_id, row.name);
-  } catch (e) {
-    showError(e);
-  }
+const pages = computed(() => Math.max(1, Math.ceil(filtered.value.length / 20)));
+const page = computed(() => {
+  const requested = Number(route.query.account_page);
+  return Math.min(pages.value, Number.isInteger(requested) && requested > 0 ? requested : 1);
+});
+const rows = computed(() => filtered.value.slice((page.value - 1) * 20, page.value * 20));
+const manageable = (row) =>
+  Boolean(row.qq_id) &&
+  row.account_state !== 'closed' &&
+  (auth.role === 'root' || row.role === 'member');
+const resettable = (row) => manageable(row) && row.role === 'member' && Boolean(row.is_active);
+const eligible = computed(() => rows.value.filter(manageable));
+const allSelected = computed(
+  () => eligible.value.length > 0 && eligible.value.every((row) => selected.value.has(row.qq_id)),
+);
+const someSelected = computed(
+  () => !allSelected.value && eligible.value.some((row) => selected.value.has(row.qq_id)),
+);
+const snapshot = (row) => ({
+  expected_account_epoch: row.account_epoch,
+  expected_credential_version: row.credential_version,
+});
+function clearSensitive() {
+  credentials.value = [];
+  exported.value = true;
+  selected.value = new Map();
+  results.value = [];
+  downloadError.value = '';
 }
-async function loadAccounts() {
-  try {
-    accounts.value = await request('/admin/web-accounts');
-    for (const row of accounts.value) names.set(row.qq_id, row.name);
-  } catch (e) {
-    showError(e);
-  }
+function invalidate() {
+  invalidated = true;
+  sessionChanged.value = true;
+  busy.value = false;
+  loading.value = false;
+  loadError.value = '登录会话已变化，请重新加载页面';
+  clearSensitive();
+  accounts.value = [];
+  roleDrafts.value = {};
 }
-function select(qq, active) {
-  const next = new Set(selected.value);
-  if (active) {
-    if (next.size < 20) next.add(qq);
-  } else next.delete(qq);
+watch(
+  () => [auth.authenticated, auth.qq_id, auth.account_epoch, auth.role],
+  (current) => {
+    if (
+      !current[0] ||
+      current[1] !== owner[0] ||
+      current[2] !== owner[1] ||
+      current[3] !== owner[2]
+    )
+      invalidate();
+  },
+  { flush: 'pre' },
+);
+watch(
+  () => [route.query.account_search, route.query.account_page],
+  () => {
+    search.value = route.query.account_search || '';
+    selected.value = new Map();
+  },
+);
+function toggle(row, checked) {
+  if (writeBlocked.value || !manageable(row)) return;
+  const next = new Map(selected.value);
+  if (checked) next.set(row.qq_id, { ...row });
+  else next.delete(row.qq_id);
   selected.value = next;
 }
-function selectPage(event) {
-  if (busy.value) return;
-  for (const row of candidates.value.items.filter((r) => !r.has_web_account))
-    select(row.qq_id, event.target.checked);
+function selectPage(checked) {
+  for (const row of eligible.value) toggle(row, checked);
 }
-function changeRole(row, event) {
-  const role = event.target.value;
-  // Keep the control on the confirmed role until the server refresh succeeds.
-  event.target.value = row.role;
-  if (role !== row.role) action(row, 'role', role);
+async function load() {
+  if (!sameSession()) return;
+  loading.value = true;
+  loadError.value = '';
+  try {
+    const data = await request('/admin/web-accounts', {}, 'accounts');
+    if (!sameSession()) return;
+    accounts.value = data;
+    roleDrafts.value = {};
+    const visible = new Map(rows.value.filter(manageable).map((row) => [row.qq_id, row]));
+    selected.value = new Map(
+      [...selected.value].filter(
+        ([id, original]) =>
+          visible.get(id)?.account_epoch === original.account_epoch &&
+          visible.get(id)?.credential_version === original.credential_version,
+      ),
+    );
+    // A later password/state change must not leave an obsolete password exportable.
+    const remaining = credentials.value.filter((receipt) =>
+      data.some(
+        (row) =>
+          row.qq_id === receipt.qq_id &&
+          row.account_epoch === receipt.account_epoch &&
+          row.credential_version === receipt.credential_version &&
+          row.is_active,
+      ),
+    );
+    if (remaining.length !== credentials.value.length) {
+      credentials.value = remaining;
+      notify('部分账号已变化，已移除对应的旧临时密码，请勿继续使用旧密码表。');
+    }
+  } catch (error) {
+    if (sameSession() && error.name !== 'AbortError') loadError.value = error.message;
+  } finally {
+    if (sameSession()) loading.value = false;
+  }
 }
-function remember(result) {
-  credentials.value = (result.created || []).map((row) => ({
-    ...row,
-    name: row.name || names.get(row.qq_id) || '未命名',
-  }));
-  skipped.value = result.skipped || [];
+function targetText(row) {
+  return `${row.real_name || '未填写姓名'}（QQ ${row.qq_id}）`;
 }
-async function issue() {
-  if (busy.value || !selected.value.size) return;
-  const ids = [...selected.value];
+function operationLabel(kind) {
+  return {
+    temporary: '重设临时密码',
+    role: '更改权限',
+    active: '调整启停状态',
+    password: '设置初始密码',
+  }[kind];
+}
+async function run(kind, targets, value) {
+  if (writeBlocked.value || !sameSession() || !targets.length) return;
+  if (kind === 'role' && auth.role !== 'root') return;
+  const ordered = [...targets].sort(
+    (a, b) => Number(a.qq_id === auth.qq_id) - Number(b.qq_id === auth.qq_id),
+  );
+  const effect =
+    kind === 'temporary'
+      ? '旧密码与旧登录会话将失效，下次登录必须改密。已导出的旧密码也会失效。'
+      : kind === 'role'
+        ? `目标权限：${roles[value]}。修改将使目标的现有会话失效。`
+        : '现有登录会话将失效。';
   if (
     !confirm(
-      `将为以下成员发放临时密码：\n${ids.map((id) => `${names.get(id) || id}（${id}）`).join('\n')}\n确认继续？`,
+      `${operationLabel(kind)}：共 ${ordered.length} 人\n${ordered.map(targetText).join('\n')}\n${effect}\n确认继续？`,
     )
   )
     return;
   busy.value = true;
-  try {
-    const result = await api('/admin/web-accounts/batch', {
-      method: 'POST',
-      timeoutMs: 30000,
-      body: { qq_ids: ids },
-    });
-    if (disposed) return;
-    remember(result);
-    selected.value = new Set();
-    await Promise.all([loadCandidates(candidates.value.page), loadAccounts()]);
-  } catch (e) {
-    if (!disposed) showError(e);
-  } finally {
-    busy.value = false;
-  }
-}
-async function action(row, kind, value) {
-  if (busy.value) return;
-  let options;
-  if (kind === 'temporary') {
-    if (!confirm(`重新生成 QQ ${row.qq_id} 的临时密码？旧密码将失效。`)) return;
-    options = { method: 'POST' };
-  } else if (kind === 'password') {
-    const password = prompt('设置新的初始密码（至少 12 位）');
-    if (!password) return;
-    options = { method: 'POST', body: { initial_password: password } };
-  } else
-    options = {
-      method: 'PATCH',
-      body: kind === 'role' ? { role: value } : { is_active: !row.is_active },
+  results.value = [];
+  for (const row of ordered) {
+    if (!sameSession()) break;
+    const result = {
+      qq_id: row.qq_id,
+      real_name: row.real_name || '',
+      state: 'pending',
+      message: '处理中',
     };
-  busy.value = true;
-  try {
-    const suffix =
-      { temporary: '/reset-temporary-password', password: '/reset-password' }[kind] || '';
-    const data = await api(
-      `/admin/web-accounts/${encodeURIComponent(row.qq_id)}${suffix}`,
-      options,
-    );
-    if (disposed) return;
-    if (kind === 'temporary') remember({ created: [{ ...data, name: row.name }], skipped: [] });
-    notify('账号已更新');
-    await Promise.all([loadAccounts(), loadCandidates(candidates.value.page)]);
-  } catch (e) {
-    showError(e);
-  } finally {
-    busy.value = false;
+    results.value = [...results.value, result];
+    if (kind === 'role' && row.role === value) {
+      Object.assign(result, { state: 'skipped', message: '权限未变化，已跳过' });
+      const next = new Map(selected.value);
+      next.delete(row.qq_id);
+      selected.value = next;
+      results.value = results.value.map((entry) => ({ ...entry }));
+      continue;
+    }
+    // Every maintenance write changes the credential version. Do not rely on the
+    // following refresh to remove an obsolete receipt: that refresh can fail.
+    credentials.value = credentials.value.filter((item) => item.qq_id !== row.qq_id);
+    try {
+      const suffix =
+        { temporary: '/reset-temporary-password', password: '/reset-password' }[kind] || '';
+      const response = await api(`/admin/web-accounts/${encodeURIComponent(row.qq_id)}${suffix}`, {
+        method: suffix ? 'POST' : 'PATCH',
+        body: {
+          ...snapshot(row),
+          ...(kind === 'role'
+            ? { role: value }
+            : kind === 'active'
+              ? { is_active: !row.is_active }
+              : kind === 'password'
+                ? { initial_password: value }
+                : {}),
+        },
+      });
+      if (!sameSession()) break;
+      if (kind === 'temporary') {
+        if (
+          !response.temporary_password ||
+          response.qq_id !== row.qq_id ||
+          response.account_epoch !== row.account_epoch
+        )
+          throw Error('未收到完整密码结果，请核对账号状态；不要自动重试。');
+        credentials.value = [
+          ...credentials.value,
+          { ...response, real_name: response.real_name || '' },
+        ];
+        exported.value = false;
+        downloadError.value = '';
+      }
+      Object.assign(result, { state: 'success', message: '成功' });
+      const next = new Map(selected.value);
+      next.delete(row.qq_id);
+      selected.value = next;
+    } catch (error) {
+      if (!sameSession()) break;
+      const uncertain = !error.status || error.status >= 500;
+      Object.assign(result, {
+        state: 'failed',
+        message: uncertain
+          ? '结果未确认，操作可能已生效。请刷新核对，不会自动重试。'
+          : error.message,
+      });
+      if (error.status === 401 || error.status === 403) {
+        results.value = results.value.map((entry) => ({ ...entry }));
+        for (const pending of ordered.slice(ordered.indexOf(row) + 1))
+          results.value.push({
+            qq_id: pending.qq_id,
+            real_name: pending.real_name || '',
+            state: 'failed',
+            message: '权限校验失败，后续操作已停止。',
+          });
+        break;
+      }
+    }
+    results.value = results.value.map((entry) => ({ ...entry }));
+  }
+  if (sameSession()) {
+    await load();
+    if (sameSession()) busy.value = false;
   }
 }
-async function create() {
-  if (busy.value) return;
-  busy.value = true;
-  try {
-    await request('/admin/web-accounts', { method: 'POST', body: { ...form } });
-    form.initial_password = '';
-    notify('账号已创建');
-    await Promise.all([loadAccounts(), loadCandidates()]);
-  } catch (e) {
-    showError(e);
-  } finally {
-    busy.value = false;
-  }
+function changeRole(row) {
+  const role = roleDrafts.value[row.qq_id] || row.role;
+  if (role !== row.role) return run('role', [row], role);
 }
-function credentialRows() {
-  return credentials.value.map((row) => [
-    row.qq_id,
-    row.name,
-    row.temporary_password,
-    date(row.expires_at),
-  ]);
+function bulk(kind) {
+  return run(kind, [...selected.value.values()], kind === 'role' ? batchRole.value : undefined);
 }
-async function copy() {
-  const text = credentialRows()
-    .map((row) => row.join('\t'))
-    .join('\n');
-  try {
-    await navigator.clipboard.writeText(text);
-    notify('已复制账密');
-  } catch {
-    fallback.value = text;
-    notify('自动复制失败，请从文本框手动复制');
-  }
+function manualPassword(row) {
+  const password = prompt('设置新的初始密码（至少 12 位；密码不会被本页保存）');
+  if (password) return run('password', [row], password);
 }
 function download() {
-  const cell = (value) => {
-    let s = String(value ?? '');
-    if (/^[=+@\-]/.test(s)) s = "'" + s;
-    return '"' + s.replace(/"/g, '""') + '"';
-  };
-  const data = [['QQ', '昵称', '临时密码', '过期时间'], ...credentialRows()]
-    .map((row) => row.map(cell).join(','))
-    .join('\r\n');
-  const url = URL.createObjectURL(new Blob(['\ufeff' + data], { type: 'text/csv;charset=utf-8' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = 'web-member-accounts.csv';
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  if (!sameSession() || busy.value || !credentials.value.length) return;
+  downloadError.value = '';
+  let url;
+  try {
+    const workbook = credentialsWorkbook(credentials.value, {
+      nameLabel: '真实姓名',
+      passwordLabel: '临时密码',
+      sheetName: '临时密码',
+    });
+    url = URL.createObjectURL(workbook);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'web-account-temporary-passwords.xlsx';
+    document.body.append(link);
+    link.click();
+    link.remove();
+    // Browsers do not confirm a completed download. Keep the unsaved-results warning.
+    notify('已发起下载，请确认文件已保存。可重复导出，不会再次重设密码。');
+  } catch (error) {
+    downloadError.value = '导出未完成，密码结果仍保留在本页。请重新导出，不要重新重设密码。';
+  } finally {
+    if (url) setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 }
 function leave() {
   return (
-    !(credentials.value.length || busy.value) ||
+    !(busy.value || (credentials.value.length && !exported.value)) ||
     confirm(
-      '离开后临时密码会清除，无法再次查看。请先复制或下载；正在发放的结果也可能无法领取。继续离开？',
+      '操作仍在进行或临时密码尚未确认保存。离开后密码明文会清除，无法重新查看。请先导出并确认文件已保存。仍要离开？',
     )
   );
 }
 function unload(event) {
-  if (credentials.value.length || busy.value) {
+  if (busy.value || (credentials.value.length && !exported.value)) {
     event.preventDefault();
     event.returnValue = '';
   }
 }
-function clear() {
-  credentials.value = [];
-  fallback.value = '';
-  form.initial_password = '';
-  selected.value = new Set();
-  names.clear();
+function reloadPage() {
+  location.reload();
+}
+function pageshow(event) {
+  if (event.persisted) location.reload();
 }
 useLeaveGuard(leave);
 onMounted(() => {
+  load();
   window.addEventListener('beforeunload', unload);
-  window.addEventListener('pagehide', clear);
-  Promise.allSettled([loadCandidates(), loadAccounts()]);
+  window.addEventListener('pagehide', invalidate);
+  window.addEventListener('pageshow', pageshow);
 });
 onBeforeUnmount(() => {
   disposed = true;
-  clear();
+  clearSensitive();
   window.removeEventListener('beforeunload', unload);
-  window.removeEventListener('pagehide', clear);
+  window.removeEventListener('pagehide', invalidate);
+  window.removeEventListener('pageshow', pageshow);
 });
 </script>
 <template>
-  <div class="admin-content">
-    <section class="admin-section">
-      <div class="admin-section-heading">
-        <div>
-          <h2>给已有成员开通账号</h2>
-          <p>搜索成员并批量发放 Web 登录账号。</p>
-        </div>
-        <span class="admin-limit">每批最多 20 人</span>
+  <section class="admin-panel account-management">
+    <div class="admin-section-heading">
+      <div>
+        <h2>账号管理</h2>
+        <p class="muted">管理已有账号的权限和密码；新成员请前往「开通账号」。</p>
       </div>
-      <section class="admin-panel">
-        <form class="admin-filter-row" @submit.prevent="loadCandidates()">
-          <label class="admin-search"
-            ><input
-              v-model.trim="filter.search"
-              type="search"
-              aria-label="搜索昵称、QQ 或学校"
-              placeholder="搜索昵称、QQ 或学校" /></label
-          ><label class="admin-toggle"
-            ><input
-              v-model="filter.include_issued"
-              type="checkbox"
-              @change="loadCandidates()"
-            />包括已有账号</label
-          ><button class="btn primary">搜索成员</button>
-        </form>
-        <div class="admin-table-meta">
-          <span>共 {{ candidates.total }} 位成员</span><span>已选 {{ selected.size }} / 20</span>
-        </div>
-        <div class="admin-table-wrap">
-          <table class="admin-table">
-            <thead>
-              <tr>
-                <th>
-                  <input
-                    type="checkbox"
-                    aria-label="选择本页未发号成员"
-                    :disabled="busy"
-                    :checked="
-                      candidates.items.filter((r) => !r.has_web_account).length > 0 &&
-                      candidates.items
-                        .filter((r) => !r.has_web_account)
-                        .every((r) => selected.has(r.qq_id))
-                    "
-                    @change="selectPage"
-                  />
-                </th>
-                <th>QQ</th>
-                <th>昵称</th>
-                <th>学校</th>
-                <th>身份</th>
-                <th>账号状态</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in candidates.items" :key="row.qq_id">
-                <td>
-                  <input
-                    type="checkbox"
-                    :aria-label="`选择 ${row.name}`"
-                    :checked="selected.has(row.qq_id)"
-                    :disabled="
-                      busy ||
-                      row.has_web_account ||
-                      (!selected.has(row.qq_id) && selected.size >= 20)
-                    "
-                    @change="select(row.qq_id, $event.target.checked)"
-                  />
-                </td>
-                <td>{{ row.qq_id }}</td>
-                <td>{{ row.name }}</td>
-                <td>{{ row.school || '—' }}</td>
-                <td>{{ row.status || '—' }}</td>
-                <td>
-                  {{
-                    row.has_web_account
-                      ? `${row.role} · ${row.is_active ? '启用' : '停用'}`
-                      : '未发放'
-                  }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="admin-table-footer">
-          <Pager
-            :page="candidates.page"
-            :total="candidates.total"
-            :busy="busy"
-            @change="loadCandidates"
-          /><button class="btn primary" :disabled="busy || !selected.size" @click="issue">
-            为已选成员生成账号
-          </button>
-        </div>
-        <p class="admin-security-note">
-          临时密码有效期默认 72 小时。结果只显示一次，请及时复制或下载并通过安全渠道交给成员。
-        </p>
-      </section>
-      <section v-if="credentials.length || skipped.length" class="admin-panel admin-results">
-        <div class="admin-section-heading">
-          <h2>本次发放结果</h2>
-          <div class="admin-result-actions">
-            <button class="btn" @click="copy">复制账密</button
-            ><button class="btn" @click="download">下载 CSV</button>
-          </div>
-        </div>
-        <p>
-          成功 {{ credentials.length }} 个，跳过 {{ skipped.length }} 个。离开后临时密码无法恢复。
-        </p>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>QQ</th>
-                <th>昵称</th>
-                <th>临时密码</th>
-                <th>过期时间</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in credentials" :key="row.qq_id">
-                <td>{{ row.qq_id }}</td>
-                <td>{{ row.name }}</td>
-                <td>
-                  <code>{{ row.temporary_password }}</code>
-                </td>
-                <td>{{ date(row.expires_at) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p v-for="(row, i) in skipped" :key="i">{{ row.qq_id }} · {{ row.reason }}</p>
-        <textarea v-if="fallback" :value="fallback" readonly aria-label="手动复制账密"></textarea>
-      </section>
-    </section>
-    <section class="admin-section">
-      <h2>账号管理</h2>
-      <details class="admin-create">
-        <summary>单个创建账号</summary>
-        <p class="muted">
-          已注销的 QQ 可在这里创建全新账号，须填写新昵称和密码；旧资料、私有数据及权限不会继承。
-        </p>
-        <form class="admin-create-body" @submit.prevent="create">
-          <div class="admin-create-grid">
-            <label
-              v-for="(label, key) in {
-                qq_id: '成员 QQ',
-                name: '昵称',
-                initial_password: '初始密码',
-                status: '身份 / 年级',
-                school: '学校',
-              }"
-              :key="key"
-              >{{ label
-              }}<input
-                v-model="form[key]"
-                :type="key === 'initial_password' ? 'password' : 'text'"
-                :autocomplete="key === 'initial_password' ? 'new-password' : undefined"
-                :required="['qq_id', 'initial_password'].includes(key)" /></label
-            ><label
-              >账号角色<select v-model="form.role">
-                <option value="member">成员</option>
-                <option value="admin">管理员</option>
-                <option v-if="auth.role === 'root'" value="root">Root</option>
-              </select></label
-            >
-          </div>
-          <button class="btn primary" :disabled="busy">创建账号</button>
-        </form>
-      </details>
-      <div class="admin-account-list">
-        <article v-for="row in accounts" :key="row.qq_id || row.account_key" class="list-item">
-          <span
-            ><b>{{ row.name }} · QQ {{ row.qq_id || row.display_qq_id }}</b
-            ><br /><small
-              >{{ row.role }} ·
+      <button class="btn" :disabled="busy || loading || sessionChanged" @click="load">
+        刷新账号
+      </button>
+    </div>
+    <button v-if="sessionChanged" class="btn primary" @click="reloadPage">重新加载页面</button>
+    <form
+      class="filters"
+      @submit.prevent="update({ account_search: search.trim(), account_page: 1 })"
+    >
+      <label
+        >搜索账号<input
+          v-model="search"
+          type="search"
+          placeholder="QQ、真实姓名或昵称"
+          :disabled="busy"
+      /></label>
+      <button class="btn primary" :disabled="busy">搜索</button>
+      <button
+        class="btn"
+        type="button"
+        :disabled="busy"
+        @click="update({ account_search: null, account_page: 1 })"
+      >
+        重置
+      </button>
+    </form>
+    <div class="account-actions" aria-label="批量账号操作">
+      <span>已选 {{ selected.size }} 人（仅当前页，翻页或筛选会清除选择）</span>
+      <button class="btn" :disabled="writeBlocked || !selected.size" @click="selected = new Map()">
+        取消选择
+      </button>
+      <button class="btn" :disabled="writeBlocked || !selected.size" @click="bulk('temporary')">
+        批量重设临时密码
+      </button>
+      <template v-if="auth.role === 'root'">
+        <label
+          >目标权限<select v-model="batchRole" :disabled="writeBlocked">
+            <option v-for="(label, role) in roles" :key="role" :value="role">{{ label }}</option>
+          </select></label
+        >
+        <button class="btn" :disabled="writeBlocked || !selected.size" @click="bulk('role')">
+          批量更改权限
+        </button>
+      </template>
+      <span v-else class="muted">仅 root 可更改权限</span>
+    </div>
+    <p v-if="loading" role="status">正在加载账号…</p>
+    <p v-else-if="loadError" role="alert">
+      {{ loadError }}。请刷新重试，当前列表可能不是最新状态。
+    </p>
+    <p v-else class="muted">
+      共 {{ filtered.length }} 个账号<span v-if="busy"> · 正在处理，请勿重复提交或离开页面</span>
+    </p>
+    <p v-if="!loading && !loadError" class="muted account-scroll-hint">
+      表格可左右滚动，查看完整信息与操作。
+    </p>
+    <div
+      v-if="!loading && !loadError"
+      class="table-wrap account-table-wrap"
+      role="region"
+      aria-label="账号列表（可左右滚动）"
+      tabindex="0"
+    >
+      <table class="account-table">
+        <thead>
+          <tr>
+            <th>
+              <input
+                type="checkbox"
+                aria-label="全选当前页可维护账号"
+                :checked="allSelected"
+                :indeterminate="someSelected"
+                :disabled="writeBlocked || !eligible.length"
+                @change="selectPage($event.target.checked)"
+              />
+            </th>
+            <th>QQ 号</th>
+            <th>真实姓名</th>
+            <th>最近登录时间</th>
+            <th>当前权限 / 状态</th>
+            <th>重设临时密码</th>
+            <th>更改权限</th>
+            <th>其他操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in rows" :key="row.qq_id || row.account_key">
+            <td>
+              <input
+                type="checkbox"
+                :aria-label="`选择 QQ ${row.qq_id || row.display_qq_id}`"
+                :checked="selected.has(row.qq_id)"
+                :disabled="writeBlocked || !manageable(row)"
+                @change="toggle(row, $event.target.checked)"
+              />
+            </td>
+            <td>{{ row.qq_id || row.display_qq_id }}</td>
+            <td>{{ row.real_name || '—' }}</td>
+            <td>{{ row.last_login_at ? date(row.last_login_at) : '从未登录' }}</td>
+            <td>
+              {{ roles[row.role] || row.role }}<br /><small class="muted"
+                >{{ row.account_state === 'closed' ? '已注销' : row.is_active ? '启用' : '停用' }} ·
+                {{ row.must_change_password ? '待改密' : '已改密' }}</small
+              >
+            </td>
+            <td>
+              <button
+                class="btn"
+                :disabled="writeBlocked || !resettable(row)"
+                @click="run('temporary', [row])"
+              >
+                重设临时密码</button
+              ><small v-if="row.role !== 'member'" class="muted account-hint"
+                >管理员账号由 root 设置初始密码</small
+              >
+            </td>
+            <td>
+              <template v-if="auth.role === 'root' && manageable(row)">
+                <select
+                  v-model="roleDrafts[row.qq_id]"
+                  :aria-label="`QQ ${row.qq_id} 的目标权限`"
+                  :disabled="writeBlocked"
+                >
+                  <option :value="undefined" disabled>选择权限</option>
+                  <option v-for="(label, role) in roles" :key="role" :value="role">
+                    {{ label }}
+                  </option>
+                </select>
+                <button
+                  class="btn"
+                  :disabled="
+                    writeBlocked || !roleDrafts[row.qq_id] || roleDrafts[row.qq_id] === row.role
+                  "
+                  @click="changeRole(row)"
+                >
+                  更改权限
+                </button>
+              </template>
+              <span v-else class="muted">{{
+                row.account_state === 'closed' ? '已注销' : '仅 root 可操作'
+              }}</span>
+            </td>
+            <td class="account-row-actions">
+              <button
+                class="btn"
+                :disabled="writeBlocked || !manageable(row)"
+                @click="run('active', [row])"
+              >
+                {{ row.is_active ? '停用' : '启用' }}
+              </button>
+              <button
+                class="btn"
+                :disabled="writeBlocked || !manageable(row)"
+                @click="manualPassword(row)"
+              >
+                设置初始密码
+              </button>
+            </td>
+          </tr>
+          <tr v-if="!rows.length">
+            <td colspan="8">
               {{
-                row.account_state === 'closed'
-                  ? '已注销（可通过创建账号重新开户）'
-                  : row.is_active
-                    ? '启用'
-                    : '停用'
+                route.query.account_search
+                  ? '没有匹配的账号。'
+                  : '暂无已开通账号，请前往「开通账号」。'
               }}
-              · {{ row.must_change_password ? '待改密' : '已完成改密' }} · 最近登录
-              {{ date(row.last_login_at) }}</small
-            ></span
-          ><span class="chips"
-            ><button
-              v-if="row.role === 'member' && row.must_change_password && row.is_active"
-              class="btn"
-              :disabled="busy || row.account_state === 'closed'"
-              @click="action(row, 'temporary')"
-            >
-              重发临时密码</button
-            ><button
-              class="btn"
-              :disabled="busy || row.account_state === 'closed'"
-              @click="action(row, 'password')"
-            >
-              设置初始密码</button
-            ><button
-              class="btn"
-              :disabled="busy || row.account_state === 'closed'"
-              @click="action(row, 'active')"
-            >
-              {{ row.is_active ? '停用' : '启用' }}</button
-            ><select
-              v-if="auth.role === 'root'"
-              :value="row.role"
-              :disabled="busy || row.account_state === 'closed'"
-              @change="changeRole(row, $event)"
-            >
-              <option value="member">成员</option>
-              <option v-if="auth.role === 'root'" value="admin">管理员</option>
-              <option value="root">Root</option>
-            </select></span
-          >
-        </article>
-      </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <Pager
+      v-if="!loading && !loadError"
+      :page="page"
+      :total="filtered.length"
+      :busy="busy"
+      @change="(next) => update({ account_page: next })"
+    />
+    <section
+      v-if="results.length"
+      class="account-results"
+      aria-label="本次操作结果"
+      aria-live="polite"
+    >
+      <h3>本次操作结果</h3>
+      <p>
+        成功 {{ results.filter((row) => row.state === 'success').length }} 人，失败/未处理
+        {{ results.filter((row) => row.state === 'failed').length }} 人<span v-if="busy"
+          >，处理中…</span
+        >
+      </p>
+      <p v-if="results.some((row) => row.state === 'skipped')" class="muted">
+        已跳过 {{ results.filter((row) => row.state === 'skipped').length }} 人（无需更改）
+      </p>
+      <ul>
+        <li v-for="row in results" :key="row.qq_id">
+          QQ {{ row.qq_id }} · {{ row.real_name || '—' }}：{{ row.message }}
+        </li>
+      </ul>
+      <p class="muted">版本或状态冲突时请刷新核对后重新勾选；不会自动重试，以免重复重设密码。</p>
     </section>
-  </div>
+    <section v-if="credentials.length" class="account-results" aria-label="临时密码导出">
+      <h3>临时密码表 · {{ credentials.length }} 人</h3>
+      <p>
+        仅包含当前页面累计领取的成功结果，不含失败账号。导出列为 QQ
+        号、真实姓名、账号、临时密码；离开后无法重新查看。
+      </p>
+      <button class="btn primary" :disabled="busy" @click="download">
+        导出本次密码表（Excel）
+      </button>
+      <button class="btn" :disabled="busy" @click="exported = true">已确认文件保存</button>
+      <p v-if="downloadError" role="alert">{{ downloadError }}</p>
+      <p class="muted">
+        可以重复下载，不会再次重设密码。每个账号仅保留最新已领取的密码；重设后此前导出的旧密码失效。
+      </p>
+    </section>
+  </section>
 </template>
+<style scoped>
+.account-management {
+  min-width: 0;
+}
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0;
+}
+.account-actions label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.account-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.account-table {
+  min-width: 1120px;
+}
+.account-table th,
+.account-table td {
+  vertical-align: middle;
+}
+.account-table th {
+  white-space: nowrap;
+}
+.account-table input[type='checkbox'] {
+  min-width: 18px;
+  min-height: 18px;
+}
+.account-table select {
+  max-width: 125px;
+}
+.account-row-actions .btn {
+  margin: 3px;
+}
+.account-hint {
+  display: block;
+  max-width: 150px;
+  margin-top: 6px;
+}
+.account-results {
+  border-top: 1px solid var(--line);
+  margin-top: 22px;
+  padding-top: 18px;
+}
+.account-results ul {
+  max-height: 260px;
+  overflow-y: auto;
+}
+.account-results .btn {
+  margin: 4px 8px 4px 0;
+}
+@media (max-width: 640px) {
+  .account-actions {
+    align-items: flex-start;
+  }
+  .account-actions > span {
+    flex-basis: 100%;
+  }
+}
+</style>

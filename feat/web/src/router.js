@@ -226,7 +226,7 @@ router.beforeEach(async (to) => {
       query.tab &&
       !(
         {
-          accounts: ['import'],
+          accounts: ['open', 'import'],
           'cf-practice': ['recent', 'check'],
           moderation: ['posts', 'reports'],
           wiki: ['categories', 'pages'],

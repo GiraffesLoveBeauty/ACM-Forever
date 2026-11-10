@@ -546,6 +546,18 @@ async def api_auth_change_password():
         await db.close()
 
 
+def _check_web_account_snapshot(data, user, account):
+    """New maintenance clients pin the target generation; legacy callers remain compatible."""
+    for key, current in (("expected_account_epoch", user["account_epoch"]),
+                         ("expected_credential_version", account["credential_version"])):
+        if key not in data:
+            continue
+        if type(data[key]) is not int:
+            raise AccountLifecycleError("INVALID_SNAPSHOT", "账号版本参数必须为整数。", 400)
+        if data[key] != current:
+            raise AccountLifecycleError("ACCOUNT_CHANGED", "账号状态或版本已变化，请刷新后重新选择。", 409)
+
+
 @api.route("/admin/web-accounts", methods=["GET", "POST"])
 @admin_required
 async def api_web_accounts():
@@ -554,7 +566,7 @@ async def api_web_accounts():
         if request.method == "GET":
             async with db.execute(
                 "SELECT a.qq_id,a.role,a.must_change_password,a.is_active,a.created_at,a.updated_at,a.last_login_at,"
-                "a.temporary_password_expires_at,u.name,u.status,u.school,u.account_state,u.closed_at "
+                "a.temporary_password_expires_at,a.credential_version,u.name,u.real_name,u.status,u.school,u.account_state,u.account_epoch,u.closed_at "
                 "FROM web_accounts a JOIN users u ON u.qq_id=a.qq_id ORDER BY a.created_at DESC"
             ) as cursor:
                 items = [dict(row) for row in await cursor.fetchall()]
@@ -819,12 +831,13 @@ async def api_update_web_account(qq_id):
     try:
         await db.execute("BEGIN IMMEDIATE")
         actor = await require_web_actor(db, request.web_identity, roles={"admin", "root"})
-        await require_active_user(db, qq_id)
-        async with db.execute("SELECT role,is_active FROM web_accounts WHERE qq_id=?", (qq_id,)) as cursor:
+        user = await require_active_user(db, qq_id)
+        async with db.execute("SELECT role,is_active,credential_version FROM web_accounts WHERE qq_id=?", (qq_id,)) as cursor:
             target = await cursor.fetchone()
         if not target:
             await db.rollback()
             return jsonify({"success": False, "message": "Web 账号不存在。"}), 404
+        _check_web_account_snapshot(data, user, target)
         if target["role"] in {"admin", "root"} and (not actor or actor["role"] != "root"):
             await db.rollback()
             return jsonify({"success": False, "message": "只有 Web root 可以修改管理员账号。"}), 403
@@ -872,11 +885,12 @@ async def api_reset_web_account_password(qq_id):
     try:
         await db.execute("BEGIN IMMEDIATE")
         actor = await require_web_actor(db, request.web_identity, roles={"admin", "root"})
-        await require_active_user(db, qq_id)
-        async with db.execute("SELECT role FROM web_accounts WHERE qq_id=?", (qq_id,)) as cursor:
+        user = await require_active_user(db, qq_id)
+        async with db.execute("SELECT role,credential_version FROM web_accounts WHERE qq_id=?", (qq_id,)) as cursor:
             target = await cursor.fetchone()
         if not target:
             return jsonify({"success": False, "message": "Web 账号不存在。"}), 404
+        _check_web_account_snapshot(data, user, target)
         if target["role"] in {"admin", "root"} and (not actor or actor["role"] != "root"):
             return jsonify({"success": False, "message": "只有 Web root 可以重置管理员密码。"}), 403
         now = int(time.time())
@@ -897,63 +911,78 @@ async def api_reset_temporary_web_account_password(qq_id):
     qq_id = str(qq_id).strip()
     if not _valid_qq(qq_id):
         return jsonify({"success": False, "message": "QQ号必须为4-12位数字。"}), 400
+    data = await request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"success": False, "message": "请求数据格式错误。"}), 400
 
     db = await get_db()
     try:
-        await require_active_user(db, qq_id)
+        user = await require_active_user(db, qq_id)
         async with db.execute(
-            "SELECT role,must_change_password,is_active,credential_version,password_hash FROM web_accounts WHERE qq_id=?", (qq_id,)
+            "SELECT role,is_active,credential_version,password_hash FROM web_accounts WHERE qq_id=?", (qq_id,)
         ) as cursor:
             target = await cursor.fetchone()
         if not target:
             return jsonify({"success": False, "message": "Web 账号不存在。"}), 404
-        if target["role"] != "member" or not target["must_change_password"]:
-            return jsonify({"success": False, "message": "仅可为仍需首次改密的成员账号重发临时密码。"}), 409
+        _check_web_account_snapshot(data, user, target)
+        if target["role"] != "member":
+            return jsonify({"success": False, "message": "临时密码重设仅适用于普通成员；管理员密码请由 root 使用设置初始密码维护。"}), 409
         if not target["is_active"]:
-            return jsonify({"success": False, "message": "账号已停用，启用后才能重发临时密码。"}), 409
+            return jsonify({"success": False, "message": "账号已停用，启用后才能重设临时密码。"}), 409
+        initial_epoch = int(user["account_epoch"])
+        initial_version = int(target["credential_version"])
+        previous_hash = target["password_hash"]
     finally:
         await db.close()
 
-    initial_version = int(target["credential_version"])
     temporary_password = generate_temporary_password()
-    while verify_password(temporary_password, target["password_hash"]):
+    while verify_password(temporary_password, previous_hash):
         temporary_password = generate_temporary_password()
-    password_hash = hash_password(temporary_password)
+    # Bound hashing outside the final write lock and event loop.
+    try:
+        password_hash = await prepare_password(temporary_password)
+    except AccountCreationError as exc:
+        return jsonify({"success": False, "code": exc.code, "message": str(exc)}), exc.status
     now = int(time.time())
     expires_at = _temporary_password_expiry(now)
     db = await get_db()
     try:
         await db.execute("BEGIN IMMEDIATE")
         await require_web_actor(db, request.web_identity, roles={"admin", "root"})
-        await require_active_user(db, qq_id)
+        user = await require_active_user(db, qq_id, expected_epoch=initial_epoch)
         async with db.execute(
-            "SELECT role,must_change_password,is_active,credential_version FROM web_accounts WHERE qq_id=?", (qq_id,)
+            "SELECT a.role,a.is_active,a.credential_version,u.real_name FROM web_accounts a "
+            "JOIN users u ON u.qq_id=a.qq_id WHERE a.qq_id=?", (qq_id,)
         ) as cursor:
             target = await cursor.fetchone()
-        if (not target or target["role"] != "member" or not target["must_change_password"]
-                or not target["is_active"] or int(target["credential_version"]) != initial_version):
+        if (not target or target["role"] != "member" or not target["is_active"]
+                or int(target["credential_version"]) != initial_version):
             await db.rollback()
-            return jsonify({"success": False, "message": "账号状态已变化，请刷新列表后重试。"}), 409
+            return jsonify({"success": False, "code": "ACCOUNT_CHANGED", "message": "账号状态已变化，请刷新后重新选择。"}), 409
+        _check_web_account_snapshot(data, user, target)
         await db.execute(
-            "UPDATE web_accounts SET password_hash=?,temporary_password_expires_at=?,"
+            "UPDATE web_accounts SET password_hash=?,must_change_password=1,temporary_password_expires_at=?,"
             "credential_version=credential_version+1,updated_at=? WHERE qq_id=?",
             (password_hash, expires_at, now, qq_id),
         )
         await db.commit()
         _clear_login_failures((f"account:{qq_id}",))
-        return jsonify({
-            "qq_id": qq_id,
-            "temporary_password": temporary_password,
-            "expires_at": expires_at,
+        response = jsonify({
+            "success": True, "qq_id": qq_id, "username": qq_id,
+            "real_name": target["real_name"] or "", "account_epoch": initial_epoch,
+            "credential_version": initial_version + 1,
+            "temporary_password": temporary_password, "expires_at": expires_at,
             "must_change_password": True,
         })
+        response.headers["Cache-Control"] = "no-store"
+        return response
     except AccountLifecycleError:
         await db.rollback()
         raise
     except Exception:
         await db.rollback()
-        LOG.exception("重发 Web 临时密码失败，QQ=%s", qq_id)
-        return jsonify({"success": False, "message": "重发临时密码失败，请稍后重试。"}), 500
+        LOG.exception("重设 Web 临时密码失败，QQ=%s", qq_id)
+        return jsonify({"success": False, "message": "重设临时密码失败，请稍后核对账号状态。"}), 500
     finally:
         await db.close()
 
