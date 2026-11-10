@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { api, auth, date, notify, showError, useRequests } from '../lib/api.js';
 import { adminSessionVersion, useLeaveGuard, useParams } from '../lib/admin.js';
@@ -12,7 +12,13 @@ const route = useRoute(),
 const accounts = ref([]),
   loading = ref(true),
   loadError = ref('');
-const search = ref(route.query.account_search || ''),
+const queryValue = (key) => (typeof route.query[key] === 'string' ? route.query[key] : '');
+const routeFilters = () => ({
+  search: queryValue('account_search'),
+  school: queryValue('account_school'),
+  status: queryValue('account_status'),
+});
+const filters = reactive(routeFilters()),
   selected = ref(new Map());
 const sessionChanged = ref(false);
 const busy = ref(false),
@@ -31,18 +37,40 @@ const writeBlocked = computed(
   () => busy.value || loading.value || Boolean(loadError.value) || sessionChanged.value,
 );
 const roles = { member: '成员', admin: '管理员', root: '超级管理员' };
+const filterValues = (field) =>
+  [
+    ...new Set(
+      accounts.value
+        .map((row) => row[field])
+        .filter((value) => typeof value === 'string' && value.trim()),
+    ),
+  ].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+const options = computed(() => ({
+  schools: filterValues('school'),
+  statuses: filterValues('status'),
+}));
 const filtered = computed(() => {
-  const term = String(route.query.account_search || '')
-    .trim()
-    .toLowerCase();
+  const applied = routeFilters();
+  const term = applied.search.trim().toLowerCase();
   return accounts.value.filter(
     (row) =>
-      !term ||
-      [row.qq_id, row.display_qq_id, row.real_name, row.name, roles[row.role]].some((value) =>
-        String(value || '')
-          .toLowerCase()
-          .includes(term),
-      ),
+      (!applied.school || row.school === applied.school) &&
+      (!applied.status || row.status === applied.status) &&
+      (!term ||
+        [
+          row.qq_id,
+          row.display_qq_id,
+          row.real_name,
+          row.name,
+          row.school,
+          row.status,
+          row.role,
+          roles[row.role],
+        ].some((value) =>
+          String(value || '')
+            .toLowerCase()
+            .includes(term),
+        )),
   );
 });
 const pages = computed(() => Math.max(1, Math.ceil(filtered.value.length / 20)));
@@ -98,12 +126,31 @@ watch(
   { flush: 'pre' },
 );
 watch(
-  () => [route.query.account_search, route.query.account_page],
+  () => [
+    route.query.account_search,
+    route.query.account_school,
+    route.query.account_status,
+    route.query.account_page,
+  ],
   () => {
-    search.value = route.query.account_search || '';
+    Object.assign(filters, routeFilters());
     selected.value = new Map();
   },
 );
+function applyFilters(reset = false) {
+  if (busy.value || sessionChanged.value) return;
+  const next = reset
+    ? { search: '', school: '', status: '' }
+    : { search: filters.search.trim(), school: filters.school, status: filters.status };
+  Object.assign(filters, next);
+  selected.value = new Map();
+  return update({
+    account_search: next.search || null,
+    account_school: next.school || null,
+    account_status: next.status || null,
+    account_page: 1,
+  });
+}
 function toggle(row, checked) {
   if (writeBlocked.value || !manageable(row)) return;
   const next = new Map(selected.value);
@@ -348,23 +395,48 @@ onBeforeUnmount(() => {
       </button>
     </div>
     <button v-if="sessionChanged" class="btn primary" @click="reloadPage">重新加载页面</button>
-    <form
-      class="filters"
-      @submit.prevent="update({ account_search: search.trim(), account_page: 1 })"
-    >
+    <form class="filters account-filters" @submit.prevent="applyFilters()">
       <label
-        >搜索账号<input
-          v-model="search"
+        >关键词<input
+          v-model="filters.search"
           type="search"
-          placeholder="QQ、真实姓名或昵称"
-          :disabled="busy"
+          placeholder="QQ、真实姓名、昵称、学校或身份"
+          :disabled="busy || sessionChanged"
       /></label>
-      <button class="btn primary" :disabled="busy">搜索</button>
+      <label
+        >学校<select v-model="filters.school" aria-label="学校" :disabled="busy || sessionChanged">
+          <option value="">全部学校</option>
+          <option v-for="school in options.schools" :key="school" :value="school">
+            {{ school }}
+          </option>
+          <option
+            v-if="filters.school && !options.schools.includes(filters.school)"
+            :value="filters.school"
+          >
+            {{ filters.school }}
+          </option>
+        </select></label
+      >
+      <label
+        >身份<select v-model="filters.status" aria-label="身份" :disabled="busy || sessionChanged">
+          <option value="">全部身份</option>
+          <option v-for="status in options.statuses" :key="status" :value="status">
+            {{ status }}
+          </option>
+          <option
+            v-if="filters.status && !options.statuses.includes(filters.status)"
+            :value="filters.status"
+          >
+            {{ filters.status }}
+          </option>
+        </select></label
+      >
+      <button class="btn primary" :disabled="busy || sessionChanged">搜索</button>
       <button
         class="btn"
         type="button"
-        :disabled="busy"
-        @click="update({ account_search: null, account_page: 1 })"
+        :disabled="busy || sessionChanged"
+        @click="applyFilters(true)"
       >
         重置
       </button>
@@ -379,7 +451,7 @@ onBeforeUnmount(() => {
       </button>
       <template v-if="auth.role === 'root'">
         <label
-          >目标权限<select v-model="batchRole" :disabled="writeBlocked">
+          >目标权限<select v-model="batchRole" aria-label="目标权限" :disabled="writeBlocked">
             <option v-for="(label, role) in roles" :key="role" :value="role">{{ label }}</option>
           </select></label
         >
@@ -505,7 +577,7 @@ onBeforeUnmount(() => {
           <tr v-if="!rows.length">
             <td colspan="8">
               {{
-                route.query.account_search
+                routeFilters().search || routeFilters().school || routeFilters().status
                   ? '没有匹配的账号。'
                   : '暂无已开通账号，请前往「开通账号」。'
               }}
@@ -565,6 +637,18 @@ onBeforeUnmount(() => {
 .account-management {
   min-width: 0;
 }
+.account-filters {
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.account-filters label:first-child {
+  flex: 1;
+  min-width: 180px;
+}
+.account-filters select {
+  width: 100%;
+  min-width: 130px;
+}
 .account-actions {
   display: flex;
   flex-wrap: wrap;
@@ -619,6 +703,10 @@ onBeforeUnmount(() => {
   margin: 4px 8px 4px 0;
 }
 @media (max-width: 640px) {
+  .account-filters label {
+    flex: 1 1 100%;
+    min-width: 0 !important;
+  }
   .account-actions {
     align-items: flex-start;
   }
