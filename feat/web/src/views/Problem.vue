@@ -103,7 +103,8 @@ async function copySample(index, kind, button) {
   }
 }
 function copyEmbedded(event) {
-  if (event.target.closest?.('button[data-statement-sample="true"]')) return copyStatementSample(event);
+  if (event.target.closest?.('button[data-statement-sample="true"]'))
+    return copyStatementSample(event);
   const button = event.target.closest?.('button[data-sample-index][data-sample-kind]');
   if (button && event.currentTarget.contains(button))
     copySample(Number(button.dataset.sampleIndex), button.dataset.sampleKind, button);
@@ -113,7 +114,15 @@ watch(() => [route.query.platform, route.query.problem_id], load, { immediate: t
 <template>
   <main class="community-main problem-page">
     <RouterLink class="forum-back-link" :to="back"
-      >← {{ back === '/home.html' ? '返回个人中心' : '返回题库' }}</RouterLink
+      >←
+      {{
+        back === '/home.html'
+          ? '返回个人中心'
+          : back.startsWith('/training-tasks.html') ||
+              back.startsWith('/admin.html?section=training')
+            ? '返回训练任务'
+            : '返回题库'
+      }}</RouterLink
     >
     <h1>{{ detail?.problem_name || route.query.problem_id || '题目详情' }}</h1>
     <div v-if="detail" class="problem-overview">
@@ -144,7 +153,11 @@ watch(() => [route.query.platform, route.query.problem_id], load, { immediate: t
       <button class="btn" @click="load">重试</button>
     </section>
     <template v-else-if="detail">
-      <SecondaryProcessingPanel :key="`${detail.platform}:${detail.problem_id}`" :platform="detail.platform" :problem-id="detail.problem_id" />
+      <SecondaryProcessingPanel
+        :key="`${detail.platform}:${detail.problem_id}`"
+        :platform="detail.platform"
+        :problem-id="detail.problem_id"
+      />
       <p id="problem-message" class="muted">
         <template v-if="detail.content_available"
           >已采集{{ pdf ? ' PDF' : '' }}题面<span v-if="!pdf"> · {{ samples.length }} 组样例</span

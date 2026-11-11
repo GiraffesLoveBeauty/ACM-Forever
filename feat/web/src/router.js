@@ -227,6 +227,7 @@ router.beforeEach(async (to) => {
       !(
         {
           accounts: ['open', 'import'],
+          training: ['edit', 'overview', 'progress'],
           'cf-practice': ['recent', 'check'],
           moderation: ['posts', 'reports'],
           wiki: ['categories', 'pages'],
