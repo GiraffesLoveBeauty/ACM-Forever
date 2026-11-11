@@ -101,7 +101,7 @@ async def detail(db, task_id):
 
 def check_version(task, data):
     if type(data.get("version")) is not int or data["version"] != task["version"]:
-        raise TaskError("任务已被其他操作更新，请重新加载后确认。", "version_conflict", 409)
+        raise TaskError("任务已被其他操作更新，请重新加载后确认。", "version_conflict", 409, version=task["version"])
 
 
 async def audit(db, task_id, identity, action, *, reason="", before=None, after=None):
