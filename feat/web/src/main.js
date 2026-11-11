@@ -21,6 +21,7 @@ import './wiki.css';
 import './markdown-code.css';
 import './statement-math.css';
 import './header-layout.css';
+import './training-tasks.css';
 const app = createApp(App);
 const renderMath = (element) => window.renderForumMath?.(element);
 app.directive('forum-math', { mounted: renderMath, updated: renderMath });
