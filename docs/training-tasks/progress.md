@@ -14,3 +14,7 @@
 成员接口：GET /api/me/training-tasks?tab=active|upcoming|history|all&page=1；GET /api/me/training-tasks/{id}；POST /api/me/training-tasks/{id}/refresh（空对象，202）。通过详情中的 refresh 查询本人队列状态，沿用后台同步执行器；相同运行任务去重，持久化 60 秒冷却。
 
 管理进度接口：GET /api/admin/training-tasks/{id}/progress，支持 page/page_size、identity、status、search；GET /api/admin/training-tasks/{id}/progress/{recipient_id} 查看逐题证据。接口不接受客户端指定成员来改变授权主体。
+
+核验读状态与已确认 AC 证据分离。聚合、管理摘要和逐题详情共用当前账号/绑定、同步状态与覆盖时间的派生规则；GET 不写进度表、不排队、不请求外部 OJ。发布时未绑定的成员首次绑定后显示 coverage_missing / pending_sync 等待同步状态，可以从任务页发起刷新；后续绑定代际仍被隔离。
+
+有完整历史且绑定匹配时，若 coverage_through_at 小于 min(当前 UTC 秒 − 60, 截止时间)，读取即时显示 pending_sync，并计入待核验人数。摘要按接收人/平台/冻结绑定批量分组，仍为一次 SELECT，不逐成员读取。覆盖已包含整个周期的任务在结束后不会仅因时间推进失效；已有 AC 最小证据、完成成绩及核验时间均保留。
