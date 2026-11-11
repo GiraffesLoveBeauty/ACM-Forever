@@ -191,7 +191,7 @@ async def my_task(db, identity, task_id):
     result = await progress.personal_detail(db, task_id, identity)
     task_id_in_queue = result["recipient"].get("refresh_task_id")
     found = next((t for t in await queue_snapshots() if t["id"] == task_id_in_queue and str(t.get("qq_id")) == identity["qq_id"] and t.get("account_epoch") == identity["account_epoch"]), None)
-    result["refresh"] = public_refresh(found) if found else None
+    result["refresh"] = public_refresh(found) if found else {"id": task_id_in_queue, "status": "interrupted"} if task_id_in_queue else None
     return jsonify(result)
 
 
@@ -209,6 +209,9 @@ async def refresh(db, identity, task_id):
         raise service.TaskError("请先在个人中心绑定 Codeforces 账号，再返回当前任务。", "binding_required", 409)
     for task in await queue_snapshots():
         if str(task.get("qq_id")) == identity["qq_id"] and task.get("account_epoch") == identity["account_epoch"] and "codeforces" in str(task.get("platform", "")) and task.get("status") in {"queued", "running"}:
+            captured = task.get("bindings", {}).get("codeforces")
+            if captured and (str(captured.get("account", "")).casefold() != str(user["cf_handle"]).casefold() or captured.get("version") != user["cf_binding_version"]):
+                continue
             await db.execute("UPDATE training_task_recipients SET refresh_task_id=? WHERE id=?", (task["id"], detail["recipient"]["id"]))
             return jsonify({"status": task["status"], "task": public_refresh(task), "deduplicated": True}), 202
     now = int(time.time())
