@@ -18,6 +18,7 @@
 | 范围 | 实际结果 |
 | --- | --- |
 | 后端全量 `python -m unittest discover -s feat/api/tests -p "test_*.py"` | 409 项：408 通过，1 项因 Windows 无符号链接权限跳过（既有 test_symlink_is_rejected）；无失败 |
+| 版本冲突当前 version / request_id 契约定向回归 | 补齐响应元数据后 1 项通过 |
 | Vue 全量 `pnpm test` | 409 项通过 |
 | 既有 Web 单测（API tests 工作流末步的五个 .cjs 文件） | 31 项通过 |
 | 新增浏览器流程 `pnpm test:e2e e2e/training-tasks.spec.js` | 桌面 / Pixel 5 共 6 项通过 |

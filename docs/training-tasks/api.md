@@ -19,7 +19,7 @@
 | `starts_at` / `due_at` | UTC 整数秒或带时区的 ISO 时间；开始须早于截止，界面显示 Asia/Shanghai；草稿可留空 |
 | `rule` | `period_ac` 或 `historical_ac` |
 | `problems` | 有序 `{platform, problem_id}` 数组，服务端规范化并去重；去重后最多 50 题，全部必做 |
-| `version` | PATCH、DELETE、预览、发布、延期及取消均必填当前整数版本；过期返回 409 |
+| `version` | PATCH、DELETE、预览、发布、延期及取消均必填当前整数版本；过期返回 409，并附当前 version |
 
 PATCH 只更新提供的白名单字段；省略字段保留，修改后版本递增并使预览失效。题目标题、难度、标签和链接由站内题库补全；没有题面仍保留原题链接和内容状态。
 
