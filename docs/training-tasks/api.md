@@ -6,7 +6,7 @@
 
 管理员入口 `/admin.html?section=training` 替换原后台训练管理；成员入口 `/training-tasks.html`。原今日训练、共享 TrainingPanel、随机挑战、Bot 和移动端旧接口保留。业务身份动态读取 `users.status`，多选取并集并去重；Web 角色仅负责授权。
 
-`ACM_TRAINING_TASKS_ENABLED` 默认 `false`。关闭时隐藏个人中心入口，发布返回 `feature_disabled`，历史查询及证据仍保留。管理员接口要求 admin/root 会话，成员接口使用会话 QQ 和 `account_epoch`，不能指定他人；所有变更要求 CSRF，写事务内重新核验操作者。响应使用 `Cache-Control: no-store`。
+`ACM_TRAINING_TASKS_ENABLED` 默认 `true`，未配置时个人中心显示训练任务入口，管理员可按正常流程发布。显式设置为 `false` 并重启服务后隐藏个人中心入口，发布返回 `feature_disabled`，历史查询及证据仍保留。管理员接口要求 admin/root 会话，成员接口使用会话 QQ 和 `account_epoch`，不能指定他人；所有变更要求 CSRF，写事务内重新核验操作者。响应使用 `Cache-Control: no-store`。
 
 首期仅支持 Codeforces 的 `period_ac`（默认周期内 AC）和 `historical_ac`（历史 AC 可计入）。其他平台可保存草稿，在证据能力验收前禁止发布。GET 仅读站内数据，刷新复用异步同步队列。
 

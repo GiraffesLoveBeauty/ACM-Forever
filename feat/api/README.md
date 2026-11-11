@@ -133,7 +133,7 @@ CF 的全平台题库接口可能只返回 Div.1 / Div.2 共用题的一份入�
 | `ACM_LUOGU_USER_SYNC_ENABLED` | 是否抓取用户洛谷过题记录，默认 `false`（暂停）；设为 `true` 并重启后恢复 |
 | `ACM_LUOGU_COOKIE` / `ACM_LUOGU_CSRF_TOKEN` | 洛谷凭据；仅配置凭据不会解除过题记录同步暂停 |
 | `ACM_CF_API_KEY` / `ACM_CF_API_SECRET` | 需要签名访问 Codeforces API 时使用 |
-| `ACM_TRAINING_TASKS_ENABLED` | 管理员训练任务的新发放与个人中心入口开关，默认 `false`；历史查询保留，首期只开放 Codeforces 核验 |
+| `ACM_TRAINING_TASKS_ENABLED` | 管理员训练任务的新发放与个人中心入口开关，默认 `true`；显式设置 `false` 可暂停新发放并隐藏入口，历史查询保留，首期只开放 Codeforces 核验 |
 | `ACM_CF_DATA_TTL_HOURS` | CF 练习赛选题的成员数据有效期，默认 24 小时；整数 1–720 |
 | `ACM_CF_PROBLEM_TTL_HOURS` | CF 题目和比赛列表核实有效期，默认 6 小时；整数 1–720 |
 | `ACM_CJLU_USERNAME` / `ACM_CJLU_PASSWORD` | 需要访问校 OJ 时使用 |
