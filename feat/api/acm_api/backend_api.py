@@ -487,7 +487,7 @@ async def api_auth_me():
             avatar_url = user["avatar_url"] if user else None
         finally:
             await db.close()
-    return jsonify({"authenticated": True, "csrf_token": session.get("webui_csrf"), "root": identity["role"] == "root", "role": identity["role"], "qq_id": identity["qq_id"], "must_change_password": identity["must_change_password"], "avatar_url": avatar_url, "account_epoch": identity.get("account_epoch"), "account_closure_enabled": current_app.config.get("ACCOUNT_CLOSURE_ENABLED", False)})
+    return jsonify({"authenticated": True, "csrf_token": session.get("webui_csrf"), "root": identity["role"] == "root", "role": identity["role"], "qq_id": identity["qq_id"], "must_change_password": identity["must_change_password"], "avatar_url": avatar_url, "account_epoch": identity.get("account_epoch"), "account_closure_enabled": current_app.config.get("ACCOUNT_CLOSURE_ENABLED", False), "training_tasks_enabled": current_app.config.get("TRAINING_TASKS_ENABLED", False)})
 
 
 @api.route("/auth/change-password", methods=["POST"])

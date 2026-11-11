@@ -403,7 +403,7 @@ def create_app(*, daily_problem_sync=False, member_sync=False):
 _PUBLIC_PAGES = {
     "account-closure.html", "index.html", "login.html", "post.html", "wiki.html", "forum-moderation.html",
     "change-password.html", "home.html", "admin.html", "notifications.html", "my-post.html",
-    "leaderboard.html", "challenge.html", "reviews.html", "problem-bank.html", "my-problems.html", "problem.html",
+    "leaderboard.html", "training-tasks.html", "challenge.html", "reviews.html", "problem-bank.html", "my-problems.html", "problem.html",
     "submissions.html", "workspace.html", "contest-review.html", "member.html", "compose.html",
     "tasks.html", "settings.html", "cf-practice.html", "auth-unavailable.html", "forbidden.html",
 }

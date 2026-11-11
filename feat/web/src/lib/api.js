@@ -10,6 +10,7 @@ const anonymousAuth = () => ({
   avatar_url: null,
   must_change_password: false,
   account_closure_enabled: false,
+  training_tasks_enabled: false,
 });
 export const auth = reactive(anonymousAuth());
 export function setAuth(data, newSession = false) {
