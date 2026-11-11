@@ -146,11 +146,12 @@ async def admin_progress(db, identity, task_id):
 @training_task_api.get("/admin/training-tasks/<int:task_id>/progress/<int:recipient_id>")
 @endpoint()
 async def recipient_progress(db, identity, task_id, recipient_id):
-    recipients = await progress.recipient_summaries(db, [task_id])
+    now = int(time.time())
+    recipients = await progress.recipient_summaries(db, [task_id], now=now)
     recipient = next((r for r in recipients if r["id"] == recipient_id), None)
     if not recipient:
         raise service.TaskError("接收记录不存在。", "not_found", 404)
-    return jsonify({"recipient": recipient, "problems": await progress.problem_progress(db, recipient)})
+    return jsonify({"recipient": recipient, "problems": await progress.problem_progress(db, recipient, now=now)})
 
 
 async def queue_snapshots():

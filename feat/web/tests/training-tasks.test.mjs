@@ -250,3 +250,102 @@ test('actual site guard preserves training editor and progress query parameters'
     realRouter.options.history.destroy();
   }
 });
+
+function holdResponse(matches) {
+  const fetcher = globalThis.fetch;
+  let release,
+    started,
+    held = false;
+  const gate = new Promise((resolve) => (release = resolve));
+  const pending = new Promise((resolve) => (started = resolve));
+  globalThis.fetch = async (url, options = {}) => {
+    const result = await fetcher(url, options);
+    if (!held && matches(url, options)) {
+      held = true;
+      started();
+      await gate;
+    }
+    return result;
+  };
+  return { pending, release: () => release() };
+}
+
+test('saving retains later text and keeps it unsaved until an explicit second save', async () => {
+  await setupEditor();
+  await click('保存草稿');
+  await set('任务标题', 'Submitted title');
+  const delayed = holdResponse((url, options) => options.method === 'PATCH');
+  const saving = click('保存草稿');
+  try {
+    await delayed.pending;
+    await set('任务标题', 'Text entered during saving');
+    await set('训练说明', 'Description entered during saving', 'textarea');
+  } finally {
+    delayed.release();
+  }
+  await saving;
+  assert.equal(stored.title, 'Submitted title');
+  assert.equal(control('任务标题').value, 'Text entered during saving');
+  assert.equal(control('训练说明', 'textarea').value, 'Description entered during saving');
+  assert.equal(guard({ path: '/admin.html', query: { section: 'settings' } }), false);
+  await click('保存草稿');
+  assert.equal(stored.title, 'Text entered during saving');
+  assert.equal(stored.description, 'Description entered during saving');
+  assert.equal(guard({ path: '/admin.html', query: { section: 'settings' } }), true);
+});
+
+test('save and preview keeps concurrent identities and dates in the editor without previewing stale data', async () => {
+  await setupEditor();
+  await click('下一步');
+  await set('动态实验组', ['动态实验组']);
+  const originalDue = control('截止时间').value;
+  const laterDue = localTime(Math.floor(Date.now() / 1000) + 14 * 86400);
+  const delayed = holdResponse(
+    (url, options) => url === '/api/admin/training-tasks' && options.method === 'POST',
+  );
+  const saving = click('保存并预览');
+  try {
+    await delayed.pending;
+    await set('动态实验组', []);
+    await set('截止时间', laterDue);
+  } finally {
+    delayed.release();
+  }
+  await saving;
+  assert.deepEqual(stored.statuses, ['动态实验组']);
+  assert.equal(stored.due_at, utcTime(originalDue));
+  assert.equal(mounted.router.currentRoute.value.query.step, '2');
+  assert.equal(control('截止时间').value, laterDue);
+  assert.equal(calls.filter((call) => call.url.includes('/audience-preview')).length, 0);
+  assert.equal(guard({ path: '/admin.html', query: { section: 'settings' } }), false);
+  const savedVersion = stored.version;
+  await click('保存并预览');
+  assert(textOf(mounted.root).includes('请至少选择一种成员身份'));
+  assert.equal(stored.version, savedVersion);
+  await set('动态实验组', ['动态实验组']);
+  await click('保存并预览');
+  assert.equal(stored.due_at, utcTime(laterDue));
+  assert.equal(mounted.router.currentRoute.value.query.step, '3');
+});
+
+test('edits made while a preview response is pending must be saved and previewed again', async () => {
+  await setupEditor();
+  await click('下一步');
+  await set('动态实验组', ['动态实验组']);
+  const delayed = holdResponse((url) => url.includes('/audience-preview'));
+  const saving = click('保存并预览');
+  const laterDue = localTime(Math.floor(Date.now() / 1000) + 21 * 86400);
+  try {
+    await delayed.pending;
+    await set('截止时间', laterDue);
+  } finally {
+    delayed.release();
+  }
+  await saving;
+  assert.equal(control('截止时间').value, laterDue);
+  assert.equal(mounted.router.currentRoute.value.query.step, '2');
+  assert.equal(guard({ path: '/admin.html', query: { section: 'settings' } }), false);
+  await click('保存并预览');
+  assert.equal(mounted.router.currentRoute.value.query.step, '3');
+  assert.equal(stored.due_at, utcTime(laterDue));
+});
