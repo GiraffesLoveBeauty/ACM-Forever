@@ -108,6 +108,7 @@ def create_app(*, daily_problem_sync=False, member_sync=False):
     app.config["DB_PATH"] = str(db_path)
     app.config["ACCOUNT_CLOSURE_ENABLED"] = _bool_env("ACM_ACCOUNT_CLOSURE_ENABLED", False)
     app.config["ACCOUNT_IMPORT_ENABLED"] = _bool_env("ACM_ACCOUNT_IMPORT_ENABLED", True)
+    app.config["TRAINING_TASKS_ENABLED"] = _bool_env("ACM_TRAINING_TASKS_ENABLED", False)
     app.config["WIKI_CACHE_ENABLED"] = _bool_env("ACM_WIKI_CACHE_ENABLED", True)
     app.extensions["wiki_public_cache"] = WikiResponseCache()
     app.config["AVATAR_UPLOAD_DIR"] = db_path.parent / "uploads" / "avatars"
@@ -193,6 +194,8 @@ def create_app(*, daily_problem_sync=False, member_sync=False):
     app.extensions["account_closure_cleanup"] = closure_cleanup
     from .acm_api.account_import_api import account_import_api, maintenance_once, maintenance_loop
     app.register_blueprint(account_import_api)
+    from .acm_api.training_task_api import training_task_api
+    app.register_blueprint(training_task_api)
 
     @app.before_serving
     async def initialize_service():
@@ -400,7 +403,7 @@ def create_app(*, daily_problem_sync=False, member_sync=False):
 _PUBLIC_PAGES = {
     "account-closure.html", "index.html", "login.html", "post.html", "wiki.html", "forum-moderation.html",
     "change-password.html", "home.html", "admin.html", "notifications.html", "my-post.html",
-    "leaderboard.html", "challenge.html", "reviews.html", "problem-bank.html", "my-problems.html", "problem.html",
+    "leaderboard.html", "training-tasks.html", "challenge.html", "reviews.html", "problem-bank.html", "my-problems.html", "problem.html",
     "submissions.html", "workspace.html", "contest-review.html", "member.html", "compose.html",
     "tasks.html", "settings.html", "cf-practice.html", "auth-unavailable.html", "forbidden.html",
 }

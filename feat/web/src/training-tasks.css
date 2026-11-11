@@ -1,0 +1,514 @@
+.training-tasks {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+  color: var(--text);
+}
+.training-tasks h1,
+.training-tasks h2,
+.training-tasks h3,
+.training-tasks p {
+  margin: 0;
+}
+.training-tasks h1 {
+  font-size: 28px;
+}
+.training-tasks h2 {
+  font-size: 20px;
+}
+.training-tasks h3 {
+  font-size: 16px;
+}
+.tt-hero {
+  padding: 28px;
+  background: var(--hero-bg, #20271f);
+  color: var(--hero-text, #f5f8f0);
+  border-bottom: 3px solid var(--accent, #e4f32f);
+  display: flex;
+  gap: 20px;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.tt-hero p {
+  color: var(--hero-muted, #bdc7b7);
+  margin-top: 8px;
+}
+.tt-kicker {
+  font: 11px/1.7 var(--font-data, monospace);
+  letter-spacing: 1px;
+  opacity: 0.8;
+}
+.tt-hero-mark {
+  font: 24px var(--font-data, monospace);
+  color: var(--accent, #e4f32f);
+  white-space: nowrap;
+}
+.tt-panel {
+  padding: 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  min-width: 0;
+}
+.tt-stack {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.tt-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.tt-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.tt-muted {
+  color: var(--muted);
+  font-size: 13px;
+}
+.tt-caption {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 6px !important;
+  line-height: 1.8;
+}
+.tt-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.tt-stat {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--text);
+  background: var(--panel);
+}
+.tt-stat strong {
+  display: block;
+  font: 700 30px/1.5 var(--font-data, monospace);
+}
+.tt-stat span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.tt-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 3px 7px;
+  background: color-mix(in srgb, var(--text) 6%, var(--panel));
+  color: var(--muted);
+  border: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.tt-tag.active,
+.tt-tag.on_time {
+  color: light-dark(#216747, #91d5ac);
+  background: light-dark(#e2f0e7, #253d2e);
+  border-color: light-dark(#bed8c5, #3d684a);
+}
+.tt-tag.upcoming {
+  color: light-dark(#3957a1, #acbfff);
+  background: light-dark(#e7ecf8, #29364c);
+}
+.tt-tag.late,
+.tt-tag.draft,
+.tt-tag.history_ac {
+  color: light-dark(#855518, #f0c179);
+  background: light-dark(#f5ebd7, #493c28);
+}
+.tt-tag.cancelled {
+  color: light-dark(#a44038, #f4a59c);
+  background: light-dark(#f8e5df, #4a302a);
+}
+.tt-note {
+  padding: 14px 16px;
+  background: var(--panel);
+  border-left: 3px solid var(--accent, #e4f32f);
+  font-size: 13px;
+  line-height: 1.8;
+}
+.tt-error {
+  padding: 14px 16px;
+  border: 1px solid light-dark(#a44038, #f4a59c);
+  color: light-dark(#96342c, #f4a59c);
+  background: var(--panel);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.tt-empty {
+  padding: 40px 22px;
+  text-align: center;
+  border: 1px dashed var(--line);
+  color: var(--muted);
+  background: var(--panel);
+}
+.tt-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+}
+.tt-tabs .btn[aria-current='page'],
+.tt-steps button[aria-current='step'] {
+  background: var(--accent);
+  color: var(--on-accent, #20271f);
+  border-color: var(--accent);
+}
+.tt-steps {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.tt-steps button {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  padding: 10px 16px;
+  font: inherit;
+}
+.tt-steps b {
+  font-family: var(--font-data, monospace);
+  margin-right: 8px;
+}
+.tt-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.tt-field {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+.tt-field > span,
+.tt-field > label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.tt-field input,
+.tt-field select,
+.tt-field textarea,
+.tt-filter input,
+.tt-filter select {
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--panel);
+  color: var(--text);
+  padding: 10px 12px;
+  max-width: 100%;
+  min-width: 0;
+  font: inherit;
+}
+.tt-field textarea {
+  resize: vertical;
+  min-height: 85px;
+}
+.tt-field input[type='datetime-local'] {
+  width: 100%;
+}
+.tt-check {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 10px 13px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  cursor: pointer;
+}
+.tt-check input {
+  accent-color: var(--text);
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.tt-check:has(input:checked) {
+  border-color: var(--text);
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
+}
+.tt-rule {
+  align-items: flex-start;
+}
+.tt-rule small {
+  display: block;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.tt-rule input {
+  margin-top: 5px;
+}
+.tt-filter {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+.tt-filter input {
+  flex: 1;
+  min-width: 130px;
+}
+.tt-filter label {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+}
+.tt-table-wrap {
+  overflow: auto;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.tt-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  min-width: 620px;
+  font-size: 13px;
+}
+.tt-table th,
+.tt-table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+.tt-table th {
+  background: color-mix(in srgb, var(--text) 6%, var(--panel));
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 500;
+}
+.tt-table td:first-child {
+  max-width: 340px;
+  overflow-wrap: anywhere;
+}
+.tt-table .tt-caption {
+  font-size: 12px;
+}
+.tt-table tr:last-child td {
+  border-bottom: 0;
+}
+.tt-title-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.tt-problems {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tt-problem {
+  padding: 16px;
+  border: 1px solid var(--line);
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  background: var(--panel);
+  min-width: 0;
+}
+.tt-problem-num {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--text) 8%, var(--panel));
+  font: 13px var(--font-data, monospace);
+  flex: none;
+}
+.tt-problem-copy {
+  flex: 1;
+  min-width: 0;
+}
+.tt-problem-copy strong {
+  overflow-wrap: anywhere;
+}
+.tt-problem-actions {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.tt-progress {
+  height: 5px;
+  background: color-mix(in srgb, var(--text) 10%, var(--panel));
+  margin-top: 12px;
+}
+.tt-progress span {
+  height: 100%;
+  display: block;
+  background: light-dark(#256649, #8dd4a9);
+}
+.tt-task-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.tt-task-card {
+  display: grid;
+  gap: 14px;
+}
+.tt-task-card .btn {
+  justify-self: start;
+}
+.tt-description {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+}
+.tt-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.tt-detail-grid > div {
+  padding: 13px;
+  background: color-mix(in srgb, var(--text) 5%, var(--panel));
+  border-left: 2px solid var(--line);
+}
+.tt-detail-grid dt {
+  font-size: 12px;
+  color: var(--muted);
+}
+.tt-detail-grid dd {
+  margin: 6px 0 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.tt-catalog {
+  max-height: 330px;
+  overflow: auto;
+}
+.tt-catalog-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.tt-catalog-row > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.tt-bar-actions {
+  position: sticky;
+  bottom: 8px;
+  padding: 14px 18px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 3px 16px #0001;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  z-index: 2;
+}
+.training-tasks button:focus-visible,
+.training-tasks a:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 3px;
+}
+.training-tasks button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+@media (max-width: 800px) {
+  .tt-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .tt-task-cards {
+    grid-template-columns: 1fr;
+  }
+  .tt-problem {
+    flex-wrap: wrap;
+  }
+  .tt-problem-actions {
+    width: 100%;
+    justify-content: flex-start;
+    padding-left: 44px;
+  }
+  .tt-hero {
+    padding: 22px;
+  }
+  .tt-hero h1 {
+    font-size: 25px;
+  }
+}
+@media (max-width: 520px) {
+  .tt-form-grid,
+  .tt-detail-grid {
+    grid-template-columns: 1fr;
+  }
+  .tt-panel {
+    padding: 16px;
+  }
+  .tt-steps {
+    gap: 4px;
+  }
+  .tt-steps button {
+    padding: 9px 8px;
+    font-size: 12px;
+    flex: 1;
+  }
+  .tt-steps b {
+    margin-right: 4px;
+  }
+  .tt-hero {
+    padding: 20px 16px;
+    gap: 12px;
+  }
+  .tt-hero-mark {
+    font-size: 17px;
+  }
+  .tt-problem {
+    padding: 12px;
+    gap: 10px;
+  }
+  .tt-problem-actions {
+    padding-left: 38px;
+  }
+  .tt-bar-actions {
+    position: static;
+    padding: 12px;
+  }
+  .tt-filter label {
+    width: 100%;
+  }
+  .tt-filter input,
+  .tt-filter select {
+    width: 100%;
+  }
+  .tt-stat {
+    padding: 13px;
+  }
+  .tt-stat strong {
+    font-size: 25px;
+  }
+  .training-tasks {
+    gap: 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .training-tasks * {
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}

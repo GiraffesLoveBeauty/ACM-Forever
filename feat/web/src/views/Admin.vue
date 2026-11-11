@@ -30,6 +30,7 @@ onBeforeRouteLeave((to) => leaveGuard(to));
 onBeforeRouteUpdate((to) => {
   if (
     (to.query.section || 'accounts') !== section.value ||
+    (section.value === 'training' && to.fullPath !== route.fullPath) ||
     (section.value === 'accounts' &&
       (to.query.tab !== route.query.tab || to.query.import_id !== route.query.import_id))
   )

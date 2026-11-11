@@ -71,3 +71,9 @@
 
 - [wiki.md（Wiki 知识手册、共享 Markdown、接口与备份恢复）](docs/wiki.md)
 - [issue-83-account-closure.md（账号注销、同 QQ 新建账号与发布验收）](docs/issue-83-account-closure.md)
+
+- [api.md（训练任务存储与发布契约）](docs/training-tasks/api.md)
+- [progress.md（训练任务证据核验与同步）](docs/training-tasks/progress.md)
+- [admin.md（后台训练任务操作与路由）](docs/training-tasks/admin.md)
+- [member.md（成员训练任务入口与状态）](docs/training-tasks/member.md)
+- [acceptance.md（训练任务联调、性能与发布回退）](docs/training-tasks/acceptance.md)

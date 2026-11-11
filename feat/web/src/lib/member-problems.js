@@ -1,3 +1,4 @@
+import { trainingReturn } from './training-tasks.js';
 const platforms = ['codeforces', 'luogu', 'atcoder', 'nowcoder', 'cjlu'];
 export function memberFilters(query = {}) {
   const number = Number(query.page);
@@ -45,6 +46,8 @@ export function memberQuery(filters) {
   );
 }
 export function problemReturn(value, manager = false) {
+  const training = trainingReturn(value);
+  if (training && (manager || !training.startsWith('/admin.html'))) return training;
   if (value === '/home.html') return value;
   if (typeof value === 'string' && !/[\\\x00-\x1f]/.test(value)) {
     try {

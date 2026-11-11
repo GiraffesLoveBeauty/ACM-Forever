@@ -4,6 +4,7 @@ import { useRequests, auth, avatar, external, date, showError } from '../lib/api
 import { compressAvatar } from '../lib/avatar.js';
 import CommunityArt from '../components/CommunityArt.vue';
 import OjBindings from '../components/OjBindings.vue';
+import AssignedTaskOverview from '../components/AssignedTaskOverview.vue';
 import { problemLink } from '../lib/member-problems.js';
 const request = useRequests(),
   profile = ref(),
@@ -174,14 +175,22 @@ onBeforeUnmount(() => {
     </section>
     <section class="community-panel">
       <div class="panel-heading"><h2>训练与题目</h2></div>
-      <p class="panel-caption">查看本人的今日训练、题库和赛事复盘。</p>
+      <p class="panel-caption">
+        查看本人的今日训练、{{ auth.training_tasks_enabled ? '训练任务、' : '' }}题库和赛事复盘。
+      </p>
       <div class="chips">
         <RouterLink class="btn" to="/challenge.html">今日训练</RouterLink
+        ><RouterLink
+          v-if="auth.training_tasks_enabled"
+          class="btn primary"
+          to="/training-tasks.html"
+          >训练任务</RouterLink
         ><RouterLink class="btn" to="/my-problems.html">题库</RouterLink
         ><RouterLink class="btn" to="/contest-review.html">赛事复盘</RouterLink
         ><RouterLink class="btn" to="/change-password.html?next=/home.html">修改密码</RouterLink>
       </div>
     </section>
+    <AssignedTaskOverview v-if="auth.training_tasks_enabled" />
     <div class="personal-columns">
       <section class="community-panel profile-details-panel">
         <div class="panel-heading">

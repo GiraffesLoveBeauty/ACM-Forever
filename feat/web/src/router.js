@@ -113,6 +113,11 @@ const router = createRouter({
       meta: { title: '题库' },
     },
     {
+      path: '/training-tasks.html',
+      component: () => import('./views/TrainingTasks.vue'),
+      meta: { title: '训练任务', body: 'member-activity-page' },
+    },
+    {
       path: '/challenge.html',
       component: () => import('./views/MemberTraining.vue'),
       meta: { title: '今日训练', body: 'member-activity-page' },
@@ -227,6 +232,7 @@ router.beforeEach(async (to) => {
       !(
         {
           accounts: ['open', 'import'],
+          training: ['edit', 'overview', 'progress'],
           'cf-practice': ['recent', 'check'],
           moderation: ['posts', 'reports'],
           wiki: ['categories', 'pages'],

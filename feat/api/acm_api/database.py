@@ -376,6 +376,7 @@ async def connect_db(db_path):
     await db.execute("INSERT OR IGNORE INTO schema_migrations(name,applied_at) VALUES('users_empty_nickname_v1',?)", (int(time.time()),))
     await db.executescript(Path(__file__).with_name("wiki.sql").read_text(encoding="utf-8"))
     await db.executescript(Path(__file__).with_name("account_closure.sql").read_text(encoding="utf-8"))
+    await db.executescript(Path(__file__).with_name("training_tasks.sql").read_text(encoding="utf-8"))
     async with db.execute("PRAGMA table_info(cf_practice_job_members)") as cursor:
         columns = {row["name"] for row in await cursor.fetchall()}
     if "account_epoch" not in columns:

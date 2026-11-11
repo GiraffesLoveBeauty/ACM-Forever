@@ -288,9 +288,9 @@ for (const role of ['member', 'admin', 'root']) {
   });
 }
 
-test('administration keeps explicit member selection and administrative endpoints', async () => {
+test('legacy shared training panel and contest administration retain their endpoints', async () => {
   identity('admin');
-  AdminTraining ||= (await import(await loadSfc('src/admin/Training.vue'))).default;
+  AdminTraining ||= (await import(await loadSfc('src/components/TrainingPanel.vue'))).default;
   AdminReview ||= (await import(await loadSfc('src/admin/Contests.vue'))).default;
   mounted = await mount(AdminTraining, await routes(), '/home.html?qq_id=99999999');
   assert.ok(textOf(mounted.root).includes('成员 QQ'));

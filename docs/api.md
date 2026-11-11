@@ -156,7 +156,7 @@ response.raise_for_status()
 
 ## 统一后台及保留的业务接口
 
-后台唯一入口为 `/admin.html`，通过 `section` 选择 `accounts`（默认）、`members`、`training`、`problems`、`cf-practice`、`contests`、`tasks`、`moderation`、`settings`。CF 使用 `tab=recent/check`，审核使用 `tab=posts/reports`，成员详情使用 `qq_id`。浏览器刷新、前进后退和登录 / 强制改密均保留模块参数；原管理页地址由服务端转入对应模块，共用的训练 / 题库 / 赛事路径则按 Web 角色分别进入后台或成员前台。
+后台唯一入口为 `/admin.html`，通过 `section` 选择 `accounts`（默认）、`members`、`training`、`problems`、`cf-practice`、`contests`、`tasks`、`moderation`、`settings`。CF 使用 `tab=recent/check`，审核使用 `tab=posts/reports`，训练任务使用 `tab=edit/overview/progress` 与 `task_id/step/recipient_id`，成员详情使用 `qq_id`。浏览器刷新、前进后退和登录 / 强制改密均保留模块参数；原管理页地址由服务端转入对应模块，共用的训练 / 题库 / 赛事路径则按 Web 角色分别进入后台或成员前台。
 
 | 方法与路径 | 权限 / 契约 |
 | --- | --- |
@@ -176,6 +176,34 @@ response.raise_for_status()
 | `GET /api/tasks`、`POST /api/tasks/<id>/cancel` | admin/root；同步任务与原始结果，刷新 / 取消保留 |
 
 赛事状态统一为 `todo/unsolved/queued/solved/reviewed/ignored`，其中 `reviewed` 可正常保存，`queued` 仅表示待补题状态，不创建复习或计划队列。`rating` 接受整数或 null。任何赛事 `note_md` 写请求均返回 410。所有写请求继续执行 CSRF 校验，模块路由不是权限边界。
+
+## 管理员布置的训练任务
+
+此模块对应 #118，管理员从 `/admin.html?section=training` 发放固定题单，成员从 `/training-tasks.html` 查看本人任务。原今日训练、自主选题及 Bot / 移动端随机挑战接口继续保留。业务身份使用动态 `users.status`，与 Web 管理权限独立。
+
+`ACM_TRAINING_TASKS_ENABLED` 默认 `false`，控制新发放与个人中心入口；关闭后历史任务及证据仍可查询。首期仅支持 Codeforces 的周期内 AC / 历史 AC 两规则，其他平台可存草稿，不能发布。
+
+| 方法与路径 | 权限 / 契约 |
+| --- | --- |
+| `GET /api/admin/training-tasks/options` | admin/root；动态身份、平台/规则能力、开关和最多 50 题限制 |
+| `POST /api/admin/training-tasks/resolve-problems` | admin/root + CSRF；标准题号规范化、去重和本地元数据补全；返回逐项错误，禁止任意链接 |
+| `GET/POST /api/admin/training-tasks` | admin/root；列表按 state/search 分页，POST 创建草稿 |
+| `GET/PATCH/DELETE /api/admin/training-tasks/<id>` | admin/root；草稿编辑与删除要求 version；PATCH 省略字段保留，发布后禁止改名单和题单 |
+| `POST /api/admin/training-tasks/<id>/audience-preview` | admin/root + CSRF；version；返回分页接收名单、排除原因、未绑定数、600 秒 preview_token |
+| `POST /api/admin/training-tasks/<id>/publish` | admin/root + CSRF；version、preview_token、Idempotency-Key；排除项须明确 confirm_exclusions |
+| `POST /api/admin/training-tasks/<id>/extend-deadline` | admin/root + CSRF；version/due_at/reason，只允许延期，重算进度并保留原截止时间 |
+| `POST /api/admin/training-tasks/<id>/cancel` | admin/root + CSRF；version/reason，保留题单、证据与审计 |
+| `GET /api/admin/training-tasks/<id>/progress` | admin/root；identity/status/search 和分页；固定分母、人数完成率、题目进度、待核验与异常分开 |
+| `GET /api/admin/training-tasks/<id>/progress/<recipient_id>` | admin/root；接收人快照与逐题最小证据 |
+| `GET /api/me/training-tasks` | 当前会话本人；tab=active/upcoming/history/all 及分页，按账号 epoch 隔离 |
+| `GET /api/me/training-tasks/<id>` | 当前会话本人；固定题单、核验、覆盖和刷新队列；他人任务返回 404 |
+| `POST /api/me/training-tasks/<id>/refresh` | 当前会话本人 + CSRF，正文 `{}`；异步队列，202，运行任务去重和持久化 60 秒冷却 |
+
+分页默认 20、上限 100。所有 GET 仅读站内证据，不请求外部 OJ；响应 no-store。发布事务重新核对版本、预览有效期与名单指纹，变化返回 409；冻结身份、账号代际、绑定、题单、周期及规则，身份变动不会补发或撤回。有效未绑定成员可以接收，未开户/停用/注销/临时凭据过期成员列入排除清单。
+
+周期判断含开始/截止两端，使用 OJ 实际提交时间，UTC 保存、Asia/Shanghai 展示。晚同步到的周期内 AC 可回补；开始前默认仅标历史已做，截止后为逾期。只有全部必做题完成才算任务完成，历史 AC 规则也需等开始。绑定/账号代际变化不能继承新账号证据，注销保留匿名最小成绩和冻结分母。
+
+刷新失败保留已知进度；无绑定、覆盖不足、暂停或失败分别显示待核验原因；重启丢失队列显示 interrupted。业务错误包含 code/message/request_id，常见 409 version_conflict/audience_changed/immutable_task、429 refresh_rate_limited（retry_after）、503 feature_disabled/sync_unavailable。完整字段、幂等、错误及生命周期契约见 [api.md（训练任务存储与发布契约）](training-tasks/api.md)，实测与发布回退见 [acceptance.md（训练任务联调与验收）](training-tasks/acceptance.md)。
 
 ## 普通成员训练闭环
 
