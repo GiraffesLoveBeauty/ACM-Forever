@@ -1,3 +1,4 @@
+import asyncio
 import json
 import time
 import unittest
@@ -127,6 +128,29 @@ class TrainingTaskTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((recipient['closed'], recipient['name'], recipient['bindings_json']), (1, '已注销成员', '{}'))
         await self.sql("UPDATE web_accounts SET role='member' WHERE qq_id='12345678'")
         self.assertEqual((await self.client.get('/api/admin/training-tasks')).status_code, 403)
+
+    async def test_partial_draft_update_keeps_rules_and_concurrent_publish_is_single(self):
+        task = await self.create(problems=[{'problem_id':'1A'},{'problem_id':'2A'}], rule='historical_ac')
+        patched = await self.client.patch(f'/api/admin/training-tasks/{task["id"]}', headers=self.headers, json={'version':1,'title':'仅改标题'})
+        updated = await patched.get_json()
+        self.assertEqual((updated['rule'], len(updated['problems']), updated['statuses']), ('historical_ac',2,['训练组']))
+        checked = await self.preview(updated)
+        first, second = await asyncio.gather(self.publish(updated,checked),self.publish(updated,checked))
+        self.assertEqual((first.status_code,second.status_code),(200,200))
+        self.assertEqual(len(await self.sql('SELECT * FROM training_task_recipients')),1)
+        self.assertEqual(len(await self.sql('SELECT * FROM training_task_progress')),2)
+        await self.sql("UPDATE users SET status='身份已调整' WHERE qq_id='22345678'")
+        self.assertEqual((await (await self.client.get(f'/api/admin/training-tasks/{task["id"]}')).get_json())['recipient_count'],1)
+
+    async def test_preview_expiry_and_duplicate_inputs_near_limit(self):
+        task = await self.create()
+        checked = await self.preview(task)
+        await self.sql('UPDATE training_tasks SET preview_expires_at=0')
+        response = await self.publish(task, checked)
+        self.assertEqual((response.status_code,(await response.get_json())['code']),(409,'audience_changed'))
+        response = await self.client.post('/api/admin/training-tasks/resolve-problems', headers=self.headers,json={'problems':[{'problem_id':'1A'}]*51})
+        result = await response.get_json()
+        self.assertEqual((response.status_code,len(result['items']),result['duplicates']),(200,1,50))
 
 
 if __name__ == '__main__':
