@@ -167,3 +167,87 @@ class TrainingProgressTests(unittest.IsolatedAsyncioTestCase):
         mine = await (await self.client.get('/api/me/training-tasks?tab=all')).get_json()
         self.assertEqual(mine['total'],0)
         self.assertEqual((await self.client.get(f'/api/me/training-tasks/{task["id"]}')).status_code,404)
+
+    async def test_first_binding_read_enables_refresh_without_reconciling_or_adopting_rebinds(self):
+        task = await self.create()
+        await self.publish(task)
+        recipient = (await self.info(task['id']))['items'][0]
+        url = f'/api/admin/training-tasks/{task["id"]}/progress/{recipient["id"]}'
+        self.assertEqual((await (await self.client.get(url)).get_json())['problems'][0]['verification'], 'unbound')
+        stored = await self.sql('SELECT * FROM training_task_progress')
+        await self.sql("UPDATE users SET cf_handle='FirstWhileWaiting' WHERE qq_id='22345678'")
+        first = await (await self.client.get(url)).get_json()
+        self.assertEqual(first['problems'][0]['verification'], 'coverage_missing')
+        self.assertTrue(first['recipient']['pending'])
+        self.assertEqual(await self.sql('SELECT * FROM training_task_progress'), stored)
+        response = await self.client.post('/api/auth/login', json={'qq_id':'22345678','password':'Test-Password-123!'})
+        headers = {'X-CSRF-Token':(await response.get_json())['csrf_token']}
+        personal = f'/api/me/training-tasks/{task["id"]}'
+        self.assertEqual((await (await self.client.get(personal)).get_json())['problems'][0]['verification'], 'coverage_missing')
+        submitter = AsyncMock(return_value={'id':'first-bound-refresh'})
+        self.app.config['PLUGIN_CONFIG'].update(_account_sync_submitter=submitter, _task_provider=lambda: [])
+        self.assertEqual((await self.client.post(personal+'/refresh', headers=headers, json={})).status_code, 202)
+        submitter.assert_awaited_once_with('22345678', ['codeforces'], 0, expected_epoch=1)
+        # An initially empty snapshot may not silently adopt a second binding generation.
+        await self.sql("UPDATE users SET cf_handle='SecondWhileWaiting' WHERE qq_id='22345678'")
+        changed = await (await self.client.get(personal)).get_json()
+        self.assertEqual(changed['problems'][0]['verification'], 'binding_changed')
+        self.assertTrue(changed['recipient']['pending'])
+        self.assertEqual(await self.sql('SELECT * FROM training_task_progress'), stored)
+
+    async def test_elapsed_coverage_is_derived_on_every_read_without_mutating_evidence(self):
+        await self.bind()
+        await self.sql("UPDATE user_platform_sync_state SET coverage_through_at=? WHERE user_qq_id='22345678'", (self.now,))
+        await self.ac(self.now-1)
+        task = await self.create(title='Coverage stops before deadline')
+        await self.publish(task)
+        covered = await self.create(title='Coverage includes the whole interval', due_at=self.now)
+        await self.publish(covered)
+        recipient = (await self.info(task['id']))['items'][0]
+        self.assertEqual((await self.info(task['id']))['summary']['pending_count'], 0)
+        progress_before = await self.sql('SELECT * FROM training_task_progress ORDER BY recipient_id,problem_id')
+        sync_before = await self.sql('SELECT * FROM user_platform_sync_state')
+        network = AsyncMock(side_effect=AssertionError('GET must not request Codeforces'))
+        submitter = AsyncMock()
+        self.app.config['PLUGIN_CONFIG']['_account_sync_submitter'] = submitter
+        with patch('time.time', return_value=self.now+4000), patch.object(cf_history, 'cf_request', network):
+            listing = await (await self.client.get('/api/admin/training-tasks')).get_json()
+            summaries = {item['id']:item['summary'] for item in listing['items']}
+            self.assertEqual(summaries[task['id']]['pending_count'], 1)
+            self.assertEqual(summaries[covered['id']]['pending_count'], 0)
+            detail = await (await self.client.get(f'/api/admin/training-tasks/{task["id"]}')).get_json()
+            self.assertEqual(detail['summary']['pending_count'], 1)
+            info = await self.info(task['id'])
+            self.assertEqual((info['summary']['pending_count'], info['summary']['on_time_count']), (1, 1))
+            individual = await (await self.client.get(f'/api/admin/training-tasks/{task["id"]}/progress/{recipient["id"]}')).get_json()
+            self.assertEqual(individual['problems'][0]['verification'], 'pending_sync')
+            self.assertEqual(individual['problems'][0]['evidence']['accepted_at'], self.now-1)
+        await self.client.post('/api/auth/login', json={'qq_id':'22345678','password':'Test-Password-123!'})
+        with patch('time.time', return_value=self.now+4000), patch.object(cf_history, 'cf_request', network):
+            listing = await (await self.client.get('/api/me/training-tasks?tab=history')).get_json()
+            recipients = {item['id']:item['recipient'] for item in listing['items']}
+            self.assertTrue(recipients[task['id']]['pending'])
+            self.assertFalse(recipients[covered['id']]['pending'])
+            personal = await (await self.client.get(f'/api/me/training-tasks/{task["id"]}')).get_json()
+            self.assertTrue(personal['recipient']['pending'])
+            self.assertEqual((personal['problems'][0]['verification'], personal['problems'][0]['status']), ('pending_sync', 'on_time'))
+        network.assert_not_awaited()
+        submitter.assert_not_awaited()
+        self.assertEqual(await self.sql('SELECT * FROM training_task_progress ORDER BY recipient_id,problem_id'), progress_before)
+        self.assertEqual(await self.sql('SELECT * FROM user_platform_sync_state'), sync_before)
+
+    async def test_live_sync_failures_and_missing_coverage_update_summary_and_details_together(self):
+        await self.bind()
+        task = await self.create()
+        await self.publish(task)
+        recipient = (await self.info(task['id']))['items'][0]
+        stored = await self.sql('SELECT * FROM training_task_progress')
+        for status, full, expected in [('failed', self.now, 'sync_failed'), ('paused', self.now, 'sync_paused'), ('success', 0, 'coverage_missing')]:
+            with self.subTest(status=status, full=full):
+                await self.sql("UPDATE user_platform_sync_state SET last_status=?,full_history_at=? WHERE user_qq_id='22345678'", (status,full))
+                info = await self.info(task['id'])
+                self.assertEqual(info['summary']['pending_count'], 1)
+                detail = await (await self.client.get(f'/api/admin/training-tasks/{task["id"]}/progress/{recipient["id"]}')).get_json()
+                self.assertEqual(detail['problems'][0]['verification'], expected)
+                self.assertTrue(detail['recipient']['pending'])
+        self.assertEqual(await self.sql('SELECT * FROM training_task_progress'), stored)
