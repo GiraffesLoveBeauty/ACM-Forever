@@ -105,7 +105,10 @@ function leave(to) {
   const sameEditor =
     to.path === '/admin.html' &&
     to.query.section === 'training' &&
-    String(to.query.task_id || '') === taskId.value &&
+    (String(to.query.task_id || '') === taskId.value ||
+      (taskId.value === 'new' &&
+        String(to.query.task_id || '') === loadedKey &&
+        String(task.value?.id || '') === loadedKey)) &&
     (to.query.tab === 'edit' || taskId.value === 'new');
   return (
     !dirty.value || sameEditor || window.confirm('草稿尚未保存，离开会丢失本次修改。确认离开？')
@@ -125,9 +128,10 @@ onBeforeUnmount(() => {
   unregister();
   window.removeEventListener('beforeunload', unload);
 });
-function restoreForm(data) {
-  form.value = data ? taskForm(data) : newDraft();
-  saved.value = JSON.stringify(form.value);
+function restoreForm(data, submitted) {
+  const persisted = data ? taskForm(data) : newDraft();
+  if (submitted === undefined || JSON.stringify(form.value) === submitted) form.value = persisted;
+  saved.value = JSON.stringify(persisted);
   preview.value = null;
   confirmed.value = false;
   publishKey = '';
@@ -250,17 +254,18 @@ async function action(operation) {
   }
 }
 async function saveDraft() {
+  const submitted = JSON.stringify(form.value);
   const result = await request(
     base + (task.value?.id ? '/' + task.value.id : ''),
     {
       method: task.value?.id ? 'PATCH' : 'POST',
-      body: taskPayload(form.value, task.value?.version),
+      body: taskPayload(JSON.parse(submitted), task.value?.version),
     },
     'save',
   );
   task.value = result;
   loadedKey = String(result.id);
-  restoreForm(result);
+  restoreForm(result, submitted);
   return result;
 }
 function save() {
@@ -268,7 +273,7 @@ function save() {
     const data = await saveDraft();
     busy.value = false;
     await address({ task_id: data.id, tab: 'edit' }, true);
-    notify('草稿已保存。');
+    notify(dirty.value ? '已保存提交时的草稿，后续修改已保留但尚未保存。' : '草稿已保存。');
   });
 }
 function validateStep() {
@@ -291,11 +296,19 @@ function nextStep() {
     )
       throw Error('请设置开始早于截止的周期，时区为 Asia/Shanghai。');
     const data = await saveDraft();
-    const checked = await request(
-      base + '/' + data.id + '/audience-preview',
-      { method: 'POST', body: { version: data.version } },
-      'preview',
-    );
+    const checked = !dirty.value
+      ? await request(
+          base + '/' + data.id + '/audience-preview',
+          { method: 'POST', body: { version: data.version } },
+          'preview',
+        )
+      : null;
+    if (dirty.value) {
+      busy.value = false;
+      await address({ task_id: data.id, tab: 'edit', step: 2 }, true);
+      notify('后续修改已保留，请再次保存并预览。');
+      return;
+    }
     preview.value = checked;
     publishKey = crypto.randomUUID();
     confirmed.value = false;
