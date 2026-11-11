@@ -108,3 +108,149 @@ test('anonymous direct links preserve the full task destination', async ({ page 
     '/training-tasks.html?task_id=17&tab=history',
   );
 });
+
+async function createBoundaryTask(context, csrf, title) {
+  const now = Math.floor(Date.now() / 1000);
+  const response = await context.request.post('/api/admin/training-tasks', {
+    headers: { 'X-CSRF-Token': csrf },
+    data: {
+      title,
+      statuses: ['训练任务测试组'],
+      starts_at: now - 86400,
+      due_at: now + 86400,
+      rule: 'period_ac',
+      problems: [{ platform: 'codeforces', problem_id: '1A' }],
+    },
+  });
+  expect(response.status()).toBe(201);
+  return await response.json();
+}
+
+async function setBoundaryBinding(context, csrf, account) {
+  const current = await (await context.request.get('/api/admin/members/10000119')).json();
+  if ((current.cf_handle || '') === account) return;
+  const response = await context.request.patch('/api/admin/members/10000119', {
+    headers: { 'X-CSRF-Token': csrf },
+    data: {
+      cf_handle: account,
+      expected_account_epoch: current.account_epoch,
+      profile_revision: current.profile_revision,
+      confirm_bindings: true,
+      expected_bindings: {
+        cf_handle: current.cf_handle,
+        atcoder_handle: current.atcoder_handle,
+        luogu_id: current.luogu_id,
+        nowcoder_id: current.nowcoder_id,
+      },
+      binding_versions: current.binding_versions,
+    },
+  });
+  expect([200, 202]).toContain(response.status());
+}
+
+test('saving keeps text entered after submission and preserves the unsaved leave guard', async ({
+  page,
+  context,
+}, testInfo) => {
+  const csrf = await login(context, '10000003');
+  const task = await createBoundaryTask(context, csrf, '保存响应边界 ' + testInfo.project.name);
+  await page.goto('/admin.html?section=training&task_id=' + task.id + '&tab=edit');
+  const title = page.getByLabel('任务标题', { exact: true });
+  await title.fill('Submitted title');
+  let release,
+    submitted,
+    held = false;
+  const gate = new Promise((resolve) => (release = resolve));
+  await page.route('**/api/admin/training-tasks/' + task.id, async (route) => {
+    if (route.request().method() !== 'PATCH' || held) return route.continue();
+    held = true;
+    submitted = route.request().postDataJSON();
+    const response = await route.fetch();
+    await gate;
+    await route.fulfill({ response });
+  });
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click();
+  try {
+    await expect.poll(() => Boolean(submitted)).toBe(true);
+    await title.fill('Text entered during saving');
+    await page.getByLabel('训练说明', { exact: true }).fill('Description entered during saving');
+  } finally {
+    release();
+  }
+  await expect(page.getByRole('button', { name: '保存草稿', exact: true })).toBeEnabled();
+  await expect(title).toHaveValue('Text entered during saving');
+  await expect(page.getByLabel('训练说明', { exact: true })).toHaveValue(
+    'Description entered during saving',
+  );
+  const server = await (await context.request.get('/api/admin/training-tasks/' + task.id)).json();
+  expect(server.title).toBe('Submitted title');
+  page.once('dialog', (dialog) => dialog.dismiss());
+  await page.getByRole('button', { name: '返回列表', exact: true }).click();
+  await expect(title).toHaveValue('Text entered during saving');
+  await page.screenshot({
+    path: testInfo.outputPath('saving-retains-later-input.png'),
+    fullPage: true,
+  });
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click();
+  await expect
+    .poll(
+      async () =>
+        (await (await context.request.get('/api/admin/training-tasks/' + task.id)).json()).title,
+    )
+    .toBe('Text entered during saving');
+});
+
+test('first binding permits task refresh before a successful sync', async ({
+  page,
+  context,
+}, testInfo) => {
+  const csrf = await login(context, '10000003');
+  await setBoundaryBinding(context, csrf, '');
+  const task = await createBoundaryTask(context, csrf, '首次绑定边界 ' + testInfo.project.name);
+  const headers = { 'X-CSRF-Token': csrf };
+  const preview = await (
+    await context.request.post('/api/admin/training-tasks/' + task.id + '/audience-preview', {
+      headers,
+      data: { version: task.version },
+    })
+  ).json();
+  const published = await context.request.post(
+    '/api/admin/training-tasks/' + task.id + '/publish',
+    {
+      headers: {
+        ...headers,
+        'Idempotency-Key': 'first-binding-' + testInfo.project.name + '-' + task.id,
+      },
+      data: {
+        version: task.version,
+        preview_token: preview.preview_token,
+        confirm_exclusions: true,
+      },
+    },
+  );
+  expect(published.status()).toBe(200);
+  await setBoundaryBinding(context, csrf, 'WaitingBindingFixture');
+  await login(context, '10000119');
+  const detail = await (await context.request.get('/api/me/training-tasks/' + task.id)).json();
+  expect(detail.problems[0].verification).not.toBe('unbound');
+  expect(detail.recipient.pending).toBe(true);
+  await page.goto('/training-tasks.html?task_id=' + task.id);
+  const refresh = page.getByRole('button', { name: '刷新进度', exact: true });
+  await expect(refresh).toBeEnabled();
+  let refreshRequests = 0;
+  await page.route('**/api/me/training-tasks/' + task.id + '/refresh', (route) => {
+    refreshRequests++;
+    return route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: '合成同步暂不可用，已有进度保留。' }),
+    });
+  });
+  await refresh.click();
+  await expect.poll(() => refreshRequests).toBe(1);
+  await expect(page.getByRole('alert')).toContainText('已有进度保留');
+  await page.screenshot({
+    path: testInfo.outputPath('first-binding-refresh-enabled.png'),
+    fullPage: true,
+  });
+});
