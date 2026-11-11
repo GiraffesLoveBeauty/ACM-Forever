@@ -26,6 +26,7 @@ async def run(port):
             "ACM_BOOTSTRAP_ROOT_QQ_ID": "",
             "ACM_BOOTSTRAP_ROOT_PASSWORD": "",
             "ACM_ACCOUNT_CLOSURE_ENABLED": "true",
+            "ACM_TRAINING_TASKS_ENABLED": "true",
         })
         from feat.api.acm_api.auth_service import hash_password
         from feat.api.acm_api.database import connect_db
@@ -48,6 +49,18 @@ async def run(port):
                     "INSERT INTO web_accounts(qq_id,password_hash,role,must_change_password,is_active,created_at,updated_at) "
                     "VALUES(?,?,?,0,1,?,?)", (qq, encoded, role, now, now),
                 )
+            for qq, name, active, has_account in [
+                ("10000118", "训练任务成员A", 1, True), ("10000119", "训练任务成员B", 1, True),
+                ("10000120", "训练任务停用成员", 0, True), ("10000121", "训练任务未开户成员", 1, False),
+            ]:
+                await db.execute("INSERT INTO users(qq_id,name,status) VALUES(?,?,'训练任务测试组')", (qq, name))
+                if has_account:
+                    await db.execute("INSERT INTO web_accounts(qq_id,password_hash,role,must_change_password,is_active,created_at,updated_at) VALUES(?,?,'member',0,?,?,?)", (qq, encoded, active, now, now))
+            await db.execute("UPDATE users SET cf_handle='TrainingFixture' WHERE qq_id='10000118'")
+            await db.execute("INSERT INTO user_platform_sync_state(user_qq_id,platform,binding_key,full_history_at,coverage_through_at,last_status,last_success_at) VALUES('10000118','codeforces','trainingfixture:1',?,?,'success',?)", (now, now, now))
+            await db.execute("INSERT INTO submission_attempts(owner_qq_id,platform,external_submission_id,problem_id,verdict,submitted_at,created_at) VALUES('10000118','codeforces','fixture:801','cf_1A','OK',?,?)", (now-3600, now))
+            for pid, name in [('cf_1A', '合成训练题一'), ('cf_2A', '合成训练题二')]:
+                await db.execute("INSERT INTO recommendations(platform,problem_id,problem_name,problem_rating,problem_url,tags) VALUES('codeforces',?,?, '1000',?,'implementation')", (pid, name, 'https://codeforces.com/contest/' + pid[3:-1] + '/problem/A'))
             for number in range(26):
                 await db.execute(
                     "INSERT INTO users(qq_id,name,real_name,school,status,cf_handle,atcoder_handle,luogu_id,nowcoder_id,cjlu_username) VALUES(?,?,?,?,?,?,?,?,?,?)",
