@@ -146,3 +146,24 @@ class TrainingProgressTests(unittest.IsolatedAsyncioTestCase):
         detail = await (await self.client.get(f'/api/me/training-tasks/{task["id"]}')).get_json()
         self.assertEqual(detail['refresh']['status'], 'running')
         self.assertNotIn('creator_qq_id', detail)
+
+
+    async def test_closed_evidence_is_anonymous_and_new_generation_cannot_inherit(self):
+        await self.bind()
+        await self.ac(self.now-1, external='22345678:801')
+        task = await self.create()
+        await self.publish(task)
+        await self.sql("UPDATE users SET account_state='closed',account_epoch=account_epoch+1 WHERE qq_id='22345678'")
+        record = (await self.sql('SELECT * FROM training_task_progress'))[0]
+        self.assertIsNone(record['binding_key'])
+        proof = json.loads(record['on_time_json'])
+        self.assertNotIn('external_submission_id', proof)
+        self.assertEqual(proof['accepted_at'],self.now-1)
+        info = await self.info(task['id'])
+        self.assertEqual((info['summary']['recipient_count'],info['summary']['on_time_count'],info['summary']['abnormal_count']),(1,1,1))
+        await self.sql("INSERT INTO account_registrations(qq_id,closed_epoch,new_epoch,created_at) VALUES('22345678',2,3,?)",(self.now,))
+        await self.sql("UPDATE users SET account_state='active',account_epoch=3,name='新一代成员' WHERE qq_id='22345678'")
+        await self.client.post('/api/auth/login',json={'qq_id':'22345678','password':'Test-Password-123!'})
+        mine = await (await self.client.get('/api/me/training-tasks?tab=all')).get_json()
+        self.assertEqual(mine['total'],0)
+        self.assertEqual((await self.client.get(f'/api/me/training-tasks/{task["id"]}')).status_code,404)

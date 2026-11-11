@@ -147,8 +147,8 @@ def canonical_problem(value):
 
 
 async def resolve_problems(db, inputs):
-    if not isinstance(inputs, list) or len(inputs) > MAX_PROBLEMS:
-        raise TaskError(f"题单最多 {MAX_PROBLEMS} 题。")
+    if not isinstance(inputs, list) or len(inputs) > 500:
+        raise TaskError("单次最多校验 500 条输入，去重后题单最多 50 题。")
     items, errors, seen, duplicates = [], [], set(), 0
     for index, value in enumerate(inputs):
         try:
@@ -174,6 +174,8 @@ async def resolve_problems(db, inputs):
             items.append(item)
         except TaskError as error:
             errors.append({"index": index, "message": str(error)})
+    if len(items) > MAX_PROBLEMS:
+        raise TaskError(f"去重后的题单最多 {MAX_PROBLEMS} 题。")
     return {"items": items, "errors": errors, "duplicates": duplicates}
 
 
@@ -186,6 +188,9 @@ async def save_draft(db, identity, data, task_id=None):
         check_version(old, data)
         if old["state"] != "draft":
             raise TaskError("已发布的名单和题单不可修改。", "immutable_task", 409)
+    if old:
+        existing = await detail(db, task_id)
+        data = {**{key: existing.get(key) for key in allowed if key != "version"}, **data}
     title, description = data.get("title", "未命名训练任务"), data.get("description", "")
     if not isinstance(title, str) or not title.strip() or len(title) > 100 or not isinstance(description, str) or len(description) > 5000:
         raise TaskError("标题须为 1–100 字，说明不能超过 5000 字。")
@@ -273,7 +278,8 @@ async def publish(db, identity, task_id, data, key):
     if len(selected) != len(members) and data.get("confirm_exclusions") is not True:
         raise TaskError("存在被排除的成员，请明确确认排除原因。", "exclusions_confirmation_required")
     now = int(time.time())
-    await db.execute("UPDATE training_tasks SET state='published',original_due_at=due_at,published_at=?,updated_at=?,version=version+1,publish_key=?,publish_version=?,preview_hash=NULL WHERE id=?", (now, now, digest(key), task["version"], task_id))
+    publisher = await one(db, "SELECT name FROM users WHERE qq_id=?", (identity.get("qq_id"),))
+    await db.execute("UPDATE training_tasks SET state='published',creator_qq_id=?,creator_name=?,original_due_at=due_at,published_at=?,updated_at=?,version=version+1,publish_key=?,publish_version=?,preview_hash=NULL WHERE id=?", (identity.get("qq_id"), (publisher or {}).get("name") or "管理员", now, now, digest(key), task["version"], task_id))
     await db.executemany("INSERT INTO training_task_recipients(task_id,qq_id,account_epoch,name,status_snapshot,bindings_json) VALUES(?,?,?,?,?,?)", [(task_id, m["qq_id"], m["account_epoch"], m["name"], m["status"], dump(m["bindings"])) for m in selected])
     await db.execute("INSERT INTO training_task_progress(recipient_id,problem_id) SELECT r.id,p.id FROM training_task_recipients r JOIN training_task_problems p ON p.task_id=r.task_id WHERE r.task_id=?", (task_id,))
     from .training_task_progress import reconcile

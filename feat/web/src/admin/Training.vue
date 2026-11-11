@@ -74,10 +74,28 @@ function auditText(entry) {
   }
 }
 function goList() {
-  return address({ task_id: null, tab: null, recipient_id: null, step: null, page: null });
+  return address({
+    member_search: null,
+    status: null,
+    identity: null,
+    task_id: null,
+    tab: null,
+    recipient_id: null,
+    step: null,
+    page: null,
+  });
 }
 function goTask(id, tab = 'overview') {
-  return address({ task_id: id, tab, step: null, recipient_id: null, page: null });
+  return address({
+    member_search: null,
+    status: null,
+    identity: null,
+    task_id: id,
+    tab,
+    step: null,
+    recipient_id: null,
+    page: null,
+  });
 }
 function leave(to) {
   if (busy.value) {
@@ -710,7 +728,15 @@ function lifecycle(kind) {
                   </td>
                   <td>{{ m.status }}</td>
                   <td>{{ exclusions[m.excluded_reason] || '将接收任务' }}</td>
-                  <td>{{ m.unbound ? '未绑定也可接收，绑定后核验' : '已绑定' }}</td>
+                  <td>
+                    {{
+                      m.excluded_reason
+                        ? '本次不发放'
+                        : m.unbound
+                          ? '未绑定也可接收，绑定后核验'
+                          : '已绑定'
+                    }}
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -819,9 +845,7 @@ function lifecycle(kind) {
         <p class="tt-note">
           已完成 {{ progress.summary.completed_problem_count }} /
           {{ progress.summary.total_problem_count }} 道成员题目；账号异常
-          {{
-            progress.summary.abnormal_count
-          }}
+          {{ progress.summary.abnormal_count }}
           人。任务需全部必做题完成，账号异常保留在固定分母中。完成与核验状态独立。
         </p>
         <form
