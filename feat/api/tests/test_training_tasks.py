@@ -83,7 +83,9 @@ class TrainingTaskTests(unittest.IsolatedAsyncioTestCase):
         update = await self.client.patch(f'/api/admin/training-tasks/{task["id"]}', headers=self.headers, json={**self.draft(), 'version': 1})
         self.assertEqual(update.status_code, 200)
         stale = await self.client.patch(f'/api/admin/training-tasks/{task["id"]}', headers=self.headers, json={**self.draft(), 'version': 1})
-        self.assertEqual((stale.status_code, (await stale.get_json())['code']), (409, 'version_conflict'))
+        conflict = await stale.get_json()
+        self.assertEqual((stale.status_code, conflict['code'], conflict['version']), (409, 'version_conflict', 2))
+        self.assertTrue(conflict['request_id'])
 
     async def test_validation_dedup_and_unsupported_draft(self):
         task = await self.create(problems=[{'problem_id': '1a'}, {'problem_id': 'cf_1A'}])
