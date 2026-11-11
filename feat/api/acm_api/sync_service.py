@@ -81,6 +81,15 @@ class SyncMixin:
                 return False
             cursor_result = await connection.execute("UPDATE user_platform_sync_state SET " + clause + " WHERE " + where, values)
             await connection.commit()
+            if cursor_result.rowcount and platform == "codeforces":
+                from .training_task_progress import reconcile
+                try:
+                    await connection.execute("BEGIN IMMEDIATE")
+                    await reconcile(connection, qq_id=qq_id)
+                    await connection.commit()
+                except Exception:
+                    await connection.rollback()
+                    LOG.exception("训练任务证据聚合失败，将在下次同步时重试")
             return bool(cursor_result.rowcount)
 
     async def _mark_user_synced(self, user, now):

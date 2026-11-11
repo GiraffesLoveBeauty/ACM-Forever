@@ -81,6 +81,10 @@ async def get_task(db, task_id):
     task = await one(db, "SELECT * FROM training_tasks WHERE id=?", (task_id,))
     if not task:
         raise TaskError("训练任务不存在或无权查看。", "not_found", 404)
+    return public_task(task)
+
+
+def public_task(task):
     task["statuses"] = json.loads(task.pop("statuses_json"))
     task["phase"] = phase(task)
     for field in ("preview_hash", "audience_hash", "preview_expires_at", "publish_key", "publish_version"):
@@ -272,6 +276,8 @@ async def publish(db, identity, task_id, data, key):
     await db.execute("UPDATE training_tasks SET state='published',original_due_at=due_at,published_at=?,updated_at=?,version=version+1,publish_key=?,publish_version=?,preview_hash=NULL WHERE id=?", (now, now, digest(key), task["version"], task_id))
     await db.executemany("INSERT INTO training_task_recipients(task_id,qq_id,account_epoch,name,status_snapshot,bindings_json) VALUES(?,?,?,?,?,?)", [(task_id, m["qq_id"], m["account_epoch"], m["name"], m["status"], dump(m["bindings"])) for m in selected])
     await db.execute("INSERT INTO training_task_progress(recipient_id,problem_id) SELECT r.id,p.id FROM training_task_recipients r JOIN training_task_problems p ON p.task_id=r.task_id WHERE r.task_id=?", (task_id,))
+    from .training_task_progress import reconcile
+    await reconcile(db, task_id=task_id)
     await audit(db, task_id, identity, "published", after={"recipients": len(selected), "problems": len(task["problems"]), "rule": task["rule"], "starts_at": task["starts_at"], "due_at": task["due_at"]})
     return await detail(db, task_id)
 
@@ -295,6 +301,8 @@ async def lifecycle(db, identity, task_id, action, data):
         if due is None or due <= task["due_at"]:
             raise TaskError("新截止时间必须晚于当前截止时间。")
         await db.execute("UPDATE training_tasks SET due_at=?,updated_at=?,version=version+1 WHERE id=?", (due, now, task_id))
+        from .training_task_progress import reconcile
+        await reconcile(db, task_id=task_id)
         await audit(db, task_id, identity, "extended", reason=reason.strip(), before={"due_at": task["due_at"]}, after={"due_at": due})
     else:
         await db.execute("UPDATE training_tasks SET state='cancelled',cancel_reason=?,cancelled_at=?,updated_at=?,version=version+1 WHERE id=?", (reason.strip(), now, now, task_id))
