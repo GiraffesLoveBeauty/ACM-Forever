@@ -108,7 +108,7 @@ def create_app(*, daily_problem_sync=False, member_sync=False):
     app.config["DB_PATH"] = str(db_path)
     app.config["ACCOUNT_CLOSURE_ENABLED"] = _bool_env("ACM_ACCOUNT_CLOSURE_ENABLED", False)
     app.config["ACCOUNT_IMPORT_ENABLED"] = _bool_env("ACM_ACCOUNT_IMPORT_ENABLED", True)
-    app.config["TRAINING_TASKS_ENABLED"] = _bool_env("ACM_TRAINING_TASKS_ENABLED", False)
+    app.config["TRAINING_TASKS_ENABLED"] = _bool_env("ACM_TRAINING_TASKS_ENABLED", True)
     app.config["WIKI_CACHE_ENABLED"] = _bool_env("ACM_WIKI_CACHE_ENABLED", True)
     app.extensions["wiki_public_cache"] = WikiResponseCache()
     app.config["AVATAR_UPLOAD_DIR"] = db_path.parent / "uploads" / "avatars"

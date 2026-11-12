@@ -26,7 +26,6 @@ async def run(port):
             "ACM_BOOTSTRAP_ROOT_QQ_ID": "",
             "ACM_BOOTSTRAP_ROOT_PASSWORD": "",
             "ACM_ACCOUNT_CLOSURE_ENABLED": "true",
-            "ACM_TRAINING_TASKS_ENABLED": "true",
         })
         from feat.api.acm_api.auth_service import hash_password
         from feat.api.acm_api.database import connect_db

@@ -156,6 +156,7 @@ test('saving keeps text entered after submission and preserves the unsaved leave
   const task = await createBoundaryTask(context, csrf, '保存响应边界 ' + testInfo.project.name);
   await page.goto('/admin.html?section=training&task_id=' + task.id + '&tab=edit');
   const title = page.getByLabel('任务标题', { exact: true });
+  await expect(title).toHaveValue(task.title);
   await title.fill('Submitted title');
   let release,
     submitted,

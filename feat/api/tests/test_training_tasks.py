@@ -1,17 +1,21 @@
 import asyncio
 import json
+import os
 import time
 import unittest
+from unittest.mock import patch
 
 import test_api_contract as contract
 from feat.api.acm_api.database import connect_db
+from feat.api.app import create_app
 from feat.api.acm_api import training_task_service as service
 
 
 class TrainingTaskTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        environment = self.enterContext(patch.dict(os.environ))
+        environment.pop("ACM_TRAINING_TASKS_ENABLED", None)
         await contract.ApiContractTests.asyncSetUp(self)
-        self.app.config["TRAINING_TASKS_ENABLED"] = True
         self.lifespan = self.app.test_app()
         await self.lifespan.__aenter__()
         self.client = self.app.test_client()
@@ -56,6 +60,25 @@ class TrainingTaskTests(unittest.IsolatedAsyncioTestCase):
         preview = preview or await self.preview(task)
         payload = {"version": task["version"], "preview_token": preview["preview_token"], "confirm_exclusions": True, **changes}
         return await self.client.post(f'/api/admin/training-tasks/{task["id"]}/publish', headers={**self.headers, "Idempotency-Key": "training-publish-key-123"}, json=payload)
+
+    async def test_default_configuration_exposes_member_entry_and_allows_publish(self):
+        self.assertNotIn("ACM_TRAINING_TASKS_ENABLED", os.environ)
+        options = await (await self.client.get('/api/admin/training-tasks/options')).get_json()
+        self.assertIs(options["enabled"], True)
+        member = self.app.test_client()
+        login = await member.post('/api/auth/login', json={"qq_id": "22345678", "password": "Test-Password-123!"})
+        self.assertEqual(login.status_code, 200, await login.get_json())
+        identity = await (await member.get('/api/auth/me')).get_json()
+        self.assertEqual(identity["role"], "member")
+        self.assertIs(identity["training_tasks_enabled"], True)
+        task = await self.create()
+        published = await self.publish(task)
+        self.assertEqual(published.status_code, 200, await published.get_json())
+
+    async def test_explicit_environment_switch_overrides_default(self):
+        for setting, expected in [("false", False), ("true", True)]:
+            with self.subTest(setting=setting), patch.dict(os.environ, {"ACM_TRAINING_TASKS_ENABLED": setting}):
+                self.assertIs(create_app().config["TRAINING_TASKS_ENABLED"], expected)
 
     async def test_dynamic_union_exclusions_atomic_publish_and_retry(self):
         await self.seed("32345678", active=0)
@@ -121,9 +144,16 @@ class TrainingTaskTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(no_csrf.status_code, 403)
         task = await self.create()
         self.app.config['TRAINING_TASKS_ENABLED'] = False
-        self.assertEqual((await self.publish(task)).status_code, 503)
+        identity = await (await self.client.get('/api/auth/me')).get_json()
+        options = await (await self.client.get('/api/admin/training-tasks/options')).get_json()
+        self.assertIs(identity['training_tasks_enabled'], False)
+        self.assertIs(options['enabled'], False)
+        disabled = await self.publish(task)
+        self.assertEqual((disabled.status_code, (await disabled.get_json())['code']), (503, 'feature_disabled'))
         self.app.config['TRAINING_TASKS_ENABLED'] = True
         await self.publish(task)
+        self.app.config['TRAINING_TASKS_ENABLED'] = False
+        self.assertEqual((await self.client.get(f'/api/admin/training-tasks/{task["id"]}')).status_code, 200)
         await self.sql("UPDATE users SET account_state='closed',account_epoch=account_epoch+1 WHERE qq_id='22345678'")
         recipient = (await self.sql('SELECT * FROM training_task_recipients'))[0]
         self.assertIsNone(recipient['qq_id'])
