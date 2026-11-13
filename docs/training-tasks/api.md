@@ -42,8 +42,10 @@ PATCH 只更新提供的白名单字段；省略字段保留，修改后版本�
 | `POST /{task_id}/publish` | `{version,preview_token,confirm_exclusions}`，另需 Idempotency-Key；返回已发布详情 |
 | `POST /{task_id}/extend-deadline` | `{version,due_at,reason}`；新截止时间须更晚，原因 1–500 字；重算既有证据 |
 | `POST /{task_id}/cancel` | `{version,reason}`；取消已发布任务，保留题单与证据 |
-| `GET /{task_id}/progress` | 分页、identity、status、search；返回不受筛选影响的 summary 与筛选后的成员 items/total |
+| `GET /{task_id}/progress` | 分页、identity、status、search（当前真实姓名、发布时昵称或 QQ）；返回不受筛选影响的 summary 与筛选后的成员 items/total |
 | `GET /{task_id}/progress/{recipient_id}` | 仅管理权限，返回 recipient 与逐题 problems 证据 |
+
+管理员进度列表 items 和逐题详情 recipient 新增 `real_name`（字符串或 null），读取当前成员资料，不改变发布时冻结的 `name`。仅未注销且账号代际匹配时返回真实姓名；未填写、注销或账号代际变化时返回 null，避免同 QQ 新账号姓名串入旧任务。该字段只在上述两个管理员接口返回，成员前台的列表/详情不新增此字段。后台完成情况使用真实姓名和题目完成进度条，未填姓名有明确提示；原有完成、核验和账号状态字段继续保留供筛选与统计使用。
 
 预览列出未开户、停用、注销和临时凭据过期等排除原因；有效未绑定成员仍可接收。有排除项必须显式提交 `confirm_exclusions:true`。发布时事务内重新计算名单指纹，名单、绑定或账号状态变化、预览超时、版本变化均须重新确认；零题目、零有效接收人或能力不足不能发布。
 
