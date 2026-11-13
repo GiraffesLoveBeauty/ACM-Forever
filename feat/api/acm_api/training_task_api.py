@@ -130,7 +130,7 @@ async def lifecycle(db, identity, task_id):
 async def admin_progress(db, identity, task_id):
     await service.get_task(db, task_id)
     page, size = service.paging(request.args)
-    members = await progress.recipient_summaries(db, [task_id])
+    members = await progress.recipient_summaries(db, [task_id], include_real_name=True)
     overview = progress.summary(members)
     status = request.args.get("status", "")
     cohort = request.args.get("identity", "")
@@ -138,7 +138,7 @@ async def admin_progress(db, identity, task_id):
         raise service.TaskError("完成状态筛选无效。")
     search = request.args.get("search", "").strip().casefold()[:100]
     selected = [r for r in members if (not cohort or r["status_snapshot"] == cohort)
-                and (not search or search in r["name"].casefold() or search in str(r["qq_id"] or ""))
+                and (not search or search in (r["real_name"] or "").casefold() or search in r["name"].casefold() or search in str(r["qq_id"] or ""))
                 and (not status or (r["pending"] if status == "pending" else r["account_status"] != "active" if status == "abnormal" else r["completion"] == status))]
     return jsonify({"summary": overview, "items": selected[(page - 1) * size:page * size], "total": len(selected), "page": page, "page_size": size})
 
@@ -147,7 +147,7 @@ async def admin_progress(db, identity, task_id):
 @endpoint()
 async def recipient_progress(db, identity, task_id, recipient_id):
     now = int(time.time())
-    recipients = await progress.recipient_summaries(db, [task_id], now=now)
+    recipients = await progress.recipient_summaries(db, [task_id], now=now, include_real_name=True)
     recipient = next((r for r in recipients if r["id"] == recipient_id), None)
     if not recipient:
         raise service.TaskError("接收记录不存在。", "not_found", 404)

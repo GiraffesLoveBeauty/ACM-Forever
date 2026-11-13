@@ -55,7 +55,7 @@ async def run(port):
                 await db.execute("INSERT INTO users(qq_id,name,status) VALUES(?,?,'训练任务测试组')", (qq, name))
                 if has_account:
                     await db.execute("INSERT INTO web_accounts(qq_id,password_hash,role,must_change_password,is_active,created_at,updated_at) VALUES(?,?,'member',0,?,?,?)", (qq, encoded, active, now, now))
-            await db.execute("UPDATE users SET cf_handle='TrainingFixture' WHERE qq_id='10000118'")
+            await db.execute("UPDATE users SET cf_handle='TrainingFixture',real_name='训练测试姓名甲' WHERE qq_id='10000118'")
             await db.execute("INSERT INTO user_platform_sync_state(user_qq_id,platform,binding_key,full_history_at,coverage_through_at,last_status,last_success_at) VALUES('10000118','codeforces','trainingfixture:1',?,?,'success',?)", (now, now, now))
             await db.execute("INSERT INTO submission_attempts(owner_qq_id,platform,external_submission_id,problem_id,verdict,submitted_at,created_at) VALUES('10000118','codeforces','fixture:801','cf_1A','OK',?,?)", (now-3600, now))
             for pid, name in [('cf_1A', '合成训练题一'), ('cf_2A', '合成训练题二')]:
