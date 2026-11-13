@@ -34,8 +34,23 @@ test('assigned task publish, frozen progress, member entry and statement round t
   await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
   const taskId = new URL(page.url()).searchParams.get('task_id');
   await page.getByRole('button', { name: '完成情况', exact: true }).click();
-  const member = page.getByRole('row').filter({ hasText: '训练任务成员A' });
+  const table = page.getByRole('table', { name: '成员完成情况' });
+  const member = table.getByRole('row').filter({ hasText: '训练测试姓名甲' });
   await expect(member).toContainText('1 / 2 题');
+  const bar = member.getByRole('progressbar', { name: '训练测试姓名甲的做题进度' });
+  await expect(bar).toHaveAttribute('aria-valuenow', '1');
+  await expect(bar).toHaveAttribute('aria-valuemax', '2');
+  expect(
+    await bar
+      .locator('span')
+      .evaluate(
+        (fill) =>
+          fill.getBoundingClientRect().width / fill.parentElement.getBoundingClientRect().width,
+      ),
+  ).toBeCloseTo(0.5, 2);
+  await expect(table).not.toContainText('10000118');
+  await expect(table).not.toContainText('任务状态');
+  await expect(table).not.toContainText('核验与账号');
   await member.getByRole('button', { name: '逐题证据', exact: true }).click();
   await expect(page.getByText(/提交 #801/)).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('admin-progress.png'), fullPage: true });
@@ -73,7 +88,8 @@ test('assigned task publish, frozen progress, member entry and statement round t
   await expect(page.getByRole('alert')).toContainText('已有进度保留');
   await expect(page.getByText('1 / 2 题', { exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('member-detail-light.png'), fullPage: true });
-  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+  await page.getByRole('button', { name: '切换主题', exact: true }).click();
+  await expect(page.locator('body')).toHaveAttribute('data-theme', 'dark');
   await page.screenshot({ path: testInfo.outputPath('member-detail-dark.png'), fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
@@ -254,4 +270,85 @@ test('first binding permits task refresh before a successful sync', async ({
     path: testInfo.outputPath('first-binding-refresh-enabled.png'),
     fullPage: true,
   });
+});
+
+test('completion real names, search and long progress bars remain usable across widths and themes', async ({
+  page,
+  context,
+}, testInfo) => {
+  const csrf = await login(context, '10000003');
+  const task = await createBoundaryTask(context, csrf, '进度布局验收 ' + testInfo.project.name);
+  const base = '/api/admin/training-tasks/' + task.id;
+  const preview = await (
+    await context.request.post(base + '/audience-preview', {
+      headers: { 'X-CSRF-Token': csrf },
+      data: { version: task.version },
+    })
+  ).json();
+  const published = await context.request.post(base + '/publish', {
+    headers: {
+      'X-CSRF-Token': csrf,
+      'Idempotency-Key': 'completion-layout-' + testInfo.project.name + '-' + Date.now(),
+    },
+    data: { version: task.version, preview_token: preview.preview_token, confirm_exclusions: true },
+  });
+  expect(published.status()).toBe(200);
+  await page.goto('/admin.html?section=training&task_id=' + task.id + '&tab=progress');
+  const table = page.getByRole('table', { name: '成员完成情况' });
+  const complete = table.getByRole('progressbar', { name: '训练测试姓名甲的做题进度' });
+  const empty = table.getByRole('progressbar', { name: '未填写姓名的做题进度' });
+  await expect(complete).toHaveAttribute('aria-valuetext', '已完成 1 / 1 题');
+  await expect(empty).toHaveAttribute('aria-valuetext', '已完成 0 / 1 题');
+  expect(await table.getByRole('columnheader').allTextContents()).toEqual([
+    '成员 / 身份快照',
+    '完成进度',
+    '操作',
+  ]);
+  for (const theme of ['light', 'dark']) {
+    if ((await page.locator('body').getAttribute('data-theme')) !== theme)
+      await page.getByRole('button', { name: '切换主题', exact: true }).click();
+    await expect(page.locator('body')).toHaveAttribute('data-theme', theme);
+    await expect(complete.locator('span')).toHaveCSS(
+      'background-color',
+      theme === 'dark' ? 'rgb(169, 130, 255)' : 'rgb(130, 80, 223)',
+    );
+    for (const width of [1440, 768, 414, 360]) {
+      await page.setViewportSize({ width, height: 960 });
+      await expect(complete).toBeVisible();
+      const track = await complete.boundingBox();
+      expect(track.width).toBeGreaterThan(90);
+      expect(
+        await complete
+          .locator('span')
+          .evaluate(
+            (fill) =>
+              fill.getBoundingClientRect().width / fill.parentElement.getBoundingClientRect().width,
+          ),
+      ).toBeCloseTo(1, 2);
+      expect(
+        await empty.locator('span').evaluate((fill) => fill.getBoundingClientRect().width),
+      ).toBe(0);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      expect(await table.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+      await page.screenshot({
+        path: testInfo.outputPath('completion-' + theme + '-' + width + '.png'),
+        fullPage: true,
+      });
+      if (width === 1440)
+        await table.screenshot({ path: testInfo.outputPath('completion-table-' + theme + '.png') });
+    }
+  }
+  await page.getByPlaceholder('真实姓名、昵称或 QQ').fill('训练测试姓名甲');
+  await page.getByRole('button', { name: '筛选成员', exact: true }).click();
+  await expect(table.getByRole('progressbar')).toHaveCount(1);
+  await expect(complete).toBeVisible();
+  await page.reload();
+  await expect(complete).toBeVisible();
+  await expect(page.getByPlaceholder('真实姓名、昵称或 QQ')).toHaveValue('训练测试姓名甲');
+  await page.getByPlaceholder('真实姓名、昵称或 QQ').fill('不存在的合成姓名');
+  await page.getByRole('button', { name: '筛选成员', exact: true }).click();
+  await expect(table).toContainText('没有符合筛选条件的成员。');
+  await expect(table.getByRole('progressbar')).toHaveCount(0);
 });

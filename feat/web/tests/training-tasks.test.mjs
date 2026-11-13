@@ -21,7 +21,7 @@ const keys = [
   'fetch',
 ];
 const originals = new Map(keys.map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
-let dom, mounted, calls, guard, stored, conflict;
+let dom, mounted, calls, guard, stored, conflict, progressItems;
 const response = (data, status = 200) => new Response(JSON.stringify(data), { status });
 beforeEach(() => {
   dom = new JSDOM('<!doctype html><body></body>', {
@@ -38,6 +38,7 @@ beforeEach(() => {
   guard = null;
   stored = null;
   conflict = false;
+  progressItems = [];
   dom.window.confirm = () => false;
   globalThis.fetch = async (url, options = {}) => {
     const body = options.body ? JSON.parse(options.body) : null;
@@ -89,6 +90,21 @@ beforeEach(() => {
             phase: 'active',
             problems: stored.problems,
           });
+    if (url.startsWith('/api/admin/training-tasks/17/progress?'))
+      return response({
+        summary: {
+          recipient_count: progressItems.length,
+          completed_problem_count: 12,
+          total_problem_count: 40,
+        },
+        items: progressItems,
+        total: progressItems.length,
+      });
+    if (url.startsWith('/api/admin/training-tasks/17/progress/'))
+      return response({
+        recipient: progressItems.find((m) => m.id === Number(url.split('/').at(-1))),
+        problems: [],
+      });
     if (url === '/api/admin/training-tasks/17')
       return response({ ...stored, phase: stored.state === 'draft' ? 'draft' : 'active' });
     if (url.startsWith('/api/admin/training-tasks?')) return response({ items: [], total: 0 });
@@ -348,4 +364,117 @@ test('edits made while a preview response is pending must be saved and previewed
   await click('保存并预览');
   assert.equal(mounted.router.currentRoute.value.query.step, '3');
   assert.equal(stored.due_at, utcTime(laterDue));
+});
+
+test('completion rows use real names and proportional progress without QQ or status columns', async () => {
+  stored = {
+    id: 17,
+    title: '合成任务',
+    version: 2,
+    state: 'published',
+    statuses: ['动态实验组'],
+    audit: [],
+    problems: [],
+  };
+  progressItems = [
+    {
+      id: 1,
+      qq_id: '22345678',
+      name: '昵称甲',
+      real_name: '合成实名甲',
+      completed_problems: 0,
+      account_status: 'active',
+    },
+    {
+      id: 2,
+      qq_id: '32345678',
+      name: '昵称乙',
+      real_name: '合成实名乙',
+      completed_problems: 4,
+      account_status: 'active',
+    },
+    {
+      id: 3,
+      qq_id: '42345678',
+      name: '数字昵称',
+      real_name: null,
+      completed_problems: 8,
+      account_status: 'active',
+    },
+    {
+      id: 4,
+      qq_id: null,
+      name: '已注销成员',
+      real_name: null,
+      completed_problems: 0,
+      account_status: 'closed',
+    },
+    {
+      id: 5,
+      qq_id: '52345678',
+      name: '历史昵称',
+      real_name: null,
+      completed_problems: 0,
+      account_status: 'changed',
+    },
+  ].map((m) => ({ ...m, problem_count: 8, status_snapshot: '动态实验组' }));
+  mounted = await mount(
+    Root,
+    [{ path: '/admin.html', component: Training }],
+    '/admin.html?section=training&task_id=17&tab=progress',
+  );
+  await settle();
+  const table = find(
+    mounted.root,
+    (n) => n.type === 'table' && n.props['aria-label'] === '成员完成情况',
+  )[0];
+  assert(table);
+  assert.deepEqual(find(table, (n) => n.type === 'th').map(textOf), [
+    '成员 / 身份快照',
+    '完成进度',
+    '操作',
+  ]);
+  const copy = textOf(table);
+  for (const label of ['合成实名甲', '合成实名乙', '未填写姓名', '已注销成员', '历史成员'])
+    assert(copy.includes(label));
+  for (const hidden of [
+    '22345678',
+    '32345678',
+    '42345678',
+    '52345678',
+    '昵称甲',
+    '任务状态',
+    '核验与账号',
+  ])
+    assert(!copy.includes(hidden), hidden);
+  const bars = find(table, (n) => n.props.role === 'progressbar');
+  assert.equal(bars.length, 5);
+  assert.deepEqual(
+    bars.slice(0, 3).map((n) => [n.props['aria-valuenow'], n.props['aria-valuemax']]),
+    [
+      [0, 8],
+      [4, 8],
+      [8, 8],
+    ],
+  );
+  assert.deepEqual(
+    bars.slice(0, 3).map((n) => n.children[0].props.style.width),
+    ['0%', '50%', '100%'],
+  );
+  assert.equal(bars[1].props['aria-label'], '合成实名乙的做题进度');
+  assert.equal(bars[1].props['aria-valuetext'], '已完成 4 / 8 题');
+  await click('逐题证据');
+  assert(textOf(mounted.root).includes('合成实名甲 · 逐题证据'));
+  assert(calls.some((c) => c.url === '/api/admin/training-tasks/17/progress/1'));
+  await set('成员搜索', '合成实名乙');
+  const form = find(mounted.root, (n) => n.type === 'form' && textOf(n).includes('成员搜索'))[0];
+  await form.props.onSubmit({ preventDefault() {} });
+  await settle();
+  assert(
+    calls.some(
+      (c) =>
+        c.url.includes('/progress?') &&
+        new URL(c.url, location.origin).searchParams.get('search') === '合成实名乙',
+    ),
+  );
 });

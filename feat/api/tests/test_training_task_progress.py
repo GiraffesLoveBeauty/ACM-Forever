@@ -20,6 +20,68 @@ class TrainingProgressTests(unittest.IsolatedAsyncioTestCase):
     preview = task_contract.TrainingTaskTests.preview
     publish = task_contract.TrainingTaskTests.publish
 
+    async def test_admin_real_name_search_paging_and_member_privacy(self):
+        await self.sql("UPDATE users SET real_name='  合成实名甲  ' WHERE qq_id='22345678'")
+        await self.seed('32345678')
+        task = await self.create()
+        await self.publish(task)
+        base = f'/api/admin/training-tasks/{task["id"]}/progress'
+        members = (await self.info(task['id']))['items']
+        self.assertEqual([m['real_name'] for m in members], ['合成实名甲', None])
+        self.assertEqual(members[0]['name'], '合成成员78')
+        for search in ['合成实名甲', '22345678']:
+            response = await self.client.get(base, query_string={'search': search})
+            data = await response.get_json()
+            self.assertEqual((data['total'], data['items'][0]['qq_id']), (1, '22345678'))
+            self.assertEqual(data['summary']['recipient_count'], 2)
+        nicknames = await (await self.client.get(base, query_string={'search': '合成成员'})).get_json()
+        self.assertEqual(nicknames['total'], 2)
+        page = await (await self.client.get(base, query_string={'page_size': 1, 'page': 2})).get_json()
+        self.assertEqual((page['total'], len(page['items']), page['items'][0]['real_name']), (2, 1, None))
+        detail = await (await self.client.get(base + '/' + str(members[0]['id']))).get_json()
+        self.assertEqual(detail['recipient']['real_name'], '合成实名甲')
+        await self.sql("UPDATE users SET real_name='合成改名甲' WHERE qq_id='22345678'")
+        renamed = await (await self.client.get(base, query_string={'search': '合成改名甲'})).get_json()
+        self.assertEqual(renamed['items'][0]['real_name'], '合成改名甲')
+        member = self.app.test_client()
+        login = await member.post('/api/auth/login', json={'qq_id': '22345678', 'password': 'Test-Password-123!'})
+        self.assertEqual(login.status_code, 200)
+        for url in ['/api/me/training-tasks', f'/api/me/training-tasks/{task["id"]}']:
+            response = await member.get(url)
+            self.assertEqual(response.status_code, 200)
+            data = await response.get_json()
+            self.assertNotIn('real_name', json.dumps(data, ensure_ascii=False))
+            self.assertNotIn('合成改名甲', json.dumps(data, ensure_ascii=False))
+        self.assertEqual((await member.get(base)).status_code, 403)
+        self.assertEqual((await member.get(base + '/' + str(members[0]['id']))).status_code, 403)
+
+    async def test_real_name_isolation_for_changed_closed_and_reused_accounts(self):
+        await self.sql("UPDATE users SET real_name='合成旧姓名' WHERE qq_id='22345678'")
+        task = await self.create()
+        await self.publish(task)
+        recipient = (await self.info(task['id']))['items'][0]
+        self.assertEqual(recipient['real_name'], '合成旧姓名')
+        await self.sql("UPDATE users SET account_epoch=account_epoch+1,real_name='新代际姓名' WHERE qq_id='22345678'")
+        changed = (await self.info(task['id']))['items'][0]
+        self.assertEqual(changed['account_status'], 'changed')
+        self.assertIsNone(changed['real_name'])
+        await self.sql("UPDATE users SET account_state='closed',account_epoch=account_epoch+1 WHERE qq_id='22345678'")
+        reopened = await self.client.post('/api/admin/web-accounts', headers=self.headers, json={
+            'qq_id': '22345678', 'name': '重新开户昵称', 'initial_password': 'New-Password-123!', 'role': 'member',
+        })
+        self.assertEqual(reopened.status_code, 201, await reopened.get_json())
+        self.assertTrue((await reopened.get_json())['new_generation'])
+        await self.sql("UPDATE users SET real_name='重新开户姓名' WHERE qq_id='22345678'")
+        base = f'/api/admin/training-tasks/{task["id"]}/progress'
+        closed = (await self.info(task['id']))['items'][0]
+        self.assertEqual((closed['account_status'], closed['name'], closed['qq_id']), ('closed', '已注销成员', None))
+        self.assertIsNone(closed['real_name'])
+        detail = await (await self.client.get(base + '/' + str(recipient['id']))).get_json()
+        self.assertIsNone(detail['recipient']['real_name'])
+        for name in ['新代际姓名', '重新开户姓名']:
+            response = await self.client.get(base, query_string={'search': name})
+            self.assertEqual((await response.get_json())['total'], 0)
+
     async def bind(self, handle='FirstHandle'):
         await self.sql("UPDATE users SET cf_handle=? WHERE qq_id='22345678'", (handle,))
         row = (await self.sql("SELECT cf_binding_version FROM users WHERE qq_id='22345678'"))[0]

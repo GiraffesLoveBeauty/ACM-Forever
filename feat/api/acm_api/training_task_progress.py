@@ -115,7 +115,7 @@ def recipient_state(row, now):
     return row
 
 
-async def recipient_summaries(db, task_ids, *, qq_id=None, epoch=None, now=None):
+async def recipient_summaries(db, task_ids, *, qq_id=None, epoch=None, now=None, include_real_name=False):
     if not task_ids:
         return []
     now = int(time.time()) if now is None else now
@@ -124,8 +124,11 @@ async def recipient_summaries(db, task_ids, *, qq_id=None, epoch=None, now=None)
     if qq_id is not None:
         where += " AND r.qq_id=? AND r.account_epoch=?"
         values.extend([str(qq_id), epoch])
-    result = await tasks.rows(db, """
-        SELECT r.*,t.starts_at,t.due_at,t.state,t.rule,u.account_epoch AS current_epoch,u.account_state,
+    name_column = """
+        ,CASE WHEN r.closed=0 AND u.account_state='active' AND u.account_epoch=r.account_epoch
+         THEN NULLIF(TRIM(u.real_name),'') ELSE NULL END AS real_name""" if include_real_name else ""
+    result = await tasks.rows(db, f"""
+        SELECT r.*{name_column},t.starts_at,t.due_at,t.state,t.rule,u.account_epoch AS current_epoch,u.account_state,
         u.cf_handle,u.cf_binding_version,a.is_active,p.platform,x.binding_key,MAX(x.binding_version) AS binding_version,
         s.binding_key AS sync_binding,s.full_history_at,s.coverage_through_at,s.last_status AS sync_status,
         COUNT(x.problem_id) AS problem_count,

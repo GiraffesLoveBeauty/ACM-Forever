@@ -3,7 +3,6 @@ import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { date, notify, useRequests } from '../lib/api.js';
 import {
-  completions,
   exclusions,
   localTime,
   newDraft,
@@ -64,6 +63,11 @@ function address(changes = {}, replace = false) {
   for (const key of Object.keys(query))
     if (query[key] === '' || query[key] == null) delete query[key];
   return router[replace ? 'replace' : 'push']({ path: '/admin.html', query });
+}
+function progressMemberName(member) {
+  if (member.account_status === 'closed') return '已注销成员';
+  if (member.account_status === 'changed') return '历史成员';
+  return member.real_name?.trim() || '未填写姓名';
 }
 function auditText(entry) {
   if (entry.action !== 'extended') return '';
@@ -873,7 +877,7 @@ function lifecycle(kind) {
             })
           "
         >
-          <label>成员搜索<input v-model="memberSearch" placeholder="姓名或 QQ" /></label
+          <label>成员搜索<input v-model="memberSearch" placeholder="真实姓名、昵称或 QQ" /></label
           ><label
             >发布时身份<select v-model="memberIdentity">
               <option value="">全部身份</option>
@@ -891,41 +895,53 @@ function lifecycle(kind) {
           ><button class="btn">筛选成员</button>
         </form>
         <div class="tt-table-wrap">
-          <table class="tt-table">
+          <table class="tt-table tt-progress-table" aria-label="成员完成情况">
             <thead>
               <tr>
-                <th>成员 / 身份快照</th>
-                <th>完成题目</th>
-                <th>任务状态</th>
-                <th>核验与账号</th>
-                <th>操作</th>
+                <th scope="col">成员 / 身份快照</th>
+                <th scope="col">完成进度</th>
+                <th scope="col">操作</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="m in progress.items" :key="m.id">
                 <td>
-                  {{ m.name }}
-                  <p class="tt-caption">{{ m.status_snapshot }} · {{ m.qq_id || '匿名归档' }}</p>
+                  <strong>{{ progressMemberName(m) }}</strong>
+                  <p class="tt-caption">{{ m.status_snapshot }}</p>
                 </td>
-                <td>{{ m.completed_problems }} / {{ m.problem_count }} 题</td>
-                <td>{{ completions[m.completion] }}</td>
-                <td>
-                  {{ m.pending ? '待核验' : '已核验' }}
-                  <p class="tt-caption">
-                    {{
-                      {
-                        active: '账号正常',
-                        closed: '已注销',
-                        disabled: '已停用',
-                        changed: '账号代际变化',
-                      }[m.account_status]
-                    }}
-                    · {{ date(m.checked_at) }}
-                  </p>
+                <td class="tt-member-progress-cell">
+                  <div class="tt-member-progress-line">
+                    <span class="tt-member-progress-count"
+                      >{{ m.completed_problems }} / {{ m.problem_count }} 题</span
+                    >
+                    <div
+                      class="tt-member-progress"
+                      role="progressbar"
+                      :aria-label="progressMemberName(m) + '的做题进度'"
+                      :aria-valuemin="0"
+                      :aria-valuemax="m.problem_count"
+                      :aria-valuenow="m.completed_problems"
+                      :aria-valuetext="
+                        '已完成 ' + m.completed_problems + ' / ' + m.problem_count + ' 题'
+                      "
+                      :style="{ '--tt-progress-steps': m.problem_count }"
+                    >
+                      <span
+                        :style="{
+                          width:
+                            (m.problem_count ? (m.completed_problems / m.problem_count) * 100 : 0) +
+                            '%',
+                        }"
+                      ></span>
+                    </div>
+                  </div>
                 </td>
                 <td>
                   <button class="btn" @click="address({ recipient_id: m.id })">逐题证据</button>
                 </td>
+              </tr>
+              <tr v-if="!progress.items.length">
+                <td colspan="3" class="tt-muted">没有符合筛选条件的成员。</td>
               </tr>
             </tbody>
           </table>
@@ -938,7 +954,7 @@ function lifecycle(kind) {
         />
         <section v-if="recipient" class="tt-panel tt-stack">
           <div class="tt-between">
-            <h3>{{ recipient.recipient.name }} · 逐题证据</h3>
+            <h3>{{ progressMemberName(recipient.recipient) }} · 逐题证据</h3>
             <button class="btn" @click="address({ recipient_id: null })">收起证据</button>
           </div>
           <TaskProblemList :problems="recipient.problems" :from="route.fullPath" />
