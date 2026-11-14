@@ -32,6 +32,7 @@ from .auth_service import (
 )
 from .reporting import valid_contest_report_time
 from .cf_client import cf_request
+from .luogu_problem import attach_classifications, load_taxonomy, native_filter, problem_id as luogu_problem_id
 from .problem_sync import sync_options
 from .problem_bank import problem_bank_status
 from .problem_tracker import attempt_problem_metadata, contest_tracker, problem_id_aliases, problem_id_key, tracker_options
@@ -1620,6 +1621,12 @@ async def api_problems():
         if tag: query += " AND (p.problem_name LIKE ? OR p.problem_id LIKE ? OR COALESCE(p.tags,'') LIKE ?)"; params.extend([f"%{tag}%", f"%{tag}%", f"%{tag}%"])
         if state == "favorite": query += " AND COALESCE(s.is_favorite,0)=1"
         elif state == "inbox": query += " AND COALESCE(s.state,'inbox')='inbox'"
+        try:
+            extra, native_params = await native_filter(db, request.args, platform)
+        except ValueError as error:
+            return jsonify({"success": False, "message": str(error)}), 400
+        query += extra
+        params.extend(native_params)
         count_query = "SELECT COUNT(*) FROM (" + query + ") filtered"
         async with db.execute(count_query, tuple(params)) as cursor:
             total = int((await cursor.fetchone())[0])
@@ -1631,12 +1638,18 @@ async def api_problems():
         query += " ORDER BY CAST(p.problem_rating AS INTEGER), p.platform, p.problem_id LIMIT ? OFFSET ?"
         async with db.execute(query, tuple(params + [size, (page - 1) * size])) as cursor:
             items = [dict(row) for row in await cursor.fetchall()]
+        await attach_classifications(db, items)
         return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": size})
     finally:
         await db.close()
 
 
 def _problem_id_filter(platform, problem_id):
+    if platform == "luogu":
+        try:
+            problem_id = luogu_problem_id(problem_id)
+        except ValueError:
+            pass  # Let unknown historical IDs follow the existing local lookup.
     aliases = problem_id_aliases(platform, problem_id)
     column = "problem_id COLLATE NOCASE" if platform == "codeforces" else "problem_id"
     return column + " IN (" + ",".join("?" for _ in aliases) + ")", aliases
@@ -1648,7 +1661,7 @@ async def _problem_detail(platform, problem_id):
     try:
         id_filter, aliases = _problem_id_filter(platform, problem_id)
         async with db.execute(
-            "SELECT platform,problem_id,contest_id,problem_name,problem_rating,problem_url,tags,"
+            "SELECT platform,problem_id,contest_id,problem_name,problem_rating,problem_url,tags,metadata_json,"
             "statement_html,statement_text,length(statement_pdf)>0 AS has_pdf,statement_language,samples,statement_fetched_at,last_fetch_status "
             "FROM crawler_problems WHERE platform=? AND " + id_filter +
             " ORDER BY (COALESCE(length(statement_html),0)>0 OR COALESCE(length(statement_text),0)>0 "
@@ -1689,12 +1702,41 @@ async def _problem_detail(platform, problem_id):
                 "statement_html": None, "statement_text": None, "statement_language": None,
                 "samples": [], "statement_fetched_at": None, "last_fetch_status": "never",
             }
+        native = json.loads(detail.pop("metadata_json", "{}"))
+        if platform == "luogu":
+            await attach_classifications(db, [detail])
+            detail["statement_markdown"] = native.get("luogu", {}).get("markdown")
+            detail["native_limits"] = native.get("luogu", {}).get("limits")
         has_pdf = bool(detail.pop("has_pdf", False))
         detail["statement_format"] = "pdf" if has_pdf else "html" if detail["statement_html"] else "text" if detail["statement_text"] else None
         detail["content_available"] = bool(has_pdf or detail["statement_html"] or detail["statement_text"])
         return jsonify(detail)
     finally:
         await db.close()
+
+
+async def _problem_taxonomy():
+    if request.args.get("platform", "luogu") != "luogu":
+        return jsonify({"success": False, "message": "本接口仅提供洛谷原生分类字典。"}), 400
+    db = await get_db()
+    try:
+        taxonomy = await load_taxonomy(db)
+        return jsonify(taxonomy or {"platform": "luogu", "difficulties": [], "tags": [], "tag_types": [],
+                                  "versions": {}, "updated_at": None, "stale": True})
+    finally:
+        await db.close()
+
+
+@api.get("/problems/taxonomy")
+@admin_required
+async def api_problem_taxonomy():
+    return await _problem_taxonomy()
+
+
+@api.get("/me/problems/taxonomy")
+@member_required
+async def api_me_problem_taxonomy():
+    return await _problem_taxonomy()
 
 
 @api.get("/problems/<platform>/<problem_id>")
@@ -2299,6 +2341,12 @@ async def api_me_problems():
             query += " AND p.is_favorite=1"
         elif state == "inbox":
             query += " AND p.outside_inbox=0"
+        try:
+            extra, native_params = await native_filter(db, request.args, platform)
+        except ValueError as error:
+            return jsonify({"success": False, "message": str(error)}), 400
+        query += extra
+        params.extend(native_params)
         count_query = "SELECT COUNT(*) FROM (" + query + ") filtered"
         async with db.execute(count_query, tuple(params)) as cursor:
             total = int((await cursor.fetchone())[0])
@@ -2310,6 +2358,7 @@ async def api_me_problems():
         query += (" ORDER BY ac_at DESC,p.platform,p.problem_id" if scope == "solved" else " ORDER BY CAST(p.problem_rating AS INTEGER),p.platform,p.problem_id") + " LIMIT ? OFFSET ?"
         async with db.execute(query, tuple(params + [size, (page - 1) * size])) as cursor:
             items = [dict(row) for row in await cursor.fetchall()]
+        await attach_classifications(db, items)
         return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": size})
     finally:
         await db.close()
