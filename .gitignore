@@ -19,3 +19,43 @@ __pycache__/
 *.sqlite3-shm
 *.sqlite3-wal
 *.py[cod]
+
+# Dependencies and package caches for every JavaScript subproject.
+node_modules/
+.pnpm-store/
+
+# Python tooling, virtual environments and test coverage.
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+/feat/web/coverage/
+
+# Local databases outside the API directory and rotated process logs.
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.log.*
+*.pid
+
+# Installers and private Android signing material.
+*.apk
+*.aab
+*.apks
+*.jks
+*.keystore
+
+# Local editor state, swap files and operating-system metadata.
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
