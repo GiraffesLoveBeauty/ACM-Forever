@@ -51,3 +51,10 @@ CREATE TABLE IF NOT EXISTS crawler_contest_catalogs (
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (platform, contest_id)
 );
+
+-- Native public classifications are cached locally. Read APIs never fetch an OJ.
+CREATE TABLE IF NOT EXISTS crawler_platform_taxonomies (
+    platform TEXT PRIMARY KEY,
+    data_json TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);

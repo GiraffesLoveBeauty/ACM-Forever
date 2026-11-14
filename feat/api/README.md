@@ -79,6 +79,24 @@ CF 支持没有样例的题目及直接返回 PDF 的题面。PDF 原文件存�
 
 需要恢复时，在服务环境文件中设置 `ACM_LUOGU_USER_SYNC_ENABLED=true`，确认洛谷 Cookie 和 CSRF Token 有效后重启 API 服务。仅设置凭据不会恢复抓取。此开关只控制用户过题记录，不影响账号验证或题目目录采集。
 
+### 洛谷公开 P 题库后端
+
+通过已有的管理员采集接口 `POST /api/admin/problems/sync`，可匿名采集洛谷公开 P 题库。本期先提供后端，管理页面的洛谷平台选项由前端子任务接入。最小请求如下，沿用管理员会话和 CSRF：
+
+```json
+{"platform":"luogu","scope":"problems","problem_ids":["P1001"],"refresh":false}
+```
+
+- `scope=problems` 指定 1–100 道题；`scope=catalog` 分页导入目录；`scope=platform` 导入目录后补齐缺失题面，`limit` 默认 100、最大 1000。重跑会跳过已有题面，优先处理未尝试的题，再重试较早失败的题，避免重复失败阻塞后续题目；`refresh=true` 时重新获取。目录总量与本次题面上限不同，目录同步可能持续较长时间。
+- 题目仍使用 SQLite 的 `(platform, problem_id)` 联合主键，例如 `(luogu, P1001)`，同步写入已有题库目录；不虚构比赛 ID。题面 HTML、纯文本、样例使用已有原子入库流程，原始 Markdown 段落及时间/内存限制保存在 `metadata_json.luogu`。
+- 难度、标签、类别和颜色直接来自洛谷公开配置，字典缓存 24 小时。洛谷的 `problem_rating` 为 null，通过 `native_difficulty/native_tags` 返回原生分类，避免误当作 CF 分数。未知 ID 也保留。
+- 列表、详情、分类字典只读取本地数据库。成员和管理员接口、筛选参数见 [api.md（接口说明）](../../docs/api.md#洛谷公开-p-题库)。
+- 不请求提交记录，不使用 Cookie、不跟随登录或验证跳转。默认请求间隔 2 秒，遇到 403/429 停止整批任务并记录冷却时间；普通单题失败保留原题面，连续三题失败停止。目录页异常、任务取消均保留已提交数据。
+
+`ACM_LUOGU_DAILY_PROBLEM_SYNC_ENABLED=false` 为默认值。评估原站允许的采集范围、目录请求量和运行窗口后，才按需开启每日目录与缺失题面更新；同时需启用总开关 `ACM_DAILY_PROBLEM_SYNC_ENABLED`。每日任务复用北京时间 04:00 的调度和 SQLite 去重记录，每天默认最多补 100 道题面。`ACM_LUOGU_REQUEST_INTERVAL` 范围 1.2–60 秒，`ACM_LUOGU_DAILY_STATEMENT_LIMIT` 范围 1–1000，`ACM_LUOGU_CATALOG_MAX_PAGES` 默认 1000、范围 1–2000；到达页数上限会报告未完成，不删除旧题。
+
+启动/初始化仅新增分类缓存表 `crawler_platform_taxonomies`，不会联网采集或重建业务表。升级前备份 SQLite 并在测试库验收；回退代码可保留新增表，回退题目数据需使用备份。账号验证继续使用公开资料页；旧用户提交同步仍受原暂停开关控制，成员 AC 同步与训练模块兼容属于后续子任务。
+
 ### 每日自动更新题库
 
 API 服务默认在北京时间每天 04:00 依次更新 AtCoder 和 Codeforces 的公开题目目录。每个平台最多补采 100 道缺失题面的题目，优先处理较新的题目，已成功保存的题面和样例继续使用。管理员可在 **同步任务** 查看进度和结果，仍可手动发起全量采集。

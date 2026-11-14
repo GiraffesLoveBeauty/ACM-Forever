@@ -156,7 +156,7 @@ class WebTaskManager:
     def __init__(self, sync_engine: SyncEngine):
         self.sync_engine = sync_engine
         self.tasks = {}
-        self.problem_sync = ProblemSync(sync_engine.db_path)
+        self.problem_sync = ProblemSync(sync_engine.db_path, getattr(sync_engine, "crawler_config", {}))
         self._daily_problem_sync_task = None
         self._claiming_daily_problem_sync = False
         self._member_sync_task = None
@@ -233,7 +233,10 @@ class WebTaskManager:
 
     async def _run_daily_problem_sync(self):
         day = datetime.now(PROBLEM_SYNC_TIMEZONE).date()
-        for platform in ("atcoder", "codeforces"):
+        platforms = ["atcoder", "codeforces"]
+        if getattr(self.sync_engine, "crawler_config", {}).get("luogu_daily_problem_sync_enabled", False):
+            platforms.append("luogu")
+        for platform in platforms:
             if datetime.now(PROBLEM_SYNC_TIMEZONE).date() != day:
                 break
             if self._claiming_daily_problem_sync or self._claiming_all_accounts_sync or self._active_problem_sync() is not None:
@@ -250,7 +253,10 @@ class WebTaskManager:
             for task_id, item in list(self.tasks.items()):
                 if item.get("platform") == platform and item.get("options", {}).get("scheduled") and item["_task"].done():
                     del self.tasks[task_id]
-            options = sync_options({"platform": platform, "scope": "platform"})
+            request_options = {"platform": platform, "scope": "platform"}
+            if platform == "luogu":
+                request_options["limit"] = getattr(self.sync_engine, "crawler_config", {}).get("luogu_daily_statement_limit", 100)
+            options = sync_options(request_options)
             options["scheduled"] = True
             task_id = self.submit_problem_sync(options)["id"]
             await asyncio.gather(self.tasks[task_id]["_task"], return_exceptions=True)

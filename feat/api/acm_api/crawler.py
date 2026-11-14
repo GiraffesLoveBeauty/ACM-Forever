@@ -18,6 +18,7 @@ import aiosqlite
 
 import logging
 from .cf_client import CFUnavailable, cf_request
+from .luogu_client import luogu_get, page_context
 from .sync_policy import SYNC_PAUSED, submission_sync_paused
 
 LOG = logging.getLogger("acm_api.crawler")
@@ -35,13 +36,7 @@ _ATCODER_DIFFICULTIES_LOCK = asyncio.Lock()
 _ATCODER_SUBMISSION_GATES = weakref.WeakKeyDictionary()
 _ATCODER_SUBMISSION_PAGE_SIZE = 500
 
-_LUOGU_GATE_LOCK = asyncio.Lock()
-_LUOGU_NEXT_REQUEST_AT = 0.0
-_LUOGU_COOLDOWN_UNTIL = 0.0
-_LUOGU_FAILURES = 0
-_LUOGU_MIN_INTERVAL = 1.2
-_LUOGU_403_COOLDOWN = 300.0
-_LUOGU_429_COOLDOWN = 60.0
+
 async def _store_cf_attempts(db, qq_id, submissions, *, commit=True):
     """Persist submission evidence and record unsolved contest problems without learning queues."""
     now = int(time.time())
@@ -76,38 +71,10 @@ async def _store_cf_attempts(db, qq_id, submissions, *, commit=True):
         await db.commit()
 
 
-_LUOGU_PROFILE_CONTEXT_RE = re.compile(
-    r'<script\s+id="lentille-context"\s+type="application/json">(.*?)</script>',
-    re.S,
-)
-
-
 async def _fetch_luogu_json(session, url, headers, timeout):
-    """所有洛谷请求共享节流和短期熔断，避免并发用户形成失败风暴。"""
-    global _LUOGU_NEXT_REQUEST_AT, _LUOGU_COOLDOWN_UNTIL, _LUOGU_FAILURES
-    async with _LUOGU_GATE_LOCK:
-        now = time.monotonic()
-        if now < _LUOGU_COOLDOWN_UNTIL:
-            raise RuntimeError("洛谷请求处于冷却期")
-        wait = _LUOGU_NEXT_REQUEST_AT - now
-        if wait > 0:
-            await asyncio.sleep(wait)
-        try:
-            async with session.get(url, headers=headers, timeout=timeout) as response:
-                if response.status == 403:
-                    _LUOGU_FAILURES += 1
-                    _LUOGU_COOLDOWN_UNTIL = time.monotonic() + _LUOGU_403_COOLDOWN
-                    raise RuntimeError("洛谷返回 403，已进入冷却期")
-                if response.status == 429:
-                    _LUOGU_FAILURES += 1
-                    _LUOGU_COOLDOWN_UNTIL = time.monotonic() + _LUOGU_429_COOLDOWN
-                    raise RuntimeError("洛谷返回 429，已进入冷却期")
-                response.raise_for_status()
-                data = await response.json()
-            _LUOGU_FAILURES = 0
-            return data
-        finally:
-            _LUOGU_NEXT_REQUEST_AT = time.monotonic() + _LUOGU_MIN_INTERVAL
+    """Legacy submission callers share the public collector request gate."""
+    return json.loads(await luogu_get(session, url, headers=headers, timeout=timeout))
+
 
 luogu_difficulty_map = {
     0: "未评定",
@@ -238,12 +205,9 @@ class Crawler:
         except (aiohttp.ClientError, asyncio.TimeoutError):
             return False, "洛谷接口暂时不可用，请稍后重试"
 
-        match = _LUOGU_PROFILE_CONTEXT_RE.search(body)
-        if not match:
-            return False, "洛谷接口返回异常，暂时无法确认账号"
         try:
-            context = json.loads(match.group(1))
-        except json.JSONDecodeError:
+            context = page_context(body)
+        except ValueError:
             return False, "洛谷接口返回异常，暂时无法确认账号"
 
         payload = context.get("data") if isinstance(context, dict) else None
