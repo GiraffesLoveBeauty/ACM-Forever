@@ -1,11 +1,20 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { auth } from '../lib/api.js';
 import ProblemCollection from '../components/ProblemCollection.vue';
 import ProblemDatabaseBrowser from '../components/ProblemDatabaseBrowser.vue';
 
 const manager = computed(() => ['admin', 'root'].includes(auth.role));
-const collection = ref(false);
+const route = useRoute(),
+  router = useRouter();
+const collection = computed(() => route.query.view === 'collection');
+function showCollection(value) {
+  const query = { ...route.query };
+  if (value) query.view = 'collection';
+  else delete query.view;
+  router.replace({ path: route.path, query });
+}
 </script>
 <template>
   <template v-if="manager">
@@ -17,9 +26,9 @@ const collection = ref(false);
         </p>
       </div>
       <div class="chips">
-        <button class="btn" :class="{ primary: !collection }" @click="collection = false">
+        <button class="btn" :class="{ primary: !collection }" @click="showCollection(false)">
           题库与 AI 管理</button
-        ><button class="btn" :class="{ primary: collection }" @click="collection = true">
+        ><button class="btn" :class="{ primary: collection }" @click="showCollection(true)">
           采集与数据库工具
         </button>
       </div>

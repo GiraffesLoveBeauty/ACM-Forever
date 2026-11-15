@@ -164,6 +164,8 @@ def parse_problem(raw, expected_id, taxonomy):
     parts, sections = [], {}
     for key, title in SECTIONS:
         text = body.get(key, "")
+        if text is None:
+            text = ""
         if not isinstance(text, str):
             raise ValueError("洛谷 Markdown 段落格式异常")
         sections[key] = text

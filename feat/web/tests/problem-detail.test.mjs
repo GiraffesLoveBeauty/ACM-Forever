@@ -31,13 +31,28 @@ const saved = (extra = {}) => ({
   samples: [sample],
   ...extra,
 });
-test('original plain-text statement shares subscript rendering with the translation',()=>{
-  const root=dom.window.document.createElement('div');
-  root.innerHTML=renderProblemContent({platform:'atcoder',statement_text:"Permutation P_1 to P'_N.",samples:[]},dom.window.document).html;
-  assert.deepEqual([...root.querySelectorAll('math annotation')].map(n=>n.textContent),['P_1',"P'_N"]);
-  assert.equal(root.querySelectorAll('.katex-html').length,2);
+test('original plain-text statement shares subscript rendering with the translation', () => {
+  const root = dom.window.document.createElement('div');
+  root.innerHTML = renderProblemContent(
+    { platform: 'atcoder', statement_text: "Permutation P_1 to P'_N.", samples: [] },
+    dom.window.document,
+  ).html;
+  assert.deepEqual(
+    [...root.querySelectorAll('math annotation')].map((n) => n.textContent),
+    ['P_1', "P'_N"],
+  );
+  assert.equal(root.querySelectorAll('.katex-html').length, 2);
 });
-let dom, mounted, calls, copied, responseData, responseStatus, holdId, held, secondaryMissing, secondaryOverrides;
+let dom,
+  mounted,
+  calls,
+  copied,
+  responseData,
+  responseStatus,
+  holdId,
+  held,
+  secondaryMissing,
+  secondaryOverrides;
 let pdfOpened, pdfRendered, pdfDestroyed, pdfHold, pdfDelayed, pdfFailure;
 const renderer = {
   openPdf(src) {
@@ -117,17 +132,29 @@ beforeEach(() => {
   globalThis.fetch = async (url, options = {}) => {
     calls.push({ url, options });
     if (url.startsWith('/api/secondary/problems/') && secondaryMissing)
-      return response({message:'该题暂无二次处理结果'},404);
-    if (url.startsWith('/api/secondary/problems/')) return response({
-      problem_key: 'codeforces:1843:A', taxonomy_version: '0.3-draft', model: 'fixture-model',
-      auto_tags: [{id:'enumeration',name_zh:'枚举',source:'ai'}],
-      effective_tags: [{id:'enumeration',name_zh:'枚举',source:'ai',tag_kind:'specific'}],
-      review_status:'auto', manual_history_count:0, manual_added_ids:[], manual_removed_ids:[],
-      needs_review_reasons:[], annotation_status:'success', content_hash:'fixture-content',
-      source_links:['https://codeforces.com/contest/1843/problem/A'],
-      translation_status:'missing', translation_active:false, translation_task_states:[],
-      ...secondaryOverrides,
-    });
+      return response({ message: '该题暂无二次处理结果' }, 404);
+    if (url.startsWith('/api/secondary/problems/'))
+      return response({
+        problem_key: 'codeforces:1843:A',
+        taxonomy_version: '0.3-draft',
+        model: 'fixture-model',
+        auto_tags: [{ id: 'enumeration', name_zh: '枚举', source: 'ai' }],
+        effective_tags: [
+          { id: 'enumeration', name_zh: '枚举', source: 'ai', tag_kind: 'specific' },
+        ],
+        review_status: 'auto',
+        manual_history_count: 0,
+        manual_added_ids: [],
+        manual_removed_ids: [],
+        needs_review_reasons: [],
+        annotation_status: 'success',
+        content_hash: 'fixture-content',
+        source_links: ['https://codeforces.com/contest/1843/problem/A'],
+        translation_status: 'missing',
+        translation_active: false,
+        translation_task_states: [],
+        ...secondaryOverrides,
+      });
     if (holdId && url.endsWith('/' + holdId))
       return new Promise((resolve) =>
         held.push(() => resolve(response(saved({ problem_id: holdId, problem_name: 'Stale' })))),
@@ -186,46 +213,61 @@ function parsed(detail) {
   return { container, ...result };
 }
 
-for (const role of ['admin','root']) test(`new crawler-only problem keeps translation management entry for ${role}`, async () => {
-  secondaryMissing=true;
-  setAuth({authenticated:true,qq_id:'1',role,csrf_token:'fixture'},true);
-  await page();
-  const content=textOf(mounted.root);
-  assert.ok(content.includes('这道题尚未进行二次处理'));
-  assert.ok(!content.includes('二次处理数据暂不可用'));
-  const link=find(mounted.root,n=>n.type==='a' && textOf(n).includes('后台管理'))[0];
-  assert.ok(link);
-  assert.ok(link.props.href.includes('action=translation'));
-  assert.ok(link.props.href.includes('problem_id=cf_1843A'));
-  assert.ok(calls.every(c=>!c.options.method || c.options.method==='GET'));
-});
+for (const role of ['admin', 'root'])
+  test(`new crawler-only problem keeps translation management entry for ${role}`, async () => {
+    secondaryMissing = true;
+    setAuth({ authenticated: true, qq_id: '1', role, csrf_token: 'fixture' }, true);
+    await page();
+    const content = textOf(mounted.root);
+    assert.ok(content.includes('这道题尚未进行二次处理'));
+    assert.ok(!content.includes('二次处理数据暂不可用'));
+    const link = find(mounted.root, (n) => n.type === 'a' && textOf(n).includes('后台管理'))[0];
+    assert.ok(link);
+    assert.ok(link.props.href.includes('action=translation'));
+    assert.ok(link.props.href.includes('problem_id=cf_1843A'));
+    assert.ok(calls.every((c) => !c.options.method || c.options.method === 'GET'));
+  });
 
-test('unprocessed problem shows a normal empty state without admin actions for member',async()=>{
-  secondaryMissing=true;
+test('unprocessed problem shows a normal empty state without admin actions for member', async () => {
+  secondaryMissing = true;
   await page();
   assert.ok(textOf(mounted.root).includes('这道题尚未进行二次处理'));
-  assert.equal(find(mounted.root,n=>n.type==='a' && textOf(n).includes('后台管理')).length,0);
+  assert.equal(
+    find(mounted.root, (n) => n.type === 'a' && textOf(n).includes('后台管理')).length,
+    0,
+  );
 });
 
-test('refresh loads newly saved labels and translation without issuing an AI request',async()=>{
+test('refresh loads newly saved labels and translation without issuing an AI request', async () => {
   await page();
-  secondaryOverrides={
-    effective_tags:[{id:'construction',name_zh:'构造',source:'ai',tag_kind:'specific'},
-      {id:'bit_operations',name_zh:'位运算',source:'ai',tag_kind:'specific'}],
-    translation_status:'auto',translation_active:true,translated_title:'模拟题中文标题',
-    translation_validation_mode:'parse_only',
-    translated_statement:'## 题目描述\n\n模拟中文译文。',
+  secondaryOverrides = {
+    effective_tags: [
+      { id: 'construction', name_zh: '构造', source: 'ai', tag_kind: 'specific' },
+      { id: 'bit_operations', name_zh: '位运算', source: 'ai', tag_kind: 'specific' },
+    ],
+    translation_status: 'auto',
+    translation_active: true,
+    translated_title: '模拟题中文标题',
+    translation_validation_mode: 'parse_only',
+    translated_statement: '## 题目描述\n\n模拟中文译文。',
   };
-  await find(mounted.root,n=>n.type==='button' && textOf(n)==='刷新标签与译文')[0].props.onClick();
+  await find(
+    mounted.root,
+    (n) => n.type === 'button' && textOf(n) === '刷新标签与译文',
+  )[0].props.onClick();
   await settle();
-  const content=textOf(mounted.root);
-  assert.ok(content.includes('构造'));assert.ok(content.includes('位运算'));
+  const content = textOf(mounted.root);
+  assert.ok(content.includes('构造'));
+  assert.ok(content.includes('位运算'));
   assert.ok(content.includes('模拟题中文标题'));
   assert.ok(content.includes('未进行本地内容一致性校验'));
-  const article=find(mounted.root,n=>typeof n.props.innerHTML==='string' && n.props.innerHTML.includes('模拟中文译文'));
-  assert.equal(article.length,1);
-  assert.equal(calls.filter(c=>c.url.startsWith('/api/secondary/problems/')).length,2);
-  assert.ok(calls.every(c=>!c.options.method || c.options.method==='GET'));
+  const article = find(
+    mounted.root,
+    (n) => typeof n.props.innerHTML === 'string' && n.props.innerHTML.includes('模拟中文译文'),
+  );
+  assert.equal(article.length, 1);
+  assert.equal(calls.filter((c) => c.url.startsWith('/api/secondary/problems/')).length, 2);
+  assert.ok(calls.every((c) => !c.options.method || c.options.method === 'GET'));
 });
 
 test('CF samples stay embedded, retain whitespace/literal markup and receive copy controls', () => {
@@ -250,7 +292,10 @@ test('AtCoder sample headings and var formulas render without duplicating sample
   assert.equal(samplesEmbedded, true);
   assert.equal(container.querySelectorAll('var math').length, 1);
   assert.equal(container.querySelectorAll('pre')[0].textContent, sample.input);
-  assert.equal(container.querySelector('h3.statement-sample-heading button').dataset.sampleIndex,'0');
+  assert.equal(
+    container.querySelector('h3.statement-sample-heading button').dataset.sampleIndex,
+    '0',
+  );
 });
 
 test('statement HTML cannot inject scripts, actions, global styles or fake copy controls', () => {
@@ -370,7 +415,12 @@ test('local viewer reads member detail, shows saved content and exposes a separa
   assert.ok(textOf(mounted.root).includes('已采集题面'));
   assert.equal(document.title, 'Saved Example · ACM Forever');
   assert.equal(calls.length, 2, 'reads local problem and local secondary results only');
-  assert.ok(calls.every(call => call.url.startsWith('/api/') && (!call.options.method || call.options.method === 'GET')));
+  assert.ok(
+    calls.every(
+      (call) =>
+        call.url.startsWith('/api/') && (!call.options.method || call.options.method === 'GET'),
+    ),
+  );
   assert.ok(textOf(mounted.root).includes('自动生效 · 未人工确认'));
   assert.ok(textOf(mounted.root).includes('当前没有已激活的真实中文译文'));
   const button = statement.querySelector('button');
@@ -411,7 +461,7 @@ test('catalog-only detail stays local, can reload and never automatically crawls
   )[0].props.onClick();
   await settle();
   assert.ok(element('problem-statement'));
-  assert.equal(calls.filter(call => !call.url.startsWith('/api/secondary/')).length, 2);
+  assert.equal(calls.filter((call) => !call.url.startsWith('/api/secondary/')).length, 2);
   assert.ok(calls.every((call) => !call.options.method || call.options.method === 'GET'));
 });
 
@@ -674,4 +724,239 @@ test('PDF load errors expose retry and a retry can render successfully', async (
   await settle();
   assert.equal(pdfRendered.length, 1);
   assert.ok(!textOf(mounted.root).includes('PDF 加载失败'));
+});
+
+test('Luogu details use native classification and Chinese language without CF rating or AI controls', async () => {
+  responseData = saved({
+    platform: 'luogu',
+    problem_id: 'P1001',
+    problem_name: 'A+B Problem',
+    problem_url: 'https://www.luogu.com.cn/problem/P1001',
+    statement_language: 'zh-CN',
+    problem_rating: 800,
+    native_difficulty: { id: 1, name: '入门', color: 'pink-3' },
+    native_tags: [{ id: 1, name: '模拟', category: { name: '算法', color: 'lapis-3' } }],
+  });
+  await page(Problem, '/problem.html?platform=luogu&problem_id=P1001');
+  const text = textOf(mounted.root);
+  assert.match(text, /入门/);
+  assert.match(text, /模拟/);
+  assert.match(text, /中文题面/);
+  assert.doesNotMatch(text, /难度 800|英文题面|AI 翻译/);
+  assert.equal(
+    calls.some((call) => String(call.url || call).includes('/secondary')),
+    false,
+  );
+});
+test('Luogu images survive sanitization only on approved source hosts', () => {
+  for (const host of ['www.luogu.com.cn', 'cdn.luogu.com.cn']) {
+    const content = parsed(
+      saved({
+        platform: 'luogu',
+        statement_html: '<p><img src="https://' + host + '/image/test.png" alt="图示"></p>',
+      }),
+    );
+    assert.equal(content.container.querySelectorAll('img').length, 1);
+  }
+  for (const host of ['evil.luogu.com.cn', 'cdn.luogu.com.cn.evil.invalid']) {
+    const content = parsed(
+      saved({
+        platform: 'luogu',
+        statement_html: '<p><img src="https://' + host + '/image/test.png" alt="图示"></p>',
+      }),
+    );
+    assert.equal(content.container.querySelectorAll('img').length, 0);
+  }
+});
+
+test('member native filters retain level zero and negative tag IDs in requests and return links', async () => {
+  setAuth({ authenticated: true, qq_id: '12345678', role: 'member', csrf_token: 'fixture' }, true);
+  const requests = [];
+  const fallback = globalThis.fetch;
+  globalThis.fetch = (url, options) => {
+    if (url.includes('/problems/taxonomy?'))
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            difficulties: [{ id: 0, name: '暂无评定' }],
+            tags: [{ id: -2, name: '特殊题', type: 5 }],
+            tag_types: [{ id: 5, name: '特殊题目' }],
+          }),
+          { status: 200 },
+        ),
+      );
+    if (url.startsWith('/api/me/problems?')) {
+      requests.push(url);
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            items: [
+              saved({
+                platform: 'luogu',
+                problem_id: 'P1001',
+                native_difficulty: { id: 0, name: '暂无评定' },
+                native_tags: [{ id: -2, name: '特殊题' }],
+              }),
+            ],
+            total: 1,
+          }),
+          { status: 200 },
+        ),
+      );
+    }
+    return fallback(url, options);
+  };
+  await page(
+    MemberProblems,
+    '/problem-bank.html?platform=luogu&native_difficulty=0&native_tag=-2&labels=math&match=any&problem_tag=dp',
+  );
+  const nativeRequest = new URL(requests[0], 'https://example.invalid').searchParams;
+  assert.equal(nativeRequest.get('labels'), '');
+  assert.equal(nativeRequest.get('problem_tag'), '');
+  assert.equal(nativeRequest.get('match'), 'all');
+  assert.equal(
+    new URL(requests[0], 'https://example.invalid').searchParams.get('native_difficulty'),
+    '0',
+  );
+  assert.equal(
+    new URL(requests[0], 'https://example.invalid').searchParams.get('native_tag'),
+    '-2',
+  );
+  assert.match(textOf(mounted.root), /暂无评定/);
+  assert.match(textOf(mounted.root), /特殊题/);
+  const link = find(mounted.root, (n) => n.type === 'a' && textOf(n) === '查看题面')[0];
+  const from = new URL(link.props.href, 'https://example.invalid').searchParams.get('from');
+  assert.match(from, /native_tag=-2/);
+  assert.match(from, /native_difficulty=0/);
+});
+test('taxonomy failure leaves the member list usable and supports retry', async () => {
+  setAuth({ authenticated: true, qq_id: '12345678', role: 'member', csrf_token: 'fixture' }, true);
+  const fallback = globalThis.fetch;
+  let failed = true,
+    attempts = 0;
+  globalThis.fetch = (url, options) => {
+    if (url.includes('/problems/taxonomy?')) {
+      attempts++;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(
+            failed
+              ? { message: 'unavailable' }
+              : { difficulties: [{ id: 0, name: '暂无评定' }], tags: [], tag_types: [] },
+          ),
+          { status: failed ? 503 : 200 },
+        ),
+      );
+    }
+    return fallback(url, options);
+  };
+  await page(MemberProblems, '/problem-bank.html?platform=luogu&native_difficulty=0');
+  assert.match(textOf(mounted.root), /洛谷分类暂时无法加载/);
+  assert.ok(find(mounted.root, (n) => n.type === 'a' && textOf(n) === '查看题面').length);
+  failed = false;
+  await find(
+    mounted.root,
+    (n) => n.type === 'button' && textOf(n) === '重试分类',
+  )[0].props.onClick();
+  await settle();
+  assert.equal(attempts, 2);
+  assert.doesNotMatch(textOf(mounted.root), /洛谷分类暂时无法加载/);
+});
+test('switching away from Luogu drops native filters before the next member query', async () => {
+  setAuth({ authenticated: true, qq_id: '12345678', role: 'member', csrf_token: 'fixture' }, true);
+  const fallback = globalThis.fetch,
+    requests = [];
+  globalThis.fetch = (url, options) => {
+    if (url.includes('/problems/taxonomy?'))
+      return Promise.resolve(
+        new Response(JSON.stringify({ difficulties: [], tags: [], tag_types: [] }), {
+          status: 200,
+        }),
+      );
+    if (url.startsWith('/api/me/problems?')) requests.push(url);
+    return fallback(url, options);
+  };
+  await page(MemberProblems, '/problem-bank.html?platform=luogu&native_difficulty=0&native_tag=-2');
+  const select = find(
+    mounted.root,
+    (n) =>
+      n.type === 'select' &&
+      n.props['onUpdate:modelValue'] &&
+      n.children.some((c) => c.type === 'option' && c.props.value === 'all'),
+  )[0];
+  select.props['onUpdate:modelValue']('codeforces');
+  await settle();
+  await find(mounted.root, (n) => n.type === 'form')[0].props.onSubmit({ preventDefault() {} });
+  await settle();
+  const query = new URL(requests.at(-1), 'https://example.invalid').searchParams;
+  assert.equal(query.get('platform'), 'codeforces');
+  assert.equal(query.has('native_difficulty'), false);
+  assert.equal(query.has('native_tag'), false);
+});
+
+test('admin Luogu records use native filters and ignore secondary processing deep links', async () => {
+  setAuth({ authenticated: true, qq_id: '87654321', role: 'admin' }, true);
+  const fallback = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = (url, options) => {
+    if (url.startsWith('/api/admin/database/problems?')) {
+      requests.push(url);
+      return Promise.resolve(
+        response({
+          items: [
+            saved({
+              platform: 'luogu',
+              problem_id: 'P1001',
+              native_difficulty: { id: 0, name: '暂无评定' },
+              native_tags: [{ id: -2, name: '特殊题' }],
+            }),
+          ],
+          total: 1,
+          page: 1,
+          tag_facets: [{ id: 'math', name_zh: '数学', count: 1 }],
+        }),
+      );
+    }
+    if (url.includes('/problems/taxonomy?'))
+      return Promise.resolve(
+        response({
+          difficulties: [{ id: 0, name: '暂无评定' }],
+          tags: [{ id: -2, name: '特殊题' }],
+          tag_types: [],
+        }),
+      );
+    return fallback(url, options);
+  };
+  await page(
+    Problems,
+    '/admin.html?section=problems&platform=luogu&problem_id=P1001&action=annotation',
+  );
+  assert.equal(
+    calls.some((call) => call.url.includes('/secondary/')),
+    false,
+  );
+  const platform = find(
+    mounted.root,
+    (n) =>
+      n.type === 'select' &&
+      n.props['onUpdate:modelValue'] &&
+      n.children.some((c) => c.type === 'option' && c.props.value === 'luogu'),
+  )[0];
+  platform.props['onUpdate:modelValue']('luogu');
+  await settle();
+  const nativeSelect = (label) =>
+    find(mounted.root, (n) => n.type === 'select' && textOf(n).includes(label))[0];
+  nativeSelect('全部原生难度').props.onChange({ target: { value: '0' } });
+  nativeSelect('全部原生标签').props.onChange({ target: { value: '-2' } });
+  await settle();
+  await find(mounted.root, (n) => n.type === 'form')[0].props.onSubmit({ preventDefault() {} });
+  await settle();
+  const params = new URL(requests.at(-1), 'https://example.invalid').searchParams;
+  assert.equal(params.get('native_difficulty'), '0');
+  assert.equal(params.get('native_tag'), '-2');
+  const row = find(mounted.root, (n) => n.type === 'tr' && textOf(n).includes('P1001'))[0];
+  assert.match(textOf(row), /暂无评定/);
+  assert.match(textOf(row), /特殊题/);
+  assert.doesNotMatch(textOf(row), /AI 标签|AI 翻译|人工标签/);
+  assert.doesNotMatch(textOf(mounted.root), /按最终算法标签筛选/);
 });

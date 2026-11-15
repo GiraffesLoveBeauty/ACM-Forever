@@ -26,14 +26,21 @@ const failures = computed(() => result.value.failures || []);
 <template>
   <div class="problem-sync-status">
     <p role="status" aria-live="polite">
-      {{ task.platform === 'codeforces' ? 'Codeforces' : 'AtCoder' }}
+      {{
+        { codeforces: 'Codeforces', atcoder: 'AtCoder', luogu: '洛谷' }[task.platform] ||
+        task.platform
+      }}
       ·
       {{
-        result.scope === 'platform'
-          ? '全平台'
-          : result.contest_id
-            ? `比赛 ${result.contest_id}`
-            : '比赛'
+        task.platform === 'luogu'
+          ? { problems: '指定 P 题号', catalog: '题目目录', platform: '目录与题面补全' }[
+              result.scope
+            ] || '公开 P 题库'
+          : result.scope === 'platform'
+            ? '全平台'
+            : result.contest_id
+              ? `比赛 ${result.contest_id}`
+              : '比赛'
       }}
       · {{ status }} · 任务 #{{ task.id }}
     </p>
@@ -43,7 +50,12 @@ const failures = computed(() => result.value.failures || []);
       :value="total ? done || 0 : undefined"
       aria-label="题目拉取进度"
     />
-    <p class="muted" v-if="progress.phase === 'metadata'">
+    <p class="muted" v-if="progress.phase === 'taxonomy'">正在更新洛谷原生难度与标签…</p>
+    <p class="muted" v-else-if="progress.phase === 'catalog'">
+      正在同步洛谷目录 · 已读取 {{ result.catalog_pages || progress.page || 0 }} 页 · 已导入
+      {{ result.metadata_count || progress.metadata_done || 0 }} 道题目
+    </p>
+    <p class="muted" v-else-if="progress.phase === 'metadata'">
       正在导入题目目录 {{ progress.metadata_done || 0 }} / {{ progress.metadata_total || 0 }} 题
     </p>
     <p class="muted" v-else-if="progress.phase === 'contest_catalog'">
@@ -62,6 +74,18 @@ const failures = computed(() => result.value.failures || []);
     <p class="muted" v-else>
       正在读取{{ result.scope === 'platform' ? '全平台题目目录' : '比赛题目列表' }}…
     </p>
+    <p
+      v-if="task.platform === 'luogu' && !active && result.catalog_complete === false"
+      class="muted"
+    >
+      目录尚未完整同步，已保存的数据保留；可稍后重新发起采集。
+    </p>
+    <p v-if="result.access_limited" role="alert">
+      洛谷暂时限制访问，本次采集已停止。<template v-if="result.retry_after"
+        >建议 {{ result.retry_after }} 秒后重试。</template
+      >
+    </p>
+    <p v-if="result.taxonomy_warning" class="muted">原生分类更新失败，暂用已保存的分类。</p>
     <p v-if="result.error" role="alert">{{ result.error }}</p>
     <details v-if="result.contest_catalog_failure_count">
       <summary>比赛题目列表补全失败 {{ result.contest_catalog_failure_count }} 场</summary>

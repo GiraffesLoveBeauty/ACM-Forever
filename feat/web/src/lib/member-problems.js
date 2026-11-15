@@ -1,10 +1,13 @@
 import { trainingReturn } from './training-tasks.js';
+import { nativeFilters } from './luogu-problems.js';
 const platforms = ['codeforces', 'luogu', 'atcoder', 'nowcoder', 'cjlu'];
 export function memberFilters(query = {}) {
   const number = Number(query.page);
   const view = query.view === 'tracker' ? 'tracker' : 'list';
+  const native = query.platform === 'luogu' && view !== 'tracker';
   const allowedPlatforms = view === 'tracker' ? ['codeforces', 'atcoder'] : ['all', ...platforms];
   return {
+    ...nativeFilters({ ...query, view }),
     view,
     scope: query.scope === 'solved' ? 'solved' : 'all',
     platform: allowedPlatforms.includes(query.platform)
@@ -14,10 +17,12 @@ export function memberFilters(query = {}) {
         : 'all',
     tag: typeof query.tag === 'string' ? query.tag.slice(0, 100) : '',
     problem_tag:
-      typeof query.problem_tag === 'string' ? query.problem_tag.trim().slice(0, 100) : '',
+      !native && typeof query.problem_tag === 'string'
+        ? query.problem_tag.trim().slice(0, 100)
+        : '',
     state: query.state === 'favorite' ? 'favorite' : '',
     labels:
-      view === 'tracker'
+      view === 'tracker' || native
         ? ''
         : [
             ...new Set(
@@ -29,7 +34,7 @@ export function memberFilters(query = {}) {
             .sort()
             .slice(0, 115)
             .join(','),
-    match: query.match === 'any' && view !== 'tracker' ? 'any' : 'all',
+    match: query.match === 'any' && view !== 'tracker' && !native ? 'any' : 'all',
     page: Number.isSafeInteger(number) && number > 0 && number <= 1000000 ? number : 1,
   };
 }

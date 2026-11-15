@@ -4,6 +4,9 @@ import { useRoute, useRouter } from 'vue-router';
 import { auth, useRequests, date } from '../lib/api.js';
 import { memberFilters, memberQuery, problemLink } from '../lib/member-problems.js';
 import Pager from '../components/Pager.vue';
+import LuoguBadges from '../components/LuoguBadges.vue';
+import LuoguFilters from '../components/LuoguFilters.vue';
+import { nativeParams } from '../lib/luogu-problems.js';
 import ProblemTracker from '../components/ProblemTracker.vue';
 import { filterTaxonomy, reviewLabels, sourceLabels } from '../lib/tag-management.js';
 const route = useRoute(),
@@ -73,7 +76,8 @@ async function load() {
   error.value = '';
   busy.value = true;
   try {
-    const { view, ...filters } = current.value;
+    const { view, native_difficulty, native_tag, ...filters } = current.value;
+    Object.assign(filters, nativeParams(current.value));
     // The backend treats every nonempty platform as a literal platform name.
     if (filters.platform === 'all') delete filters.platform;
     if (view === 'tracker') {
@@ -155,8 +159,22 @@ watch(() => route.fullPath, load, { immediate: true });
 watch(
   () => form.platform,
   (platform, previous) => {
-    if (previous !== undefined && platform !== current.value.platform) form.problem_tag = '';
-    loadTags(platform);
+    if (previous !== undefined && platform !== current.value.platform) {
+      form.problem_tag = '';
+      if (platform === 'luogu') {
+        form.labels = '';
+        form.match = 'all';
+      }
+      form.native_difficulty = '';
+      form.native_tag = '';
+    }
+    if (platform !== 'luogu') loadTags(platform);
+    else {
+      ++tagsRevision;
+      tags.value = [];
+      tagsError.value = '';
+      tagsBusy.value = false;
+    }
   },
   { immediate: true },
 );
@@ -203,6 +221,11 @@ watch(
       </button>
     </div>
     <section class="card">
+      <div v-if="current.platform === 'luogu' && !isTracker" class="luogu-library-intro">
+        <span>LUOGU · P 题库</span>
+        <h2>洛谷题库</h2>
+        <p>保留洛谷原生难度与标签，从熟悉的分类开始练习。</p>
+      </div>
       <form class="filters member-problem-filters" @submit.prevent="navigate()">
         <label
           ><span>平台</span
@@ -219,7 +242,12 @@ watch(
             maxlength="100"
             :placeholder="isTracker ? '比赛 ID、题号、题名或标签' : '题号、题名或标签'"
         /></label>
-        <label
+        <LuoguFilters
+          v-if="form.platform === 'luogu' && !isTracker"
+          v-model:difficulty="form.native_difficulty"
+          v-model:tag="form.native_tag"
+        />
+        <label v-else
           ><span>标签</span
           ><select v-model="form.problem_tag" :disabled="tagsBusy">
             <option value="">{{ tagsBusy ? '正在加载标签…' : '全部标签' }}</option>
@@ -238,7 +266,11 @@ watch(
           <button type="button" class="btn" @click="clear">清除筛选</button>
         </div>
       </form>
-      <section v-if="!isTracker" class="bank-label-filter" aria-label="算法标签筛选">
+      <section
+        v-if="!isTracker && form.platform !== 'luogu'"
+        class="bank-label-filter"
+        aria-label="算法标签筛选"
+      >
         <div class="bank-label-heading">
           <div>
             <h2>按算法标签筛选</h2>
@@ -340,11 +372,19 @@ watch(
             >
               <div class="bank-problem-info">
                 <b>{{ row.platform }} · {{ row.problem_id }}</b
-                ><br />{{ row.problem_name || '未命名题目' }}<br /><small
-                  >难度 {{ row.problem_rating ?? '未知'
-                  }}<template v-if="row.ac_at"> · AC {{ date(row.ac_at) }}</template></small
-                >
-                <div v-if="row.has_secondary" class="bank-result-tags">
+                ><br />{{ row.problem_name || '未命名题目' }}<br />
+                <LuoguBadges
+                  v-if="row.platform === 'luogu'"
+                  :problem="row"
+                  :tags="false"
+                  class="bank-luogu-difficulty"
+                />
+                <small v-else>难度 {{ row.problem_rating ?? '未知' }}</small>
+                <small v-if="row.ac_at"> · AC {{ date(row.ac_at) }}</small>
+                <div v-if="row.platform === 'luogu'" class="bank-result-tags">
+                  <LuoguBadges :problem="row" :difficulty="false" />
+                </div>
+                <div v-else-if="row.has_secondary" class="bank-result-tags">
                   <button
                     v-for="tag in row.effective_tags"
                     :key="tag.id"
@@ -360,8 +400,7 @@ watch(
                   }}</small>
                 </div>
                 <small v-else class="muted"
-                  >原站标签：{{ tagsText(row.tags) }}
-                  · 算法标签待接入</small
+                  >原站标签：{{ tagsText(row.tags) }} · 算法标签待接入</small
                 >
               </div>
               <span class="chips"
@@ -389,9 +428,11 @@ watch(
           </div>
           <p v-if="!rows.length" class="empty">
             {{
-              current.scope === 'solved'
-                ? '暂未同步到匹配的已 AC 题目。请检查筛选与个人中心的绑定、同步状态。'
-                : '没有匹配题目，请调整筛选。'
+              current.scope === 'solved' && current.platform === 'luogu'
+                ? '暂无匹配的已保存洛谷 AC 记录。题库目录与成员记录分别同步。'
+                : current.scope === 'solved'
+                  ? '暂未同步到匹配的已 AC 题目。请检查筛选与个人中心的绑定、同步状态。'
+                  : '没有匹配题目，请调整筛选。'
             }}
           </p>
         </template>
@@ -402,6 +443,29 @@ watch(
 </template>
 
 <style scoped>
+.luogu-library-intro {
+  border-bottom: 1px solid var(--line, #dce6df);
+  margin-bottom: 24px;
+  padding-bottom: 22px;
+}
+.luogu-library-intro > span {
+  color: var(--accent, #176c60);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+}
+.luogu-library-intro h2 {
+  margin: 8px 0;
+  font-size: 24px;
+}
+.luogu-library-intro p {
+  margin: 0;
+  color: var(--muted, #697970);
+  font-size: 13px;
+}
+.bank-luogu-difficulty {
+  margin-top: 9px;
+}
 .bank-label-filter {
   padding: 20px;
   background: #176c6005;

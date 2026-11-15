@@ -1,8 +1,11 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { date, useRequests } from '../lib/api.js';
 import Pager from './Pager.vue';
+import LuoguBadges from './LuoguBadges.vue';
+import LuoguFilters from './LuoguFilters.vue';
+import { nativeParams } from '../lib/luogu-problems.js';
 import AdminProblemProcessing from './AdminProblemProcessing.vue';
 
 const request = useRequests();
@@ -21,7 +24,26 @@ const visibleFacets = computed(() =>
       `${t.name_zh} ${t.id}`.toLowerCase().includes(labelSearch.value.toLowerCase()),
   ),
 );
-const filters = reactive({ q: '', platform: '', status: 'all' });
+const filters = reactive({
+  q: '',
+  platform: '',
+  status: 'all',
+  native_difficulty: '',
+  native_tag: '',
+});
+watch(
+  () => filters.platform,
+  (platform) => {
+    if (platform === 'luogu') {
+      selectedTags.value = [];
+      matchMode.value = 'all';
+      labelSearch.value = '';
+    }
+    filters.native_difficulty = '';
+    filters.native_tag = '';
+  },
+);
+let revision = 0;
 const rows = ref([]),
   total = ref(0),
   page = ref(1),
@@ -30,7 +52,7 @@ const rows = ref([]),
 const pageSize = 20;
 
 function platformName(value) {
-  return { codeforces: 'Codeforces', atcoder: 'AtCoder' }[value] || value;
+  return { codeforces: 'Codeforces', atcoder: 'AtCoder', luogu: '洛谷' }[value] || value;
 }
 function statusName(row) {
   if (row.last_fetch_status === 'failed')
@@ -45,6 +67,7 @@ function tagsText(tags) {
   return Array.isArray(tags) && tags.length ? tags.join(' · ') : '—';
 }
 async function load(nextPage = 1) {
+  const version = ++revision;
   page.value = nextPage;
   busy.value = true;
   error.value = '';
@@ -56,23 +79,28 @@ async function load(nextPage = 1) {
     page_size: String(pageSize),
     labels: selectedTags.value.join(','),
     match: matchMode.value,
+    ...nativeParams(filters),
   });
   try {
     const data = await request(`/admin/database/problems?${params}`, {}, 'database-problems');
+    if (version !== revision) return;
     rows.value = data.items || [];
     facets.value = data.tag_facets || [];
     total.value = data.total || 0;
     page.value = data.page || 1;
   } catch (cause) {
-    if (cause.name !== 'AbortError') error.value = cause.message || '读取题库记录失败。';
+    if (version === revision && cause.name !== 'AbortError')
+      error.value = cause.message || '读取题库记录失败。';
   } finally {
-    busy.value = false;
+    if (version === revision) busy.value = false;
   }
 }
 function reset() {
   filters.q = '';
   filters.platform = '';
   filters.status = 'all';
+  filters.native_difficulty = '';
+  filters.native_tag = '';
   selectedTags.value = [];
   matchMode.value = 'all';
   labelSearch.value = '';
@@ -85,6 +113,7 @@ function toggleTag(id) {
   load(1);
 }
 function openProcessing(row, action) {
+  if (row.platform === 'luogu') return;
   active.value = { ...row, action };
 }
 function closeProcessing() {
@@ -138,6 +167,7 @@ onMounted(() => {
             <option value="">全部平台</option>
             <option value="codeforces">Codeforces</option>
             <option value="atcoder">AtCoder</option>
+            <option value="luogu">洛谷</option>
           </select></label
         ><label
           ><span>题面状态</span
@@ -148,12 +178,17 @@ onMounted(() => {
             <option value="failed">最近采集失败</option>
           </select></label
         >
+        <LuoguFilters
+          v-if="filters.platform === 'luogu'"
+          v-model:difficulty="filters.native_difficulty"
+          v-model:tag="filters.native_tag"
+        />
         <div class="problem-database-filter-actions">
           <button class="btn primary" type="submit" :disabled="busy">筛选</button>
           <button class="btn" type="button" :disabled="busy" @click="reset">重置</button>
         </div>
       </form>
-      <div v-if="facets.length" class="admin-label-filter">
+      <div v-if="filters.platform !== 'luogu' && facets.length" class="admin-label-filter">
         <label
           >按最终算法标签筛选
           <input
@@ -213,19 +248,29 @@ onMounted(() => {
               </td>
               <td class="problem-database-title">
                 <b>{{ row.problem_name || '未命名题目' }}</b>
-                <small
+                <small v-if="row.platform === 'luogu'">公开 P 题库 · 独立题目</small>
+                <small v-else
                   >比赛 {{ row.contest_id || '—' }} · 题序 {{ row.problem_index || '—' }}</small
                 >
               </td>
-              <td>{{ row.problem_rating ?? '—' }}</td>
+              <td>
+                <LuoguBadges
+                  v-if="row.platform === 'luogu'"
+                  :problem="row"
+                  :tags="false"
+                /><template v-else>{{ row.problem_rating ?? '—' }}</template>
+              </td>
               <td class="problem-database-tags">
-                <span>{{ tagsText(row.tags) }}</span
+                <LuoguBadges v-if="row.platform === 'luogu'" :problem="row" :difficulty="false" />
+                <span v-else>{{ tagsText(row.tags) }}</span
                 ><small>{{
-                  row.has_secondary
-                    ? row.manual_history_count
-                      ? '含人工历史 · 最终有效标签'
-                      : '自动标签 · 未人工确认'
-                    : '爬虫原始标签 · 尚未二次处理'
+                  row.platform === 'luogu'
+                    ? '洛谷原生标签 · 随源站同步'
+                    : row.has_secondary
+                      ? row.manual_history_count
+                        ? '含人工历史 · 最终有效标签'
+                        : '自动标签 · 未人工确认'
+                      : '爬虫原始标签 · 尚未二次处理'
                 }}</small>
               </td>
               <td>
@@ -233,16 +278,36 @@ onMounted(() => {
                   {{ statusName(row) }}
                 </span>
                 <small>{{ row.sample_count }} 组样例</small>
-                <small v-if="row.translation_status === 'auto'" class="translation-ready">已翻译 · 未人工确认</small>
+                <small v-if="row.translation_status === 'auto'" class="translation-ready"
+                  >已翻译 · 未人工确认</small
+                >
                 <small v-else-if="row.translation_status === 'needs_review'">翻译待复核</small>
                 <small v-else-if="row.translation_status">待翻译</small>
               </td>
               <td>{{ date(row.updated_at) }}</td>
               <td>
                 <div class="problem-processing-actions">
-                  <button class="btn" @click="openProcessing(row, 'translation')">AI 翻译</button>
-                  <button class="btn" @click="openProcessing(row, 'annotation')">AI 标签</button>
-                  <button class="btn" @click="openProcessing(row, 'manual')">人工标签</button>
+                  <button
+                    v-if="row.platform !== 'luogu'"
+                    class="btn"
+                    @click="openProcessing(row, 'translation')"
+                  >
+                    AI 翻译
+                  </button>
+                  <button
+                    v-if="row.platform !== 'luogu'"
+                    class="btn"
+                    @click="openProcessing(row, 'annotation')"
+                  >
+                    AI 标签
+                  </button>
+                  <button
+                    v-if="row.platform !== 'luogu'"
+                    class="btn"
+                    @click="openProcessing(row, 'manual')"
+                  >
+                    人工标签
+                  </button>
                   <RouterLink
                     class="btn"
                     :to="{

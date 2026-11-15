@@ -1833,14 +1833,21 @@ async def api_database_problems():
 
     db = await get_db()
     try:
-        async with db.execute("SELECT COUNT(*) FROM crawler_problems" + where, tuple(params)) as cursor:
+        try:
+            extra, native_params = await native_filter(db, request.args, platform)
+        except ValueError as error:
+            return jsonify({"success": False, "message": str(error)}), 400
+        if extra:
+            where = (where or " WHERE 1=1") + extra
+            params.extend(native_params)
+        async with db.execute("SELECT COUNT(*) FROM crawler_problems p" + where, tuple(params)) as cursor:
             total = int((await cursor.fetchone())[0])
         page = min(page, max(1, (total + page_size - 1) // page_size))
         async with db.execute(
             "SELECT platform,problem_id,contest_id,problem_index,problem_name,problem_rating,"
             "problem_url,tags,statement_language,sample_count,last_fetch_status,"
             f"CASE WHEN {has_content} THEN 1 ELSE 0 END AS content_available,"
-            "statement_fetched_at,updated_at FROM crawler_problems"
+            "statement_fetched_at,updated_at FROM crawler_problems p"
             + where
             + " ORDER BY updated_at DESC,platform,problem_id LIMIT ? OFFSET ?",
             tuple(params + [page_size, (page - 1) * page_size]),
@@ -1852,6 +1859,7 @@ async def api_database_problems():
             except (TypeError, ValueError):
                 item["tags"] = []
             item["content_available"] = bool(item["content_available"])
+        await attach_classifications(db, items)
         return jsonify({
             "items": items,
             "total": total,

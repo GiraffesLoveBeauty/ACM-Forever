@@ -425,3 +425,40 @@ test('the task page explains paused user crawling alongside other platform resul
   assert.match(content, /87654321：luogu：已暂停，保留已有记录/);
   assert.doesNotMatch(content, /同步失败|新增 -5 条/);
 });
+
+test('Luogu collection submits normalized P IDs without contest fields', async () => {
+  await page();
+  await model('sync-platform', 'luogu');
+  assert.equal(element('sync-language').props.disabled, true);
+  assert.equal(find(mounted.root, (n) => n.props.id === 'sync-contest').length, 0);
+  await model('sync-problems', 'p1001，P1002 P1001');
+  await submit();
+  assert.deepEqual(JSON.parse(syncPosts()[0].options.body), {
+    platform: 'luogu',
+    scope: 'problems',
+    language: 'zh-CN',
+    refresh: false,
+    problem_ids: ['P1001', 'P1002'],
+  });
+});
+test('Luogu whole-platform collection sends both a bounded statement limit and batch size', async () => {
+  await page();
+  await model('sync-platform', 'luogu');
+  await model('sync-scope', 'platform');
+  await model('luogu-statement-limit', 120);
+  await model('sync-batch-size', 25);
+  await submit();
+  const body = JSON.parse(syncPosts()[0].options.body);
+  assert.equal(body.limit, 120);
+  assert.equal(body.batch_size, 25);
+  assert.equal(body.language, 'zh-CN');
+  assert.equal('contest_id' in body, false);
+});
+test('Luogu validation rejects source URLs before any task is submitted', async () => {
+  await page();
+  await model('sync-platform', 'luogu');
+  await model('sync-problems', 'https://www.luogu.com.cn/problem/P1001');
+  await submit();
+  assert.equal(syncPosts().length, 0);
+  assert.match(textOf(mounted.root), /仅支持 P/);
+});

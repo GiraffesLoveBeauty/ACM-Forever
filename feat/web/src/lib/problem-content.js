@@ -123,7 +123,9 @@ export function renderProblemContent(detail, doc = document) {
         !(
           url.hostname === 'codeforces.com' ||
           url.hostname.endsWith('.codeforces.com') ||
-          ['atcoder.jp', 'img.atcoder.jp'].includes(url.hostname)
+          ['atcoder.jp', 'img.atcoder.jp', 'www.luogu.com.cn', 'cdn.luogu.com.cn'].includes(
+            url.hostname,
+          )
         )
       ) {
         image.replaceWith(doc.createTextNode(image.alt || '[图片未保存]'));
@@ -150,10 +152,16 @@ export function renderProblemContent(detail, doc = document) {
     }
   } else {
     const text = detail.statement_text || '';
-    if (/\\[A-Za-z]+|\$[^$]+\$|```|~~~|^\s*(?:#{1,6} |[-*+] )|\b[A-Za-z](?:['′]+|[_^](?:\{|[A-Za-z0-9]))/m.test(text)) {
+    if (
+      /\\[A-Za-z]+|\$[^$]+\$|```|~~~|^\s*(?:#{1,6} |[-*+] )|\b[A-Za-z](?:['′]+|[_^](?:\{|[A-Za-z0-9]))/m.test(
+        text,
+      )
+    ) {
       statement.innerHTML = renderStatementMarkdown(text, doc);
     } else {
-      const plain = doc.createElement('pre'); plain.textContent = text; statement.append(plain);
+      const plain = doc.createElement('pre');
+      plain.textContent = text;
+      statement.append(plain);
     }
   }
 
@@ -187,10 +195,13 @@ export function renderProblemContent(detail, doc = document) {
         button.dataset.sampleIndex = String(index);
         button.dataset.sampleKind = kind;
         button.textContent = `复制样例 ${index + 1} ${label}`;
-        const heading=pre.previousElementSibling;
+        const heading = pre.previousElementSibling;
         if (heading?.matches('h1,h2,h3,h4,h5,h6,.title')) {
-          heading.querySelectorAll('button[data-statement-sample],.statement-sample-copy-status').forEach(node=>node.remove());
-          heading.classList.add('statement-sample-heading');heading.append(button);
+          heading
+            .querySelectorAll('button[data-statement-sample],.statement-sample-copy-status')
+            .forEach((node) => node.remove());
+          heading.classList.add('statement-sample-heading');
+          heading.append(button);
         } else pre.before(button);
       }
     });
