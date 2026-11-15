@@ -1,4 +1,6 @@
-# Android 修改标准与模块关联（v0.2.27）
+# Android 修改标准与模块关联（v0.2.28）
+
+本轮0.2.28/code42接入正式训练任务、练习总览和模块独立编号/恢复，详见[实施与验收说明](android-v0.2.28-practice-recovery.md)。题单就是管理员下发的training task，不再请求`/api/club/sheets`；旧打卡提交已移除，提醒本地保留。管理写操作绑定读取时账号/任务版本；发布幂等键与预览配对，禁止通用自动写重试。
 
 0.2.27/code41更新源改为Gitee优先、GitHub兜底，详见[源选择与发布配置](android-v0.2.27-gitee-updates.md)。`UpdateSources`控制正式Release解析和清单兜底；`UpdateManifest.downloadUrls`仅为固定Gitee仓库添加同版本GitHub备选；`ModuleSpec/ModuleNetwork`控制固定仓库的同版本模块和CDN白名单。自定义清单不能被静默替换。不可删除原APK/模块的哈希、版本、签名校验，或在校验失败时直接安装。`gitee_release.py`只允许匹配源码Tag的Actions运行，Secret仅发布端使用；八附件匿名回读后才解除预发布状态，PATCH 必须携带原 `tag_name/name/body`。GitHub 已公开而 Gitee 未完成时，重跑须先核对真实 Tag/commit、源码版本、渠道和固定证书，再下载校验原始八附件；成功恢复后跳过构建和 GitHub 发布，不允许用重新打包的不同字节覆盖首发文件。1.0.0和自站PR继续独立保留。
 
@@ -36,7 +38,7 @@
 | `ProblemTags`、`ProblemTagPicker`、题库与搜索/比赛进度 | 原始标签候选搜索、完整标签精确筛选 | `tag`关键词与`problem_tag`完整标签分开编码；真实候选、平台切换清标签、筛选归第一页、翻页/返回/重建保留、单窗防重及会话代次 |
 | `OjBindingsActivity`、`OjBindingState` | 本人 OJ 绑定列表、归属核验、绑定/改绑/解绑与同步 | 复用 `/api/me/profile` 的 `bindings` 能力；是否绑定取账号字段而非 AC 数；确认请求必须核对实际输入与验证码所属账号；密码/确认不持久化，写入不自动重试，返回个人中心/账号页刷新 |
 | `AccountClosureActivity`、`AccountClosureFlow`、`AccountClosure`、`SessionVault`及`MainActivity`登录页 | 本人账户注销、实时开关、确认和结果回执 | 独立加密回执先保存再提交；未登录时仍须有本机回执查询入口；当前密码不持久化；管理员不能提交；转屏/断网/重启只查询，不重放POST；已明确的提交前拒绝可清回执，查询限流不得清理；必须匹配回执与提交时间才报成功，同QQ新代账号不可被旧回执退出 |
-| `ClubActivity`、`TrainingReminder` | 题单、讨论、错题、复习、打卡和本地提醒 | 缺失接口保留真实报错，通知授权、返回来源页 |
+| `TrainingTasksActivity`、`TrainingUi`、`ClubActivity`、`TrainingReminder` | 正式题单/安排，讨论、错题、复习占位和本地提醒 | 任务证据与待核验分开；停止后台页轮询，通知设置不丢 |
 | `CloudDrafts` 与主页面编辑器 | 云端多草稿和自动保存 | 账号+草稿代次；切换草稿、返回旧页、迟到写入、Markdown 导入归属 |
 | `PdfActivity`、`ContentView`、阅读器资源 | PDF、Markdown/公式/代码与图片 | 缩放/翻页/复制、受限媒体地址、缓存边界 |
 | `ImagePreviewActivity`、`PageRefresh`、`ApiClient.MediaFormatException` | 图片失败后的原页手动/自动恢复 | 仅连接失败重试；格式/尺寸/权限错误不循环；十秒预警、关闭仍重试、成功三秒消失、会话代次与退出取消 |
@@ -78,18 +80,18 @@ Wiki完整目录与阅读导航的本地适配见[android-wiki-navigation-local-
 
 ## 仍缺的业务接口与不需要接口的部分
 
-基准为 main `f30b33cf` 的代码核查，不是服务器部署证明。其余缺失能力保留第二优先级，本轮不新增业务后端。
+本轮按 main `52d28788` 更新题单/安排状态；其他项沿用原核查，不是服务器部署证明。其余缺失能力保留第二优先级，本轮不新增业务后端。
 
 | 能力 | App 既有占位路径 | 网页已有基础 / 尚缺部分 |
 | --- | --- | --- |
-| 社团题单 | `GET /api/club/sheets` | Web 有随机训练，尚无教练题单下发、截止和成员完成进度 |
+| 社团题单 | 已接入 `/api/me/training-tasks`，不再缺列表/详情接口 | 管理员下发、截止、完成进度及同步已在当前main实现；仍缺全量关键词搜索契约 |
 | 按题讨论 | `GET/POST /api/club/problem-discussions` | Web 有泛论坛、评论、审核、举报；尚缺平台+题号关联与讨论标签检索 |
 | 私人错题本 | `GET/PUT/DELETE /api/me/club/mistakes` | Web 有收藏；尚缺私人错因笔记/标签。退休笔记接口不能代替 |
 | 间隔补题复习 | `GET/PUT /api/me/club/reviews` | Web 有赛事六态；尚缺复习阶段、到期和1/3/7天推进 |
-| 每日目标与打卡 | `GET/POST /api/me/club/checkin` | Web 有汇总和活跃日；尚缺目标、达标和幂等打卡 |
+| 每日目标与打卡 | 本轮移除旧打卡提交和该占位请求 | 入口改为“训练安排”，使用正式任务摘要；通知及时间继续本地保存 |
 | 完整公开成员搜索 | 暂复用公开排行榜 | Web/移动已有公开ID、资料和已发布话题；完整成员目录超出现有搜索范围 |
 
-这些 `/club/` 路径是客户端已有约定，当前仓库尚无对应后端路由；后续需先确定契约，不能把界面存在当作API已实现。本轮搜索还需要对应的关键词/分页契约。
+除已替换的题单/打卡外，表中的 `/club/` 路径仍是客户端已有约定，当前仓库尚无对应后端路由；后续需先确定契约，不能把界面存在当作API已实现。本轮搜索还需要对应的关键词/分页契约。
 
 更新分发使用Gitee公开Release的JSON/APK并保留GitHub兜底，不需要业务 `/api/mobile/v1/releases/*`；自站客户端与镜像已从本PR拆分，另待配置和review。相册背景、裁剪、主辅色、透明度、本机主题、搜索设置/历史、通知时间均本机保存，不需要上传接口。公开成员ID/平台题数/已发布话题已有移动接口，不再列为缺失；本人OJ绑定的新本地实现见下节，不改变服务器已开放的平台范围。
 
