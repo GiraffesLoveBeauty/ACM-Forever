@@ -26,6 +26,8 @@ def module_assets(directory, manifest, repository):
     if path.stat().st_size > 65536:
         raise ValueError("Module catalog exceeds 64 KiB")
     index = json.loads(path.read_text(encoding="utf-8"))
+    from create_module_assets import validate_catalog
+    validate_catalog(index, manifest["versionName"], manifest["versionCode"], repository)
     if (index.get("schemaVersion") != 1 or index.get("versionCode") != manifest["versionCode"]
             or index.get("versionName") != manifest["versionName"] or len(index.get("modules", [])) != 4):
         raise ValueError("Incomplete module catalog")

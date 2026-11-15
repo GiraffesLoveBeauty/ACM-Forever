@@ -445,6 +445,13 @@ final class ApiClient {
         return request(method, path, "GET".equals(method) ? null : body == null ? new JSONObject() : body);
     }
 
+    synchronized Object publishTraining(long task,JSONObject payload,String key)throws Exception{
+        if(task<1||key==null||!key.matches("[A-Za-z0-9_-]{16,128}"))throw new IllegalArgumentException("发布凭据无效");
+        String path="/api/admin/training-tasks/"+task+"/publish";AdminApiPolicy.check("POST",path);
+        if(!isAdministrator()||requiresPasswordChange())throw new ApiException(403,"无访问权限",false);
+        return request("POST",path,payload,Collections.singletonMap("Idempotency-Key",key));
+    }
+
     JSONObject changePassword(String oldPassword, String newPassword) throws Exception {
         JSONObject body = new JSONObject().put("old_password", oldPassword).put("new_password", newPassword);
         JSONObject result = (JSONObject) request("POST", "/api/auth/change-password", body);

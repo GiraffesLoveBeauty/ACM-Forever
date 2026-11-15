@@ -32,6 +32,7 @@ final class SearchModules {
             case "forum":return "公开话题标题与正文";case "wiki":return "公开文章、标签与正文";
             case "problems":return "题名、题号或标签 · 需要登录";case "tracker":return "本人比赛进度 · 需要登录";
             case "posts":case "bookmarks":case "drafts":return "仅本人可见，在接口返回范围内筛选（最多最近 100 条）";
+            case "sheets":return "题单已接入正式训练任务；无API接口：尚无全量关键词搜索接口";
             default:return "无API接口：该模块尚无全局搜索接口";}
     }
     static String path(String id,String term,int page){

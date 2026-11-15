@@ -10,7 +10,7 @@ import org.json.JSONObject;
 final class ModuleNetwork {
     interface Progress {void update(long bytes);}
     interface Cancelled {boolean get();}
-    private static volatile Map<String,ModuleSpec> cached;private static volatile int cachedCode;private static String cachedVersion="";
+    private static volatile Map<String,ModuleSpec> cached;private static volatile int cachedCode;private static String cachedVersion="";private static long cachedAt;
     static InputStream connect(String address)throws Exception{
         URL url=new URL(address);
         for(int attempt=0;attempt<6;attempt++){
@@ -27,7 +27,7 @@ final class ModuleNetwork {
     }
     static Map<String,ModuleSpec> catalog(Context c)throws Exception{return catalog(c,ModuleStore.code(c),ModuleStore.version(c));}
     static synchronized Map<String,ModuleSpec> catalog(Context c,int code,String version)throws Exception{
-        Map<String,ModuleSpec> ready=cached;if(ready!=null&&cachedCode==code&&version.equals(cachedVersion))return ready;
+        Map<String,ModuleSpec> ready=cached;long now=android.os.SystemClock.elapsedRealtime();if(ready!=null&&cachedCode==code&&version.equals(cachedVersion)&&now-cachedAt>=0&&now-cachedAt<60000)return ready;
         File local=new File(ModuleStore.root(c,code),"catalog.json");byte[] bytes=null;Map<String,ModuleSpec> parsed=null;Exception failure=null;
         for(String address:ModuleSpec.indexUrls(version))try(InputStream in=connect(address)){
             byte[] candidate=read(in,65536);parsed=ModuleSpec.parse(new JSONObject(new String(candidate,java.nio.charset.StandardCharsets.UTF_8)),code,version);bytes=candidate;break;
@@ -39,7 +39,7 @@ final class ModuleNetwork {
             File parent=local.getParentFile();if(!parent.isDirectory()&&!parent.mkdirs())throw new IOException("无法缓存模块清单");File partial=File.createTempFile("catalog-",".part",parent);
             try{try(FileOutputStream out=new FileOutputStream(partial)){out.write(bytes);out.getFD().sync();}java.nio.file.Files.move(partial.toPath(),local.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING,java.nio.file.StandardCopyOption.ATOMIC_MOVE);}finally{partial.delete();}
         }
-        cached=parsed;cachedCode=code;cachedVersion=version;return parsed;
+        cached=parsed;cachedCode=code;cachedVersion=version;cachedAt=now;return parsed;
     }
     static byte[] read(InputStream in,int max)throws IOException{ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] bytes=new byte[8192];int n;while((n=in.read(bytes))!=-1){if(out.size()+n>max)throw new IOException("模块清单过大");out.write(bytes,0,n);}return out.toByteArray();}
     static void download(ModuleSpec spec,File destination,Progress progress,Cancelled cancelled)throws Exception{

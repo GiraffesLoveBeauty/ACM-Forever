@@ -16,6 +16,7 @@ public final class UpdateActivity extends Activity {
     private CheckBox automatic,moduleUpdates;
     private TextView modulesSummary;
     private LinearLayout moduleActions;
+    private final Runnable healthObserver=this::moduleStatus;
     private boolean painting;
     private boolean initialCheck;
     private PullRefreshLayout pull;
@@ -44,10 +45,18 @@ public final class UpdateActivity extends Activity {
         options.addView(text("默认勾选，仅更新已下载的模块。关闭后保留原文件和设置；旧资源包兼容时继续使用，原生模块须匹配新版 App，可能暂不可用。安装仍需系统确认。",12));
         modulesSummary=text("模块：等待版本检查",12);options.addView(modulesSummary);
         moduleActions=new SpacedLayout(this);moduleActions.setOrientation(LinearLayout.VERTICAL);options.addView(moduleActions);
-        for(String id:ModuleSpec.IDS)if(ModuleStore.acquired(this).contains(id)&&!ModuleStore.current(this,id)&&OptionalModules.allowed(this,id))button(moduleActions,"更新"+ModuleSpec.name(id),()->startActivity(new Intent(this,ModuleDownloadActivity.class).putExtra("module_id",id).putExtra("refresh_module",true).putExtra("next",OptionalModules.target(this,id))));
+        ModuleHealth.listen(healthObserver);moduleStatus();button(options,"检查本机模块 / 本地恢复",()->ModuleHealth.checkAll(this));
         LinearLayout publishing=card();publishing.addView(text("版本发布地址",16));source=text("",12);source.setTextIsSelectable(true);publishing.addView(source);button(publishing,"设置发布地址",this::editSource);
         releaseHistory();
         refresh();AppAppearance.paintFields(root);
+    }
+    private void moduleStatus(){
+        if(isDestroyed()||moduleActions==null)return;moduleActions.removeAllViews();
+        for(String id:ModuleSpec.IDS)if(ModuleStore.acquired(this).contains(id)&&OptionalModules.allowed(this,id)){
+            ModuleHealth.Status health=ModuleHealth.state(id);moduleActions.addView(text(ModuleSpec.name(id)+" · "+health.message+(health.revision.isEmpty()?"":"\n编号："+health.revision),12));
+            if(health.intact&&!ModuleStore.current(this,id))button(moduleActions,"更新"+ModuleSpec.name(id),()->startActivity(new Intent(this,ModuleDownloadActivity.class).putExtra("module_id",id).putExtra("refresh_module",true).putExtra("next",OptionalModules.target(this,id))));
+            if(!health.intact&&!"检查中".equals(health.message))button(moduleActions,"修复 "+ModuleSpec.name(id),()->OptionalModules.open(this,id,OptionalModules.target(this,id)));
+        }
     }
     private TextView text(String value,int size){TextView t=new TextView(this);t.setText(value);t.setTextSize(size);t.setTextColor(MobileStyle.TEXT);t.setPadding(0,dp(4),0,dp(6));return t;}
     private LinearLayout card(){LinearLayout box=new SpacedLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(16),dp(16),dp(16),dp(16));box.setBackground(MobileStyle.panel(this,MobileStyle.MODULE,16,0));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.bottomMargin=dp(12);body.addView(box,p);return box;}
@@ -86,5 +95,5 @@ public final class UpdateActivity extends Activity {
     }
     @Override protected void onResume(){super.onResume();updates.attach(this,this::refresh);updates.resumeInstall(this);if(initialCheck){initialCheck=false;if(!updates.busy()&&!updates.ready())updates.check(true);}}
     @Override protected void onPause(){updates.detach(this);super.onPause();}
-    @Override protected void onDestroy(){ModalDialogs.close(this);super.onDestroy();}
+    @Override protected void onDestroy(){ModalDialogs.close(this);ModuleHealth.unlisten(healthObserver);super.onDestroy();}
 }

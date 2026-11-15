@@ -36,6 +36,34 @@ final class ModuleFiles {
         if(info==null)throw new IOException("缺少已签名的模块身份");JSONObject value=new JSONObject(new String(info,java.nio.charset.StandardCharsets.UTF_8));
         if(!spec.id.equals(value.getString("id"))||value.getInt("api")!=1||value.getInt("versionCode")!=spec.versionCode||!spec.kind.equals(value.getString("kind")))throw new IOException("模块版本或身份不兼容");
         if(ModuleSpec.nativeModule(spec.id)&&!spec.id.equals(value.getString("splitName")))throw new IOException("原生功能包身份不兼容");
+        if(!spec.revision.isEmpty()&&!ModuleSpec.nativeModule(spec.id)){
+            if(!spec.revision.equals(value.optString("revision"))||!spec.revision.equals(resourceRevision(file)))throw new IOException("资源编号与签名内容不一致");
+        }
+    }
+    /** Independent of ZIP timestamps, signatures and the enclosing App version. */
+    static String resourceRevision(File archive)throws Exception{
+        TreeMap<String,String> files=new TreeMap<>();
+        try(JarFile jar=new JarFile(archive,true)){
+            for(Enumeration<JarEntry> entries=jar.entries();entries.hasMoreElements();){JarEntry entry=entries.nextElement();String name=safePath(entry.getName());if(entry.isDirectory()||!name.startsWith("payload/"))continue;
+                MessageDigest digest=MessageDigest.getInstance("SHA-256");long size=0;try(InputStream in=jar.getInputStream(entry)){byte[] buffer=new byte[16384];int n;while((n=in.read(buffer))!=-1){size+=n;if(size>ModuleSpec.MAX_BYTES)throw new IOException("资源过大");digest.update(buffer,0,n);}}
+                if(files.put(name.substring(8),size+"\0"+hex(digest.digest()))!=null)throw new IOException("重复资源");
+            }
+        }
+        if(files.isEmpty())throw new IOException("资源包为空");MessageDigest digest=MessageDigest.getInstance("SHA-256");digest.update("ACM-MODULE-ASSETS/1\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        for(Map.Entry<String,String> item:files.entrySet())digest.update((item.getKey()+"\0"+item.getValue()+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));return "a1-"+hex(digest.digest());
+    }
+    /** Compare actual installed bytes to an already verified signed archive, not its marker. */
+    static boolean matches(File archive,File directory)throws Exception{
+        if(!directory.isDirectory())return false;Set<String> expected=new HashSet<>();
+        try(JarFile jar=new JarFile(archive,true)){
+            byte[] a=new byte[16384],b=new byte[16384];
+            for(Enumeration<JarEntry> entries=jar.entries();entries.hasMoreElements();){JarEntry entry=entries.nextElement();String name=safePath(entry.getName());if(entry.isDirectory()||!name.startsWith("payload/"))continue;
+                String relative=safePath(name.substring(8));File file=new File(directory,relative);if(!file.getCanonicalPath().startsWith(directory.getCanonicalPath()+File.separator)||!file.isFile()||Files.isSymbolicLink(file.toPath())||file.length()!=entry.getSize())return false;expected.add(relative);
+                try(InputStream actual=new FileInputStream(file);InputStream wanted=jar.getInputStream(entry)){int n;while((n=wanted.read(a))!=-1){int offset=0;while(offset<n){int m=actual.read(b,offset,n-offset);if(m<0)return false;offset+=m;}for(int i=0;i<n;i++)if(a[i]!=b[i])return false;}if(actual.read()!=-1)return false;}
+            }
+        }
+        try(java.util.stream.Stream<Path> files=Files.walk(directory.toPath())){for(Path path:(Iterable<Path>)files::iterator){if(Files.isSymbolicLink(path))return false;if(Files.isRegularFile(path)){String relative=directory.toPath().relativize(path).toString().replace(File.separatorChar,'/');if(!expected.contains(relative)&&!relative.equals(".complete-api1")&&!relative.equals(".source-code"))return false;}}}
+        return !expected.isEmpty();
     }
     static void extract(File archive,File destination)throws Exception{
         if(destination.exists()||!destination.mkdirs())throw new IOException("无法创建模块安装目录");boolean completed=false;

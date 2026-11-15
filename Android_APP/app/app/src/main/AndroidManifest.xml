@@ -16,6 +16,7 @@
         <receiver android:name=".TrainingReminder" android:exported="false"><intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter></receiver>
         <activity android:name=".ModuleDownloadActivity" android:exported="false" />
         <receiver android:name=".ModuleInstallReceiver" android:exported="false" />
+        <provider android:name=".AccountExportProvider" android:authorities="${applicationId}.accounts" android:exported="false" android:grantUriPermissions="true" />
         <provider android:name=".ThemeShareProvider" android:authorities="${applicationId}.themes" android:exported="false" android:grantUriPermissions="true" />
         <activity android:name=".AppearanceActivity" android:exported="false" />
         <activity android:name=".AboutActivity" android:exported="false" />
@@ -30,6 +31,7 @@
         <provider android:name=".UpdateFileProvider" android:authorities="${applicationId}.updates" android:exported="false" android:grantUriPermissions="true" />
         <activity android:name=".WebFeaturesActivity" android:exported="false" />
         <activity android:name=".ImagePreviewActivity" android:exported="false" />
+        <activity android:name=".TrainingTasksActivity" android:exported="false" />
         <activity android:name=".ClubActivity" android:exported="false" android:launchMode="singleTop" />
         <activity android:name=".PdfActivity" android:exported="false" android:launchMode="singleTop" />
         <activity android:name=".MainActivity" android:exported="true">

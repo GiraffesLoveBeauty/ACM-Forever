@@ -31,13 +31,16 @@ final class ModuleDownloads {
         if(((AcmApplication)context).updates().operationActive()){publish(id,"failed","App正在更新，请完成或取消更新后再下载模块。",0,0);return;}
         cancelled.put(id,false);publish(id,"checking","正在读取模块信息…",0,0);
         io.execute(()->{try{
+            if(!ModuleSpec.nativeModule(id)){ModuleHealth.Status local=ModuleHealth.verify(context,id);if(local.intact&&ModuleStore.current(context,id)){publish(id,"done","本机模块已检查并恢复，无需下载",0,0);return;}}
             ModuleSpec spec=ModuleNetwork.catalog(context).get(id);if(spec==null)throw new IOException("缺少模块信息");File file=ModuleStore.archive(context,id);
+            if(!ModuleSpec.nativeModule(id)&&ModuleStore.reuse(context,spec)){if(cancelled(id)||!OptionalModules.allowed(context,id))throw new IOException("操作取消或权限已变化");ModuleStore.acquired(context,id);if(!ModuleHealth.verify(context,id).intact)throw new IOException("模块恢复验证失败");publish(id,"done","已复用并恢复本机完整模块",0,0);return;}
+            if(file.isFile())try{ModuleFiles.verify(file,spec,ModuleStore.trusted(context));}catch(Exception invalid){java.nio.file.Files.deleteIfExists(file.toPath());}
             if(!file.isFile()){publish(id,"downloading","正在下载…",0,spec.size);ModuleNetwork.download(spec,file,n->publish(id,"downloading","正在下载…",n,spec.size),()->cancelled(id));}
             if(cancelled(id))throw new IOException("已取消下载");publish(id,"verifying","正在校验签名与版本…",spec.size,spec.size);
             try{ModuleFiles.verify(file,spec,ModuleStore.trusted(context));}catch(Exception e){java.nio.file.Files.deleteIfExists(file.toPath());throw e;}
             if(cancelled(id))throw new IOException("已取消下载");if(!OptionalModules.allowed(context,id))throw new IOException("登录状态或权限已变化");
             ModuleStore.acquired(context,id);
-            if(ModuleSpec.nativeModule(id))installNative(id,file,spec);else{ModuleStore.installAssets(context,spec);CharacterArt.clear();publish(id,"done","模块已下载",spec.size,spec.size);}
+            if(ModuleSpec.nativeModule(id))installNative(id,file,spec);else{ModuleStore.installAssets(context,spec);if(!ModuleHealth.verify(context,id).intact)throw new IOException("模块恢复验证失败");CharacterArt.clear();publish(id,"done","模块完整，已完成下载/修复",spec.size,spec.size);}
         }catch(Exception e){publish(id,"failed",e.getMessage()==null?"模块操作失败":e.getMessage(),0,0);}});
     }
     private void installNative(String id,File file,ModuleSpec spec)throws Exception{

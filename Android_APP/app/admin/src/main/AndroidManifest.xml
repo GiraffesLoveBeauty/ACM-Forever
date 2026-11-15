@@ -3,5 +3,5 @@
         <dist:delivery><dist:on-demand /></dist:delivery>
         <dist:fusing dist:include="false" />
     </dist:module>
-    <application><activity android:name="com.giraffeslovebeauty.acmforever.AdminQuickActivity" android:exported="false" /></application>
+    <application><activity android:name="com.giraffeslovebeauty.acmforever.AdminQuickActivity" android:exported="false" /><activity android:name="com.giraffeslovebeauty.acmforever.AdminTrainingActivity" android:exported="false" /><activity android:name="com.giraffeslovebeauty.acmforever.AdminAccountsActivity" android:exported="false" /></application>
 </manifest>
