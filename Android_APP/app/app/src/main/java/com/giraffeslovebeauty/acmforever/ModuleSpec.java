@@ -14,6 +14,12 @@ final class ModuleSpec {
     static boolean nativeModule(String id){return "advanced".equals(id)||"admin".equals(id);}
     static String filename(String id){if(!IDS.contains(id))throw new IllegalArgumentException("未知模块");return "module-"+id+(nativeModule(id)?".apk":".acmpack");}
     static String indexUrl(String version){if(!version.matches("[0-9]+\\.[0-9]+\\.[0-9]+"))throw new IllegalArgumentException("无效版本");return "https://github.com/"+REPOSITORY+"/releases/download/v"+version+"/modules.json";}
+    static List<String> indexUrls(String version){return Arrays.asList(UpdateSources.asset(version,"modules.json",true),indexUrl(version));}
+    List<String> downloadUrls(){
+        String version=java.net.URI.create(url).getPath().split("/releases/download/v",2)[1].split("/",2)[0];
+        String github=UpdateSources.asset(version,filename(id),false);
+        return url.equals(github)?Collections.singletonList(url):Arrays.asList(url,github);
+    }
     static Map<String,ModuleSpec> parse(JSONObject index,int code,String version)throws Exception{
         if(index.getInt("schemaVersion")!=1||index.getInt("versionCode")!=code||!version.equals(index.getString("versionName")))throw new IllegalArgumentException("模块清单与当前App版本不匹配");
         Map<String,ModuleSpec> result=new LinkedHashMap<>();JSONArray rows=index.getJSONArray("modules");
@@ -21,9 +27,9 @@ final class ModuleSpec {
         for(int i=0;i<rows.length();i++){
             JSONObject row=rows.getJSONObject(i);String id=row.getString("id"),kind=row.getString("kind"),hash=row.getString("sha256");
             if(!IDS.contains(id)||result.containsKey(id))throw new IllegalArgumentException("模块身份重复或未知");
-            String url="https://github.com/"+REPOSITORY+"/releases/download/v"+version+"/"+filename(id);
+            String url=row.getString("url");
             Object rawSize=row.get("sizeBytes");if(!(rawSize instanceof Integer||rawSize instanceof Long))throw new IllegalArgumentException("模块大小无效");long size=((Number)rawSize).longValue();
-            if(size<=0||size>MAX_BYTES||!hash.matches("[0-9a-f]{64}")||!url.equals(row.getString("url"))||!kind.equals(nativeModule(id)?"native":"assets"))throw new IllegalArgumentException("模块清单无效");
+            if(size<=0||size>MAX_BYTES||!hash.matches("[0-9a-f]{64}")||!(url.equals(UpdateSources.asset(version,filename(id),true))||url.equals(UpdateSources.asset(version,filename(id),false)))||!kind.equals(nativeModule(id)?"native":"assets"))throw new IllegalArgumentException("模块清单无效");
             result.put(id,new ModuleSpec(id,url,hash,kind,size,code));
         }
         return result;

@@ -1,8 +1,12 @@
-# 打一辈子爱臭美 / ACMforever v0.2.26（源码评审候选）
+# 打一辈子爱臭美 / ACMforever v0.2.27（源码评审候选）
 
 当前工程及发布说明以 [android-app.md（Android 工程、更新渠道、构建与发布）](../docs/android-app.md) 为准。以下旧版条目保留其当时状态。
 
-## v0.2.26（待评审）
+## v0.2.27（待评审）
+
+默认从 Gitee 公开 Release 检查更新、下载 APK 和配套模块，GitHub 保留兜底；自定义地址保持用户选择。Tag 仍由 GitHub Actions 编译签名，可将同一批制品镜像至 Gitee。发布前须配置 `GITEE_RELEASE_TOKEN` 并核验全部附件。详见[范围、配置与验收](../docs/android-v0.2.27-gitee-updates.md)。本轮只提交 PR，尚未合并或发布。
+
+## v0.2.26（历史记录，已发布）
 
 修复论坛 Markdown 公式显示为原始代码、三行话题摘要及我的主题返回位置；搜索拖动触边自动滚动速度加倍，保留渐进加速及边界保护。详见[范围与验收](../docs/android-v0.2.26-reader-and-theme-return.md)。本轮提交源码PR供其他成员评审，未合并或发布安装包。
 

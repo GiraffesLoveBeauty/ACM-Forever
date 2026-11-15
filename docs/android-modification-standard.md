@@ -1,6 +1,8 @@
-# Android 修改标准与模块关联（v0.2.26）
+# Android 修改标准与模块关联（v0.2.27）
 
-当前源码评审候选0.2.26/code40的论坛、主题返回和搜索拖动修复见[实施记录](android-v0.2.26-reader-and-theme-return.md)。Markdown公式须在解析前保留原文，不能全局替换代码块或二次扫描转义货币；共享阅读器变更须联查论坛、预览、Wiki和题面。高级个性化的页面位置须随页面及Activity状态保存，首次恢复不能被onResume的重复渲染覆盖。以下0.2.25段落保留模块实施时的记录。
+0.2.27/code41更新源改为Gitee优先、GitHub兜底，详见[源选择与发布配置](android-v0.2.27-gitee-updates.md)。`UpdateSources`控制正式Release解析和清单兜底；`UpdateManifest.downloadUrls`仅为固定Gitee仓库添加同版本GitHub备选；`ModuleSpec/ModuleNetwork`控制固定仓库的同版本模块和CDN白名单。自定义清单不能被静默替换。不可删除原APK/模块的哈希、版本、签名校验，或在校验失败时直接安装。`gitee_release.py`只允许匹配源码Tag的Actions运行，Secret仅发布端使用；八附件匿名回读后才解除预发布状态，PATCH 必须携带原 `tag_name/name/body`。GitHub 已公开而 Gitee 未完成时，重跑须先核对真实 Tag/commit、源码版本、渠道和固定证书，再下载校验原始八附件；成功恢复后跳过构建和 GitHub 发布，不允许用重新打包的不同字节覆盖首发文件。1.0.0和自站PR继续独立保留。
+
+上一公开版本0.2.26/code40的论坛、主题返回和搜索拖动修复见[实施记录](android-v0.2.26-reader-and-theme-return.md)。Markdown公式须在解析前保留原文，不能全局替换代码块或二次扫描转义货币；共享阅读器变更须联查论坛、预览、Wiki和题面。高级个性化的页面位置须随页面及Activity状态保存，首次恢复不能被onResume的重复渲染覆盖。以下0.2.25段落保留模块实施时的记录。
 
 首页及我的空间话题卡片统一用`ForumExcerpt`执行网页`postExcerpt`的文字摘要规则，最多三行，末尾省略；不要直接显示原始`excerpt`，也不要为摘要逐卡增加WebView。0.2.26搜索拖动边缘滚动上限为192dp/秒，旧版96是历史值；调整时须联查帧率无关性、掉帧限速、反向/离开即停以及列表边界。
 
@@ -43,7 +45,7 @@
 | `ThemePackage`、`LocalThemes`、`ProfileCover` | `.acmtheme`格式、隔离安装、原图字节与非破坏性裁剪 | [格式规范](android-theme-package-v1.md)；布尔选项、主辅色/透明度、模板浅深配色、原图及裁剪同时往返；文件I/O不在主线程，先校验后登记，导入不覆盖当前外观 |
 | `ThemeShareProvider`（基础包）、`AdvancedAppearanceActivity`（高级模块） | 后台生成私人主题文件并调用系统分享 | 独立只读附件、ClipData读取授权、随机文件名与缓存回收；不共用APK Provider，不包含账号字段，不自动发送QQ/微信消息 |
 | `OfficialThemeView`、`theme-renderer/` | 原Vue/CSS/SVG离线主题层，无原生JS桥 | [源文件关联](android-official-theme-adaptation-v0.2.17.md)；原源变化重跑构建工具和指纹检查，禁止用重新描摹替代；原生控件仍使用共享样式 |
-| `AppUpdates`、`UpdateManifest`、更新页面与 Provider | 检查、下载、校验及系统安装 | 当前GitHub单源、取消/重建/进程恢复、包名版本签名、更新日志 |
+| `AppUpdates`、`UpdateManifest`、更新页面与 Provider | 检查、下载、校验及系统安装 | Gitee优先/GitHub兜底与自定义源、取消/重建/进程恢复、包名版本签名、更新日志 |
 | `tools/create_update_manifest.py`、`tag_release.py` | 同一 APK 的清单和GitHub Release事务 | `.github/workflows/android-release.yml`、签名渠道、不可变目录和 latest |
 | `OptionalModules`、`ModuleDownloads`、`ModuleStore`、`ModuleUpdates`、`ModuleInstaller` | 按需下载、真实系统安装及升级保留 | 登录/管理员和账号代次、索引版本、签名叶证书、大小/哈希、分包版本、未来资源隔离、取消和旧目录保留；不得按偏好标记判定已安装原生功能 |
 | `tools/create_module_assets.py`、`module-resources/`、`app/advanced/`、`app/admin/` | 四模块制品、资源源文件与真实拆包 | 与基础APK同版本和证书；八附件必须全部回读通过才能公开，不把模块包或密钥提交源码库 |
@@ -89,7 +91,7 @@ Wiki完整目录与阅读导航的本地适配见[android-wiki-navigation-local-
 
 这些 `/club/` 路径是客户端已有约定，当前仓库尚无对应后端路由；后续需先确定契约，不能把界面存在当作API已实现。本轮搜索还需要对应的关键词/分页契约。
 
-更新分发使用GitHub公开静态 JSON/APK，不需要业务 `/api/mobile/v1/releases/*`；自站客户端与镜像已从本PR拆分，另待配置和review。相册背景、裁剪、主辅色、透明度、本机主题、搜索设置/历史、通知时间均本机保存，不需要上传接口。公开成员ID/平台题数/已发布话题已有移动接口，不再列为缺失；本人OJ绑定的新本地实现见下节，不改变服务器已开放的平台范围。
+更新分发使用Gitee公开Release的JSON/APK并保留GitHub兜底，不需要业务 `/api/mobile/v1/releases/*`；自站客户端与镜像已从本PR拆分，另待配置和review。相册背景、裁剪、主辅色、透明度、本机主题、搜索设置/历史、通知时间均本机保存，不需要上传接口。公开成员ID/平台题数/已发布话题已有移动接口，不再列为缺失；本人OJ绑定的新本地实现见下节，不改变服务器已开放的平台范围。
 
 ## 本人 OJ 绑定（本地新增，2026-11-06）
 

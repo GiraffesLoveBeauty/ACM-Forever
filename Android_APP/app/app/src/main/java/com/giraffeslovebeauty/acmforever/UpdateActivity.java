@@ -76,7 +76,7 @@ public final class UpdateActivity extends Activity {
         if(isFinishing()||isDestroyed())return;painting=true;pull.loading(updates.checking());
         try{status.setText(updates.status());last.setText(updates.lastCheck());error.setText(updates.error());banner.setVisibility(updates.error().isEmpty()?View.GONE:View.VISIBLE);notes.setText(updates.notes());notes.setVisibility(updates.notes().isEmpty()?View.GONE:View.VISIBLE);
             check.setEnabled(!updates.busy());download.setText(updates.downloadLabel());download.setVisibility(updates.available()&&!updates.ready()?View.VISIBLE:View.GONE);download.setEnabled(!updates.busy());install.setVisibility(updates.ready()?View.VISIBLE:View.GONE);install.setEnabled(!updates.busy());cancel.setVisibility(updates.downloading()?View.VISIBLE:View.GONE);clearPackages.setEnabled(!updates.busy());
-            automatic.setChecked(updates.automatic());moduleUpdates.setChecked(ModuleStore.updateTogether(this));moduleUpdates.setEnabled(!updates.operationActive());modulesSummary.setText("模块："+updates.modulesStatus());for(int i=0;i<moduleActions.getChildCount();i++)moduleActions.getChildAt(i).setEnabled(!updates.operationActive());source.setText(updates.endpoint());
+            automatic.setChecked(updates.automatic());moduleUpdates.setChecked(ModuleStore.updateTogether(this));moduleUpdates.setEnabled(!updates.operationActive());modulesSummary.setText("模块："+updates.modulesStatus());for(int i=0;i<moduleActions.getChildCount();i++)moduleActions.getChildAt(i).setEnabled(!updates.operationActive());source.setText(updates.sourceStatus());
         }finally{painting=false;}
     }
     private void editSource(){

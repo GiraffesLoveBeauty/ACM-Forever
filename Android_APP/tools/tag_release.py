@@ -103,6 +103,20 @@ class GitHub:
     def latest(self):
         return self.api("/releases/latest", missing=True)
 
+    def tag_commit(self, tag):
+        """Resolve lightweight or annotated tags without trusting target_commitish."""
+        obj = self.api("/git/ref/tags/" + quote(tag, safe=""))["object"]
+        for _ in range(6):
+            sha = obj.get("sha", "")
+            if not re.fullmatch(r"[0-9a-f]{40}", sha):
+                raise ValueError("Invalid GitHub Tag object")
+            if obj.get("type") == "commit":
+                return sha
+            if obj.get("type") != "tag":
+                break
+            obj = self.api("/git/tags/" + sha)["object"]
+        raise ValueError("GitHub Tag does not identify a commit")
+
     def release(self, tag):
         current = self.api("/releases/tags/" + quote(tag, safe=""), missing=True)
         if current is not None:

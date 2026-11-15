@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "capturedOn": "2026-11-09",
+  "capturedOn": "2026-11-15",
   "repository": "GiraffesLoveBeauty/ACM-Forever",
   "maintainers": [
     "MiaoJJ13445"
@@ -130,8 +130,22 @@
     "github-actions[bot]"
   ],
   "versions": {
+    "0.2.27": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [],
+      "reviewers": [],
+      "publishers": [],
+      "pr": 0,
+      "status": "development",
+      "scope": "Gitee 优先更新源码候选；实际 PR 与评审、发布身份待核实后补录。",
+      "evidence": []
+    },
     "0.2.26": {
-      "uploaders": ["MiaoJJ13445"],
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
       "reviewRequesters": [],
       "reviewers": [],
       "publishers": [],
