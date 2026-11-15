@@ -82,8 +82,14 @@ final class OjBindingsUiSmoke {
             main(activity::onBackPressed); await(() -> description("洛谷绑定账号") != null, "back to list");
             clickDescription("洛谷绑定账号"); await(() -> has("该平台尚未开放本人归属验证"), "unsupported platform tells truth");
             check(!has("申请验证码"), "no fabricated platform ownership flow");
-            api.logout(); main(() -> { test.callActivityOnPause(activity); test.callActivityOnResume(activity); });
-            await(() -> has("登录已失效") || has("请返回并重新登录") || has("无访问权限"), "session loss removes private controls");
+            Activity privatePage = activity;
+            Instrumentation.ActivityMonitor loginMonitor = test.addMonitor(MainActivity.class.getName(), null, false);
+            try {
+                api.logout(); Activity login = test.waitForMonitorWithTimeout(loginMonitor, 10000);
+                check(login != null, "session loss redirects to the forced login page"); activity = login; pages.add(login);
+                await(() -> has("账号登录"), "forced login after leaving private controls");
+                main(() -> check(privatePage.isFinishing() || privatePage.isDestroyed(), "private binding page removed from navigation"));
+            } finally { test.removeMonitor(loginMonitor); }
             check(!has("申请验证码") && !has("确认解绑"), "old account cannot write after logout");
             output.putString("stream", "PASS: real profile bind CTA; no CTA for bound zero-AC; account settings username/modify; changed verification target blocked after local validation and pre-server transport failures; original proof target can still bind when explicitly selected; CF first bind, rebind with current password and explicit confirmation; pending proof restored after Activity recreation without password/checkbox; failed proof retains old account; CSRF and expected-account payloads; manual sync; confirmed unbind; unsupported-platform explanation; session-loss guard; return refresh.\n");
             status = Activity.RESULT_OK;
