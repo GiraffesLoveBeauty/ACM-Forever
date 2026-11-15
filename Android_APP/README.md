@@ -4,7 +4,7 @@
 
 ## v0.2.27（待评审）
 
-默认从 Gitee 公开 Release 检查更新、下载 APK 和配套模块，GitHub 保留兜底；自定义地址保持用户选择。Tag 仍由 GitHub Actions 编译签名，可将同一批制品镜像至 Gitee。发布前须配置 `GITEE_RELEASE_TOKEN` 并核验全部附件。详见[范围、配置与验收](../docs/android-v0.2.27-gitee-updates.md)。本轮只提交 PR，尚未合并或发布。
+默认从 Gitee 公开 Release 检查更新、下载 APK 和配套模块，GitHub 保留兜底；自定义地址保持用户选择。Tag 仍由 GitHub Actions 编译签名并发布 GitHub Release，Gitee 暂由用户手动同步同批附件，GitHub 发包不要求 Gitee 凭据。可选自动镜像须设置 `GITEE_MIRROR_MODE=automatic` 并配置 `GITEE_RELEASE_TOKEN`。详见[范围、配置与验收](../docs/android-v0.2.27-gitee-updates.md)。PR #141 已合并，发布方式小修另提 PR；尚未创建 Tag 或发布 v0.2.27。
 
 ## v0.2.26（历史记录，已发布）
 

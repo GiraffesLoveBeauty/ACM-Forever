@@ -1,6 +1,6 @@
 # Android v0.2.27：Gitee 优先更新与完整镜像发布
 
-日期：2026-11-15。当前为 **0.2.27 / versionCode 41 / debug** 源码评审候选，基于 main `6b7536fbb91c0cd30770a14302554e425e5f2ce9`；上一公开版本为 v0.2.26/code40。本轮提交 PR 供其他成员 review，不合并、创建 Tag 或发布制品。1.0.0 和自站更新仍独立等待。
+日期：2026-11-15。当前为 **0.2.27 / versionCode 41 / debug**，PR #141 已完成第二轮本地 review 并合并为 `931ffa7718a867bee9d1cf7c0a61993ae545517a`；上一公开版本为 v0.2.26/code40。用户确认 Gitee 由其手动同步，因此发布工作流小修另提 PR，尚未创建 Tag 或发布 v0.2.27。**App 的 Gitee 优先级保持不变，发布端是否自动同步是独立设置。** 1.0.0 和自站更新仍独立等待。
 
 ## 可行性实测
 
@@ -29,30 +29,36 @@
 flowchart TD
     A[源码 PR] --> B[其他成员 Review 与 CI]
     B --> C[确认后合并并创建新版本 Tag]
-    C --> D[检查 Gitee Secret / 版本与固定证书]
+    C --> D[检查版本与固定证书 / 自动镜像模式才检查 Gitee Secret]
     D --> R{同 Tag 的 GitHub Release 已公开?}
     R -->|否| N[编译测试签名]
     N --> E[GitHub 草稿上传八附件并回读]
     E --> F[公开 GitHub Release]
-    F --> G[同步同一个源码 Tag 至 Gitee]
+    F --> M{Gitee 同步模式}
+    M -->|manual 默认| X[用户手动同步同版 Tag 与全部附件]
+    M -->|automatic 可选| G[同步同一个源码 Tag 至 Gitee]
     R -->|是| V[核对源码提交 / 版本 / 渠道 / 固定证书]
     V --> W[下载并校验八个原始附件 / 跳过重新构建和 GitHub 发布]
-    W --> G
+    W --> M
     G --> H[Gitee 创建预发布 Release]
     H --> I[上传同字节 APK 和模块 / 改写两份 JSON 地址]
     I --> J[匿名回下载全部八附件并核验]
     J --> K[切换 Gitee Release 为正式发布]
 ```
 
-管理员在 GitHub 仓库 **Settings → Secrets and variables → Actions → New repository secret** 配置 `GITEE_RELEASE_TOKEN`，使用对 `MJJ13445/ACM-Forever` 有仓库写入与 Release 附件操作权限的 Gitee 访问令牌。只在 Secret 保存，不写入源码、App、聊天、URL 或日志。本次只读检查确认该 Secret 尚未配置；本 PR 不创建或索取令牌。
+发布模式由 GitHub Actions Repository Variable `GITEE_MIRROR_MODE` 控制，缺省为 **`manual`**，另一个允许值为 `automatic`；其他值会被拒绝。在默认手动模式下，工作流完整编译、签名、验证并公开 GitHub 八附件，跳过 Gitee 凭据检查和远端写入，不需要配置 Gitee Token。客户端仍按 Gitee → GitHub 检查更新；Gitee 尚无同版 Release 时使用已有兜底逻辑。
 
-工作流在编译及公开 GitHub Release **之前**检查 Secret 非空。Gitee 写凭据仅供发布 Action 使用；App 全程匿名下载。同步只推送本次 Tag 及其源码对象，不改 Gitee main、GitHub main、网站部署和业务数据库。已有同名 Gitee Tag 指向别处时拒绝移动。
+仅在将模式设为 `automatic` 时，管理员还需在 GitHub 仓库 **Settings → Secrets and variables → Actions → New repository secret** 配置 `GITEE_RELEASE_TOKEN`，使用对 `MJJ13445/ACM-Forever` 有仓库写入与 Release 附件操作权限的 Gitee 访问令牌。只在 Secret 保存，不写入源码、App、聊天、URL 或日志。当前只读检查确认该 Secret 尚未配置；按用户选择使用手动模式，不创建或索取令牌。
+
+自动模式在编译及公开 GitHub Release **之前**检查 Secret 非空。Gitee 写凭据仅供发布 Action 使用；App 全程匿名下载。自动同步只推送本次 Tag 及其源码对象，不改 Gitee main、GitHub main、网站部署和业务数据库。已有同名 Gitee Tag 指向别处时拒绝移动。
 
 八附件：基础 APK、对应 `.sha256`、`update.json`、`modules.json`、`module-advanced.apk`、`module-admin.apk`、`module-official-themes.acmpack`、`module-cat-art.acmpack`。Gitee 两份 JSON 的 URL 改为 Gitee 同版本地址，APK与四模块字节、体积、哈希及签名不变；不要求两站 JSON 字节相同。
 
-Gitee 没有本流程使用的 draft 字段，以 `prerelease=true` 暂存；最新版本检查拒绝预发布。所有附件匿名回读正确后才切 `prerelease=false`。PATCH 同时携带官方 API 要求的 `tag_name`、`name`、`body`，保持已确认的版本、标题和说明不变。已公开附件不可替换，完全一致的重跑只校验；中途失败的预发布可在同 Tag 重跑时补齐缺失文件，已有文件不同则阻止。不能删除 Tag、覆盖 APK 或略过回读来解决失败。
+手动同步需要在 Gitee 创建同版 Tag 和 Release，并上传上述八附件；源码镜像导入不等于附件同步。APK、四模块和 `.sha256` 使用 GitHub 首发原文件；`update.json` 的 `apkUrl/modulesUrl`、`modules.json` 的四个下载 URL 改为 Gitee 同版路径，保留全部版本、大小、哈希及签名身份字段。`gitee_release.mirror_files()` 可从下载的 GitHub 八附件在本地生成两份 Gitee JSON，不执行远端写操作。不要重新打包模块或修改哈希来凑匹配。
 
-GitHub 先发布、Gitee 后同步，跨站不是原子事务。若后半段失败，GitHub 可能已公开、Gitee 仍预发布；App 可兜底 GitHub，修复配置/网络后重跑原 Tag 工作流。Gitee 旧正式版低于本机时，客户端会检查 GitHub 较新版本。国内网络、Gitee 配额、令牌权限及下载策略仍需首次真实镜像验收。
+可选自动模式下，Gitee 没有本流程使用的 draft 字段，以 `prerelease=true` 暂存；最新版本检查拒绝预发布。所有附件匿名回读正确后才切 `prerelease=false`。PATCH 同时携带官方 API 要求的 `tag_name`、`name`、`body`，保持已确认的版本、标题和说明不变。已公开附件不可替换，完全一致的重跑只校验；中途失败的预发布可在同 Tag 重跑时补齐缺失文件，已有文件不同则阻止。不能删除 Tag、覆盖 APK 或略过回读来解决失败。
+
+GitHub 先发布、Gitee 后同步，跨站不是原子事务。手动同步由用户负责；可选自动模式的后半段失败时，GitHub 可能已公开、Gitee 仍预发布，修复配置/网络后重跑原 Tag 工作流。App 可兜底 GitHub；Gitee 旧正式版低于本机时，客户端会检查 GitHub 较新版本。国内网络、Gitee 配额、令牌权限及下载策略仍需首次真实镜像验收。
 
 重跑时，`gitee_release.py --restore-github` 在构建前检查同 Tag 的 GitHub Release。未发布或只有草稿时执行原构建/草稿事务；已正式公开时必须确认公开仓库、真实 Tag 解引用后的 commit、Release 源码标记、源码版本/code、当前渠道及固定证书，再下载并校验原始八附件的完整性、URL、体积、哈希与校验文件。验证成功才输出 `reused=true`；随后跳过 SDK/密钥配置、编译、打包及 GitHub 发布，直接镜像原始字节。恢复失败即终止，不退回重新构建；输出目录非空时拒绝混入其他制品。资源包 ZIP 时间戳和签名可能随重新打包变化，因此即使源码和密钥相同也不能用新包替换首发附件。
 
@@ -68,7 +74,7 @@ GitHub 先发布、Gitee 后同步，跨站不是原子事务。若后半段失�
 
 新增测试涵盖源顺序、异常/非法清单兜底、自定义源、镜像延迟、同版本 APK URL、模块 URL 白名单、发布完整性、失败恢复和不可变附件。模拟器使用合成 HTTPS 传输，不访问生产账号或向 Gitee 写入测试附件。真实网络只进行了前述匿名读取；凭据未配置，**尚未验收本项目 Gitee 的真实 Tag 推送、Release 写入、附件大小配额及完整 APK 下载**。上述发布测试使用内存夹具，不能代替首次真实发布验收。本机日志保存在被忽略的 `Android_APP/dist/gitee-v0.2.27-local/` 及同级构建日志，不提交源码库。
 
-Review 重点：跨源仍只安装相同身份的制品；取消与重建不启动无限重试；Gitee Tag 不覆盖；令牌不进客户端与日志；八附件全通过才公开；GitHub 既有发布校验仍有效。PR 合并及首次 Tag 发布前，管理员需配置 Secret 并确认 Gitee 空间/权限。
+Review 重点：跨源仍只安装相同身份的制品；取消与重建不启动无限重试；Gitee Tag 不覆盖；令牌不进客户端与日志；自动镜像八附件全通过才公开；GitHub 既有发布校验仍有效。手动模式无需 Gitee Secret；如启用自动镜像，发布前需配置 Secret 并确认 Gitee 空间/权限。
 
 ## PR #141 首轮 Review 修复
 

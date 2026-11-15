@@ -21,6 +21,7 @@ jobs:
     env:
       RELEASE_TAG: ${{ github.ref_name }}
       RELEASE_CHANNEL: ${{ vars.ANDROID_RELEASE_CHANNEL || 'debug' }}
+      GITEE_MIRROR_MODE: ${{ vars.GITEE_MIRROR_MODE || 'manual' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,11 +40,13 @@ jobs:
           git merge-base --is-ancestor HEAD origin/main
           python Android_APP/tools/tag_release.py validate --tag "$RELEASE_TAG"
           case "$RELEASE_CHANNEL" in debug|release) ;; *) echo 'Invalid release channel'; exit 1 ;; esac
+          case "$GITEE_MIRROR_MODE" in manual|automatic) ;; *) echo 'Invalid Gitee mirror mode'; exit 1 ;; esac
 
       - name: Test release contracts and publication failures
         run: python -m unittest discover -s Android_APP/tests -p 'test_*release*.py' -v
 
       - name: Require Gitee mirror credential before publication
+        if: env.GITEE_MIRROR_MODE == 'automatic'
         env:
           GITEE_RELEASE_TOKEN: ${{ secrets.GITEE_RELEASE_TOKEN }}
         run: |
@@ -166,6 +169,7 @@ jobs:
             --source-commit "$GITHUB_SHA"
 
       - name: Mirror identical signed artifacts to Gitee and verify anonymous downloads
+        if: env.GITEE_MIRROR_MODE == 'automatic'
         env:
           GITEE_RELEASE_TOKEN: ${{ secrets.GITEE_RELEASE_TOKEN }}
         run: |
