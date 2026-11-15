@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router';
 import { auth, date, useRequests } from '../lib/api.js';
 import { originalProblemUrl, renderProblemContent } from '../lib/problem-content.js';
 import PdfPreview from '../components/PdfPreview.vue';
+import LuoguBadges from '../components/LuoguBadges.vue';
 import SecondaryProcessingPanel from '../components/SecondaryProcessingPanel.vue';
 import { problemReturn } from '../lib/member-problems.js';
 import { copyStatementSample } from '../lib/statement-samples.js';
@@ -128,13 +129,21 @@ watch(() => [route.query.platform, route.query.problem_id], load, { immediate: t
     <div v-if="detail" class="problem-overview">
       <div id="problem-meta" class="chips">
         <span class="chip">{{
-          { codeforces: 'Codeforces', atcoder: 'AtCoder' }[detail.platform] || detail.platform
+          { codeforces: 'Codeforces', atcoder: 'AtCoder', luogu: '洛谷' }[detail.platform] ||
+          detail.platform
         }}</span>
         <span class="chip">{{ detail.problem_id }}</span>
-        <span class="chip">难度 {{ detail.problem_rating ?? '未知' }}</span>
-        <span v-for="tag in detail.tags" :key="tag" class="chip">{{ tag }}</span>
+        <LuoguBadges v-if="detail.platform === 'luogu'" :problem="detail" />
+        <template v-else
+          ><span class="chip">难度 {{ detail.problem_rating ?? '未知' }}</span>
+          <span v-for="tag in detail.tags" :key="tag" class="chip">{{ tag }}</span></template
+        >
         <span v-if="detail.statement_language" class="chip">{{
-          detail.statement_language === 'ja' ? '日文题面' : '英文题面'
+          detail.statement_language === 'zh-CN'
+            ? '中文题面'
+            : detail.statement_language === 'ja'
+              ? '日文题面'
+              : '英文题面'
         }}</span>
       </div>
       <a
@@ -154,6 +163,7 @@ watch(() => [route.query.platform, route.query.problem_id], load, { immediate: t
     </section>
     <template v-else-if="detail">
       <SecondaryProcessingPanel
+        v-if="detail.platform !== 'luogu'"
         :key="`${detail.platform}:${detail.problem_id}`"
         :platform="detail.platform"
         :problem-id="detail.problem_id"
@@ -191,6 +201,9 @@ watch(() => [route.query.platform, route.query.problem_id], load, { immediate: t
         <h2>题面尚未采集</h2>
         <p v-if="detail.last_fetch_status === 'failed'">
           这道题目上次采集失败，请管理员在题库管理中重新拉取。
+        </p>
+        <p v-else-if="detail.platform === 'luogu'">
+          本题已进入目录，正文和样例尚未采集。可先查看原题，或请管理员按题号补全。
         </p>
         <p v-else>
           如果正在拉取该平台全部题目，请等待任务处理到这道题目后重新检查。也可请管理员按比赛或题号采集。
