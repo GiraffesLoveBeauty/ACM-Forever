@@ -36,13 +36,17 @@ class FakeGitHub:
     def latest(self):
         return self.releases.get(self.latest_tag)
 
+    def tag_commit(self, tag):
+        return 'a' * 40
+
     def release(self, tag):
         return self.releases.get(tag)
 
     def create(self, tag, title, notes):
         self.operations.append("create")
         self.assert_notes = notes.read_text(encoding="utf-8")
-        self.releases[tag] = {"tag_name": tag, "draft": True, "assets": []}
+        self.releases[tag] = {"tag_name": tag, "draft": True, "prerelease": False,
+                              "name": title, "body": self.assert_notes, "assets": []}
 
     def upload(self, tag, paths):
         self.operations.append("upload")
@@ -251,6 +255,23 @@ class TagReleaseTests(unittest.TestCase):
 
 
 class GitHubDraftAdapterTests(unittest.TestCase):
+    def test_resolves_lightweight_and_annotated_tags_to_exact_commit(self):
+        github = release.GitHub('GiraffesLoveBeauty/ACM-Forever')
+        commit, annotation = 'a'*40, 'b'*40
+        with patch.object(github,'api',return_value=dict(object=dict(type='commit',sha=commit))) as api:
+            self.assertEqual(commit,github.tag_commit('v0.2.27'))
+            api.assert_called_once_with('/git/ref/tags/v0.2.27')
+        with patch.object(github,'api',side_effect=[dict(object=dict(type='tag',sha=annotation)),dict(object=dict(type='commit',sha=commit))]) as api:
+            self.assertEqual(commit,github.tag_commit('v0.2.27'))
+            self.assertEqual(('/git/tags/'+annotation,),api.call_args.args)
+
+    def test_invalid_tag_object_and_annotation_cycles_are_rejected(self):
+        github = release.GitHub('GiraffesLoveBeauty/ACM-Forever')
+        for obj in (dict(type='tree',sha='a'*40),dict(type='commit',sha='invalid'),dict(type='tag',sha='b'*40)):
+            with patch.object(github,'api',return_value=dict(object=obj)) as api:
+                with self.assertRaises(ValueError): github.tag_commit('v0.2.27')
+                self.assertLessEqual(api.call_count,7)
+
     def test_tag_lookup_404_falls_back_to_authenticated_draft_list(self):
         github = release.GitHub("GiraffesLoveBeauty/ACM-Forever")
         draft = {"id": 11, "tag_name": "v0.2.14", "draft": True, "assets": []}

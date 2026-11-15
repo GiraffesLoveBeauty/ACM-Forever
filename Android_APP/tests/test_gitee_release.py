@@ -38,6 +38,11 @@ class FakeGitee:
             self.assets[multipart.name] = multipart.read_bytes()
             return dict(name=multipart.name, id=len(self.assets))
         if method == 'PATCH':
+            required = ('tag_name', 'name', 'body')
+            if any(not isinstance((data or {}).get(k), str) or not data[k] for k in required):
+                raise ValueError('Missing required Gitee PATCH fields')
+            if any(data[k] != self.current[k] for k in required):
+                raise ValueError('Publishing must preserve release identity and notes')
             self.operations.append('publish')
             self.current.update(data)
             return self.current
@@ -75,6 +80,16 @@ class GiteeReleaseTest(unittest.TestCase):
         self.assertEqual(8, len(self.client.assets))
         self.assertEqual('publish', self.client.operations[-1])
         self.assertEqual(8, len([op for op in self.client.operations if op.startswith('read:')]))
+
+    def test_patch_requires_fields_and_keeps_existing_title_and_notes(self):
+        self.client.corrupt = 'update.json'
+        with self.assertRaises(ValueError): self.publish()
+        self.client.current.update(name='Existing custom title', body='Custom notes\n\nSource commit: `' + self.commit + '`')
+        self.client.corrupt = None
+        self.publish()
+        self.assertEqual('Existing custom title', self.client.current['name'])
+        self.assertTrue(self.client.current['body'].startswith('Custom notes'))
+        self.assertFalse(self.client.current['prerelease'])
 
     def test_json_urls_change_but_signed_payload_bytes_and_hashes_do_not(self):
         self.publish()

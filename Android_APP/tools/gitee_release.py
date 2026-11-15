@@ -7,13 +7,14 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from tag_release import digest, module_assets, validate_manifest
+from tag_release import GitHub, digest, module_assets, read_manifest, validate_manifest, validate_source
 
 GITHUB_REPOSITORY = 'GiraffesLoveBeauty/ACM-Forever'
 GITEE_REPOSITORY = 'MJJ13445/ACM-Forever'
@@ -59,6 +60,47 @@ def mirror_files(directory, target):
         (target / filename).write_bytes(data)
     paths = [apk, checksum] + [p for p in optional if p.name != 'modules.json'] + [target / 'modules.json', target / 'update.json']
     return tag, mirrored, paths
+
+
+def restore_github(github, directory, tag, source_commit, version, code, channel, certificate):
+    """A rerun mirrors the immutable originals, never a freshly rebuilt approximation."""
+    if (github.repository != GITHUB_REPOSITORY or tag != 'v' + version
+            or not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+', tag)
+            or not re.fullmatch(r'[0-9a-f]{40}', source_commit)
+            or channel not in ('debug', 'release') or not re.fullmatch(r'[0-9a-f]{64}', certificate)):
+        raise ValueError('Invalid GitHub recovery identity')
+    current = github.release(tag)
+    if current is None or current.get('draft') is True:
+        return False
+    if (current.get('draft') is not False or current.get('prerelease') is not False
+            or current.get('tag_name') != tag or github.repository_info().get('private') is not False
+            or github.tag_commit(tag) != source_commit
+            or re.findall(r'^Source commit: `([0-9a-f]{40})`\s*$', current.get('body', ''), re.MULTILINE) != [source_commit]):
+        raise ValueError('Published GitHub Release is not the reviewed source Tag')
+    name = 'acmforever-' + version + ('-debug' if channel == 'debug' else '') + '.apk'
+    names = [name, name + '.sha256', 'update.json', 'modules.json', 'module-advanced.apk',
+             'module-admin.apk', 'module-official-themes.acmpack', 'module-cat-art.acmpack']
+    remote_names = [a.get('name') for a in current.get('assets', [])]
+    if len(remote_names) != len(names) or set(remote_names) != set(names):
+        raise ValueError('Published GitHub Release has missing, duplicate or unexpected assets')
+    destination = Path(directory)
+    if destination.exists() and (not destination.is_dir() or any(destination.iterdir())):
+        raise ValueError('Recovery output must be empty; never mix published and rebuilt bytes')
+    with tempfile.TemporaryDirectory() as temp:
+        downloaded = Path(temp)
+        manifest = read_manifest(github, current, downloaded)
+        if (manifest['versionName'] != version or manifest['versionCode'] != code
+                or manifest.get('channel') != channel or manifest.get('signingCertificateSha256') != certificate):
+            raise ValueError('Published manifest differs from the bundled version, channel or pinned certificate')
+        for filename in names:
+            if filename != 'update.json':
+                github.download(tag, filename, downloaded)
+        # Reuse the full eight-file contract: fixed URLs, version, sizes, hashes and checksum.
+        mirror_files(downloaded, downloaded / 'gitee-manifests')
+        destination.mkdir(parents=True, exist_ok=True)
+        for filename in names:
+            shutil.copyfile(downloaded / filename, destination / filename)
+    return True
 
 
 class PublicRedirect(urllib.request.HTTPRedirectHandler):
@@ -183,7 +225,8 @@ def publish(client, directory, tag, source_commit):
             current = client.api('POST', '/releases', dict(tag_name=tag, name='ACMforever ' + manifest['versionName'],
                 body=manifest['notes'] + '\n\nSource commit: `' + source_commit + '`\nBuilt by GitHub Actions; identical signed APK/modules.',
                 prerelease=True, target_commitish=source_commit))
-        if current.get('tag_name') != tag or current.get('prerelease') not in (True, False):
+        if (current.get('tag_name') != tag or current.get('prerelease') not in (True, False)
+                or not all(isinstance(current.get(k), str) and current[k] for k in ('tag_name', 'name', 'body'))):
             raise ValueError('Unexpected Gitee release identity')
         if source_commit not in current.get('body', ''):
             raise ValueError('Gitee release source identity differs')
@@ -202,7 +245,9 @@ def publish(client, directory, tag, source_commit):
         if {r['name'] for r in client.files(rid)} != {p.name for p in paths}:
             raise ValueError('Gitee release incomplete; keep prerelease')
         if not published:
-            result = client.api('PATCH', '/releases/' + str(rid), dict(prerelease=False))
+            # Gitee PATCH requires all three fields even when only prerelease changes.
+            fields = {k: current[k] for k in ('tag_name', 'name', 'body')}
+            result = client.api('PATCH', '/releases/' + str(rid), dict(fields, prerelease=False))
             if result.get('prerelease') is not False or result.get('tag_name') != tag:
                 raise ValueError('Gitee publication was not confirmed')
         confirmed = client.release(tag)
@@ -215,12 +260,28 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     for name in ('tag', 'directory', 'source-commit'):
         p.add_argument('--' + name, required=True)
+    p.add_argument('--restore-github', action='store_true')
+    p.add_argument('--channel', choices=('debug', 'release'))
+    p.add_argument('--certificate')
+    p.add_argument('--gradle', default='Android_APP/app/app/build.gradle')
+    p.add_argument('--history', default='Android_APP/app/app/src/main/assets/releases/history.json')
     args = p.parse_args()
     if (os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('GITHUB_EVENT_NAME') != 'push'
             or os.environ.get('GITHUB_REF') != 'refs/tags/' + args.tag
             or os.environ.get('GITHUB_REPOSITORY') != GITHUB_REPOSITORY or os.environ.get('GITHUB_SHA') != args.source_commit):
         p.error('Gitee publication is allowed only from the matching reviewed GitHub Tag Action')
-    print(publish(Gitee(os.environ.get('GITEE_RELEASE_TOKEN', '')), args.directory, args.tag, args.source_commit))
+    if args.restore_github:
+        if not args.channel or not args.certificate or not os.environ.get('GITHUB_OUTPUT'):
+            p.error('Recovery requires channel, pinned certificate and the Actions output file')
+        version, code = validate_source(args.tag, Path(args.gradle).read_text(encoding='utf-8'),
+                                        json.loads(Path(args.history).read_text(encoding='utf-8')))
+        reused = restore_github(GitHub(GITHUB_REPOSITORY), args.directory, args.tag, args.source_commit,
+                                version, code, args.channel, args.certificate)
+        with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+            output.write('reused=' + str(reused).lower() + '\n')
+        print('Restored verified original GitHub assets' if reused else 'No published Release; use normal build and draft publication')
+    else:
+        print(publish(Gitee(os.environ.get('GITEE_RELEASE_TOKEN', '')), args.directory, args.tag, args.source_commit))
 
 
 if __name__ == '__main__':

@@ -49,26 +49,52 @@ jobs:
         run: |
           test -n "$GITEE_RELEASE_TOKEN" || { echo 'Configure GITEE_RELEASE_TOKEN before publishing v0.2.27 or later.'; exit 1; }
 
+      - name: Configure pinned channel certificate
+        env:
+          RELEASE_CERTIFICATE: ${{ vars.ANDROID_RELEASE_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          if [ "$RELEASE_CHANNEL" = debug ]; then
+            certificate='88c9f163cbf379aeca7bc110f66c542a838d0d8e3970f24fd96582bec8e93fe4'
+          else
+            test -n "$RELEASE_CERTIFICATE"
+            certificate="$(printf '%s' "$RELEASE_CERTIFICATE" | tr -d ':' | tr 'A-F' 'a-f')"
+          fi
+          [[ "$certificate" =~ ^[0-9a-f]{64}$ ]]
+          echo "EXPECTED_CERTIFICATE=$certificate" >> "$GITHUB_ENV"
+
+      - name: Restore immutable GitHub assets when retrying a published Tag
+        id: restore
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python Android_APP/tools/gitee_release.py --restore-github --tag "$RELEASE_TAG" \
+            --directory "$RUNNER_TEMP/release-assets" --source-commit "$GITHUB_SHA" \
+            --channel "$RELEASE_CHANNEL" --certificate "$EXPECTED_CERTIFICATE"
+
       - uses: actions/setup-java@v4
+        if: steps.restore.outputs.reused != 'true'
         with:
           distribution: temurin
           java-version: '17'
 
       - uses: android-actions/setup-android@v3
+        if: steps.restore.outputs.reused != 'true'
         with:
           packages: platform-tools
 
       - name: Install Android SDK platform
+        if: steps.restore.outputs.reused != 'true'
         run: sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
 
       - name: Configure fixed channel signing key
+        if: steps.restore.outputs.reused != 'true'
         env:
           DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
           RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
           RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
           RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
-          RELEASE_CERTIFICATE: ${{ vars.ANDROID_RELEASE_CERT_SHA256 }}
         run: |
           set -euo pipefail
           umask 077
@@ -76,20 +102,16 @@ jobs:
           if [ "$RELEASE_CHANNEL" = debug ]; then
             test -n "$DEBUG_KEYSTORE_BASE64" || { echo 'Missing ANDROID_DEBUG_KEYSTORE_BASE64'; exit 1; }
             printf '%s' "$DEBUG_KEYSTORE_BASE64" | base64 --decode > "$key_path"
-            certificate='88c9f163cbf379aeca7bc110f66c542a838d0d8e3970f24fd96582bec8e93fe4'
           else
             test -n "$RELEASE_KEYSTORE_BASE64" && test -n "$RELEASE_KEY_ALIAS"
             test -n "$RELEASE_KEYSTORE_PASSWORD" && test -n "$RELEASE_KEY_PASSWORD"
-            test -n "$RELEASE_CERTIFICATE"
             printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$key_path"
-            certificate="$(printf '%s' "$RELEASE_CERTIFICATE" | tr -d ':' | tr 'A-F' 'a-f')"
           fi
           test -s "$key_path"
-          [[ "$certificate" =~ ^[0-9a-f]{64}$ ]]
           echo "ANDROID_KEYSTORE_PATH=$key_path" >> "$GITHUB_ENV"
-          echo "EXPECTED_CERTIFICATE=$certificate" >> "$GITHUB_ENV"
 
       - name: Test and build signed APK
+        if: steps.restore.outputs.reused != 'true'
         working-directory: Android_APP/app
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
@@ -105,6 +127,7 @@ jobs:
           fi
 
       - name: Create manifest from verified signed APK
+        if: steps.restore.outputs.reused != 'true'
         run: |
           set -euo pipefail
           python Android_APP/tools/create_update_manifest.py \
@@ -116,6 +139,7 @@ jobs:
             --output-dir "$RUNNER_TEMP/release-assets"
 
       - name: Package signed optional modules and exact-size catalog
+        if: steps.restore.outputs.reused != 'true'
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
@@ -133,6 +157,7 @@ jobs:
             --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner" --channel "$RELEASE_CHANNEL"
 
       - name: Publish only after draft assets pass read-back verification
+        if: steps.restore.outputs.reused != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
