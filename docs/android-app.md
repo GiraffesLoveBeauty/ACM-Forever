@@ -1,5 +1,7 @@
 # ACMforever Android
 
+本轮 **0.2.27/code41** 为 Gitee 优先更新候选：清单、APK 与模块使用 Gitee，失败兜底 GitHub；Tag 自动发布增加同字节 Gitee 镜像与匿名回读，需配置 `GITEE_RELEASE_TOKEN`。详见[方案与验证](android-v0.2.27-gitee-updates.md)。当前仅提交源码 PR，待其他成员 review；基线 v0.2.26 已由 PR #115 合并并发布，下方旧版状态保留当时记录。自站更新和延期 1.0.0 不在本轮范围。
+
 当前源码评审候选 **0.2.26/code40** 修复论坛三行摘要、Markdown公式与“我的主题→设置”返回位置，并将搜索拖动触边自动滚动速度加倍，详见[实施与验证记录](android-v0.2.26-reader-and-theme-return.md)。本轮提交源码PR供其他成员评审，未合并或发布。基线v0.2.25已随PR #114合并并Tag发布；以下旧版本“本轮/待评审”等字样保留当时记录。
 
 本轮 0.2.25 可选模块为源码评审候选，构建、下载签名、模块入口与升级保留见 [可选模块说明](android-v0.2.25-optional-modules.md)。本地验收已完成，提交源码 PR 供其他成员 review；尚未合并或公开发布。
