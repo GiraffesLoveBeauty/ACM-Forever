@@ -53,6 +53,30 @@ class MemberProfileTests(unittest.IsolatedAsyncioTestCase):
         before = before or await self.snapshot(qq)
         return await (client or self.client).patch("/api/admin/members/" + qq, headers=self.headers if headers is None else headers, json={"expected_account_epoch": before["account_epoch"], "profile_revision": before["profile_revision"], **changes})
 
+    async def test_admin_luogu_uid_edit_queues_only_luogu_and_fences_old_records(self):
+        before = await self.snapshot()
+        db = await connect_db(self.path)
+        await db.execute("INSERT INTO submissions(user_qq_id,platform,problem_id,submit_time) VALUES('20000000','luogu','P1001',0)")
+        await db.execute("INSERT INTO submissions(user_qq_id,platform,problem_id,submit_time) VALUES('20000000','atcoder','abc100_a',123)")
+        await db.commit()
+        await db.close()
+        async def submit(qq_id, platforms):
+            self.assertEqual((qq_id, platforms), ("20000000", ["luogu"]))
+            return {"id": "synthetic-luogu-sync"}
+        self.app.config["PLUGIN_CONFIG"]["_account_sync_submitter"] = submit
+        response = await self.save({"luogu_id": "1234", "confirm_bindings": True,
+                                    "expected_bindings": {"luogu_id": before["luogu_id"]},
+                                    "binding_versions": before["binding_versions"]}, before)
+        self.assertEqual(response.status_code, 202, await response.get_json())
+        data = await response.get_json()
+        self.assertEqual(data["member"]["luogu_id"], "1234")
+        self.assertEqual(data["member"]["luogu_binding_version"], before["luogu_binding_version"] + 1)
+        self.assertEqual(data["task_id"], "synthetic-luogu-sync")
+        db = await connect_db(self.path)
+        async with db.execute("SELECT platform FROM submissions WHERE user_qq_id='20000000'") as cursor:
+            self.assertEqual([row[0] for row in await cursor.fetchall()], ["atcoder"])
+        await db.close()
+
     async def test_complete_fields_real_name_and_all_platforms(self):
         data = await (await self.client.get("/api/admin/members", query_string={"search":"合成姓名"})).get_json()
         self.assertEqual(data["total"], 1)

@@ -231,6 +231,24 @@ test('MemberProblems reads URL filters and never inherits administrator owner se
   assert(!textOf(mounted.root).includes('题库管理'));
 });
 
+test('Luogu solved records with unknown times stay visible without a fabricated date', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    if (url.startsWith('/api/me/problems?'))
+      return response({
+        items: [
+          { platform: 'luogu', problem_id: 'P1001', problem_name: '合成洛谷已通过题', ac_at: 0 },
+        ],
+        total: 1,
+      });
+    return originalFetch(url, options);
+  };
+  mounted = await mount(Problems, routes, '/problem-bank.html?scope=solved&platform=luogu');
+  assert(textOf(mounted.root).includes('合成洛谷已通过题'));
+  assert(textOf(mounted.root).includes('已 AC，时间未知'));
+  assert(!textOf(mounted.root).includes('1970'));
+});
+
 test('MemberProblems failure provides retry without an empty-data claim', async () => {
   failed = true;
   mounted = await mount(Problems, routes, '/problem-bank.html?scope=solved');
@@ -410,8 +428,12 @@ for (const scope of ['all', 'solved']) {
         assert(textOf(mounted.root).includes('ATC 合成题'));
       } else {
         assert.equal(params.get('platform'), platform);
-        assert(textOf(mounted.root).includes(platform === 'codeforces' ? 'CF 合成题' : 'ATC 合成题'));
-        assert(!textOf(mounted.root).includes(platform === 'codeforces' ? 'ATC 合成题' : 'CF 合成题'));
+        assert(
+          textOf(mounted.root).includes(platform === 'codeforces' ? 'CF 合成题' : 'ATC 合成题'),
+        );
+        assert(
+          !textOf(mounted.root).includes(platform === 'codeforces' ? 'ATC 合成题' : 'CF 合成题'),
+        );
       }
     });
   }

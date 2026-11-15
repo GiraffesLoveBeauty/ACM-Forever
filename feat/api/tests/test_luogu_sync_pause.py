@@ -13,11 +13,10 @@ from feat.api.service_runtime import SyncEngine, WebTaskManager
 
 
 class LuoguPolicyTests(unittest.IsolatedAsyncioTestCase):
-    def test_pause_is_default_and_requires_explicit_configuration(self):
-        for config in ({}, {"luogu_cookie": "cookie", "luogu_csrf_token": "csrf"},
-                       {"luogu_user_sync_enabled": False}, {"luogu_user_sync_enabled": "false"}):
-            with self.subTest(config=config):
-                self.assertTrue(submission_sync_paused("luogu", config))
+    def test_public_sync_is_enabled_by_default_and_can_be_paused(self):
+        self.assertFalse(submission_sync_paused("luogu", {}))
+        for config in ({"luogu_user_sync_enabled": False}, {"luogu_user_sync_enabled": "false"}):
+            self.assertTrue(submission_sync_paused("luogu", config))
         self.assertFalse(submission_sync_paused("luogu", {"luogu_user_sync_enabled": True}))
         for platform in ("codeforces", "atcoder", "nowcoder", "cjlu"):
             self.assertFalse(submission_sync_paused(platform, {}))
@@ -27,7 +26,7 @@ class LuoguPolicyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_both_crawler_entry_points_skip_http_and_database_access(self):
         for fetch in (Crawler.fetch_luogu_submission, Crawler.fetch_luogu_submissions):
-            for config in ({}, {"luogu_cookie": "cookie", "luogu_csrf_token": "csrf"}):
+            for config in ({"luogu_user_sync_enabled": False}, {"luogu_user_sync_enabled": False, "luogu_cookie": "cookie", "luogu_csrf_token": "csrf"}):
                 with self.subTest(fetch=fetch.__name__, configured=bool(config)):
                     session, db = AsyncMock(), AsyncMock()
                     result = await fetch(session, None, 0, db, config)
@@ -35,13 +34,11 @@ class LuoguPolicyTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(session.mock_calls, [])
                     self.assertEqual(db.mock_calls, [])
 
-    async def test_crawlers_can_be_resumed_explicitly(self):
-        config = {"luogu_user_sync_enabled": True, "luogu_cookie": "cookie", "luogu_csrf_token": "csrf"}
+    async def test_crawlers_can_be_resumed_explicitly_without_credentials(self):
         for fetch in (Crawler.fetch_luogu_submission, Crawler.fetch_luogu_submissions):
             with self.subTest(fetch=fetch.__name__):
-                with patch("feat.api.acm_api.crawler._fetch_luogu_json", new=AsyncMock(return_value={})) as http:
-                    with patch.object(Crawler, "_get_existing_problem_ids", new=AsyncMock(return_value=set())):
-                        result = await fetch(AsyncMock(), {"qq_id": "12345678", "luogu_id": "1234"}, 0, AsyncMock(), config)
+                with patch("feat.api.acm_api.luogu_user_sync.sync_public_practice", new=AsyncMock(return_value=0)) as http:
+                    result = await fetch(AsyncMock(), {"qq_id": "12345678", "luogu_id": "1234"}, 0, AsyncMock(), {"luogu_user_sync_enabled": True})
                 self.assertEqual(result, 0)
                 http.assert_awaited_once()
 
@@ -59,7 +56,7 @@ class LuoguPauseIntegrationTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
         finally:
             await db.close()
-        self.engine = SyncEngine(self.path, {})
+        self.engine = SyncEngine(self.path, {"luogu_user_sync_enabled": False})
         await self.engine.start()
         self.luogu_patch = patch.object(Crawler, "fetch_luogu_submission", new=AsyncMock(side_effect=AssertionError("Luogu must not run")))
         self.atcoder_patch = patch.object(Crawler, "fetch_atcoder_submissions", new=AsyncMock(return_value=2))

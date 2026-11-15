@@ -257,7 +257,7 @@ onBeforeUnmount(() => {
               ><b>{{ item.problem_name || item.problem_id }}</b
               ><small
                 >{{ item.platform }} · {{ item.problem_rating || '难度未知' }} ·
-                {{ date(item.submit_time) }}</small
+                {{ item.submit_time ? date(item.submit_time) : 'AC 时间未知' }}</small
               ></span
             ><RouterLink
               class="recent-ac-open"

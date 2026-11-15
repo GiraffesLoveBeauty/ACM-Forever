@@ -2044,7 +2044,7 @@ async def api_training_summary():
     owner = _field(request.args, "owner_qq_id", 32)
     db = await get_db()
     try:
-        async with db.execute("SELECT DISTINCT date(submit_time,'unixepoch','localtime') AS day FROM submissions WHERE user_qq_id=? ORDER BY day DESC LIMIT 365", (owner,)) as cursor:
+        async with db.execute("SELECT DISTINCT date(submit_time,'unixepoch','localtime') AS day FROM submissions WHERE user_qq_id=? AND submit_time>0 ORDER BY day DESC LIMIT 365", (owner,)) as cursor:
             days = [row["day"] for row in await cursor.fetchall()]
         day_set = set(days); streak = 0; day = time.localtime()
         while time.strftime("%Y-%m-%d", day) in day_set:
@@ -2287,7 +2287,7 @@ async def api_me_training_summary():
     qq_id = _me_qq_id()
     db = await get_db()
     try:
-        async with db.execute("SELECT DISTINCT date(submit_time,'unixepoch','localtime') AS day FROM submissions WHERE user_qq_id=? ORDER BY day DESC LIMIT 365", (qq_id,)) as cursor:
+        async with db.execute("SELECT DISTINCT date(submit_time,'unixepoch','localtime') AS day FROM submissions WHERE user_qq_id=? AND submit_time>0 ORDER BY day DESC LIMIT 365", (qq_id,)) as cursor:
             days = [row["day"] for row in await cursor.fetchall()]
         day_set = set(days)
         streak = 0

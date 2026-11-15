@@ -34,6 +34,35 @@ class MemberTrainingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200, await response.get_json())
         return await response.get_json()
 
+    async def test_unknown_luogu_ac_times_count_as_solved_but_not_dated_activity(self):
+        from feat.api.acm_api.luogu_user_sync import sync_public_practice
+        from test_luogu_user_sync import page
+        async with self.app.test_app():
+            client = self.app.test_client()
+            await self.account_login(client, role="member")
+            await self.sql("UPDATE users SET luogu_id='1234' WHERE qq_id='12345678'")
+            db = await connect_db(self.db_path)
+            try:
+                async with db.execute("SELECT * FROM users WHERE qq_id='12345678'") as cursor:
+                    user = await cursor.fetchone()
+                with patch("feat.api.acm_api.luogu_user_sync.luogu_get", new=AsyncMock(return_value=page(["P1001", "CF1A"]))):
+                    self.assertEqual(await sync_public_practice(None, user, db, {}), 2)
+            finally:
+                await db.close()
+            solved = await (await client.get("/api/me/problems?scope=solved&platform=luogu")).get_json()
+            self.assertEqual(solved["total"], 2)
+            self.assertEqual({row["problem_id"] for row in solved["items"]}, {"P1001", "CF1A"})
+            self.assertTrue(all(row["ac_at"] == 0 for row in solved["items"]))
+            summary = await (await client.get("/api/me/training/summary")).get_json()
+            self.assertEqual(summary, {"streak_days": 0, "active_days": 0, "days": []})
+            totals = await (await client.get("/api/me/leaderboard?days=0")).get_json()
+            recent = await (await client.get("/api/me/leaderboard?days=7")).get_json()
+            self.assertEqual(totals["rows"][0]["luogu_count"], 2)
+            self.assertEqual(recent["rows"][0]["luogu_count"], 0)
+            detail = await (await client.get("/api/me/problems/luogu/P1001")).get_json()
+            self.assertIn("luogu.com.cn/problem/P1001", detail["problem_url"])
+            self.assertFalse(detail.get("statement_html"))
+
     async def test_solved_scope_is_session_owned_stable_paginated_and_keeps_catalog(self):
         async with self.app.test_app():
             client = self.app.test_client(); await self.account_login(client, role="member")

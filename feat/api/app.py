@@ -131,7 +131,7 @@ def create_app(*, daily_problem_sync=False, member_sync=False):
         "luogu_daily_statement_limit": luogu_daily_limit,
         "luogu_catalog_max_pages": luogu_max_pages,
         "luogu_daily_problem_sync_enabled": _bool_env("ACM_LUOGU_DAILY_PROBLEM_SYNC_ENABLED", False),
-        "luogu_user_sync_enabled": _bool_env("ACM_LUOGU_USER_SYNC_ENABLED", False),
+        "luogu_user_sync_enabled": _bool_env("ACM_LUOGU_USER_SYNC_ENABLED", True),
         "luogu_cookie": os.getenv("ACM_LUOGU_COOKIE", ""),
         "luogu_csrf_token": os.getenv("ACM_LUOGU_CSRF_TOKEN", ""),
         "cf_api_key": os.getenv("ACM_CF_API_KEY", ""),
