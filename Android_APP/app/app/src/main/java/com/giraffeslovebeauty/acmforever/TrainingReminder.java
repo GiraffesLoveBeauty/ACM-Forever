@@ -27,7 +27,7 @@ public final class TrainingReminder extends BroadcastReceiver {
         manager.createNotificationChannel(new NotificationChannel("training","训练与补题提醒",NotificationManager.IMPORTANCE_DEFAULT));
         if(!manager.areNotificationsEnabled()||Build.VERSION.SDK_INT>=33&&c.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)return;
         Intent open=new Intent(c,MainActivity.class).setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP).putExtra("club_page",daily?"checkin":"reviews");PendingIntent click=PendingIntent.getActivity(c,daily?3900:4000,open,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-        Notification notice=new Notification.Builder(c,"training").setSmallIcon(R.drawable.ic_cat_notification).setContentTitle("ACMforever 训练提醒").setContentText(daily?"查看今日训练、到期补题及打卡目标。":"已缓存的复习计划到期，请打开 App 核对最新计划。").setContentIntent(click).setAutoCancel(true).build();
+        Notification notice=new Notification.Builder(c,"training").setSmallIcon(R.drawable.ic_cat_notification).setContentTitle("ACMforever 训练提醒").setContentText(daily?"查看我的训练安排与到期补题。":"已缓存的复习计划到期，请打开 App 核对最新计划。").setContentIntent(click).setAutoCancel(true).build();
         manager.notify(intent.getIntExtra("id",3900),notice);
     }
 }

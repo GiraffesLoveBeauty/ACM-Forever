@@ -7,7 +7,7 @@ import android.widget.*;
 
 public final class ModuleDownloadActivity extends MobilePageActivity {
     private String id;private ModuleDownloads downloads;private LinearLayout panel;private final Runnable observer=this::render;private Intent next;private String previous="";private boolean resumed;private ProgressBar progress;private TextView message;
-    @Override public void onCreate(Bundle saved){super.onCreate(saved);id=getIntent().getStringExtra("module_id");if(!ModuleSpec.IDS.contains(id)||!OptionalModules.allowed(this,id)){finish();return;}next=getIntent().getParcelableExtra("next");createPage(ModuleSpec.name(id));panel=card(body);downloads=ModuleDownloads.get(this);downloads.listen(observer);if(saved==null&&("idle".equals(downloads.state(id).phase)||getIntent().getBooleanExtra("refresh_module",false)))downloads.start(id);render();}
+    @Override public void onCreate(Bundle saved){super.onCreate(saved);id=getIntent().getStringExtra("module_id");if(!ModuleSpec.IDS.contains(id)||!OptionalModules.allowed(this,id)){finish();return;}next=getIntent().getParcelableExtra("next");createPage(ModuleSpec.name(id));panel=card(body);downloads=ModuleDownloads.get(this);downloads.listen(observer);if(saved==null)downloads.start(id);render();}
     @Override protected void onResume(){super.onResume();resumed=true;if(downloads!=null)render();}
     @Override protected void onPause(){resumed=false;super.onPause();}
     @Override protected void onDestroy(){if(downloads!=null)downloads.unlisten(observer);super.onDestroy();}

@@ -78,12 +78,13 @@ public final class ClubActivity extends Activity {
         if(!page.equals("club")&&!page.equals("templates")&&!api.isLoggedIn()){text(card(),"未登录：请返回顶部头像进入账号设置登录。",16);return;}
         switch(page){case "sheets":sheets();break;case "discussions":discussions();break;case "mistakes":mistakes();break;case "reviews":reviews();break;case "templates":templates();break;case "checkin":checkin();break;default:menu();restorePosition();}
     }
-    private String pageTitle(){switch(page){case "sheets":return "社团题单";case "discussions":return "一起解题";case "mistakes":return "我的错题本";case "reviews":return "补题与复习";case "templates":return "Wiki 手册";case "checkin":return "训练打卡";default:return "社团训练";}}
-    private void menu(){LinearLayout box=card();text(box,"题单 → 讨论 → 补题 → 复习",17);button(box,"社团题单",()->go("sheets"));button(box,"错题本",()->go("mistakes"));button(box,"待补题与间隔复习",()->go("reviews"));button(box,"Wiki 手册",this::openWiki);button(box,"训练打卡与本地提醒",()->go("checkin"));}
+    private String pageTitle(){switch(page){case "sheets":return "社团题单";case "discussions":return "一起解题";case "mistakes":return "我的错题本";case "reviews":return "补题与复习";case "templates":return "Wiki 手册";case "checkin":return "本地提醒设置";default:return "社团训练";}}
+    private void menu(){LinearLayout box=card();text(box,"题单 → 讨论 → 补题 → 复习",17);button(box,"社团题单",()->go("sheets"));button(box,"错题本",()->go("mistakes"));button(box,"待补题与间隔复习",()->go("reviews"));button(box,"Wiki 手册",this::openWiki);button(box,"训练安排",()->startActivity(new Intent(this,TrainingTasksActivity.class).putExtra("mode","schedule")));}
     private void select(JSONObject item){go("discussions",()->{platform=item.optString("platform");problem=item.optString("problem_id");keyword="";tag="";});}
     private String key(){return "platform="+UrlEncoding.form(platform)+"&problem_id="+UrlEncoding.form(problem);}
     private JSONObject keyData() throws JSONException{return new JSONObject().put("platform",platform).put("problem_id",problem);}
-    private void sheets(){text(card(),"题单截止时间与完成进度来自服务器，AC 数据同步后更新。",14);load("/api/club/sheets",value->{JSONArray items=rows(value);if(items.length()==0)text(card(),"暂无分配的题单。",15);for(int i=0;i<items.length();i++){JSONObject sheet=items.optJSONObject(i);if(sheet==null)continue;LinearLayout box=card();text(box,sheet.optString("title"),20);text(box,sheet.optString("description"),14);text(box,date(sheet.optLong("deadline"))+" 截止\n已完成 "+sheet.optInt("completed")+" / "+sheet.optInt("total"),14);JSONArray problems=sheet.optJSONArray("items");if(problems==null)continue;for(int j=0;j<problems.length();j++){JSONObject item=problems.optJSONObject(j);if(item==null)continue;text(box,(item.optBoolean("completed")?"已完成 · ":"未完成 · ")+item.optString("platform")+" · "+item.optString("problem_id"),16);button(box,"讨论 / 错题 / 原题",()->select(item));}}});}
+    private void sheets(){button(card(),"打开社团题单",()->startActivity(new Intent(this,TrainingTasksActivity.class)));}
+
     private void discussions(){
         if(platform.isEmpty()||problem.isEmpty()){text(card(),"请从题单、题目或错题本选择一道题。",16);return;}
         LinearLayout controls=card();text(controls,platform+" · "+problem,20);EditText search=input(controls,"搜索本题讨论",keyword);String[] filters={"全部","WA","TLE","输入格式","边界","复杂度","思路","其他"};Spinner choice=spinner(controls,filters);choice.setSelection(Math.max(0,java.util.Arrays.asList(filters).indexOf(tag)));
@@ -152,13 +153,7 @@ public final class ClubActivity extends Activity {
             prefs.edit().putInt("reminder_hour",h).putInt("reminder_minute",m).apply();dialog.dismiss();enableReminder(notify.isChecked());
         }));ModalDialogs.show(dialog);
     }
-    private void checkin(){LinearLayout form=card();text(form,"达标以北京时间当日已同步 AC 为准。",14);EditText target=input(form,"每日目标 1–100 题",String.valueOf(prefs.getInt("daily_target",1)));target.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-        button(form,"达到目标后打卡",()->{try{int count=Integer.parseInt(target.getText().toString());if(count<1||count>100)throw new IllegalArgumentException();prefs.edit().putInt("daily_target",count).apply();LinearLayout status=card();task(()->api.writeObject("POST","/api/me/club/checkin",new JSONObject().put("target",count)),result->render(),status);}catch(Exception e){notice("请输入 1–100 的目标。");}});
-        text(form,"提醒只在设备本地运行，系统省电策略可能延迟。未允许通知时不能显示。",12);
-        reminderToggle=new CheckBox(this);reminderToggle.setText("通知提醒");form.addView(reminderToggle);reminderState=text(form,"",13);refreshReminder();
-        reminderToggle.setOnCheckedChangeListener((b,checked)->{if(!updatingReminder)enableReminder(checked);});
-        button(form,"设置每日提醒时间",this::pickReminderTime);
-        button(form,"关闭所有训练提醒",()->{TrainingReminder.disable(this);refreshReminder();});
-        load("/api/me/club/checkin",value->{JSONObject info=(JSONObject)value;LinearLayout box=card();text(box,info.optString("day")+" · 今日已同步 AC "+info.optInt("actual"),18);text(box,(info.optBoolean("checked_in")?"今日已打卡":"今日尚未打卡")+" · 连续 "+info.optInt("streak")+" 天",16);});
+    private void checkin(){LinearLayout form=card();text(form,"本机训练提醒，与服务器打卡无关。系统省电策略可能延迟提醒。",14);
+        reminderToggle=new CheckBox(this);reminderToggle.setText("通知提醒");form.addView(reminderToggle);reminderState=text(form,"",13);refreshReminder();reminderToggle.setOnCheckedChangeListener((b,on)->{if(!updatingReminder)enableReminder(on);});button(form,"设置每日提醒时间",this::pickReminderTime);button(form,"关闭所有训练提醒",()->{TrainingReminder.disable(this);refreshReminder();});
     }
 }

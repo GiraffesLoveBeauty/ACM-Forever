@@ -19,14 +19,18 @@ final class OptionalModules {
     /** Notify the owner only after an Activity actually starts, never for consent/cancellation. */
     static void open(Activity activity,String id,Intent target,Runnable started){
         if(!ModuleSpec.IDS.contains(id)||!allowed(activity,id)||activity.isFinishing()||activity.isDestroyed()||ModalDialogs.isShowing(activity)||pending.contains(activity))return;
-        if(ModuleStore.available(activity,id)){if(target!=null)start(activity,target,started);return;}
-        if(ModuleStore.archive(activity,id).isFile()){download(activity,id,target,started);return;}
+        if(ModuleSpec.nativeModule(id)&&ModuleStore.available(activity,id)){if(target!=null)start(activity,target,started);return;}
+        if(ModuleSpec.nativeModule(id)&&ModuleStore.archive(activity,id).isFile()){download(activity,id,target,started);return;}
         pending.add(activity);long owner=((AcmApplication)activity.getApplication()).api().sessionGeneration();Context app=activity.getApplicationContext();
-        io.execute(()->{ModuleSpec spec=null;Exception failure=null;try{spec=ModuleNetwork.catalog(app).get(id);}catch(Exception e){failure=e;}ModuleSpec selected=spec;Exception error=failure;
+        io.execute(()->{ModuleSpec spec=null;Exception failure=null;boolean complete=false;try{
+                if(!ModuleSpec.nativeModule(id)&&(ModuleStore.acquired(app).contains(id)||ModuleStore.archive(app,id).isFile()))complete=ModuleHealth.verify(app,id).intact;
+                if(!complete)spec=ModuleNetwork.catalog(app).get(id);
+            }catch(Exception e){failure=e;}ModuleSpec selected=spec;Exception error=failure;boolean usable=complete;
             activity.runOnUiThread(()->{pending.remove(activity);if(activity.isFinishing()||activity.isDestroyed()||!allowed(activity,id)||owner!=((AcmApplication)activity.getApplication()).api().sessionGeneration()||ModalDialogs.isShowing(activity))return;
                 if(error!=null){failure(activity,error);return;}
+                if(usable){if(target!=null)start(activity,target,started);return;}
                 LinearLayout body=new SpacedLayout(activity);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(dp(activity,8),dp(activity,8),dp(activity,8),dp(activity,8));
-                TextView question=new TextView(activity);question.setText(selected.confirmation());question.setTextSize(16);question.setTextColor(MobileStyle.TEXT);question.setPadding(0,0,0,dp(activity,18));body.addView(question);
+                TextView question=new TextView(activity);question.setText(ModuleHealth.damaged(id)?"模块损坏或不完整，修复下载约"+((selected.size+1023)/1024)+"KB，是否下载？":selected.confirmation());question.setTextSize(16);question.setTextColor(MobileStyle.TEXT);question.setPadding(0,0,0,dp(activity,18));body.addView(question);
                 LinearLayout actions=new SpacedLayout(activity);Button yes=new Button(activity),no=new Button(activity);yes.setText("下载喵");no.setText("点错了喵");MobileStyle.button(yes,true);MobileStyle.button(no,false);yes.setCompoundDrawables(null,null,null,null);no.setCompoundDrawables(null,null,null,null);
                 actions.addView(yes,new LinearLayout.LayoutParams(0,dp(activity,56),1));actions.addView(no,new LinearLayout.LayoutParams(0,dp(activity,56),1));body.addView(actions);
                 AlertDialog dialog=new ModalDialogs.Builder(activity).setTitle(ModuleSpec.name(id)).setView(body).create();no.setOnClickListener(v->dialog.dismiss());yes.setOnClickListener(v->{if(!dialog.isShowing())return;dialog.dismiss();if(allowed(activity,id))download(activity,id,target,started);});ModalDialogs.show(dialog);

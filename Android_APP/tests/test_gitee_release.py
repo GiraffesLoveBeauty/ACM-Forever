@@ -92,6 +92,9 @@ class GiteeReleaseTest(unittest.TestCase):
         self.assertFalse(self.client.current['prerelease'])
 
     def test_json_urls_change_but_signed_payload_bytes_and_hashes_do_not(self):
+        for row in self.fixture.catalog["modules"]:
+            row["revision"] = ("n1-" if row["kind"] == "native" else "a1-") + "a"*64
+        self.fixture.save()
         self.publish()
         manifest = json.loads(self.client.assets['update.json'])
         catalog = json.loads(self.client.assets['modules.json'])

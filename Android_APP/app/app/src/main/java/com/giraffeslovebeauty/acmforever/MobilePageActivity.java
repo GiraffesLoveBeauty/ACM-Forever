@@ -35,24 +35,32 @@ abstract class MobilePageActivity extends Activity {
         read(()->{if(!admin)return api.get(path);synchronized(api){api.refreshSession();return api.adminRequest("GET",path,null);}},slot,!admin,display);
     }
     protected void read(Callable<Object> request,LinearLayout slot,boolean cache,Display display){
+        read(request,slot,cache,display,()->{});
+    }
+    /** Cache replay only paints; polling may resume after an accepted live response has finished. */
+    protected void read(Callable<Object> request,LinearLayout slot,boolean cache,Display display,Runnable onNetworkSuccess){
         int token=serial;long owner=api.sessionGeneration();final boolean[] loaded={false};final Object binding=new Object();slot.setTag(binding);
-        java.util.function.Consumer<Object> show=data->{if(token!=serial||owner!=api.sessionGeneration()||isDestroyed()||slot.getTag()!=binding)return;slot.removeAllViews();slot.setBackground(MobileStyle.panel(this,MobileStyle.MODULE,16,0));try{display.show(data);loaded[0]=true;AppAppearance.paintFields(slot);}catch(Exception e){error(slot,e);}};
+        java.util.function.Function<Object,Boolean> show=data->{if(token!=serial||owner!=api.sessionGeneration()||isDestroyed()||slot.getTag()!=binding)return false;slot.removeAllViews();slot.setBackground(MobileStyle.panel(this,MobileStyle.MODULE,16,0));try{display.show(data);loaded[0]=true;AppAppearance.paintFields(slot);return true;}catch(Exception e){error(slot,e);return false;}};
         Runnable network=()->{if(token!=serial||isDestroyed()||slot.getTag()!=binding)return;refresh.start(token);io.execute(()->{
             Object data=null;Exception failure=null;
             try{if(owner!=api.sessionGeneration())throw new ApiClient.ApiException(401,"登录账号已切换",false);data=request.call();}catch(Exception e){failure=e;}
             Object value=data;Exception issue=failure;runOnUiThread(()->{if(token!=serial||isDestroyed())return;if(slot.getTag()!=binding){refresh.finish(token);return;}if(owner!=api.sessionGeneration()){error(slot,new ApiClient.ApiException(401,"登录账号已切换",false));refresh.finish(token);return;}
-                if(issue==null)show.accept(value);else{boolean retain=refresh.failure(FailureState.title(issue));if(!retain||!loaded[0])error(slot,issue);}refresh.finish(token);});
+                boolean shown=false;if(issue==null)shown=show.apply(value);else{boolean retain=refresh.failure(FailureState.title(issue));if(!retain||!loaded[0])error(slot,issue);}refresh.finish(token);
+                if(shown&&token==serial&&owner==api.sessionGeneration()&&!isDestroyed()&&slot.getTag()==binding)onNetworkSuccess.run();});
         });};
         refresh.register(token,network);
         if(!cache){network.run();return;}
-        io.execute(()->{api.beginReplay();try{Object cached=request.call();runOnUiThread(()->{if(token==serial&&owner==api.sessionGeneration()&&!isDestroyed()&&slot.getTag()==binding){refresh.cached(token);show.accept(cached);}});}catch(Exception ignored){}finally{api.endReplay();}runOnUiThread(()->{if(token==serial&&!isDestroyed())network.run();});});
+        io.execute(()->{api.beginReplay();try{Object cached=request.call();runOnUiThread(()->{if(token==serial&&owner==api.sessionGeneration()&&!isDestroyed()&&slot.getTag()==binding){refresh.cached(token);show.apply(cached);}});}catch(Exception ignored){}finally{api.endReplay();}runOnUiThread(()->{if(token==serial&&!isDestroyed())network.run();});});
     }
     protected void write(String method,String path,JSONObject payload,boolean admin,Runnable done){
         writeResult(method,path,payload,admin,value->done.run());
     }
     protected void writeResult(String method,String path,JSONObject payload,boolean admin,Display done){
+        writeRequest(()->admin?api.adminRequest(method,path,payload):api.writeObject(method,path,payload),admin,done);
+    }
+    protected void writeRequest(Callable<Object> request,boolean admin,Display done){
         if(writing)return;writing=true;int token=serial;long owner=api.sessionGeneration();notice.hide();
-        io.execute(()->{Exception failure=null;Object response=null;try{synchronized(api){if(owner!=api.sessionGeneration())throw new IllegalArgumentException("登录账号已切换");if(admin)api.refreshSession();if(owner!=api.sessionGeneration())throw new IllegalArgumentException("登录账号已切换");response=admin?api.adminRequest(method,path,payload):api.writeObject(method,path,payload);}}catch(Exception e){failure=e;}
+        io.execute(()->{Exception failure=null;Object response=null;try{synchronized(api){if(owner!=api.sessionGeneration())throw new IllegalArgumentException("登录账号已切换");if(admin)api.refreshSession();if(owner!=api.sessionGeneration())throw new IllegalArgumentException("登录账号已切换");response=request.call();}}catch(Exception e){failure=e;}
             Exception issue=failure;Object result=response;runOnUiThread(()->{writing=false;if(isDestroyed()||token!=serial)return;if(owner!=api.sessionGeneration()){resetPage("登录已失效");error(card(body),new ApiClient.ApiException(401,"登录账号已切换，请返回重新登录",false));return;}if(issue!=null)notice.show("操作",issue);else try{done.show(result);}catch(Exception e){notice.show("处理结果",e);}});});
     }
     protected JSONObject json(String key,Object value){try{return new JSONObject().put(key,value);}catch(Exception e){throw new IllegalArgumentException(e);}}

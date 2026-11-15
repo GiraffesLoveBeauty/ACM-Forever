@@ -536,11 +536,11 @@ public final class MainActivity extends Activity {
     private void refreshNav() {
         nav.removeAllViews();
         String[] ids = {"forum", "rank", "compose", "problems", "mine"};
-        String[] names = {"主页", "排名", "发帖", "题库", "个人中心"};
+        String[] names = {"主页", "排名", "发帖", "练习", "个人中心"};
         for (int i = 0; i < ids.length; i++) {
             String id = ids[i];
             boolean compose = "compose".equals(id);
-            boolean active=id.equals(screen);LinearLayout holder=column();holder.setGravity(Gravity.CENTER);holder.setContentDescription(names[i]);holder.setOnClickListener(v->show(id));
+            boolean active=id.equals(screen)||"problems".equals(id)&&"problem_bank".equals(screen);LinearLayout holder=column();holder.setGravity(Gravity.CENTER);holder.setContentDescription(names[i]);holder.setOnClickListener(v->show(id));
             android.widget.ImageView icon=new android.widget.ImageView(this);icon.setImageDrawable(AppIcons.get(this,id,compose?MobileStyle.ON_ACCENT:active?TEXT:MUTED));
             if(compose){icon.setPadding(dp(5),dp(5),dp(5),dp(5));icon.setBackground(shape(MobileStyle.controlFill(ACCENT),16,0));icon.setImageDrawable(AppIcons.get(this,id,MobileStyle.ON_ACCENT));}
             holder.addView(icon,new LinearLayout.LayoutParams(dp(compose?44:23),dp(compose?44:23)));
@@ -665,7 +665,8 @@ public final class MainActivity extends Activity {
         if ("search".equals(screen)) renderSearch();
         else if ("forum".equals(screen)) renderForum(serial);
         else if ("rank".equals(screen)) renderRank(serial);
-        else if ("problems".equals(screen)) renderProblems(serial);
+        else if ("problems".equals(screen)) renderPractice();
+        else if ("problem_bank".equals(screen)) renderProblems(serial);
         else if ("compose".equals(screen)) renderCompose(serial);
         else if ("detail".equals(screen)) renderDetail(serial);
         else if ("account".equals(screen)) renderAccount(serial);
@@ -673,7 +674,7 @@ public final class MainActivity extends Activity {
         else if ("problem_detail".equals(screen)) renderProblemDetail(serial);
         else if ("training".equals(screen)) renderTraining(serial);
         else if ("contests".equals(screen)) renderContests();
-        else if (java.util.Arrays.asList("club","sheets","discussions","mistakes","reviews","templates","checkin").contains(screen)){String target=screen;screen="problems";updateSearchHeader();refreshNav();renderProblems(serial);openTrainingCenter(target);}
+        else if (java.util.Arrays.asList("club","sheets","discussions","mistakes","reviews","templates","checkin").contains(screen)){String target=screen;screen="problems";updateSearchHeader();refreshNav();renderPractice();if(!"club".equals(target))openTrainingCenter(target);}
         else renderMine(serial);
         if(loadingRegion==null)restoreScroll();
     }
@@ -1121,7 +1122,6 @@ public final class MainActivity extends Activity {
     private void renderProblems(int serial) {
         if(!java.util.Arrays.asList("codeforces","atcoder","luogu","nowcoder","cjlu").contains(platform))platform="codeforces";
         heading("PROBLEM BANK", "题库", "找一道适合今天的题，继续向 AC 前进。");
-        addClubEntry();
         if (api.isUnconfigured()) { error(connectionFailure()); return; }
         if (!api.isLoggedIn()) {
             failureBox(card(), "未登录", 320, null);
@@ -1179,7 +1179,7 @@ public final class MainActivity extends Activity {
         Runnable submit=()->{problemKeyword=ProblemTags.keyword(keyword.getText().toString());problemKeywordDraft=problemKeyword;page=1;root.requestFocus();android.view.inputmethod.InputMethodManager ime=(android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);if(ime!=null)ime.hideSoftInputFromWindow(keyword.getWindowToken(),0);readFromAction=true;loadScreen();};
         Button searchButton=action("搜索",true);searchButton.setContentDescription("搜索题库");searchButton.setOnClickListener(v->submit.run());line.addView(searchButton,new LinearLayout.LayoutParams(dp(80),dp(50)));tools.addView(line);
         keyword.setOnEditorActionListener((v,id,event)->{if(id==android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH){submit.run();return true;}return false;});
-        Button tags=action("题目标签："+(problemTag.isEmpty()?"全部标签":problemTag),false);tags.setContentDescription("筛选题库标签");tags.setOnClickListener(v->{int token=requestSerial;long owner=api.sessionGeneration();String source=platform;ProblemTagPicker.show(this,api,io,source,problemTag,()->token==requestSerial&&owner==api.sessionGeneration()&&"problems".equals(screen)&&source.equals(platform),tag->{problemTag=tag;page=1;readFromAction=true;loadScreen();});});tools.addView(tags);
+        Button tags=action("题目标签："+(problemTag.isEmpty()?"全部标签":problemTag),false);tags.setContentDescription("筛选题库标签");tags.setOnClickListener(v->{int token=requestSerial;long owner=api.sessionGeneration();String source=platform;ProblemTagPicker.show(this,api,io,source,problemTag,()->token==requestSerial&&owner==api.sessionGeneration()&&"problem_bank".equals(screen)&&source.equals(platform),tag->{problemTag=tag;page=1;readFromAction=true;loadScreen();});});tools.addView(tags);
         if(!problemTag.isEmpty()||!problemKeyword.isEmpty()||!problemKeywordDraft.isEmpty()){
             Button clear=action("清除搜索与标签",false);clear.setOnClickListener(v->{problemKeyword="";problemKeywordDraft="";problemTag="";page=1;readFromAction=true;loadScreen();});tools.addView(clear);
         }
@@ -2131,7 +2131,7 @@ public final class MainActivity extends Activity {
         menuRow(training, "最近 AC", "题目、平台与通过时间", () -> showRecent(result.optJSONArray("recent_ac")));
         menuRow(training, "今日训练", "稳定基础、主训练、突破上限与挑战历史", () -> show("training"));
         menuRow(training, "赛事复盘", "按比赛查看题目并保存补题状态", () -> show("contests"));
-        menuRow(training, "我的题目收藏", "查看自己收藏的题目", () -> navigate("problems",()->problemState="favorite"));
+        menuRow(training, "我的题目收藏", "查看自己收藏的题目", () -> navigate("problem_bank",()->problemState="favorite"));
         } else failureBox(card(), FailureState.title(failures[0]), 300, this::loadScreen);
         LinearLayout community = card();community.addView(label("我的社区 · 仅自己可见", 13, TEXT, true));space(community,12);
         LinearLayout shortcuts=row();community.addView(shortcuts);
@@ -2437,15 +2437,21 @@ public final class MainActivity extends Activity {
             composeTitle=draft.optString("title");composeBody=draft.optString("body");composeCategoryId=draft.optInt("category");composeDraftId=0;composeRevision=0;composeSavedRevision=0;
         }catch(Exception e){clearComposer();}
     }
+    private void renderPractice(){
+        heading("PRACTICE","练习","每一道题，都是向 AC 更近一步。");addClubEntry();
+        LinearLayout bank=card();bank.addView(label("题库",22,TEXT,true));bank.addView(label("筛选、搜索题目，查看题面、难度与算法标签。",14,MUTED,false));Button enter=action("进入题库",true);enter.setOnClickListener(v->navigate("problem_bank",()->{}));bank.addView(enter);
+    }
     private void addClubEntry() {
         LinearLayout box=card(),title=row();title.addView(label("训练工具",13,TEXT,true),new LinearLayout.LayoutParams(0,-2,1));
-        TextView all=label("全部  ›",11,MUTED,false);all.setMinHeight(dp(36));all.setGravity(Gravity.CENTER);all.setOnClickListener(v->show("club"));title.addView(all);box.addView(title);
-        LinearLayout tools=row();String[] names={"社团题单","我的错题","Wiki","训练打卡"},targets={"sheets","mistakes","templates","checkin"},icons={"problems","forum","templates","checkin"};
+        box.addView(title);
+        LinearLayout tools=row();String[] names={"社团题单","我的错题","Wiki","训练安排"},targets={"sheets","mistakes","templates","checkin"},icons={"problems","forum","templates","checkin"};
         for(int i=0;i<names.length;i++){String target=targets[i];quickTile(tools,names[i],icons[i],()->{if("templates".equals(target))openWebFeature("wiki",0);else show(target);});}box.addView(tools);
         Button progress=action("比赛进度 · 本人 AC 记录",false);progress.setOnClickListener(v->openWebFeature("tracker",0));box.addView(progress);
+        if(api.isAdministrator()){final int token=requestSerial;final long owner=api.sessionGeneration();io.execute(()->{try{api.refreshSession();runOnUiThread(()->{if(isDestroyed()||token!=requestSerial||owner!=api.sessionGeneration()||!api.isAdministrator())return;Button manage=action("社团题单管理",false);manage.setOnClickListener(v->OptionalModules.open(this,"admin",new Intent().setClassName(this,getPackageName()+".AdminTrainingActivity")));box.addView(manage);});}catch(Exception ignored){}});}
     }
     private void openTrainingCenter(String target) {
-        Intent intent=new Intent(this,ClubActivity.class);intent.putExtra("page",target);
+        if("club".equals(target)){navigate("problems",null);return;}
+        Intent intent;if("sheets".equals(target)||"checkin".equals(target))intent=new Intent(this,TrainingTasksActivity.class).putExtra("mode","checkin".equals(target)?"schedule":"list");else intent=new Intent(this,ClubActivity.class).putExtra("page",target);
         startActivity(intent);
     }
 

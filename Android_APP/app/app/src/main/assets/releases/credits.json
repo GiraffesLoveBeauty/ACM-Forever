@@ -880,6 +880,18 @@
         "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631240064",
         "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/48#issuecomment-6631299712"
       ]
+    },
+    "0.2.28": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [],
+      "reviewers": [],
+      "publishers": [],
+      "evidence": [],
+      "pr": 0,
+      "status": "development",
+      "scope": "练习、正式训练任务与模块恢复候选；评审及发布后据实补录。"
     }
   },
   "sources": [

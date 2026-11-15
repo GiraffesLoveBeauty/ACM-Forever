@@ -124,3 +124,5 @@ Windows 的 `Android_APP/tools/` 内带历史版本号的本地脚本保留当�
 debug 与 release 构建分支均完成单测/Lint/打包及实际清单生成检查；release 分支仅借本机调试密钥验证签名配置，没有正式签名制品发布。最终本机结果见 [安装说明-v0.2.13.md（实际 APK 与回归结果）](../Android_APP/docs/安装说明-v0.2.13.md)。生产更新源、正式私钥构建、远端 APK 下载与真机安装仍需发布验收，本机模拟响应不作为这些流程已通过的证据。
 
 网络锁修复前的 `b041a471db892c9f704e2be6048bdaaf8fe1a6ca`，API、Android、browser 三项 CI 均已成功，属于旧 head 结果。本轮修复后，debug/release 各 67 项单测、十二组界面回归、9 项发布清单测试及实际 APK 清单核验通过；上轮 Wiki/Markdown、旧 P1、论坛作者主页与 Activity 重建会话再次通过。新增回归先在旧代码失败，后在修复后通过；证据路径见安装说明。新提交的远端检查按其 head 另行核对，本轮未修改后端或网页。
+
+- [android-v0.2.28-practice-recovery.md（练习、正式题单与模块编号/恢复）](android-v0.2.28-practice-recovery.md)
