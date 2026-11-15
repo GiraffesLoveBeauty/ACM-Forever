@@ -43,6 +43,12 @@ jobs:
       - name: Test release contracts and publication failures
         run: python -m unittest discover -s Android_APP/tests -p 'test_*release*.py' -v
 
+      - name: Require Gitee mirror credential before publication
+        env:
+          GITEE_RELEASE_TOKEN: ${{ secrets.GITEE_RELEASE_TOKEN }}
+        run: |
+          test -n "$GITEE_RELEASE_TOKEN" || { echo 'Configure GITEE_RELEASE_TOKEN before publishing v0.2.27 or later.'; exit 1; }
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -133,6 +139,13 @@ jobs:
           python Android_APP/tools/tag_release.py publish --tag "$RELEASE_TAG" \
             --directory "$RUNNER_TEMP/release-assets" --repository "$GITHUB_REPOSITORY" \
             --source-commit "$GITHUB_SHA"
+
+      - name: Mirror identical signed artifacts to Gitee and verify anonymous downloads
+        env:
+          GITEE_RELEASE_TOKEN: ${{ secrets.GITEE_RELEASE_TOKEN }}
+        run: |
+          python Android_APP/tools/gitee_release.py --tag "$RELEASE_TAG" \
+            --directory "$RUNNER_TEMP/release-assets" --source-commit "$GITHUB_SHA"
 
       - name: Remove temporary signing key
         if: always()

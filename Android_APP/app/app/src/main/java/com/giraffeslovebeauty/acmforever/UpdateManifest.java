@@ -23,10 +23,16 @@ final class UpdateManifest {
         sizeBytes=value.optLong("sizeBytes",0);minSdk=value.optInt("minSdk",26);
         if(sizeBytes<0||sizeBytes>MAX_APK_BYTES||minSdk<1)throw new IllegalArgumentException("安装包大小或系统版本要求无效。");
         notes=value.optString("notes","");if(notes.length()>8000)throw new IllegalArgumentException("更新说明过长。");
-        modulesUrl=value.optString("modulesUrl","");if(!modulesUrl.isEmpty()&&!modulesUrl.equals(ModuleSpec.indexUrl(versionName)))throw new IllegalArgumentException("模块清单地址与版本不一致。");
+        modulesUrl=value.optString("modulesUrl","");if(!modulesUrl.isEmpty()&&!ModuleSpec.indexUrls(versionName).contains(modulesUrl))throw new IllegalArgumentException("模块清单地址与版本不一致。");
         json=value.toString();
     }
     String json(){return json;}
+    String apkFilename(){return "acmforever-"+versionName+("debug".equals(channel)?"-debug":"")+".apk";}
+    java.util.List<String> downloadUrls(){
+        if(versionName.matches("[0-9]+\\.[0-9]+\\.[0-9]+")&&apkUrl.equals(UpdateSources.asset(versionName,apkFilename(),true)))
+            return java.util.Arrays.asList(apkUrl,UpdateSources.asset(versionName,apkFilename(),false));
+        return java.util.Collections.singletonList(apkUrl);
+    }
     void requireChannel(String current){if(!channel.isEmpty()&&!channel.equals(current))throw new IllegalArgumentException("更新清单与当前 App 渠道不同，请安装对应渠道的版本。");}
     static String https(String value){
         try{

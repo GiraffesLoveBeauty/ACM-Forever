@@ -43,7 +43,7 @@ final class StartupUpdatesUiSmoke {
             // Keep the synthetic HTTPS transport independent of emulator host connectivity.
             java.util.concurrent.atomic.AtomicBoolean online=new java.util.concurrent.atomic.AtomicBoolean(false);
             updates=new AppUpdates(context,api,online::get);java.lang.reflect.Field updateOwner=AcmApplication.class.getDeclaredField("updates");updateOwner.setAccessible(true);updateOwner.set(app,updates);version=updates.currentVersion()+1;
-            check(updates.endpoint().equals(context.getString(R.string.default_update_manifest_url)),"debug updates use GitHub Release independently of business API");
+            check(updates.endpoint().equals(UpdateSources.GITEE_LATEST),"debug updates prefer Gitee independently of business API");
             main(()->updates.source("https://startup-updates.test.invalid/api/mobile/v1/releases/latest?channel=debug"));
             main(()->updates.check(true));await(()->updateState(()->!updates.busy()),"offline check completes");check("无网络".equals(updates.error())&&checks.get()==0,"offline check never calls transport");online.set(true);prefs.edit().remove("app_update_attempt").commit();
             check(updates.automatic(),"automatic check defaults on");check(!prefs.contains("app_update_wifi_download"),"legacy auto-download setting removed");main(()->updates.automatic(false));check(!updates.automatic(),"explicit off respected");prefs.edit().remove("app_update_automatic").apply();

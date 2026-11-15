@@ -1,7 +1,23 @@
 {
   "schemaVersion": 1,
-  "currentVersionCode": 40,
+  "currentVersionCode": 41,
   "entries": [
+    {
+      "versionName": "0.2.27",
+      "versionCode": 41,
+      "recordDate": "2026-11-15",
+      "summary": "Gitee 优先更新与配套模块下载，GitHub 保留兜底。",
+      "changes": [
+        "默认通过 Gitee 公开 Release 检查更新，缺失、连接或清单验证失败时尝试 GitHub。",
+        "安装包和可选模块支持同版本 Gitee 下载及 GitHub 兜底；继续核验大小、SHA-256、包名、版本与签名。",
+        "更新页面显示首选地址和最近成功的来源；手工指定更新地址时保留用户选择。",
+        "Tag 发布保留 GitHub Actions 编译与原固定签名，可配置 Gitee 凭据同步完整 Release 附件。"
+      ],
+      "notes": [
+        "当前为 PR 测试候选，尚未合并或发布；Gitee 首次镜像须配置发布凭据并验证完整附件。",
+        "不修改业务服务器、自站镜像待办、网页或延期的 1.0.0 双渠道实现。"
+      ]
+    },
     {
       "versionName": "0.2.26",
       "versionCode": 40,
