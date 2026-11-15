@@ -146,7 +146,7 @@ public final class OjBindingsActivity extends MobilePageActivity {
         parent.addView(text(current ? "请使用当前 ACMForever 登录密码确认归属核验。"
                 : "解绑或成功改绑将清理该平台 AC、提交证据、同步状态，并结束进行中的训练挑战。收藏与历史学习资料保留，其他平台不受影响。", 14));
         passwordInput = input(parent, "当前 ACMForever 登录密码", "");
-        passwordInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        PasswordFields.attach(passwordInput);
         passwordInput.setSaveEnabled(false); passwordInput.setFilters(new InputFilter[]{new InputFilter.LengthFilter(256)}); controls.add(passwordInput);
         confirmation = new CheckBox(this); confirmation.setText(current ? "我确认核验当前账号的归属" : "我已确认平台、账号和以上数据影响");
         confirmation.setSaveEnabled(false); parent.addView(confirmation); controls.add(confirmation);

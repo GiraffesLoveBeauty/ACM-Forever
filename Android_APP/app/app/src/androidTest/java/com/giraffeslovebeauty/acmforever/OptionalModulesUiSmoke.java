@@ -29,7 +29,11 @@ final class OptionalModulesUiSmoke {
             AppAppearance.prefs(app).edit().putString("api_base_url","https://modules.test.invalid").putBoolean("auto_login",false).putBoolean("app_update_automatic",false).putString("app_update_url","https://modules.test.invalid/update.json").commit();
             app.api().setBaseUrl("https://modules.test.invalid");app.api().setNetworkAvailable(()->true);app.api().login("90000001","Synthetic-Only!");
             trace("logged in");
-            if(mode.equals("modules-recovery")){
+            if(mode.equals("modules-storage")){
+                storage();
+            }else if(mode.startsWith("modules-removal-")){
+                removal();
+            }else if(mode.equals("modules-recovery")){
                 for(String id:Arrays.asList("official-themes","cat-art")){
                     trace("recovery start "+id);ModuleSpec spec=ModuleNetwork.catalog(app).get(id);File archive=ModuleStore.archive(app,id);ModuleNetwork.download(spec,archive,n->{},()->false);trace("downloaded "+id);ModuleStore.installAssets(app,spec);trace("installed "+id);ModuleStore.acquired(app,id);
                     ModuleHealth.Status original=ModuleHealth.verify(app,id);check(original.intact&&!original.revision.isEmpty(),"real signed content healthy");File directory=ModuleStore.assets(app,id);
@@ -118,7 +122,7 @@ final class OptionalModulesUiSmoke {
     private File firstResource(File directory)throws Exception{try(java.util.stream.Stream<java.nio.file.Path> paths=java.nio.file.Files.walk(directory.toPath())){return paths.filter(java.nio.file.Files::isRegularFile).map(java.nio.file.Path::toFile).filter(f->!f.getName().startsWith(".")&&f.length()>0).findFirst().orElseThrow(()->new IOException("No payload resource"));}}
     private void downloadFrom(String label,String id)throws Exception{
         click(label);await(()->has("下载喵"),"consent "+id);Instrumentation.ActivityMonitor monitor=test.addMonitor(ModuleDownloadActivity.class.getName(),null,false);
-        try{click("下载喵");Activity page=test.waitForMonitorWithTimeout(monitor,8000);check(page!=null,"download page "+id);activity=page;opened.add(page);await(()->ModuleStore.available(app,id)&&has("打开模块"),"signed installed "+id);}finally{test.removeMonitor(monitor);}
+        try{click("下载喵");Activity page=test.waitForMonitorWithTimeout(monitor,8000);check(page!=null,"download page "+id);activity=page;opened.add(page);await(()->ModuleStore.available(app,id)&&(has("打开模块")||has("完成")),"signed installed "+id);}finally{test.removeMonitor(monitor);}
     }
     private void administrator(){role="admin";try{app.api().refreshSession();}catch(Exception e){throw new AssertionError(e);}check(app.api().isAdministrator(),"synthetic administrator session");}
     private void adminClick(){OptionalTestClasses.call(activity,"showAdministratorMenu",new Class<?>[0]);}
@@ -177,10 +181,40 @@ final class OptionalModulesUiSmoke {
         if(!optout)check(ModuleStore.assets(app,"cat-art").getAbsolutePath().contains("/39/"),"future staged assets do not affect old app");
         trace("INSTALLER_READY upgrade");long end=SystemClock.uptimeMillis()+25000;while(SystemClock.uptimeMillis()<end)Thread.sleep(100);
     }
+    private void storage()throws Exception{
+        administrator();Map<String,ModuleSpec> catalog=ModuleNetwork.catalog(app);
+        for(String id:Arrays.asList("official-themes","cat-art")){ModuleSpec spec=catalog.get(id);ModuleNetwork.download(spec,ModuleStore.archive(app,id),n->{},()->false);ModuleStore.installAssets(app,spec);ModuleStore.acquired(app,id);check(ModuleHealth.verify(app,id).intact,"signed resource fixture "+id);}
+        ModuleSpec cat=catalog.get("cat-art");ModuleStore.reuse(app,new ModuleSpec(cat.id,cat.url,cat.sha256,cat.kind,cat.size,cat.versionCode+1,ModuleHealth.state("cat-art").revision));
+        File personal=new File(app.getFilesDir(),"module-storage-personal-test.txt");java.nio.file.Files.write(personal.toPath(),new byte[]{1,2,3});
+        activity=open(StorageActivity.class,new Intent());check(has("模块管理")&&has("管理可选模块"),"storage module entry");
+        activity=open(ModuleManagerActivity.class,new Intent());click("删除分层猫娘素材");click("点错了喵");check(ModuleStore.available(app,"cat-art"),"cancel keeps resource");
+        click("删除分层猫娘素材");click("确认删除");await(()->!ModuleStore.acquired(app).contains("cat-art"),"explicit resource removed");
+        check(!ModuleStore.available(app,"cat-art")&&ModuleRemovalFiles.targets(new File(app.getFilesDir(),"optional-modules"),"cat-art",ModuleSpec.filename("cat-art")).isEmpty(),"archive, current and future staged resource removed");
+        check(ModuleStore.available(app,"official-themes")&&personal.isFile(),"other module and personal file retained");
+        check(!ModuleStore.acquired(app).contains("cat-art"),"deleted module excluded from next app update");
+        downloadFrom("管理下载分层猫娘素材","cat-art");check(ModuleStore.available(app,"cat-art")&&ModuleStore.acquired(app).contains("cat-art"),"explicit download restores module");
+        close();activity=open(OptionalTestClasses.type("AdminQuickActivity"),new Intent());await(()->has("待审核话题"),"admin page");
+        main(()->OptionalTestClasses.call(activity,"resetPassword",new Class<?>[]{String.class,JSONObject.class},"90000002",new JSONObject()));
+        main(()->{View eye=find("显示密码");check(eye!=null,"administrator reset has eye");eye.performClick();check(find("隐藏密码")!=null,"reset eye reveals");find("隐藏密码").performClick();check(find("显示密码")!=null,"reset eye masks again");ModalDialogs.close(activity);});
+        personal.delete();
+    }
+    private void removal()throws Exception{
+        administrator();ModuleDownloads jobs=ModuleDownloads.get(app);
+        if(mode.endsWith("verify")){
+            check(!ModuleStore.installedNative(app).contains("admin")&&ModuleStore.installedNative(app).contains("advanced"),"system removed only requested split");
+            main(jobs::reconcileRemovals);await(()->!ModuleStore.acquired(app).contains("admin"),"post-restart removal cleanup");
+            check(!ModuleStore.archive(app,"admin").exists()&&ModuleStore.acquired(app).contains("advanced"),"admin archive removed and other split retained");return;
+        }
+        check(ModuleStore.installedNative(app).contains("admin"),"native module present before removal");ModuleStore.acquired(app,"admin");
+        activity=open(ModuleManagerActivity.class,new Intent());click("删除手机便捷管理");click("确认删除");
+        await(()->"approval".equals(jobs.state("admin").phase),"real system removal confirmation");trace("REMOVAL_READY");
+        if(mode.endsWith("cancel")){await(()->"failed".equals(jobs.state("admin").phase),"system cancellation returned");check(ModuleStore.installedNative(app).contains("admin")&&ModuleStore.acquired(app).contains("admin"),"system cancel retains split and record");}
+        else{await(()->!ModuleStore.installedNative(app).contains("admin"),"system removal (may restart app)");trace("split removed without process restart");}
+    }
     private Activity open(Class<?> type,Intent intent){Activity a=test.startActivitySync(intent.setClassName(app,type.getName()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK));opened.add(a);return a;}
     private void close(){if(activity!=null)main(()->{ModalDialogs.close(activity);activity.finish();});test.waitForIdleSync();}
     private void main(Runnable task){Throwable[] failure={null};test.runOnMainSync(()->{try{task.run();}catch(Throwable t){failure[0]=t;}});if(failure[0]!=null)throw new AssertionError(failure[0]);}
-    private View walk(View view,String label){if(view instanceof TextView&&label.contentEquals(((TextView)view).getText()))return view;if(view instanceof ViewGroup){ViewGroup group=(ViewGroup)view;for(int i=0;i<group.getChildCount();i++){View found=walk(group.getChildAt(i),label);if(found!=null)return found;}}return null;}
+    private View walk(View view,String label){if(label.contentEquals(view.getContentDescription()==null?"":view.getContentDescription())||view instanceof TextView&&label.contentEquals(((TextView)view).getText()))return view;if(view instanceof ViewGroup){ViewGroup group=(ViewGroup)view;for(int i=0;i<group.getChildCount();i++){View found=walk(group.getChildAt(i),label);if(found!=null)return found;}}return null;}
     private void dump(View view,StringBuilder text){if(view instanceof TextView)text.append(((TextView)view).getText()).append(" | ");if(view instanceof ViewGroup)for(int i=0;i<((ViewGroup)view).getChildCount();i++)dump(((ViewGroup)view).getChildAt(i),text);}
     private View find(String label){try{java.lang.reflect.Field field=ModalDialogs.class.getDeclaredField("visible");field.setAccessible(true);java.lang.ref.WeakReference<?> ref=(java.lang.ref.WeakReference<?>)((Map<?,?>)field.get(null)).get(activity);AlertDialog dialog=ref==null?null:(AlertDialog)ref.get();if(dialog!=null&&dialog.isShowing()){View found=walk(dialog.getWindow().getDecorView(),label);if(found!=null)return found;}}catch(Exception e){throw new AssertionError(e);}return activity==null?null:walk(activity.getWindow().getDecorView(),label);}
     private boolean has(String text){boolean[] found={false};main(()->found[0]=find(text)!=null);return found[0];}

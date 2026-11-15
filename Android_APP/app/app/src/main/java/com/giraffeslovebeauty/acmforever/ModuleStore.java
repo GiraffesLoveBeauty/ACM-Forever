@@ -35,6 +35,13 @@ final class ModuleStore {
     static void acquired(Context c,String id){Set<String> ids=acquired(c);ids.add(id);if(!c.getSharedPreferences("optional_modules",0).edit().putStringSet("acquired",ids).commit())throw new IllegalStateException("无法保存已下载模块记录，请检查存储空间");}
     static Set<String> acquired(Context c){Set<String> ids=new HashSet<>(c.getSharedPreferences("optional_modules",0).getStringSet("acquired",Collections.emptySet()));ids.retainAll(ModuleSpec.IDS);ids.addAll(installedNative(c));for(String id:ModuleSpec.IDS)if(!ModuleSpec.nativeModule(id)&&available(c,id))ids.add(id);return ids;}
     static boolean updateTogether(Context c){return AppAppearance.prefs(c).getBoolean("app_update_modules",true);}
+    static synchronized void removeLocal(Context c,String id)throws Exception{
+        ModuleSpec.name(id);
+        if(installedNative(c).contains(id))throw new IOException("原生模块仍已安装，请先完成系统卸载确认");
+        ModuleRemovalFiles.remove(new File(c.getFilesDir(),"optional-modules"),id,ModuleSpec.filename(id));
+        Set<String> ids=acquired(c);ids.remove(id);
+        if(!c.getSharedPreferences("optional_modules",0).edit().putStringSet("acquired",ids).commit())throw new IOException("无法保存模块删除结果，请重试");
+    }
     static void updateTogether(Context c,boolean on){AppAppearance.prefs(c).edit().putBoolean("app_update_modules",on).apply();}
     static InputStream open(Context c,String id,String relative)throws IOException{
         if(!available(c,id))throw new FileNotFoundException("尚未下载"+ModuleSpec.name(id));ModuleFiles.safePath(relative);File root=assets(c,id),file=new File(root,relative);

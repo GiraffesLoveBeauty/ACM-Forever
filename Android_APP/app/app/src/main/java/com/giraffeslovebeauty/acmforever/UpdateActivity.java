@@ -38,8 +38,8 @@ public final class UpdateActivity extends Activity {
         last=text("",12);current.addView(last);check=button(current,"检查更新",()->updates.check(true));download=button(current,"下载新版安装包",()->updates.openDownload(this));install=button(current,"安装新版",()->updates.install(this));cancel=button(current,"取消下载",updates::cancelDownload);
         clearPackages=button(current,"清理已下载安装包",()->new ModalDialogs.Builder(this).setTitle("清理已下载安装包？").setMessage("仅删除本 App 下载的安装包，不会卸载当前 App，也不影响账号密码、主题或草稿。需要更新时可重新下载。").setNegativeButton("取消",null).setPositiveButton("确认清理",(d,w)->updates.clearDownloadedPackages()).show());
         LinearLayout options=card();options.addView(text("自动更新选项",18));automatic=new CheckBox(this);automatic.setText("启动时自动检查更新");automatic.setMinHeight(dp(48));options.addView(automatic);
-        options.addView(text("自动检查默认开启，启动时在会话处理后发起，检查成功后间隔 6 小时；失败可在下一次启动重试。进入本页与手动检查始终立即检查。发现新版先询问，点击下载后进入猫娘下载页；安装仍需系统确认。",12));
-        automatic.setOnCheckedChangeListener((b,value)->{if(!painting){updates.automatic(value);if(value)updates.check(false);}});
+        options.addView(text("自动检查默认开启，登录后每天最多主动检查一次，按手机本地时间凌晨 4:00 换日。当天手动或自动检查成功后不再主动检查；失败可手动重试。进入本页与手动检查始终立即检查。发现新版先询问，点击下载后进入猫娘下载页；安装仍需系统确认。",12));
+        automatic.setOnCheckedChangeListener((b,value)->{if(!painting){updates.automatic(value);if(value)updates.maybeCheck();}});
         moduleUpdates=new CheckBox(this);moduleUpdates.setText("随 App 更新已下载模块");moduleUpdates.setMinHeight(dp(48));moduleUpdates.setChecked(ModuleStore.updateTogether(this));options.addView(moduleUpdates);
         moduleUpdates.setOnCheckedChangeListener((b,value)->{if(!painting)ModuleStore.updateTogether(this,value);});
         options.addView(text("默认勾选，仅更新已下载的模块。关闭后保留原文件和设置；旧资源包兼容时继续使用，原生模块须匹配新版 App，可能暂不可用。安装仍需系统确认。",12));

@@ -52,6 +52,8 @@ public final class MainActivity extends Activity {
     private long headerAvatarOwner=-1,headerCheckOwner=-1;
     private android.net.Uri pendingPostImage;
     private EditText composeBodyInput;
+    private ComposerPreview composePreview;
+    private boolean previewOpened,previewRight;
     private CloudDrafts cloud;
     private final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
     private boolean sessionRestoreAttempted;
@@ -257,6 +259,7 @@ public final class MainActivity extends Activity {
             state.putString("problem_id", selectedProblem.optString("problem_id"));
         }
         state.putString("search_scope", searchScope); state.putString("search_return", searchReturn);
+        state.putBoolean("preview_open",composePreview==null?previewOpened:composePreview.opened());state.putBoolean("preview_right",composePreview==null?previewRight:composePreview.right());
         state.putString("compose_title", composeTitle); state.putString("compose_body", composeBody);
         state.putInt("compose_category", composeCategoryId); state.putInt("compose_draft", composeDraftId);
         state.putLong("compose_revision", composeRevision); state.putLong("compose_saved_revision", composeSavedRevision);
@@ -289,6 +292,7 @@ public final class MainActivity extends Activity {
                     .put("platform", state.getString("problem_platform")).put("problem_id", state.getString("problem_id"));
         } catch (org.json.JSONException ignored) { memberPreview = null; selectedProblem = null; }
         searchScope = state.getString("search_scope", "forum"); searchReturn = state.getString("search_return", "forum");
+        previewOpened=state.getBoolean("preview_open",false);previewRight=state.getBoolean("preview_right",false);
         if(state.containsKey("compose_title")){
             composeTitle = state.getString("compose_title", ""); composeBody = state.getString("compose_body", "");
             composeCategoryId = state.getInt("compose_category", 0); composeDraftId = state.getInt("compose_draft", 0);
@@ -677,6 +681,7 @@ public final class MainActivity extends Activity {
         if(navigationOwner!=api.sessionGeneration()){navigation.clear();navigationOwner=api.sessionGeneration();}
         if(api.isLoggedIn()&&api.requiresPasswordChange())screen="account";
         int serial = ++requestSerial;
+        if(composePreview!=null){previewOpened=composePreview.opened();previewRight=composePreview.right();composePreview=null;}
         pageRefresh.reset(serial);if(readFromAction)pageRefresh.userAction();actionNotice.hide();detailUi=null;composeEditorShown=false;composeBodyInput=null;
         if (!api.isLoggedIn()) defaultAvatar(headerAvatar);
         else refreshHeaderAvatar(false);
@@ -1597,7 +1602,8 @@ public final class MainActivity extends Activity {
         body.setText(composeBody);
         body.setContentDescription("发帖正文输入");
         body.addTextChangedListener(watch(value -> { if(currentComposer(editorGeneration)){composeBody = value; composerChanged();} }));
-        box.addView(body, new LinearLayout.LayoutParams(-1, -2));
+        composePreview=new ComposerPreview(this,body,this::openBrowser,previewOpened,previewRight);
+        box.addView(composePreview,new LinearLayout.LayoutParams(-1,-2));
         space(box,12);
         WrapLayout format = new WrapLayout(this);format.setContentDescription("发帖格式工具");
         Button bold = action("加粗", false), code = action("代码块", false), quote = action("引用", false);
@@ -1615,7 +1621,7 @@ public final class MainActivity extends Activity {
         Button draftList=action("云端草稿",false);compactTool(draftList);draftList.setOnClickListener(v->showCloudDraftList());tools.addView(draftList);
         Button preview = action("预览正文", false);
         preview.setContentDescription("预览发帖正文");
-        compactTool(preview);preview.setOnClickListener(v -> { LinearLayout article = column(); article.addView(new ContentView(this, composeBody, false, this::openBrowser)); detailsDialog("正文预览", article); });tools.addView(preview);
+        compactTool(preview);preview.setOnClickListener(v -> {if(currentComposer(editorGeneration))composePreview.open();});tools.addView(preview);
         composeStatus = label(cloud.state().status, 12, MUTED, false);
         box.addView(composeStatus);
         Button save = action("保存草稿", false);
@@ -2069,10 +2075,7 @@ public final class MainActivity extends Activity {
         password.setHint("密码"); password.setSingleLine(true);
         password.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         password.setSaveEnabled(false);password.setTextSize(15);password.setPadding(dp(14),0,0,0);password.setBackgroundColor(Color.TRANSPARENT);
-        LinearLayout passwordRow=row();passwordRow.setBackground(shape(BACKGROUND,10,0));box.addView(passwordRow,new LinearLayout.LayoutParams(-1,dp(52)));
-        passwordRow.addView(password,new LinearLayout.LayoutParams(0,-1,1));
-        ImageButton eye=new ImageButton(this);eye.setImageDrawable(AppIcons.get(this,"eye",MUTED));eye.setPadding(dp(12),dp(12),dp(12),dp(12));eye.setBackgroundColor(Color.TRANSPARENT);eye.setContentDescription("显示密码");passwordRow.addView(eye,new LinearLayout.LayoutParams(dp(48),dp(48)));
-        final boolean[] visible={false};eye.setOnClickListener(v->{int start=password.getSelectionStart(),end=password.getSelectionEnd();visible[0]=!visible[0];password.setTransformationMethod(visible[0]?android.text.method.HideReturnsTransformationMethod.getInstance():android.text.method.PasswordTransformationMethod.getInstance());if(start>=0&&end>=0)password.setSelection(start,end);eye.setImageDrawable(AppIcons.get(this,visible[0]?"eye-off":"eye",MUTED));eye.setContentDescription(visible[0]?"隐藏密码":"显示密码");});
+        box.addView(password,new LinearLayout.LayoutParams(-1,dp(52)));PasswordFields.attach(password);
         final LoginOptions[] options={LoginOptions.read(preferences)};
         CheckBox remember = new CheckBox(this); remember.setText("记住账号");
         CheckBox rememberPassword=new CheckBox(this);rememberPassword.setText("记住密码");
@@ -2213,7 +2216,7 @@ public final class MainActivity extends Activity {
         menuRow(settings,"个性化设置","背景选择 · 主题选择",this::showCoverSettings);
         menuRow(settings,"搜索设置","搜索模块排序 · 历史记录",()->openSearchSettings());
         menuRow(settings, "修改密码", "保护账号安全", this::showChangePassword);
-        menuRow(settings, "存储管理", "缓存占用 · 临时文件 · 安装包", () -> openLocalSettings(StorageActivity.class));
+        menuRow(settings, "存储管理", "缓存占用 · 临时文件 · 模块 · 安装包", () -> openLocalSettings(StorageActivity.class));
         menuRow(settings, "帮助与说明", "统一帮助 · 问题反馈 · 数据与权限", () -> openLocalSettings(HelpActivity.class));
         menuRow(settings, "检查更新", "下载新版 · 自动更新选项", this::checkForUpdates);
 
@@ -2439,6 +2442,7 @@ public final class MainActivity extends Activity {
         oldPassword.setHint("当前密码"); newPassword.setHint("新密码"); confirmation.setHint("确认新密码");
         oldPassword.setInputType(129); newPassword.setInputType(129); confirmation.setInputType(129);
         form.addView(oldPassword); form.addView(newPassword); form.addView(confirmation);
+        PasswordFields.attach(oldPassword);PasswordFields.attach(newPassword);PasswordFields.attach(confirmation);
         AlertDialog dialog = new ModalDialogs.Builder(this).setTitle("修改密码").setMessage("新密码需 12–128 位、无空格，并包含至少三类字符。")
                 .setView(form).setNegativeButton("取消", null).setPositiveButton("确认修改", null).create();
         dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {

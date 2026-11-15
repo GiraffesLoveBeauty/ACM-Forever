@@ -43,7 +43,7 @@ final class AppUpdates {
     private String checkedSource="";
     private String sourceDiagnostics="";
     private long promptedVersion;
-    private boolean startupChecked,pendingOffer,openingDownload,openingInstaller;
+    private boolean pendingOffer,openingDownload,openingInstaller;
     private volatile boolean awaitingModuleInstall;
     boolean awaitingModuleInstall(){return awaitingModuleInstall;}
     private AlertDialog offerDialog;
@@ -78,11 +78,11 @@ final class AppUpdates {
         owner.clear();listener=null;
     }}
     private Activity activity(){Activity a=owner.get();return a==null||a.isFinishing()||a.isDestroyed()?null:a;}
-    boolean operationActive(){return busy()||openingInstaller;}
+    boolean operationActive(){return busy()||openingInstaller||awaitingModuleInstall;}
     boolean automatic(){return prefs.getBoolean(KEY+"automatic",true);}
     void automatic(boolean value){prefs.edit().putBoolean(KEY+"automatic",value).apply();changed();}
-    void maybeCheck(){if(!automatic()||busy())return;long now=System.currentTimeMillis(),success=prefs.getLong(KEY+"success",0),attempt=prefs.getLong(KEY+"attempt",0);boolean sameBuild=prefs.getLong(KEY+"checked_build",-1)==currentVersion();if((!sameBuild||now-success>=6*60*60*1000L||now<success)&&(attempt==0||now-attempt>=60000||now<attempt))check(false);}
-    void startupCheck(){if(!api.isLoggedIn()||startupChecked)return;startupChecked=true;maybeCheck();}
+    void maybeCheck(){if(api.isLoggedIn()&&automatic()&&!busy())check(false);}
+    void startupCheck(){if(api.isLoggedIn())maybeCheck();}
     long currentVersion(){try{PackageInfo p=context.getPackageManager().getPackageInfo(context.getPackageName(),0);return Build.VERSION.SDK_INT>=28?p.getLongVersionCode():p.versionCode;}catch(Exception e){return 0;}}
     String currentName(){try{return context.getPackageManager().getPackageInfo(context.getPackageName(),0).versionName;}catch(Exception e){return "未知";}}
     private String channel(){return (context.getApplicationInfo().flags&ApplicationInfo.FLAG_DEBUGGABLE)!=0?"debug":"release";}
@@ -102,7 +102,7 @@ final class AppUpdates {
         if(next.equals(source))return true;
         if(offerDialog!=null){offerDialog.setOnDismissListener(null);offerDialog.dismiss();offerDialog=null;}
         ++generation;cancelDownload();source=next;release=null;error="";checking=false;pendingOffer=false;pendingResult="";promptedVersion=0;clearStored();
-        prefs.edit().remove(KEY+"attempt").remove(KEY+"success").remove(KEY+"checked_build").apply();
+        prefs.edit().remove(KEY+"checked_build").apply();
         return true;
     }
     boolean busy(){return checking||verifying||clearingPackages||downloadId!=-1;}
@@ -132,7 +132,15 @@ final class AppUpdates {
     void dismissError(){error="";changed();}
     private void changed(){if(listener!=null&&activity()!=null)listener.run();}
     void check(boolean manual){
-        if(!syncSource()){changed();return;}if(busy())return;error="";sourceDiagnostics="";pendingResult="";checking=true;changed();
+        if(!syncSource()){changed();return;}if(busy())return;
+        long now=System.currentTimeMillis();
+        if(!manual){
+            java.time.ZoneId zone=java.time.ZoneId.systemDefault();
+            if(!api.isLoggedIn()||!automatic()||!UpdateCheckDay.due(now,prefs.getLong(KEY+"success",0),zone)||!UpdateCheckDay.due(now,prefs.getLong(KEY+"auto_attempt",0),zone))return;
+            // Persist before dispatch, so rotations/restarts and failures cannot repeat today's automatic attempt.
+            if(!prefs.edit().putLong(KEY+"auto_attempt",now).commit())return;
+        }
+        error="";sourceDiagnostics="";pendingResult="";checking=true;changed();
         final long ticket=++generation;final String address=source;++moduleCheckGeneration;
         prefs.edit().putLong(KEY+"attempt",System.currentTimeMillis()).apply();
         io.execute(()->{
