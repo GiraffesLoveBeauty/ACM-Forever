@@ -29,10 +29,15 @@
 flowchart TD
     A[源码 PR] --> B[其他成员 Review 与 CI]
     B --> C[确认后合并并创建新版本 Tag]
-    C --> D[检查 Gitee Secret 与版本 / 编译测试签名]
-    D --> E[GitHub 草稿上传八附件并回读]
+    C --> D[检查 Gitee Secret / 版本与固定证书]
+    D --> R{同 Tag 的 GitHub Release 已公开?}
+    R -->|否| N[编译测试签名]
+    N --> E[GitHub 草稿上传八附件并回读]
     E --> F[公开 GitHub Release]
     F --> G[同步同一个源码 Tag 至 Gitee]
+    R -->|是| V[核对源码提交 / 版本 / 渠道 / 固定证书]
+    V --> W[下载并校验八个原始附件 / 跳过重新构建和 GitHub 发布]
+    W --> G
     G --> H[Gitee 创建预发布 Release]
     H --> I[上传同字节 APK 和模块 / 改写两份 JSON 地址]
     I --> J[匿名回下载全部八附件并核验]
@@ -45,15 +50,18 @@ flowchart TD
 
 八附件：基础 APK、对应 `.sha256`、`update.json`、`modules.json`、`module-advanced.apk`、`module-admin.apk`、`module-official-themes.acmpack`、`module-cat-art.acmpack`。Gitee 两份 JSON 的 URL 改为 Gitee 同版本地址，APK与四模块字节、体积、哈希及签名不变；不要求两站 JSON 字节相同。
 
-Gitee 没有本流程使用的 draft 字段，以 `prerelease=true` 暂存；最新版本检查拒绝预发布。所有附件匿名回读正确后才切 `prerelease=false`。已公开附件不可替换，完全一致的重跑只校验；中途失败的预发布可在同 Tag 重跑时补齐缺失文件，已有文件不同则阻止。不能删除 Tag、覆盖 APK 或略过回读来解决失败。
+Gitee 没有本流程使用的 draft 字段，以 `prerelease=true` 暂存；最新版本检查拒绝预发布。所有附件匿名回读正确后才切 `prerelease=false`。PATCH 同时携带官方 API 要求的 `tag_name`、`name`、`body`，保持已确认的版本、标题和说明不变。已公开附件不可替换，完全一致的重跑只校验；中途失败的预发布可在同 Tag 重跑时补齐缺失文件，已有文件不同则阻止。不能删除 Tag、覆盖 APK 或略过回读来解决失败。
 
 GitHub 先发布、Gitee 后同步，跨站不是原子事务。若后半段失败，GitHub 可能已公开、Gitee 仍预发布；App 可兜底 GitHub，修复配置/网络后重跑原 Tag 工作流。Gitee 旧正式版低于本机时，客户端会检查 GitHub 较新版本。国内网络、Gitee 配额、令牌权限及下载策略仍需首次真实镜像验收。
+
+重跑时，`gitee_release.py --restore-github` 在构建前检查同 Tag 的 GitHub Release。未发布或只有草稿时执行原构建/草稿事务；已正式公开时必须确认公开仓库、真实 Tag 解引用后的 commit、Release 源码标记、源码版本/code、当前渠道及固定证书，再下载并校验原始八附件的完整性、URL、体积、哈希与校验文件。验证成功才输出 `reused=true`；随后跳过 SDK/密钥配置、编译、打包及 GitHub 发布，直接镜像原始字节。恢复失败即终止，不退回重新构建；输出目录非空时拒绝混入其他制品。资源包 ZIP 时间戳和签名可能随重新打包变化，因此即使源码和密钥相同也不能用新包替换首发附件。
 
 ## 验证与 Review
 
 本轮本地验证结果：
 
-- Android JVM 测试 **214 项通过，0 失败**；发布、署名与 Gitee 镜像契约测试 **57 项通过，0 失败**；官方主题资源测试 **2 项通过**。
+- 首轮 Android JVM 测试 **214 项通过，0 失败**；主题资源测试 **2 项通过**。本轮 review 修复只涉及发布脚本、工作流与文档，APK 源码和本地测试包不变。
+- 修复后发布、署名与 Gitee 镜像/恢复契约测试 **68 项通过，0 失败、0 跳过**；actionlint **v1.7.7** 检查发布工作流通过。
 - Lint **0 errors / 68 warnings**；基础 debug APK、advanced/admin 原生模块和 instrumentation APK 均构建成功。
 - 模拟器 `giteeupdates` 通过：默认 Gitee、新版本优先且不请求 GitHub 清单、源故障兜底、实际更新页来源文案、Gitee CDN 重定向、模块同版本切源、取消与临时文件清理、自定义源保持。
 - 模拟器 `startupupdates` 通过：默认勾选及关闭记忆、会话恢复后检查、进程内去重、弹窗版本与说明、同尺寸按钮及取消色、重建、下载/重试/取消、最新版本确认、失败重试及六小时节流。
@@ -61,3 +69,9 @@ GitHub 先发布、Gitee 后同步，跨站不是原子事务。若后半段失�
 新增测试涵盖源顺序、异常/非法清单兜底、自定义源、镜像延迟、同版本 APK URL、模块 URL 白名单、发布完整性、失败恢复和不可变附件。模拟器使用合成 HTTPS 传输，不访问生产账号或向 Gitee 写入测试附件。真实网络只进行了前述匿名读取；凭据未配置，**尚未验收本项目 Gitee 的真实 Tag 推送、Release 写入、附件大小配额及完整 APK 下载**。上述发布测试使用内存夹具，不能代替首次真实发布验收。本机日志保存在被忽略的 `Android_APP/dist/gitee-v0.2.27-local/` 及同级构建日志，不提交源码库。
 
 Review 重点：跨源仍只安装相同身份的制品；取消与重建不启动无限重试；Gitee Tag 不覆盖；令牌不进客户端与日志；八附件全通过才公开；GitHub 既有发布校验仍有效。PR 合并及首次 Tag 发布前，管理员需配置 Secret 并确认 Gitee 空间/权限。
+
+## PR #141 首轮 Review 修复
+
+本地报告 `PR141-v0.2.27-Review结果.md` 审查提交 `c4e114e1702dcc591cfef5dc8f33c5ca2eb9c965`，提出一项 P1、一项 P2。本轮补全 Gitee PATCH 必填字段，并为工作流增加已公开原始制品恢复分支。测试夹具现强制检查 PATCH 三字段及其值；恢复回归使用同一资源与临时 RSA 密钥实际打包、签名两次，确认两包不同，随后从模拟 GitHub 首发附件恢复，完成中断的模拟 Gitee 发布，且不覆盖已公开附件。还覆盖错误 Tag/commit、渠道/证书/版本、缺失/重复/损坏附件、非空输出目录和 Actions 输出门禁。
+
+本轮没有调用真实 Gitee 写接口，没有合并、创建 Tag 或发布。修复提交需重新交其他成员 review。修复日志在被忽略的 `Android_APP/dist/release-v0227-review-fix-tests.log`；首轮 APK 与模拟器验收证据继续保留。
