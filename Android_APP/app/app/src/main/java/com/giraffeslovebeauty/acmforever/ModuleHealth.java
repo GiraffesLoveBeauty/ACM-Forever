@@ -8,7 +8,7 @@ import java.util.concurrent.*;
 
 /** No file hashing on the UI thread. Only local repair runs without download consent. */
 final class ModuleHealth {
-    static final class Status {final boolean intact;final String message,revision;Status(boolean ok,String text,String r){intact=ok;message=text;revision=r;}}
+    static final class Status {final boolean intact;final String message,revision,number;Status(boolean ok,String text,String r){this(ok,text,r,"");}Status(boolean ok,String text,String r,String n){intact=ok;message=text;revision=r;number=n;}}
     private static final Map<String,Status> states=new ConcurrentHashMap<>();
     private static final Set<String> broken=ConcurrentHashMap.newKeySet();
     private static final ExecutorService io=Executors.newSingleThreadExecutor();
@@ -24,10 +24,10 @@ final class ModuleHealth {
     static synchronized Status verify(Context c,String id){
         publish(id,new Status(false,"检查中",""));
         try{
-            String revision;
-            if(ModuleSpec.nativeModule(id)){if(!ModuleStore.installedNative(c).contains(id))throw new IllegalStateException("原生模块未安装或版本不匹配");revision="App "+ModuleStore.code(c);try{String recorded=ModuleStore.localSpec(c,id,ModuleStore.code(c)).revision;if(!recorded.isEmpty())revision=recorded;}catch(Exception notRecorded){}}
-            else revision=ModuleStore.inspect(c,id,true).revision;
-            Status result=new Status(true,"完整",revision);publish(id,result);CharacterArt.clear();return result;
+            String revision,number="";
+            if(ModuleSpec.nativeModule(id)){if(!ModuleStore.installedNative(c).contains(id))throw new IllegalStateException("原生模块未安装或版本不匹配");revision="App "+ModuleStore.code(c);try{ModuleSpec recorded=ModuleStore.localSpec(c,id,ModuleStore.code(c));if(!recorded.revision.isEmpty())revision=recorded.revision;number=recorded.number;}catch(Exception notRecorded){}}
+            else {ModuleStore.Checked checked=ModuleStore.inspect(c,id,true);revision=checked.revision;try{number=ModuleStore.localSpec(c,id,checked.sourceCode).number;}catch(Exception notRecorded){}}
+            Status result=new Status(true,"完整",revision,number);publish(id,result);CharacterArt.clear();return result;
         }catch(Exception failure){Status result=new Status(false,("修复中".equals(state(id).message)?"修复失败 / 待修复：":"损坏 / 待修复：")+failure.getMessage(),"");publish(id,result);CharacterArt.clear();return result;}
     }
     static void check(Context context,String id,java.util.function.Consumer<Status> done){Context c=context.getApplicationContext();io.execute(()->{Status result=verify(c,id);if(done!=null)main.post(()->done.accept(result));});}

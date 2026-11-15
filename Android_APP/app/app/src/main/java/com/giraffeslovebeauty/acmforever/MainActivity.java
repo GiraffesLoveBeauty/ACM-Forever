@@ -109,6 +109,14 @@ public final class MainActivity extends Activity {
     private String days = "7";
     private String platform = "";
     private int page = 1;
+    private int forumPageCount=1;
+    private int forumVisibleCount=ForumFeed.PAGE_SIZE;
+    private String forumKey="";
+    private ForumFeed forumFeed;
+    private LinearLayout forumRows;
+    private Button forumMore;
+    private boolean forumBusy,forumSwipe;
+    private float forumTouchY;
     private int rankPageSize = 20;
     private boolean popupLoading;
     private int postId = 0;
@@ -235,6 +243,7 @@ public final class MainActivity extends Activity {
         state.putString("query", query); state.putString("category", category); state.putString("sort", sort);
         state.putString("days", days); state.putString("platform", platform); state.putInt("page", page);
         state.putInt("rank_page_size", rankPageSize); state.putString("rank_sort", rankSort);
+        state.putInt("forum_page_count",forumPageCount);state.putInt("forum_visible_count",forumVisibleCount);state.putString("forum_key",forumKey);
         state.putStringArrayList("rank_platforms", new java.util.ArrayList<>(rankPlatforms));
         state.putString("profile_platform",profilePlatform);state.putInt("post_id", postId); state.putString("problem_state", problemState);
         state.putBoolean("return_from_bindings",returnFromBindings);
@@ -262,6 +271,8 @@ public final class MainActivity extends Activity {
         query = state.getString("query", ""); category = state.getString("category", ""); sort = state.getString("sort", "latest");
         days = state.getString("days", "7");if(!java.util.Arrays.asList("7","30","90","365","all").contains(days))days="7"; platform = state.getString("platform", ""); page = state.getInt("page", 1);
         rankPageSize = state.getInt("rank_page_size",20); rankSort = state.getString("rank_sort", "total_count");
+        forumPageCount=Math.max(1,Math.min(1000,state.getInt("forum_page_count",1)));forumKey=state.getString("forum_key","");
+        forumVisibleCount=Math.max(ForumFeed.PAGE_SIZE,state.getInt("forum_visible_count",ForumFeed.PAGE_SIZE));
         java.util.ArrayList<String> platforms = state.getStringArrayList("rank_platforms");
         if (platforms != null && !platforms.isEmpty()) { rankPlatforms.clear(); rankPlatforms.addAll(platforms); }
         profilePlatform=state.getString("profile_platform","all");postId = state.getInt("post_id", 0); problemState = state.getString("problem_state", "");
@@ -518,10 +529,21 @@ public final class MainActivity extends Activity {
         header.addView(search, searchParams);
         ImageButton tools=new ImageButton(this);MobileStyle.flat(tools);android.graphics.drawable.Drawable plus=AppIcons.get(this,"add",MobileStyle.ON_ACCENT);tools.setImageDrawable(plus);tools.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);tools.setBackground(MobileStyle.panel(this,MobileStyle.controlFill(ACCENT),12,0));tools.setPadding(dp(8),dp(8),dp(8),dp(8));tools.setContentDescription("常用工具");tools.setOnClickListener(v->showTools(tools));header.addView(tools,new LinearLayout.LayoutParams(dp(44),dp(44)));
 
-        ScrollView scroll = new ScrollView(this);
+        ScrollView scroll = new ScrollView(this){
+            @Override public boolean dispatchTouchEvent(android.view.MotionEvent event){
+                int action=event.getActionMasked();
+                if(action==android.view.MotionEvent.ACTION_DOWN){forumTouchY=event.getY();forumSwipe=false;}
+                if(action==android.view.MotionEvent.ACTION_MOVE&&forumTouchY-event.getY()>android.view.ViewConfiguration.get(MainActivity.this).getScaledTouchSlop())forumSwipe=true;
+                boolean handled=super.dispatchTouchEvent(event);
+                if(action==android.view.MotionEvent.ACTION_UP){maybeLoadMoreForum();forumSwipe=false;}
+                if(action==android.view.MotionEvent.ACTION_CANCEL)forumSwipe=false;
+                return handled;
+            }
+        };
         pageScroll=scroll;
         scroll.setFillViewport(true);
-        root.addView(PullRefreshLayout.forPage(this,scroll,pageRefresh,()->!loginBusy&&!composeBusy&&!actionBusy&&!"compose".equals(screen)&&!ModalDialogs.isShowing(this)), new LinearLayout.LayoutParams(-1, 0, 1));
+        root.addView(PullRefreshLayout.forPage(this,scroll,pageRefresh,()->!loginBusy&&!composeBusy&&!actionBusy&&!"compose".equals(screen)&&!ModalDialogs.isShowing(this),this::refreshCurrentPage), new LinearLayout.LayoutParams(-1, 0, 1));
+        scroll.setOnScrollChangeListener((v,x,y,oldX,oldY)->{if(y>oldY)maybeLoadMoreForum();});
         content = column();
         content.setPadding(dp(12), dp(12), dp(12), dp(24));
         scroll.addView(content);
@@ -769,30 +791,72 @@ public final class MainActivity extends Activity {
     }
 
     private void renderForum(int serial) {
+        String key=query+"\n"+category+"\n"+sort;
+        if(!key.equals(forumKey)){forumKey=key;forumPageCount=1;forumVisibleCount=ForumFeed.PAGE_SIZE;pendingScroll=0;}
+        forumFeed=new ForumFeed();forumBusy=false;forumSwipe=false;
         forumHeader(null);
-        loading("正在加载社区话题…");
-        loadPage(serial,() -> {
-            try {
-                String suffix = "?page=" + page + "&page_size=12&sort=" + sort
-                        + "&q=" + encode(query) + "&category=" + encode(category);
-                JSONObject result = api.getObject(api.publicPostsPath(suffix));
-                result.getJSONArray("rows");
-                present(() -> { if (serial == requestSerial) showForum(null, result); });
-            } catch (Exception e) {
-                present(() -> { if (serial == requestSerial) error(e); });
-            }
-        });
+        forumRows=column();content.addView(forumRows);loadingRegion=forumRows;
+        forumRows.addView(label("正在加载社区话题…",14,MUTED,false));
+        forumMore=action("正在加载…",false);forumMore.setContentDescription("继续加载社区话题");forumMore.setEnabled(false);
+        forumMore.setOnClickListener(v->loadMoreForum());content.addView(forumMore);
+        loadForumPages(serial,1,forumPageCount);
     }
 
-    private void showForum(JSONArray categories, JSONObject result) {
-        content.removeAllViews();
-        forumHeader(categories);
+    private void refreshCurrentPage(){
+        if(!pageRefresh.canRefresh())return;
+        if(java.util.Arrays.asList("forum","rank","problem_bank").contains(screen)){
+            page=1;forumPageCount=1;forumVisibleCount=ForumFeed.PAGE_SIZE;pendingScroll=0;readFromAction=true;loadScreen();
+        }else pageRefresh.refreshNow();
+    }
 
-        JSONArray rows = result.optJSONArray("rows");
-        if (rows == null || rows.length() == 0) status("这里还没有话题，试试其他分类或关键词。");
-        else for (int i = 0; i < rows.length(); i++) addPost(rows.optJSONObject(i));
-        int total = result.optInt("total", 0);
-        if (total > 0) addPager(total, 12);
+    private void maybeLoadMoreForum(){
+        if(!forumSwipe||!"forum".equals(screen)||forumBusy||forumFeed==null||!forumFeed.more(forumVisibleCount))return;
+        if(content.getHeight()-pageScroll.getHeight()-pageScroll.getScrollY()>dp(160))return;
+        forumSwipe=false;loadMoreForum();
+    }
+
+    private void loadMoreForum(){
+        if(!"forum".equals(screen)||forumBusy||forumFeed==null||!forumFeed.more(forumVisibleCount)||!pageRefresh.canRefresh())return;
+        int buffered=forumFeed.rows().length();
+        if(buffered>forumVisibleCount){forumVisibleCount=Math.min(buffered,forumVisibleCount+ForumFeed.PAGE_SIZE);showForum();restoreScroll();return;}
+        forumVisibleCount+=ForumFeed.PAGE_SIZE;
+        loadForumPages(requestSerial,forumFeed.lastPage()+1,forumFeed.lastPage()+1);
+    }
+
+    private void loadForumPages(int serial,int from,int to){
+        forumBusy=true;forumMore.setEnabled(false);forumMore.setText("正在加载…");
+        String parameters="&sort="+sort+"&q="+encode(query)+"&category="+encode(category);
+        loadPage(serial,()->readForumPages(serial,from,to,parameters));
+        // Incremental requests share one reconnect read; do not accumulate one retry per swipe.
+        pageRefresh.replaceRead(serial,()->{forumBusy=true;int count=forumPageCount;startRead(serial,()->readForumPages(serial,1,count,parameters));});
+    }
+
+    private void readForumPages(int serial,int from,int to,String parameters){
+        final boolean replay=api.isReplay();
+        try {
+            java.util.Map<Integer,JSONObject> batch=new java.util.LinkedHashMap<>();
+            for(int p=from;p<=to;p++){
+                String suffix="?page="+p+"&page_size="+ForumFeed.PAGE_SIZE+parameters;
+                JSONObject result=api.getObject(api.publicPostsPath(suffix));result.getJSONArray("rows");batch.put(p,result);
+                if((long)p*Math.max(ForumFeed.PAGE_SIZE,result.optInt("page_size",Math.max(ForumFeed.PAGE_SIZE,result.getJSONArray("rows").length())))>=result.optInt("total"))break;
+            }
+            present(()->{if(serial!=requestSerial)return;
+                try{for(java.util.Map.Entry<Integer,JSONObject> item:batch.entrySet())forumFeed.replace(item.getKey(),item.getValue());}
+                catch(org.json.JSONException invalid){error(invalid);return;}
+                forumPageCount=Math.max(1,forumFeed.lastPage());if(!replay)forumBusy=false;showForum();
+            });
+        }catch(Exception e){present(()->{if(serial!=requestSerial)return;if(!replay){forumBusy=false;forumMore.setText("重试加载");forumMore.setEnabled(true);forumMore.setOnClickListener(v->loadForumPages(serial,from,to));}error(e);});}
+    }
+
+    private void showForum(){
+        int y=pendingScroll>=0?pendingScroll:pageScroll.getScrollY();
+        loadingRegion=null;forumRows.setMinimumHeight(0);forumRows.setGravity(Gravity.TOP);forumRows.setPadding(0,0,0,0);forumRows.setBackgroundColor(Color.TRANSPARENT);
+        forumRows.removeAllViews();JSONArray rows=forumFeed.visibleRows(forumVisibleCount);
+        if(rows.length()==0)forumRows.addView(label("这里还没有话题，试试其他分类或关键词。",14,MUTED,false));
+        for(int i=0;i<rows.length();i++)addPost(forumRows,rows.optJSONObject(i));
+        forumMore.setText(forumBusy?"正在刷新…":forumFeed.more(forumVisibleCount)?"继续向下滑动加载":"已显示全部话题");
+        forumMore.setEnabled(!forumBusy&&forumFeed.more(forumVisibleCount));forumMore.setOnClickListener(v->loadMoreForum());
+        pendingScroll=y;
     }
 
     private void forumHeader(JSONArray categories) {
@@ -865,8 +929,11 @@ public final class MainActivity extends Activity {
     }
 
     private void addPost(JSONObject post) {
+        addPost(content,post);
+    }
+    private void addPost(LinearLayout parent,JSONObject post) {
         if (post == null) return;
-        LinearLayout box = card();
+        LinearLayout box = card(parent);
         LinearLayout authorRow = row();
         ImageButton avatar = avatarButton(32);
         avatar.setContentDescription("查看" + value(post, "author_name", "ACM 成员") + "的公开主页");

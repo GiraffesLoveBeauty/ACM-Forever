@@ -12,7 +12,7 @@ final class ModuleUpdates {
         List<String> names=new ArrayList<>();long bytes=0;StringBuilder details=new StringBuilder();
         for(String id:ModuleSpec.IDS)if(selected.contains(id)&&catalog.containsKey(id)){
             ModuleSpec target=catalog.get(id);ModuleHealth.Status local=ModuleHealth.verify(c,id);boolean same=local.intact&&(ModuleSpec.nativeModule(id)?code==ModuleStore.code(c):!target.revision.isEmpty()&&target.revision.equals(local.revision));
-            details.append('\n').append(ModuleSpec.name(id)).append("：").append(local.intact?shortRevision(local.revision):local.message).append(" → ").append(shortRevision(target.revision)).append(same?" · 无需下载":" · 可更新/修复");
+            details.append('\n').append(ModuleSpec.name(id)).append("：").append(local.intact?(local.number.isEmpty()?shortRevision(local.revision):local.number):local.message).append(" → ").append(target.number.isEmpty()?shortRevision(target.revision):target.number).append(same?" · 无需下载":" · 可更新/修复");
             if(!same){names.add(ModuleSpec.name(id));File saved=ModuleStore.archive(c,id,code);boolean valid=false;if(saved.isFile())try{ModuleFiles.verify(saved,target,ModuleStore.trusted(c));valid=true;}catch(Exception ignored){}if(!valid)bytes+=target.size;}
         }
         return (names.isEmpty()?"已下载模块完整；无需重复下载":"需配套文件约 "+((bytes+1023)/1024)+" KB："+String.join("、",names))+details;

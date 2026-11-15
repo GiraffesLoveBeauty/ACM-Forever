@@ -47,10 +47,19 @@ public class GithubCreditsTest {
         assertThrows(JSONException.class, () -> GithubCredits.parse(avatar.toString()));
     }
     @Test public void rejectsInvalidRecordAndFalsePublishedStatus() throws Exception {
-        JSONObject value = source(); value.getJSONObject("versions").getJSONObject("0.2.22").put("status","published");
+        JSONObject value = source(); value.getJSONObject("versions").getJSONObject("0.2.22").put("publishers",new JSONArray());
         assertThrows(JSONException.class, () -> GithubCredits.parse(value.toString()));
         JSONObject evidence = source(); evidence.getJSONObject("versions").getJSONObject("0.2.21").put("evidence",new JSONArray().put("http://example.invalid"));
         assertThrows(JSONException.class, () -> GithubCredits.parse(evidence.toString()));
+    }
+    @Test public void confirmedSelfReviewsAndPublishedHistoryAreAttributedToTheirActualOwner()throws Exception{
+        GithubCredits credits=GithubCredits.parse(source().toString());
+        for(int minor=22;minor<=28;minor++){
+            GithubCredits.Version version=credits.versions.get("0.2."+minor);
+            assertEquals("published",version.status);assertEquals(java.util.Collections.singletonList("MiaoJJ13445"),version.reviewers);
+            assertEquals(java.util.Collections.singletonList("MiaoJJ13445"),version.reviewRequesters);
+            assertTrue(version.scope.contains("本人确认"));assertFalse(version.evidence.isEmpty());
+        }
     }
     @Test public void attributionListsCannotBeChangedAfterValidation() throws Exception {
         GithubCredits credits = GithubCredits.parse(source().toString());

@@ -53,7 +53,7 @@ public final class UpdateActivity extends Activity {
     private void moduleStatus(){
         if(isDestroyed()||moduleActions==null)return;moduleActions.removeAllViews();
         for(String id:ModuleSpec.IDS)if(ModuleStore.acquired(this).contains(id)&&OptionalModules.allowed(this,id)){
-            ModuleHealth.Status health=ModuleHealth.state(id);moduleActions.addView(text(ModuleSpec.name(id)+" · "+health.message+(health.revision.isEmpty()?"":"\n编号："+health.revision),12));
+            ModuleHealth.Status health=ModuleHealth.state(id);moduleActions.addView(text(ModuleSpec.name(id)+" · "+health.message+(!health.number.isEmpty()?"\n编号："+health.number:health.revision.isEmpty()?"":"\n内容标识："+health.revision),12));
             if(health.intact&&!ModuleStore.current(this,id))button(moduleActions,"更新"+ModuleSpec.name(id),()->startActivity(new Intent(this,ModuleDownloadActivity.class).putExtra("module_id",id).putExtra("refresh_module",true).putExtra("next",OptionalModules.target(this,id))));
             if(!health.intact&&!"检查中".equals(health.message))button(moduleActions,"修复 "+ModuleSpec.name(id),()->OptionalModules.open(this,id,OptionalModules.target(this,id)));
         }

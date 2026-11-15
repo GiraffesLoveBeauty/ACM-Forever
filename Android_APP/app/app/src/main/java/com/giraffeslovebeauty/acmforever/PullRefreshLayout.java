@@ -41,6 +41,9 @@ final class PullRefreshLayout extends FrameLayout {
     @Override public void onInitializeAccessibilityNodeInfo(android.view.accessibility.AccessibilityNodeInfo info){super.onInitializeAccessibilityNodeInfo(info);info.addAction(new android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK,"刷新页面"));}
     void loading(boolean value){loading=value;if(!dragging){indicator.setVisibility(value?VISIBLE:INVISIBLE);indicator.setAlpha(1);progress.setVisibility(value?VISIBLE:GONE);label.setText(value?"正在刷新…":"下拉刷新");}}
     static PullRefreshLayout forPage(Context context,ScrollView scroll,PageRefresh page,BooleanSupplier enabled){
-        PullRefreshLayout layout=new PullRefreshLayout(context,scroll,()->enabled.getAsBoolean()&&page.canRefresh(),page::refreshNow);page.observe(layout::loading);return layout;
+        return forPage(context,scroll,page,enabled,page::refreshNow);
+    }
+    static PullRefreshLayout forPage(Context context,ScrollView scroll,PageRefresh page,BooleanSupplier enabled,Runnable refresh){
+        PullRefreshLayout layout=new PullRefreshLayout(context,scroll,()->enabled.getAsBoolean()&&page.canRefresh(),refresh);page.observe(layout::loading);return layout;
     }
 }

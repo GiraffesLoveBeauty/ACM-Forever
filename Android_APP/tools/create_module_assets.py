@@ -15,7 +15,21 @@ from zipfile import ZipFile, ZIP_DEFLATED
 from create_update_manifest import signer_digest, PACKAGE
 
 IDS = ('official-themes', 'advanced', 'admin', 'cat-art')
+PINYIN = {
+    'official-themes': 'guan_1_fang_1_zhu_3_ti_2_ku_4',
+    'advanced': 'gao_1_ji_2_ge_4_xing_4_hua_4',
+    'admin': 'shou_3_ji_1_bian_4_jie_2_guan_3_li_3',
+    'cat-art': 'fen_1_ceng_2_mao_1_niang_2_su_4_cai_2',
+}
 MAX_BYTES = 16 * 1024 * 1024
+
+
+def module_number(module, version, build='I'):
+    if (module not in PINYIN or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version)
+            or not isinstance(build, str) or not build
+            or not re.fullmatch(r'M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})', build)):
+        raise ValueError('Invalid module number')
+    return f'{PINYIN[module]}-{version}-{build}'
 
 
 def filename(module):
@@ -59,6 +73,10 @@ def validate_catalog(index, version, code, repository):
             raise ValueError('Invalid module artifact identity, URL, hash or size')
         if 'revision' in entry and (not isinstance(entry['revision'], str) or not re.fullmatch(('n1-' if module in ('advanced', 'admin') else 'a1-') + '[0-9a-f]{64}', entry['revision'])):
             raise ValueError('Invalid independent module revision')
+        if 'number' in entry:
+            number = entry['number']
+            if not isinstance(number, str) or number != module_number(module, version, number.rsplit('-', 1)[-1]):
+                raise ValueError('Module number does not match identity or App version')
 
 
 def package_resources(source, target, module, code):
@@ -121,6 +139,7 @@ def build(args):
         entries.append(dict(id=module, kind='native' if module in ('advanced', 'admin') else 'assets',
                             url=f'https://github.com/{args.repository}/releases/download/v{version}/{target.name}',
                             sha256=hashlib.sha256(target.read_bytes()).hexdigest(), sizeBytes=target.stat().st_size,
+                            number=module_number(module, version, args.module_build),
                             revision=native_revision(Path(args.app_root) / module) if module in ('advanced', 'admin') else resource_revision(Path(args.resources) / module)))
     index = dict(schemaVersion=1, versionCode=code, versionName=version, modules=entries)
     validate_catalog(index, version, code, args.repository)
@@ -135,4 +154,5 @@ if __name__ == '__main__':
     for name in ('output-dir', 'app-root', 'resources', 'repository', 'keystore', 'jarsigner', 'keytool', 'aapt', 'apksigner'):
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--channel', choices=('debug', 'release'), required=True)
+    parser.add_argument('--module-build', default='I', help='Canonical Roman build number within this App version, e.g. I or II')
     build(parser.parse_args())
