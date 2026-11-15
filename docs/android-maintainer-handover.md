@@ -10,7 +10,7 @@
 
 当前 App 维护负责人为 GitHub 用户 **MiaoJJ13445**。本人确认截至 v0.2.21 的 App 历史版本均由其制作，Android 历次 PR 作者记录与之相符；目前未来数月仍由其负责。后续交接必须在 PR 中明确新负责人、范围、接手日期和待办，不能仅修改客户端显示就视为完成权限交接。
 
-已核实的 App Review 发起者是 **Setsuna-Yukirin**，自动评审者是 **chatgpt-codex-connector[bot]**，公开安装包发布账号是 **github-actions[bot]**。发起评审、执行评审、人工批准、提交版本和发布制品是不同职责，不能相互替代。GitHub 贡献者中的 `codex` 是 GitHub 提交归属账号，不能凭名字将其视为 Codex 评审机器人或某位真实成员。
+0.2.21及以前已核实的 App Review 发起者是 **Setsuna-Yukirin**，自动评审者是 **chatgpt-codex-connector[bot]**。用户于2026-11-15确认：**自0.2.22起的已完成版本由 MiaoJJ13445 本人Review**（含本地审查），对应版本据此署名；未来候选仍待实际完成后补录。公开安装包发布账号是 **github-actions[bot]**。发起评审、执行评审、GitHub人工批准、提交版本和发布制品是不同职责，不能相互替代。本人Review署名不代表GitHub人工APPROVED。GitHub 贡献者中的 `codex` 是 GitHub 提交归属账号，不能凭名字将其视为 Codex 评审机器人或某位真实成员。
 
 人员数据入口为 `app/app/src/main/assets/releases/credits.json`；头像在 `assets/credits/avatars/`。数据只包括公开 GitHub 用户名、公开头像、职责和来源链接，不包含 QQ、密码、邮箱、Token 或管理接口返回资料。关于页与更新页共用该数据；不要各自硬编码名单。
 
@@ -18,7 +18,7 @@
 
 1. 在 `people` 中登记新增参与者的准确 GitHub `login`、`kind`、`profileUrl`、公开头像来源与本地文件摘要。普通用户和机器人分别标注，头像缩为至多 96×96 PNG，单张不超过 64 KiB。
 2. 在 `versions` 中增加与更新日志同名的版本；`uploaders` 表示 App 上传/提交负责人，`reviewRequesters` 表示实际发布评审请求者，`reviewers` 表示实际出具评审者，`publishers` 表示实际 Release 发布账号。
-3. 从对应 PR 的评论或 review 核实人员，并保存 `evidence` 链接。没有发生的操作保留空数组，不预填“已评审”“已发布”。新 PR 上传前通常无法知道最终评审记录，不得为补署名伪造记录。
+3. 从对应 PR 的评论或 review 核实人员，并保存 `evidence` 链接；本地审查可据本人明确确认补录，在 `scope` 写明确认日期和来源，不能冒充GitHub人工批准。没有发生的操作保留空数组，不预填“已评审”“已发布”。新 PR 上传前通常无法知道最终评审记录，不得为补署名伪造记录。
 4. 早期 v0.1.x～v0.2.12 随 PR #48 汇总，显示该 PR 参与人时必须保留“未找到本版本独立评审记录”。v0.2.14 未公开、v0.2.16 拆分后未独立发布，不能把 Tag、草稿或本地 APK 当成公开 Release。
 5. 特别鸣谢收录仓库 GitHub 贡献者和已核实的 App 评审协作者，机器人另列自动化支持。非代码贡献者取得准确 GitHub 身份后可人工补充来源；不要猜测同名账号。后继维护者及时补录新参与者，更新 `capturedOn`，不要删除历史署名。
 

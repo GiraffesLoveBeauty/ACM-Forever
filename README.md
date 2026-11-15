@@ -81,3 +81,4 @@
 - [acceptance.md（训练任务联调、性能与发布回退）](docs/training-tasks/acceptance.md)
 
 - [android-v0.2.28-practice-recovery.md（练习、正式题单与模块编号/恢复）](docs/android-v0.2.28-practice-recovery.md)
+- [android-v0.2.29-lists-updates.md（题单权限、列表加载、署名与更新诊断）](docs/android-v0.2.29-lists-updates.md)
