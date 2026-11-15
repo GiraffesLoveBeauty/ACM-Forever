@@ -4,6 +4,12 @@ const props = defineProps({ task: { type: Object, required: true } });
 const result = computed(() => props.task.result || {});
 const progress = computed(() => props.task.progress || {});
 const active = computed(() => ['queued', 'running'].includes(props.task.status));
+const luoguCatalog = computed(
+  () => props.task.platform === 'luogu' && ['catalog', 'platform'].includes(result.value.scope),
+);
+const batch = computed(() =>
+  props.task.platform === 'luogu' ? result.value.completed_batches : progress.value.batch,
+);
 const status = computed(
   () =>
     ({
@@ -50,34 +56,38 @@ const failures = computed(() => result.value.failures || []);
       :value="total ? done || 0 : undefined"
       aria-label="题目拉取进度"
     />
-    <p class="muted" v-if="progress.phase === 'taxonomy'">正在更新洛谷原生难度与标签…</p>
-    <p class="muted" v-else-if="progress.phase === 'catalog'">
+    <p class="muted" v-if="active && progress.phase === 'taxonomy'">正在更新洛谷原生难度与标签…</p>
+    <p
+      class="muted"
+      v-else-if="active && task.platform === 'luogu' && progress.phase === 'catalog'"
+    >
       正在同步洛谷目录 · 已读取 {{ result.catalog_pages || progress.page || 0 }} 页 · 已导入
       {{ result.metadata_count || progress.metadata_done || 0 }} 道题目
     </p>
-    <p class="muted" v-else-if="progress.phase === 'metadata'">
+    <p class="muted" v-else-if="active && progress.phase === 'metadata'">
       正在导入题目目录 {{ progress.metadata_done || 0 }} / {{ progress.metadata_total || 0 }} 题
     </p>
-    <p class="muted" v-else-if="progress.phase === 'contest_catalog'">
+    <p class="muted" v-else-if="active && progress.phase === 'contest_catalog'">
       正在补全比赛题目列表 {{ progress.contests_done || 0 }} / {{ progress.contests_total || 0 }} 场
     </p>
     <p class="muted" v-else-if="total || !active">
-      已处理 {{ progress.done || 0 }} / {{ progress.total || 0 }} 题 · 成功
-      {{ result.success_count || 0 }} 题 · 失败 {{ result.failure_count || 0 }} 题 · 样例
-      {{ result.sample_count || 0 }} 组 · 跳过 {{ result.skipped_count || 0 }} 题 · 剩余待拉取
-      {{ result.remaining_count || 0 }} 题
+      已处理 {{ done || 0 }} / {{ total || 0 }} 题 · 成功 {{ result.success_count || 0 }} 题 · 失败
+      {{ result.failure_count || 0 }} 题 · 样例 {{ result.sample_count || 0 }} 组 · 跳过
+      {{ result.skipped_count || 0 }} 题 · 剩余待拉取 {{ result.remaining_count || 0 }} 题
       <template v-if="result.scope === 'platform'">
-        · 批次 {{ progress.batch || 0 }} / {{ result.batch_count || 0 }}</template
+        · {{ task.platform === 'luogu' ? '已完成批次' : '批次' }} {{ batch || 0 }} /
+        {{ result.batch_count || 0 }}</template
       >
       <template v-if="active && progress.problem_id"> · 当前 {{ progress.problem_id }}</template>
     </p>
     <p class="muted" v-else>
       正在读取{{ result.scope === 'platform' ? '全平台题目目录' : '比赛题目列表' }}…
     </p>
-    <p
-      v-if="task.platform === 'luogu' && !active && result.catalog_complete === false"
-      class="muted"
-    >
+    <p v-if="luoguCatalog && !active" class="muted">
+      目录同步结果 · 已读取 {{ result.catalog_pages || 0 }} 页 · 已导入
+      {{ result.metadata_count || 0 }} 道题目
+    </p>
+    <p v-if="luoguCatalog && !active && result.catalog_complete === false" class="muted">
       目录尚未完整同步，已保存的数据保留；可稍后重新发起采集。
     </p>
     <p v-if="result.access_limited" role="alert">

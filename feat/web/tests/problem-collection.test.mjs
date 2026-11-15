@@ -462,3 +462,186 @@ test('Luogu validation rejects source URLs before any task is submitted', async 
   assert.equal(syncPosts().length, 0);
   assert.match(textOf(mounted.root), /仅支持 P/);
 });
+
+test('successful explicit Luogu collection does not report an incomplete directory', async () => {
+  jobs = [
+    running({
+      platform: 'luogu',
+      status: 'completed',
+      result: {
+        scope: 'problems',
+        success_count: 1,
+        failure_count: 0,
+        remaining_count: 0,
+        catalog_complete: false,
+      },
+      progress: { phase: 'statements', done: 1, total: 1, problem_id: 'P1001' },
+    }),
+  ];
+  await page(Tasks);
+  const content = textOf(mounted.root);
+  assert.match(content, /拉取完成/);
+  assert.match(content, /成功 1 题/);
+  assert.doesNotMatch(content, /目录尚未完整同步|目录同步结果/);
+});
+
+test('Luogu directory warnings remain visible after failed or cancelled directory collection', async () => {
+  for (const scope of ['catalog', 'platform']) {
+    for (const status of ['failed', 'cancelled']) {
+      jobs = [
+        running({
+          platform: 'luogu',
+          status,
+          result: { scope, catalog_complete: false, catalog_pages: 1, metadata_count: 3 },
+          progress: { phase: 'catalog', done: 3, total: 6 },
+        }),
+      ];
+      await page(Tasks);
+      const content = textOf(mounted.root);
+      assert.match(content, /目录尚未完整同步/);
+      assert.match(content, /已读取 1 页 · 已导入 3 道题目/);
+      assert.doesNotMatch(content, /正在同步|拉取完成|目录同步完成/);
+      mounted.unmount();
+      mounted = null;
+    }
+  }
+});
+
+test('completed Luogu directory collection shows saved counts without ongoing phase text', async () => {
+  jobs = [
+    running({
+      platform: 'luogu',
+      status: 'completed',
+      result: { scope: 'catalog', catalog_complete: true, catalog_pages: 1, metadata_count: 3 },
+      progress: { phase: 'catalog', done: 3, total: 3 },
+    }),
+  ];
+  await page(Tasks);
+  const content = textOf(mounted.root);
+  assert.match(content, /拉取完成/);
+  assert.match(content, /已读取 1 页 · 已导入 3 道题目/);
+  assert.doesNotMatch(content, /正在同步|目录尚未完整同步/);
+});
+
+test('Luogu tasks that skip saved statements show final statistics after the last discovery phase', async () => {
+  for (const scope of ['problems', 'platform']) {
+    jobs = [
+      running({
+        platform: 'luogu',
+        status: 'completed',
+        result: {
+          scope,
+          skipped_count: 1,
+          catalog_complete: scope === 'platform',
+          catalog_pages: scope === 'platform' ? 1 : 0,
+          metadata_count: scope === 'platform' ? 1 : 0,
+        },
+        progress: { phase: scope === 'platform' ? 'catalog' : 'taxonomy', done: 0, total: 0 },
+      }),
+    ];
+    await page(Tasks);
+    const content = textOf(mounted.root);
+    assert.match(content, /拉取完成/);
+    assert.match(content, /跳过 1 题/);
+    assert.doesNotMatch(content, /正在更新|正在同步|目录尚未完整同步/);
+    mounted.unmount();
+    mounted = null;
+  }
+});
+
+test('active collection phases keep their progress wording for each platform', async () => {
+  for (const [platform, phase, expected] of [
+    ['luogu', 'taxonomy', /正在更新洛谷原生难度与标签/],
+    ['luogu', 'catalog', /正在同步洛谷目录/],
+    ['atcoder', 'metadata', /正在导入题目目录 2 \/ 3 题/],
+    ['codeforces', 'contest_catalog', /正在补全比赛题目列表 1 \/ 2 场/],
+    ['atcoder', 'catalog', /正在读取全平台题目目录/],
+    ['codeforces', 'catalog', /正在读取全平台题目目录/],
+  ]) {
+    jobs = [
+      running({
+        platform,
+        result: { scope: 'platform', catalog_complete: false },
+        progress: {
+          phase,
+          done: 0,
+          total: 0,
+          metadata_done: 2,
+          metadata_total: 3,
+          contests_done: 1,
+          contests_total: 2,
+        },
+      }),
+    ];
+    await page(Tasks);
+    const content = textOf(mounted.root);
+    assert.match(content, expected);
+    assert.doesNotMatch(content, /目录尚未完整同步|目录同步结果/);
+    mounted.unmount();
+    mounted = null;
+  }
+});
+
+test('terminal legacy discovery phases show final counts instead of ongoing wording', async () => {
+  for (const [platform, phase] of [
+    ['atcoder', 'metadata'],
+    ['codeforces', 'contest_catalog'],
+  ]) {
+    for (const status of ['completed', 'partial', 'failed', 'cancelled']) {
+      jobs = [
+        running({
+          platform,
+          status,
+          result: { scope: 'platform', skipped_count: 2 },
+          progress: { phase, done: 1, total: 4, metadata_done: 3, metadata_total: 5 },
+        }),
+      ];
+      await page(Tasks);
+      const content = textOf(mounted.root);
+      assert.match(content, /跳过 2 题/);
+      assert.match(content, phase === 'metadata' ? /已处理 3 \/ 5 题/ : /已处理 1 \/ 4 题/);
+      assert.doesNotMatch(content, /正在导入|正在补全/);
+      mounted.unmount();
+      mounted = null;
+    }
+  }
+});
+
+test('Luogu platform collection reports completed batches while running and after stopping', async () => {
+  for (const [status, completed] of [
+    ['running', 1],
+    ['completed', 2],
+    ['cancelled', 1],
+  ]) {
+    jobs = [
+      running({
+        platform: 'luogu',
+        status,
+        result: { scope: 'platform', batch_count: 2, completed_batches: completed },
+        progress: { phase: 'statements', done: completed, total: 3 },
+      }),
+    ];
+    await page(Tasks);
+    assert.ok(textOf(mounted.root).includes('已完成批次 ' + completed + ' / 2'));
+    mounted.unmount();
+    mounted = null;
+  }
+});
+
+test('Codeforces and AtCoder retain their current batch number display', async () => {
+  for (const platform of ['codeforces', 'atcoder']) {
+    jobs = [
+      running({
+        platform,
+        result: { scope: 'platform', batch_count: 3, completed_batches: 1 },
+        progress: { phase: 'statements', done: 3, total: 5, batch: 2 },
+      }),
+    ];
+    await page(Tasks);
+    const content = textOf(mounted.root);
+    assert.match(content, /批次 2 \/ 3/);
+    assert.doesNotMatch(content, /已完成批次/);
+    mounted.unmount();
+    mounted = null;
+  }
+});
