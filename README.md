@@ -82,3 +82,4 @@
 
 - [android-v0.2.28-practice-recovery.md（练习、正式题单与模块编号/恢复）](docs/android-v0.2.28-practice-recovery.md)
 - [android-v0.2.29-lists-updates.md（题单权限、列表加载、署名与更新诊断）](docs/android-v0.2.29-lists-updates.md)
+- [android-v0.2.29-maintenance-followup.md（密码显隐、内嵌预览、每日检查与模块管理）](docs/android-v0.2.29-maintenance-followup.md)
