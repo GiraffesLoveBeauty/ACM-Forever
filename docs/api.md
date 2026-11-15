@@ -265,7 +265,7 @@ Web 归属验证当前实现 Codeforces：账号存在性使用已有验证器�
 
 题库管理顶部的 **服务端数据库 → 初始化数据库** 会补齐 SQLite 表结构，保留已有账号、设置、题目及样例；页面显示各平台目录数量、已采集数量、失败数量和样例组数。服务启动仍自动初始化，也可使用已有 `python -m api.init_db` 命令。
 
-题库管理页的 **题库记录** 可视化浏览 `crawler_problems` 中的目录数据、采集状态、样例数和更新时间，并按平台、题面状态及题号 / 题名 / 比赛 ID 搜索。对应的 `GET /api/admin/database/problems` 仅限 Web 管理员 / Root，支持 `q`、`platform`、`status`、`page` 和 `page_size`；题面正文通过下方题目详情接口读取。
+题库管理页的 **题库记录** 可视化浏览 `crawler_problems` 中的目录数据、采集状态、样例数和更新时间，并按平台、题面状态及题号 / 题名 / 比赛 ID 搜索。对应的 `GET /api/admin/database/problems` 仅限 Web 管理员 / Root，支持 `q`、`platform`、`status`、`page` 和 `page_size`；洛谷另支持 `native_difficulty` / `native_tag`，返回原生分类，筛选先于统计与分页。题面正文通过下方题目详情接口读取。
 
 管理页按 **服务端数据库 → 拉取题目 → 题库记录** 排列；浏览和收藏题目的独立题库通过主导航进入，不再混排在管理页。初始化、目录导入和采集批次完成后刷新题库记录，并保留记录表当前筛选和页码。
 
@@ -389,7 +389,7 @@ print(task["status"], task["progress"], task["result"])
 
 ### 洛谷公开 P 题库
 
-洛谷复用 `POST /api/admin/problems/sync` 和 `GET /api/tasks`，沿用管理员鉴权、首次改密限制、CSRF、202/409 与取消机制。本节参数独立于上文的 AtCoder/CF 比赛参数；本期不增加前端采集入口或成员 AC 同步。
+洛谷复用 `POST /api/admin/problems/sync` 和 `GET /api/tasks`，沿用管理员鉴权、首次改密限制、CSRF、202/409 与取消机制。本节参数独立于上文的 AtCoder/CF 比赛参数。Web 前端在成员题库和管理员题库展示原生分类，在采集页提供下述三种范围；本期不恢复成员 AC 同步，训练模块兼容由 #137 处理。
 
 | 参数 | 洛谷规则 |
 | --- | --- |
@@ -415,6 +415,7 @@ print(task["status"], task["progress"], task["result"])
 | 查询接口 | 权限与新增数据 |
 | --- | --- |
 | `GET /api/problems?platform=luogu` | 管理员题库列表 |
+| `GET /api/admin/database/problems?platform=luogu` | 管理专用数据库列表；可组合原生分类、题面状态、搜索与分页 |
 | `GET /api/me/problems?platform=luogu` | 成员题库列表；原有本人记录范围、收藏、分页规则继续适用 |
 | `GET /api/problems/luogu/P1001` | 管理员本地详情 |
 | `GET /api/me/problems/luogu/P1001` | 成员本地详情 |
@@ -437,9 +438,9 @@ print(task["status"], task["progress"], task["result"])
 }
 ```
 
-难度和标签保留原生整数 ID（标签可为负数），颜色为洛谷原始令牌；不换算为 CF Rating。未知 ID 的名称/颜色可为 null，前端应显示 ID 作为兜底；难度字段缺失时 id=null，与原生 id=0（暂无评定）区分。原 `tags` 字段仍保存标签名供旧接口兼容，新前端以 native_tags 为准。详情另返回 `statement_markdown`（原始题面段落拼接）和 `native_limits`（原始 time/memory 数组及原单位，不猜测语言对应关系，缺失限制如实返回 null）；样例使用已有 `samples` 数组。HTML 由项目已有 Mistune 渲染，转义原始 HTML，限制链接协议，并保留数学公式、表格和代码块。
+难度和标签保留原生整数 ID（标签可为负数），颜色为洛谷原始令牌；不换算为 CF Rating。未知 ID 的名称/颜色可为 null，前端应显示 ID 作为兜底；难度字段缺失时 id=null，与原生 id=0（暂无评定）区分。原 `tags` 字段仍保存标签名供旧接口兼容，新前端以 native_tags 为准。详情另返回 `statement_markdown`（原始题面段落拼接）和 `native_limits`（原始 time/memory 数组及原单位，不猜测语言对应关系，缺失限制如实返回 null）；样例使用已有 `samples` 数组。题目背景等可选 Markdown 段落为 null 时按空段落处理，正文仍必须非空；这与源站合法空字段兼容，不将缺失正文当成功。HTML 由项目已有 Mistune 渲染，转义原始 HTML，限制链接协议，并保留数学公式、表格和代码块。
 
-两个列表可组合 `native_difficulty=0` 和 `native_tag=-2` 筛选；必须显式指定 `platform=luogu`，参数为单个整数 ID，无效值返回 400。原生筛选在总数和分页之前生效，可和已有搜索/标签/收藏/本人记录范围组合。上述 GET 均只读 SQLite，不触发远程采集；字典返回 `difficulties/tags/tag_types/versions/updated_at/stale`，首次采集前为空数组、updated_at=null、stale=true。字典缓存 24 小时，开启采集时才刷新。分类表初始化兼容旧数据库。
+上述三个题目列表可组合 `native_difficulty=0` 和 `native_tag=-2` 筛选；必须显式指定 `platform=luogu`，参数为单个整数 ID，无效值返回 400。原生筛选在总数和分页之前生效，可和已有搜索/标签/收藏/本人记录范围组合。上述 GET 均只读 SQLite，不触发远程采集；字典返回 `difficulties/tags/tag_types/versions/updated_at/stale`，首次采集前为空数组、updated_at=null、stale=true。字典缓存 24 小时，开启采集时才刷新。分类表初始化兼容旧数据库。
 
 ## 已下线的 Web 功能
 
