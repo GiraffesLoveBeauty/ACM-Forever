@@ -121,7 +121,16 @@ def create_app(*, daily_problem_sync=False, member_sync=False):
     app.config["WEBUI_DIST_DIR"] = Path(__file__).parent.parent / "web" / "dist"
     root_ids = _csv_env("ACM_ROOT_QQ_IDS")
     initial_admin_ids = _csv_env("ACM_ADMIN_QQ_IDS")
+    luogu_interval = float(os.getenv("ACM_LUOGU_REQUEST_INTERVAL", "2.0"))
+    luogu_daily_limit = int(os.getenv("ACM_LUOGU_DAILY_STATEMENT_LIMIT", "100"))
+    luogu_max_pages = int(os.getenv("ACM_LUOGU_CATALOG_MAX_PAGES", "1000"))
+    if not 1.2 <= luogu_interval <= 60 or not 1 <= luogu_daily_limit <= 1000 or not 1 <= luogu_max_pages <= 2000:
+        raise ValueError("Luogu request interval must be 1.2–60, daily limit 1–1000, catalog pages 1–2000")
     crawler_config = {
+        "luogu_request_interval": luogu_interval,
+        "luogu_daily_statement_limit": luogu_daily_limit,
+        "luogu_catalog_max_pages": luogu_max_pages,
+        "luogu_daily_problem_sync_enabled": _bool_env("ACM_LUOGU_DAILY_PROBLEM_SYNC_ENABLED", False),
         "luogu_user_sync_enabled": _bool_env("ACM_LUOGU_USER_SYNC_ENABLED", False),
         "luogu_cookie": os.getenv("ACM_LUOGU_COOKIE", ""),
         "luogu_csrf_token": os.getenv("ACM_LUOGU_CSRF_TOKEN", ""),
@@ -358,7 +367,7 @@ def create_app(*, daily_problem_sync=False, member_sync=False):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
-        problem_images = " https://*.codeforces.com https://codeforces.com https://img.atcoder.jp https://atcoder.jp" if request.path == "/problem.html" else ""
+        problem_images = " https://*.codeforces.com https://codeforces.com https://img.atcoder.jp https://atcoder.jp https://www.luogu.com.cn https://cdn.luogu.com.cn" if request.path == "/problem.html" else ""
         response.headers.setdefault(
             "Content-Security-Policy",
             "default-src 'self'; base-uri 'self'; object-src 'none'; "

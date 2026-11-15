@@ -387,6 +387,60 @@ print(task["status"], task["progress"], task["result"])
 
 服务启动会自动建表；也可先在部署目录运行 `python3 -m api.init_db --database /root/acm-forever-data/acm_forever.db`，详见 [服务端初始化说明](../feat/api/README.md#单独初始化数据库与题目采集)。
 
+### 洛谷公开 P 题库
+
+洛谷复用 `POST /api/admin/problems/sync` 和 `GET /api/tasks`，沿用管理员鉴权、首次改密限制、CSRF、202/409 与取消机制。本节参数独立于上文的 AtCoder/CF 比赛参数；本期不增加前端采集入口或成员 AC 同步。
+
+| 参数 | 洛谷规则 |
+| --- | --- |
+| `platform` | 必填 `luogu` |
+| `scope` | `problems`：指定题号；`catalog`：仅目录；`platform`：目录加缺失题面。不传时，有题号默认 problems，否则 platform |
+| `problem_ids` | problems 必填，1–100 个 P 题号，大小写规范化、去重；不接受 URL、B/AT/CF 等其他题库题号 |
+| `contest_id` | 洛谷不接受此参数 |
+| `limit` | 仅 platform 使用，本次题面上限 1–1000，默认 100；目录会独立分页导入 |
+| `batch_size` | 入库/题面进度批次大小 1–100，默认 50；不改变原站分页大小 |
+| `language` | 仅 `zh-CN`，默认同此值 |
+| `refresh` | 布尔，默认 false；已有非空题面时跳过，true 允许重新采集 |
+
+```json
+{"platform":"luogu","scope":"problems","problem_ids":["P1001","P1002"],"refresh":false}
+```
+
+公开来源为 `/problem/list?type=P&page=N` 和 `/problem/P题号` 页内 `lentille-context`，字典为 `/_lfe/config` 的 `ProblemDifficulty` 及 `/_lfe/tags`。后端只请求固定 HTTPS 原站，不接受任意 URL，不带 Cookie。所有请求有响应大小限制、超时与共享节流；403/429 或登录跳转停止整批任务，`result.access_limited/retry_after/error` 提供原因和建议等待秒数，冷却后需重新发起。三次连续单题错误也停止任务。
+
+目录逐页、逐批提交；重复题号、不完整页、总数变化或配置页数上限会报告 `catalog_complete=false` 和 partial/failed，保留已写入目录。目录之外的旧题保留，不据此推断删除。指定题号首次失败时保存仅有题号/原站链接的占位目录及失败信息，未验证题目不会有题面。取消后重跑可继续补齐。
+
+任务结果复用计数字段，增加 `catalog_pages/catalog_complete`；`progress.phase` 为 `taxonomy/catalog/statements`。洛谷 `remaining_count` 包含失败及尚未成功保存的题面，`metadata_count` 为本次已提交的目录题数；`completed` 表示本次有界任务成功，是否仍有缺失题面看 remaining_count。到达题面 limit 不代表整个平台题面已经补齐。分类缓存过期且普通刷新失败时可使用缓存，并返回 `taxonomy_warning`；无缓存时分类获取失败会停止任务。
+
+| 查询接口 | 权限与新增数据 |
+| --- | --- |
+| `GET /api/problems?platform=luogu` | 管理员题库列表 |
+| `GET /api/me/problems?platform=luogu` | 成员题库列表；原有本人记录范围、收藏、分页规则继续适用 |
+| `GET /api/problems/luogu/P1001` | 管理员本地详情 |
+| `GET /api/me/problems/luogu/P1001` | 成员本地详情 |
+| `GET /api/problems/taxonomy?platform=luogu` | 管理员原生分类字典 |
+| `GET /api/me/problems/taxonomy?platform=luogu` | 成员原生分类字典 |
+
+列表和详情保留旧字段，洛谷增加以下字段：
+
+```json
+{
+  "platform": "luogu",
+  "problem_id": "P1001",
+  "problem_rating": null,
+  "classification_source": "luogu",
+  "native_difficulty": {"id": 1, "type": "Pupil", "name": "入门", "color": "pink-3"},
+  "native_tags": [
+    {"id": 1, "name": "模拟", "type": 2, "parent": 110,
+     "category": {"id": 2, "type": "Algorithm", "name": "算法", "color": "lapis-3", "order": 1}}
+  ]
+}
+```
+
+难度和标签保留原生整数 ID（标签可为负数），颜色为洛谷原始令牌；不换算为 CF Rating。未知 ID 的名称/颜色可为 null，前端应显示 ID 作为兜底；难度字段缺失时 id=null，与原生 id=0（暂无评定）区分。原 `tags` 字段仍保存标签名供旧接口兼容，新前端以 native_tags 为准。详情另返回 `statement_markdown`（原始题面段落拼接）和 `native_limits`（原始 time/memory 数组及原单位，不猜测语言对应关系，缺失限制如实返回 null）；样例使用已有 `samples` 数组。HTML 由项目已有 Mistune 渲染，转义原始 HTML，限制链接协议，并保留数学公式、表格和代码块。
+
+两个列表可组合 `native_difficulty=0` 和 `native_tag=-2` 筛选；必须显式指定 `platform=luogu`，参数为单个整数 ID，无效值返回 400。原生筛选在总数和分页之前生效，可和已有搜索/标签/收藏/本人记录范围组合。上述 GET 均只读 SQLite，不触发远程采集；字典返回 `difficulties/tags/tag_types/versions/updated_at/stale`，首次采集前为空数组、updated_at=null、stale=true。字典缓存 24 小时，开启采集时才刷新。分类表初始化兼容旧数据库。
+
 ## 已下线的 Web 功能
 
 待复习 / 待复盘、提交时间线、笔记与计划工作区及其 Web 专属接口已下线。旧页面 `reviews.html/submissions.html/workspace.html` 显示“功能已下线”，可返回个人中心或管理中心。以下路由保留原身份及 CSRF 守卫，已授权调用统一返回 `410`、`code=feature_retired`，不读写历史学习数据：

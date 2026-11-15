@@ -1,4 +1,4 @@
-"""Collect public AtCoder and Codeforces problems."""
+"""Collect public AtCoder, Codeforces and Luogu problems."""
 
 import asyncio
 import hashlib
@@ -27,8 +27,11 @@ def sync_options(data):
     if set(data) - {"platform", "scope", "contest_id", "problem_ids", "limit", "batch_size", "language", "refresh"}:
         raise ValueError("存在不支持的参数，仅支持 platform/scope/contest_id/problem_ids/limit/batch_size/language/refresh")
     platform = data.get("platform", "atcoder")
+    if platform == "luogu":
+        from .luogu_sync import sync_options as luogu_options
+        return luogu_options(data)
     if platform not in ("atcoder", "codeforces"):
-        raise ValueError("题面采集支持 atcoder 和 codeforces")
+        raise ValueError("题面采集支持 atcoder、codeforces 和 luogu")
     scope = data.get("scope", "contest")
     if scope not in ("contest", "platform"):
         raise ValueError("scope 必须为 contest（单场比赛）或 platform（整个平台）")
@@ -189,8 +192,9 @@ async def _scheduled_pending(db, platform, items):
 
 
 class ProblemSync:
-    def __init__(self, db_path):
+    def __init__(self, db_path, config=None):
         self.db_path = db_path
+        self.config = config or {}
         self._request_lock = asyncio.Lock()
         self._next_request_at = 0.0
 
@@ -209,6 +213,9 @@ class ProblemSync:
                 self._next_request_at = time.monotonic() + 1.5
 
     async def run(self, options, task):
+        if options["platform"] == "luogu":
+            from .luogu_sync import LuoguSync
+            return await LuoguSync(self.db_path, self.config).run(options, task)
         task.update(status="running", started_at=int(time.time()))
         full = options["scope"] == "platform"
         scheduled = full and options.get("scheduled", False)
