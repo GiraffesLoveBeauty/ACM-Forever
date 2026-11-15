@@ -148,7 +148,7 @@ CF申请验证码后，将验证码保存到公开资料再确认；改绑、解
 - 单元测试、Lint、构建及受影响的真实 Activity 流程通过后再打包；回归见 [本轮实施与验收](android-v0.2.19.md)。不要把测试夹具当线上数据。
 - 只暂存本任务路径，检查敏感信息、`git diff --cached --check`，源码与文档分别提交；PR 写清测试与尚未部署的配置。新增文档在根 README 添加入口。
 
-当前GitHub发布配置见 [Tag发布](android-tag-release-v0.2.14.md)。自站更新另开PR；原讨论保留在 [PR #100](https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/100)。
+当前GitHub发布配置见 [Tag发布](android-tag-release-v0.2.14.md)。v0.2.27 的客户端保持 Gitee 优先；发布工作流默认 `GITEE_MIRROR_MODE=manual`，GitHub 正常发包，Gitee 由用户手动同步同批附件。只有设为 `automatic` 才要求发布凭据并运行自动镜像；不得把发布方式选择误改成 App 更新源优先级。自站更新另开PR；原讨论保留在 [PR #100](https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/100)。
 
 ## v0.2.19新增关联
 
