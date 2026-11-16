@@ -15,7 +15,7 @@ public class AcmApplication extends Application {
     private SharedPreferences preferences;
     private java.util.concurrent.CompletableFuture<Boolean> restoring;
     private PdfFiles pdfFiles;
-    private AppUpdates updates;
+    private volatile AppUpdates updates,adminUpdates;
     private AccountClosureFlow closure;
     private LoginGate loginGate;
 
@@ -35,6 +35,8 @@ public class AcmApplication extends Application {
         }
         api.setNetworkAvailable(this::networkAvailable);
         api.setSessionChanged(() -> {
+            if(updates!=null)updates.sessionChanged();
+            if(adminUpdates!=null&&adminUpdates!=updates)adminUpdates.sessionChanged();
             loginGate.sessionChanged();
             drafts.bind(api.isLoggedIn()?api.getBaseUrl()+"/"+api.accountKey():"",api.sessionGeneration());
             if(!api.isLoggedIn())clearPdfFiles();
@@ -55,6 +57,11 @@ public class AcmApplication extends Application {
     void closureReceiptChanged() { loginGate.receiptChanged(); }
     synchronized AccountClosureFlow closure() { if (closure == null) closure = new AccountClosureFlow(this); return closure; }
     synchronized AppUpdates updates(){if(updates==null)updates=new AppUpdates(this,api);return updates;}
+    synchronized AppUpdates adminUpdates(){if(adminUpdates==null)adminUpdates=new AppUpdates(this,api,this::networkAvailable,true);return adminUpdates;}
+    AppUpdates updatesFor(android.content.Intent intent){return intent.getBooleanExtra("admin_distribution",false)?adminUpdates():updates();}
+    boolean otherUpdatesBusy(AppUpdates current){AppUpdates a=updates,b=adminUpdates;return a!=null&&a!=current&&a.operationActive()||b!=null&&b!=current&&b.operationActive();}
+    boolean updatesBusy(){return otherUpdatesBusy(null);}
+    boolean canOpenPrivateApk(String name){AppUpdates a=updates,b=adminUpdates;return a!=null&&a.canOpenPrivateApk(name)||b!=null&&b.canOpenPrivateApk(name);}
     CloudDrafts drafts() { return drafts; }
     SessionVault vault() { return vault; }
     boolean consumeSessionSaveFailure() { return sessionSaveFailed.getAndSet(false); }

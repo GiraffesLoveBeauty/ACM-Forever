@@ -60,13 +60,16 @@ def validate_catalog(index, version, code, repository):
     if (index.get('schemaVersion') != 1 or index.get('versionCode') != code
             or index.get('versionName') != version or len(index.get('modules', [])) != 4):
         raise ValueError('Incomplete or incompatible module catalog')
+    tag = index.get('previewTag', 'v' + version)
+    if tag != 'v' + version and not re.fullmatch('v' + re.escape(version) + r'-preview\.[1-9]\d*', tag):
+        raise ValueError('Invalid module preview identity')
     seen = set()
     for entry in index['modules']:
         module = entry.get('id')
         if module not in IDS or module in seen:
             raise ValueError('Duplicate or unknown module')
         seen.add(module)
-        expected = f'https://github.com/{repository}/releases/download/v{version}/{filename(module)}'
+        expected = f'https://github.com/{repository}/releases/download/{tag}/{filename(module)}'
         if (entry.get('url') != expected or not re.fullmatch('[0-9a-f]{64}', entry.get('sha256', ''))
                 or type(entry.get('sizeBytes')) is not int or not 0 < entry['sizeBytes'] <= MAX_BYTES
                 or entry.get('kind') != ('native' if module in ('advanced', 'admin') else 'assets')):
@@ -110,6 +113,7 @@ def build(args):
     destination = Path(args.output_dir)
     manifest = json.loads((destination / 'update.json').read_text(encoding='utf-8'))
     version, code = manifest['versionName'], manifest['versionCode']
+    tag = manifest.get('previewTag', 'v' + version)
     if args.repository != 'GiraffesLoveBeauty/ACM-Forever':
         raise ValueError('Module client pins the distribution repository')
     certificate = manifest['signingCertificateSha256']
@@ -137,14 +141,19 @@ def build(args):
                 target, os.environ['ANDROID_KEY_ALIAS'])
         verify_jar(target, args.jarsigner, args.keytool, certificate)
         entries.append(dict(id=module, kind='native' if module in ('advanced', 'admin') else 'assets',
-                            url=f'https://github.com/{args.repository}/releases/download/v{version}/{target.name}',
+                            url=f'https://github.com/{args.repository}/releases/download/{tag}/{target.name}',
                             sha256=hashlib.sha256(target.read_bytes()).hexdigest(), sizeBytes=target.stat().st_size,
                             number=module_number(module, version, args.module_build),
                             revision=native_revision(Path(args.app_root) / module) if module in ('advanced', 'admin') else resource_revision(Path(args.resources) / module)))
     index = dict(schemaVersion=1, versionCode=code, versionName=version, modules=entries)
+    if args.channel == 'preview':
+        index['previewTag'] = tag
     validate_catalog(index, version, code, args.repository)
     (destination / 'modules.json').write_text(json.dumps(index, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    manifest['modulesUrl'] = f'https://github.com/{args.repository}/releases/download/v{version}/modules.json'
+    if args.channel == 'preview':
+        manifest['modulesPath'] = f'/api/admin/android/releases/{tag}/modules'
+    else:
+        manifest['modulesUrl'] = f'https://github.com/{args.repository}/releases/download/{tag}/modules.json'
     (destination / 'update.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     print(json.dumps({entry['id']: entry['sizeBytes'] for entry in entries}))
 
@@ -153,6 +162,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('output-dir', 'app-root', 'resources', 'repository', 'keystore', 'jarsigner', 'keytool', 'aapt', 'apksigner'):
         parser.add_argument('--' + name, required=True)
-    parser.add_argument('--channel', choices=('debug', 'release'), required=True)
+    parser.add_argument('--channel', choices=('debug', 'release', 'preview'), required=True)
     parser.add_argument('--module-build', default='I', help='Canonical Roman build number within this App version, e.g. I or II')
     build(parser.parse_args())

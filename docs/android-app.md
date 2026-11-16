@@ -1,6 +1,12 @@
 # ACMforever Android
 
-当前源码候选为 **0.2.30/code44**，基于已发布的 0.2.29/PR #144，优化弱网导航、重复读取、缓存失效和重连，增加管理员题单按完成数量可选排名。含兼容后端改动，合并前需负责人联调及运维确认；本轮只提交新 PR 等待 Review，未合并或发布。范围和验证见 [android-v0.2.30-network-training.md（本轮说明）](android-v0.2.30-network-training.md)。以下版本段落为历史记录。
+当前源码为 **1.0.0/code45 正式候选**，基于已发布 0.2.30/code44（PR #145）。修正关于与历史 Review 署名，恢复管理员手动待发布测试渠道，同包名、同固定签名覆盖，保留已下载模块和本机数据；普通更新保持 Gitee 优先、GitHub 回退。测试 APK 不自动检查，只有管理员可手动选择下载，不和普通 APK 捆绑。
+
+本地测试和模拟器覆盖往返已完成，但本轮外部 Review、私有 API 部署及凭据、真实草稿/真机下载验收和 Gitee 镜像尚未完成，**不是已发布 1.0.0**。见 [android-v1.0.0-verification.md（检查结果与发布条件）](android-v1.0.0-verification.md)及 [android-v1.0.0-release-channels.md（正式与测试分发）](android-v1.0.0-release-channels.md)。源码 PR 评审后按授权合并、由 Tag Actions 重建发布；不会手工上传本地候选。
+
+## 历史版本记录
+
+以下“本轮”“待评审”“延期”保留对应版本当时状态，不代表当前 1.0.0 状态。0.2.30 已随 PR #145 合入并发布，范围和当时验证见 [android-v0.2.30-network-training.md](android-v0.2.30-network-training.md)。
 
 本轮 **0.2.27/code41** 保持 Gitee 优先更新：清单、APK 与模块使用 Gitee，失败兜底 GitHub。Tag 由 GitHub Actions 发布，Gitee 暂由用户手动同步同批 Release 附件；GitHub 发包不要求 Gitee 凭据。设置 `GITEE_MIRROR_MODE=automatic` 才启用需要 `GITEE_RELEASE_TOKEN` 的自动镜像与匿名回读。详见[方案与验证](android-v0.2.27-gitee-updates.md)。PR #141 已合并，发布方式小修另提 PR；尚未创建 Tag 或发布 v0.2.27。基线 v0.2.26 已由 PR #115 合并并发布，下方旧版状态保留当时记录。自站更新和延期 1.0.0 不在本轮范围。
 

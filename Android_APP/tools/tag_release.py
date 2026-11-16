@@ -14,13 +14,15 @@ PACKAGE = "com.giraffeslovebeauty.acmforever"
 
 def module_assets(directory, manifest, repository):
     """All optional artifacts are part of the same immutable release transaction."""
-    url = manifest.get("modulesUrl", "")
+    preview = manifest.get("distribution") == "preview"
+    tag = manifest.get("previewTag") if preview else 'v' + manifest["versionName"]
+    url = manifest.get("modulesPath", "") if preview else manifest.get("modulesUrl", "")
     if not url:
         if manifest["versionCode"] >= 39:
             raise ValueError("Modular app releases require a complete modules.json")
         return []
-    expected = f'https://github.com/{repository}/releases/download/v{manifest["versionName"]}/modules.json'
-    if url != expected:
+    expected = f'https://github.com/{repository}/releases/download/{tag}/modules.json'
+    if url != (f'/api/admin/android/releases/{tag}/modules' if preview else expected):
         raise ValueError("Module catalog URL does not match this release")
     path = directory / "modules.json"
     if path.stat().st_size > 65536:
@@ -28,6 +30,8 @@ def module_assets(directory, manifest, repository):
     index = json.loads(path.read_text(encoding="utf-8"))
     from create_module_assets import validate_catalog
     validate_catalog(index, manifest["versionName"], manifest["versionCode"], repository)
+    if index.get('previewTag') != (tag if preview else None):
+        raise ValueError("Module distribution differs from its base APK")
     if (index.get("schemaVersion") != 1 or index.get("versionCode") != manifest["versionCode"]
             or index.get("versionName") != manifest["versionName"] or len(index.get("modules", [])) != 4):
         raise ValueError("Incomplete module catalog")
@@ -52,7 +56,7 @@ def module_assets(directory, manifest, repository):
 def validate_source(tag, gradle, history):
     version = re.search(r"\bversionName\s+'(\d+\.\d+\.\d+)'", gradle)
     code = re.search(r"\bversionCode\s+(\d+)\b", gradle)
-    if not version or not code or tag != "v" + version[1] or not 1 <= int(code[1]) <= 2100000000:
+    if not version or not code or not re.fullmatch(r"v"+re.escape(version[1])+r"(?:-preview\.[1-9]\d*)?",tag) or not 1 <= int(code[1]) <= 2100000000:
         raise ValueError("Tag must be vX.Y.Z and match the checked-out Android version")
     if (int(code[1]) != history.get("currentVersionCode") or not history.get("entries")
             or history["entries"][0].get("versionName") != version[1] or history.get("schemaVersion") != 1):
@@ -68,8 +72,8 @@ def digest(path):
     return result.hexdigest()
 
 
-def validate_manifest(value):
-    if (not isinstance(value, dict) or value.get("packageName") != PACKAGE or type(value.get("versionCode")) is not int
+def validate_manifest(value, package=PACKAGE):
+    if (not isinstance(value, dict) or value.get("packageName") != package or type(value.get("versionCode")) is not int
             or not 1 <= value["versionCode"] <= 2100000000
             or not re.fullmatch(r"\d+\.\d+\.\d+", value.get("versionName", ""))
             or not re.fullmatch(r"[0-9a-f]{64}", value.get("sha256", ""))
@@ -78,6 +82,16 @@ def validate_manifest(value):
             or not isinstance(value.get("notes"), str) or not value["notes"].strip()
             or len(value["notes"].encode("utf-16-le")) // 2 > 8000):
         raise ValueError("Release manifest identity/version/hash is invalid")
+
+
+def manifest_channel(value):
+    if value.get('schemaVersion') == 2:
+        if 'channel' in value or value.get('distribution') not in ('release', 'preview'):
+            raise ValueError('Invalid distribution metadata')
+        return value['distribution']
+    if value.get('channel') in ('debug', 'release') and 'distribution' not in value:
+        return value['channel']
+    raise ValueError('Missing or inconsistent distribution metadata')
 
 
 class GitHub:
@@ -141,6 +155,13 @@ class GitHub:
         # --verify-tag prevents gh from silently creating a tag at the default branch.
         self.run("release", "create", tag, "--repo", self.repository, "--verify-tag", "--draft", "--title", title, "--notes-file", str(notes))
 
+    def create_private(self, tag, source_commit, notes):
+        # This draft is a private store, not a public release candidate. Never publish it.
+        self.api("/releases", "--method", "POST", "--raw-field", "tag_name=" + tag,
+                 "--raw-field", "target_commitish=" + source_commit, "--field", "draft=true",
+                 "--field", "prerelease=true", "--raw-field", "name=Administrator debug " + tag,
+                 "--raw-field", "body=" + notes)
+
     def upload(self, tag, paths):
         current = self.release(tag)
         if current is None or not current.get("draft"):
@@ -198,9 +219,8 @@ def require_newer(github, manifest):
         old = read_manifest(github, previous, Path(temp))
     if manifest["versionCode"] <= old["versionCode"]:
         raise ValueError("versionCode must be greater than the latest published code")
-    if (old.get("channel", "release") == manifest["channel"]
-            and old.get("signingCertificateSha256") != manifest["signingCertificateSha256"]):
-        raise ValueError("The signing certificate changed within the same release channel")
+    if old.get("signingCertificateSha256") != manifest["signingCertificateSha256"]:
+        raise ValueError("The signing certificate changed; old installations cannot upgrade")
 
 
 def publish(github, tag, directory, source_commit):
@@ -212,10 +232,11 @@ def publish(github, tag, directory, source_commit):
     validate_manifest(manifest)
     if tag != "v" + manifest["versionName"] or not re.fullmatch(r"[0-9a-f]{40}", source_commit):
         raise ValueError("Tag or source commit is invalid")
-    if (manifest.get("channel") not in ("debug", "release")
+    legacy = manifest["versionName"].startswith('0.') and manifest_channel(manifest) == 'debug'
+    if ((not legacy and manifest_channel(manifest) != "release")
             or not re.fullmatch(r"[0-9a-f]{64}", manifest.get("signingCertificateSha256", ""))):
-        raise ValueError("Channel and pinned signing certificate are required")
-    suffix = "-debug" if manifest["channel"] == "debug" else ""
+        raise ValueError("Only legacy-compatible formal releases may be published publicly")
+    suffix = "-debug" if legacy else ""
     filename = "acmforever-" + manifest["versionName"] + suffix + ".apk"
     expected_url = "https://github.com/" + github.repository + "/releases/download/" + tag + "/" + filename
     if manifest.get("apkUrl") != expected_url:
@@ -226,6 +247,9 @@ def publish(github, tag, directory, source_commit):
             or checksum.read_text(encoding="ascii").strip() != manifest["sha256"] + "  " + filename):
         raise ValueError("Local release assets no longer match the validated APK")
     optional = module_assets(directory, manifest, github.repository)
+    from release_credits import bundled_credits, requires_review_record
+    if requires_review_record(manifest["versionName"]):
+        bundled_credits(apk, manifest["versionName"])
     all_assets = [apk, checksum, manifest_path] + optional
     if github.repository_info().get("private") is not False:
         raise ValueError("App update assets must be in a public repository")
@@ -269,6 +293,74 @@ def publish(github, tag, directory, source_commit):
     return "Published verified Release " + tag
 
 
+def preview_base(github):
+    latest = github.latest()
+    if latest is None:
+        raise ValueError("A published stable release is required before distributing a reversible preview")
+    with tempfile.TemporaryDirectory() as temp:
+        return read_manifest(github, latest, Path(temp))
+
+
+def stage_preview(github, tag, directory, source_commit):
+    directory = Path(directory)
+    manifest_path = directory / "update.json"
+    if manifest_path.stat().st_size > 32768:
+        raise ValueError("Admin manifest exceeds 32 KiB")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    validate_manifest(manifest)
+    revision = manifest.get("previewRevision")
+    target = manifest.get("releaseVersionCode")
+    if (type(revision) is not int or revision < 1 or type(target) is not int or not manifest["versionCode"] < target <= 2100000000
+            or tag != "v" + manifest["versionName"] + "-preview." + str(revision) or manifest.get("previewTag") != tag
+            or not re.fullmatch(r"[0-9a-f]{40}", source_commit)
+            or manifest.get("schemaVersion") != 2 or manifest.get("distribution") != "preview" or "apkUrl" in manifest or "channel" in manifest
+            or manifest.get("apkPath") != "/api/admin/android/releases/" + tag + "/apk"
+            or not re.fullmatch(r"[0-9a-f]{64}", manifest.get("signingCertificateSha256", ""))):
+        raise ValueError("Invalid private admin distribution")
+    old = preview_base(github)
+    if (manifest["versionCode"] != old["versionCode"] or target <= old["versionCode"]
+            or tuple(map(int,manifest["versionName"].split("."))) <= tuple(map(int,old["versionName"].split(".")))
+            or old.get("signingCertificateSha256") != manifest["signingCertificateSha256"]):
+        raise ValueError("Preview must reuse the live stable versionCode and certificate, targeting a future release")
+    name = "acmforever-" + manifest["versionName"] + "-preview." + str(revision) + ".apk"
+    paths = [directory / name, directory / (name + ".sha256"), manifest_path] + module_assets(directory, manifest, github.repository)
+    if (paths[0].stat().st_size != manifest["sizeBytes"] or digest(paths[0]) != manifest["sha256"]
+            or paths[1].read_text(encoding="ascii").strip() != manifest["sha256"] + "  " + name):
+        raise ValueError("Admin assets differ from verified metadata")
+    from release_credits import bundled_credits, requires_review_record
+    if requires_review_record(manifest['versionName']):
+        bundled_credits(paths[0], manifest['versionName'])
+    private_tag = tag
+    current = github.release(private_tag)
+    if current is not None and not current.get("draft"):
+        raise ValueError("Admin draft became public; refuse further uploads")
+    if current is not None and any(a.get("name") == "update.json" for a in current.get("assets", [])):
+        with tempfile.TemporaryDirectory() as temp:
+            remote = github.download(private_tag, "update.json", Path(temp))
+            if remote.stat().st_size > 32768 or json.loads(remote.read_text(encoding="utf-8")) != manifest:
+                raise ValueError("An existing preview is immutable; increment previewRevision and create a new tag")
+            recorded = {a['name'] for a in current.get('assets', [])}
+            if recorded - {p.name for p in paths}:
+                raise ValueError('Unexpected private draft attachments')
+            for local in paths:
+                if local.name in recorded and digest(github.download(private_tag, local.name, Path(temp))) != digest(local):
+                    raise ValueError('An existing preview attachment is immutable')
+            if len(recorded) == len(paths):
+                return 'Verified private admin draft ' + private_tag + '; NOT published'
+    if current is None:
+        github.create_private(private_tag, source_commit, "PRIVATE ADMIN STORAGE: DO NOT PUBLISH\n" + manifest["notes"])
+    github.upload(private_tag, paths)
+    with tempfile.TemporaryDirectory() as temp:
+        for local in paths:
+            if digest(github.download(private_tag, local.name, Path(temp))) != digest(local):
+                raise ValueError("Admin draft read-back verification failed")
+    if not github.release(private_tag).get("draft"):
+        raise ValueError("Admin storage must remain a draft")
+    if {a['name'] for a in github.release(private_tag).get('assets', [])} != {p.name for p in paths}:
+        raise ValueError('Private draft contains missing or unexpected attachments')
+    return "Verified private admin draft " + private_tag + "; NOT published"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -276,19 +368,30 @@ def main():
     check.add_argument("--tag", required=True)
     check.add_argument("--gradle", default="Android_APP/app/app/build.gradle")
     check.add_argument("--history", default="Android_APP/app/app/src/main/assets/releases/history.json")
-    release = sub.add_parser("publish")
-    for option in ("tag", "directory", "repository", "source-commit"):
-        release.add_argument("--" + option, required=True)
+    check.add_argument("--credits", default="Android_APP/app/app/src/main/assets/releases/credits.json")
+    base = sub.add_parser("preview-base")
+    base.add_argument("--repository", required=True)
+    for command in ("publish", "stage-preview"):
+        release = sub.add_parser(command)
+        for option in ("tag", "directory", "repository", "source-commit"):
+            release.add_argument("--" + option, required=True)
     args = parser.parse_args()
     if args.command == "validate":
-        print(validate_source(args.tag, Path(args.gradle).read_text(encoding="utf-8"), json.loads(Path(args.history).read_text(encoding="utf-8"))))
+        version = validate_source(args.tag, Path(args.gradle).read_text(encoding="utf-8"), json.loads(Path(args.history).read_text(encoding="utf-8")))
+        from release_credits import requires_review_record, validate_release_credits
+        if requires_review_record(version[0]):
+            validate_release_credits(json.loads(Path(args.credits).read_text(encoding="utf-8")), version[0])
+        print(version)
+    elif args.command == "preview-base":
+        print(preview_base(GitHub(args.repository))["versionCode"])
     else:
         if (os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("GITHUB_EVENT_NAME") != "push"
                 or os.environ.get("GITHUB_REF") != "refs/tags/" + args.tag
                 or os.environ.get("GITHUB_REPOSITORY") != args.repository
                 or os.environ.get("GITHUB_SHA") != args.source_commit):
             parser.error("Publication is allowed only in the matching GitHub tag-push Action")
-        print(publish(GitHub(args.repository), args.tag, args.directory, args.source_commit))
+        action = stage_preview if args.command == "stage-preview" else publish
+        print(action(GitHub(args.repository), args.tag, args.directory, args.source_commit))
 
 
 if __name__ == "__main__":

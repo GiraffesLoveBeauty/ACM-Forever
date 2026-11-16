@@ -14,7 +14,7 @@ public final class UpdateDownloadActivity extends Activity {
     private Button install,retry,cancel;
     private int dp(int n){return MobileStyle.dp(this,n);}
     @Override public void onCreate(Bundle state){
-        super.onCreate(state);AppAppearance.load(this);AppAppearance.window(this);updates=((AcmApplication)getApplication()).updates();
+        super.onCreate(state);AppAppearance.load(this);AppAppearance.window(this);updates=((AcmApplication)getApplication()).updatesFor(getIntent());
         LinearLayout root=new SpacedLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setFitsSystemWindows(true);root.setBackground(ProfileCover.drawable(this));AppAppearance.content(this,root);
         LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);header.setPadding(dp(12),dp(8),dp(12),dp(8));header.setBackgroundColor(MobileStyle.CHROME);
         ImageButton back=new ImageButton(this);MobileStyle.flat(back);back.setImageDrawable(AppIcons.get(this,"back",MobileStyle.TEXT));back.setBackgroundColor(android.graphics.Color.TRANSPARENT);back.setContentDescription("返回，下载在后台继续");back.setOnClickListener(v->finish());header.addView(back,new LinearLayout.LayoutParams(dp(48),dp(48)));header.addView(text("安装包下载",22));root.addView(header);

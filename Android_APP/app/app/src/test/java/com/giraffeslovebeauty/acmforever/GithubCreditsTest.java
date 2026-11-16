@@ -26,12 +26,19 @@ public class GithubCreditsTest {
         assertEquals("chatgpt-codex-connector[bot]", old.reviewers.get(0));
         assertTrue(credits.people.get(old.reviewers.get(0)).bot());
     }
-    @Test public void currentDevelopmentDoesNotClaimUnperformedReviewOrPublication() throws Exception {
+    @Test public void currentSnapshotDistinguishesReviewFromPublication() throws Exception {
         JSONObject history = new JSONObject(new String(Files.readAllBytes(Paths.get("src/main/assets/" + ReleaseHistory.ASSET)), StandardCharsets.UTF_8));
         String name = history.getJSONArray("entries").getJSONObject(0).getString("versionName");
         GithubCredits.Version current = GithubCredits.parse(source().toString()).versions.get(name);
-        assertEquals("development", current.status); assertEquals(0,current.pr);
-        assertTrue(current.reviewers.isEmpty()); assertTrue(current.reviewRequesters.isEmpty()); assertTrue(current.publishers.isEmpty());
+        if (current.status.equals("development")) {
+            assertTrue(current.reviewers.isEmpty()); assertTrue(current.publishers.isEmpty());
+        } else {
+            assertTrue(current.status.equals("reviewed") || current.status.equals("published"));
+            assertFalse(current.reviewers.isEmpty()); assertFalse(current.reviewRequesters.isEmpty());
+            assertFalse(current.evidence.isEmpty()); assertTrue(current.pr > 0);
+            if (current.status.equals("reviewed")) assertTrue(current.publishers.isEmpty());
+            assertFalse(current.publication().contains("待评审"));
+        }
         assertEquals("published", GithubCredits.parse(source().toString()).versions.get("0.2.21").status);
     }
     @Test public void rejectsUnknownOrRepeatedIdentityReferences() throws Exception {
@@ -54,12 +61,37 @@ public class GithubCreditsTest {
     }
     @Test public void confirmedSelfReviewsAndPublishedHistoryAreAttributedToTheirActualOwner()throws Exception{
         GithubCredits credits=GithubCredits.parse(source().toString());
-        for(int minor=22;minor<=28;minor++){
+        for(int minor=22;minor<=30;minor++){
             GithubCredits.Version version=credits.versions.get("0.2."+minor);
             assertEquals("published",version.status);assertEquals(java.util.Collections.singletonList("MiaoJJ13445"),version.reviewers);
             assertEquals(java.util.Collections.singletonList("MiaoJJ13445"),version.reviewRequesters);
-            assertTrue(version.scope.contains("本人确认"));assertFalse(version.evidence.isEmpty());
+            assertTrue(version.scope.contains("MiaoJJ13445"));assertFalse(version.evidence.isEmpty());
         }
+    }
+    @Test public void attributionUsesExplicitNamesInsteadOfFirstPersonNarration() throws Exception {
+        GithubCredits credits = GithubCredits.parse(source().toString());
+        assertFalse(credits.historyOwnerNote.contains("本人"));
+        assertFalse(credits.historyOwnerNote.contains("当前候选"));
+        for (GithubCredits.Person person : credits.people.values()) assertFalse(person.role.contains("本人"));
+        for (GithubCredits.Version version : credits.versions.values()) assertFalse(version.scope.contains("本人"));
+    }
+    @Test public void reviewedSnapshotRequiresActualPeopleAndEvidenceButNotFuturePublication() throws Exception {
+        JSONObject value = source();
+        String name = new JSONObject(new String(Files.readAllBytes(Paths.get("src/main/assets/" + ReleaseHistory.ASSET)), StandardCharsets.UTF_8))
+                .getJSONArray("entries").getJSONObject(0).getString("versionName");
+        JSONObject record = value.getJSONObject("versions").getJSONObject(name);
+        record.put("status", "reviewed").put("reviewRequesters", new JSONArray()).put("reviewers", new JSONArray());
+        assertThrows(JSONException.class, () -> GithubCredits.parse(value.toString()));
+        record.put("reviewRequesters", new JSONArray().put("MiaoJJ13445"))
+                .put("reviewers", new JSONArray().put("MiaoJJ13445"))
+                .put("publishers", new JSONArray()).put("pr", 999)
+                .put("evidence", new JSONArray().put("https://github.com/" + GithubCredits.REPOSITORY + "/pull/999"))
+                .put("scope", "Review：MiaoJJ13445（本地审查）。");
+        assertEquals("构建快照已收录 Review 记录", GithubCredits.parse(value.toString()).versions.get(name).publication());
+        record.put("publishers", new JSONArray().put("github-actions[bot]"));
+        assertThrows(JSONException.class, () -> GithubCredits.parse(value.toString()));
+        record.put("publishers", new JSONArray()).put("evidence", new JSONArray());
+        assertThrows(JSONException.class, () -> GithubCredits.parse(value.toString()));
     }
     @Test public void attributionListsCannotBeChangedAfterValidation() throws Exception {
         GithubCredits credits = GithubCredits.parse(source().toString());

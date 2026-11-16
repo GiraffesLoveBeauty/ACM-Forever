@@ -1,5 +1,62 @@
 # Android 1.0.0：正式版与待发布测试版
 
+> 2026-11-16恢复实施。以下“本轮”以已发布0.2.30/code44、main `672427d9` 为基线；文末2026-11-08资料仅为历史，code37/38与旧制品哈希不能用于本次发布。状态：PR #150第二轮本地Review通过（审查04f35c8），已补录人员快照，用户授权合并并由Tag发布1.0.0。线上管理员私有下载仍需运维配置与实际验收。
+
+## 本轮版本与分发
+
+| 项目 | 正式版 | 管理员待发布测试版 |
+| --- | --- | --- |
+| 名称 / 安装code | 1.0.0 / 45 | 目标1.0.0，preview.1 / 44（实际分发再读线上普通版code） |
+| 包名/数据/证书 | `com.giraffeslovebeauty.acmforever`，保留数据、固定历史签名 | 相同包名和签名，覆盖；不会多一个App |
+| 构建 | release，debuggable=false | preview，debuggable=false |
+| 检查 | 默认开，每个手机本地04:00日最多一次主动尝试 | 所有自动检查关闭；手动正式渠道可返回普通版 |
+| 下载 | Gitee优先、GitHub兜底，公开八附件 | 仅管理员手动；业务服务器鉴权代理私有草稿八附件 |
+
+普通和测试APK互不内嵌。previewRevision独立递增，后续1.0.1测试版应沿用当时正式code45，正式1.0.1再提高到46。Android不支持从已发布正式code45无损降回旧code44；同code来回仅适用于相应普通版与其未来测试版本。共享数据格式须向后兼容。
+
+公开清单使用schemaVersion2、distribution=release，省略旧channel字段，让未修改的0.2.30 debug客户端发现正式升级。正式包校验版本名/code、实际debuggable/渠道元数据、大小/hash与固定证书。只在首次正式发布前允许签名相同且code≤44的旧0.2.x debug包作为切回目标。
+
+### 本地模块与系统安装回执
+
+普通模块仍使用`optional-modules/<code>/`；测试模块使用`optional-modules/<code>/previews/<previewTag>/`。各目录分别保存`catalog.json`、`downloads/`和`installed/`，私有清单经管理员在线校验后原子保存，不能覆盖同code的普通清单。离线清单不含登录凭据，解析后下载地址为空、owner=-1；下载必须重新取得当前管理员绑定的spec。
+
+资源复用继续校验原始归档签名和内容revision，解包回执同时保存源code与源previewTag；健康检查、修复按同一归属取清单和归档。仅已安装测试基础包对应的修订写入`.activated`，暂存未来修订不切换当前资源；普通版优先自身资源，没有配套资源时可保留此前真正启用且API兼容的资源。显式删除模块清理各版本和测试修订中的该ID，保留其他模块、主题、原图和账户数据。
+
+普通更新的系统回执继续兼容`app-update`；测试回执带独立进程/会话控制器凭据，接收器送到`adminUpdates`。系统待确认、取消、失败都必须更新发起控制器；退出、换号、失去角色或进程重建后旧测试回执不恢复授权。系统确认仍由用户完成，不静默安装。对应真实窗口及变更资源回归见[本轮验收](android-v1.0.0-verification.md#pr-150-首轮-review-修复与新增回归)。
+
+## 八附件与发布顺序
+
+每种分发各自包含基础APK、`.sha256`、`update.json`、`modules.json`及四个模块（官方主题、高级个性化、便捷管理、分层素材），共八附件；两种分发不混装。
+
+1. 完成本地实现、单测、实际APK/模块与迁移验收，再提PR交用户安排Review。当前待Review记录保持空；真实完成后补录PR、证据与人员，复核补录差异，才允许Tag。
+2. 测试Tag `v1.0.0-preview.N`：Actions读取当前公开普通版code和签名，生成preview基础包及两原生split、两资源包。模块metadata与基础包同code，清单含previewTag与独立revision。
+3. 测试八附件逐件回读后留在GitHub**未公开草稿**；禁止publish、更改latest或镜像Gitee。已存在测试修订不可覆盖，修复后增加N。
+4. 正式Tag `v1.0.0`：仅构建正式八附件；回读验证完整性后公开，不带测试URL。Gitee当前为manual，维护者手动镜像同一套文件，不索要Gitee Token。
+5. 正式发布后，同目标或更早测试修订自动从私有API的候选中移除。没有测试版本是200/available=false；源缺配置或故障是503。
+
+固定证书SHA256：`88c9f163cbf379aeca7bc110f66c542a838d0d8e3970f24fd96582bec8e93fe4`，沿用既有`ANDROID_DEBUG_KEYSTORE_BASE64`（历史Secret名不影响debuggable）。不更换证书，不提交私钥。
+
+## 管理员API与运维配置
+
+| 请求 | 行为 |
+| --- | --- |
+| `GET /api/admin/android/releases/latest` | 实时会话/admin/root/首次改密校验；完整最新未正式发布候选与受限moduleCatalog |
+| `GET /api/admin/android/releases/{previewTag}/apk` | 下载对应候选基础包，完整缓冲验hash后再校验角色 |
+| `GET /api/admin/android/releases/{previewTag}/modules` | 对应候选的受限模块清单 |
+| `GET /api/admin/android/releases/{previewTag}/assets/{name}` | 仅允许四个固定模块文件名，缓冲验hash后再次校验角色 |
+
+匿名401、普通成员403、未首次改密428；返回private/no-store、Vary Cookie。角色在上游下载期间丢失时不得返回文件；换账号/退出后客户端取消传输与私有Provider授权。私有下载不走DownloadManager，进程恢复后需重新鉴权。APK≤150MiB、单模块≤16MiB，Token仅发往GitHub API，重定向CDN不带Token；客户端不接收Token、资产ID或临时签名URL。公共下载不携带业务Cookie。
+
+服务器由运维安全配置`ACM_ANDROID_GITHUB_TOKEN`（仅需读取目标仓库未公开Release草稿的最小权限）及可选`ACM_ANDROID_GITHUB_REPOSITORY=GiraffesLoveBeauty/ACM-Forever`。不在聊天传私钥或Token，不将私有文件放到公开静态目录。无需更改数据库结构。
+
+`feat/**`合并main会命中当前服务器同步流程。**合并前需完成运维确认及当前head的外部Review；未配置Token不能称线上测试下载已可用。** 未配置返回503，正常登录、论坛与公共正式更新仍可工作。回退时撤销本PR新增蓝图注册并移除专用Token；已安装测试包仍可手动切回当前不低于自身code的正式包。公开自站镜像继续等待，与本次私有鉴权代理分开。
+
+本地验证和限制详见[android-v1.0.0-verification.md（本轮验收）](android-v1.0.0-verification.md)。真实草稿、线上凭据、真机/鸿蒙安装确认必须在Review后按授权发布再验收。
+
+---
+
+# 2026-11-08延期前设计与验收归档
+
 > 本文为延期前的设计和本地验收归档。0.2.24 PR只保存此记录，不包含下述双渠道客户端、管理员分发接口、工作流或发布工具实现。对应源码、候选包、日志和备份均继续留在本地，未来单独提交并重新review。
 
 > 2026-11-08延期记录：用户决定暂不发布1.0.0，继续0.x更新。本文保留当时的渠道设计、1.0.0/code38候选包摘要与验收结果，供下次发布复用；它们不是已公开版本。当前源码改为0.2.24/code38，见[本轮题目优化](android-v0.2.24-problem-reading.md)。下次1.0.0必须使用高于届时已发布版本的versionCode，不能照抄本文历史code38；测试版也须重新读取当时线上普通版的基线code。签名、同包名覆盖、独立下载与禁自动检查等实现和测试保留，重新发布前按新基线再验证。

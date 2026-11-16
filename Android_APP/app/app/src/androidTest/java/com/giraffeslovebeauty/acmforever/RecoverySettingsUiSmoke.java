@@ -101,7 +101,7 @@ final class RecoverySettingsUiSmoke {
             test.waitForIdleSync();Thread.sleep(250);Bitmap b=test.getUiAutomation().takeScreenshot();
             if(b==null)continue;int ink=0;
             for(int y=b.getHeight()/8;y<b.getHeight()*7/8;y+=8)for(int x=16;x<b.getWidth()-16;x+=8){int color=b.getPixel(x,y);if(android.graphics.Color.red(color)<150&&android.graphics.Color.green(color)<150&&android.graphics.Color.blue(color)<150)ink++;}
-            if(ink>30){try(OutputStream out=new FileOutputStream(new File(context.getExternalFilesDir(null),name))){b.compress(Bitmap.CompressFormat.PNG,100,out);}finally{b.recycle();}return;}
+            if(ink>30){try(OutputStream out=new FileOutputStream(new File(context.getFilesDir(),name))){b.compress(Bitmap.CompressFormat.PNG,100,out);}finally{b.recycle();}return;}
             b.recycle();
         }while(SystemClock.uptimeMillis()<until);
         throw new AssertionError("Page has not visibly drawn: "+name);

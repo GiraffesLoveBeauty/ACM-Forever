@@ -7,6 +7,7 @@ import org.json.JSONTokener;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.CookieManager;
@@ -40,6 +41,7 @@ final class ApiClient {
     private Snapshot snapshot()throws Exception{synchronized(stateLock){Snapshot b=bound.get();if(b!=null)requireCurrent(b);return new Snapshot(baseUrl,csrfToken,sessionGeneration);}}
     private void requireCurrent(Snapshot owner)throws ApiException{if(owner.generation!=sessionGeneration||!owner.base.equals(baseUrl))throw new ApiException(401,"登录账号已切换",false);}
     private void attachCookies(HttpURLConnection connection,URI uri,Snapshot owner)throws Exception{synchronized(stateLock){requireCurrent(owner);for(Map.Entry<String,List<String>> header:cookies.get(uri,Collections.emptyMap()).entrySet())if(header.getKey()!=null)connection.setRequestProperty(header.getKey(),String.join("; ",header.getValue()));}}
+    private volatile HttpURLConnection adminDownload;
     private final CookieManager cookies = new CookieManager(null, CookiePolicy.ACCEPT_ORIGINAL_SERVER);
     private volatile String baseUrl = "";
     private volatile String csrfToken = "";
@@ -479,6 +481,50 @@ final class ApiClient {
         return request("POST",path,payload,Collections.singletonMap("Idempotency-Key",key));
     }
 
+    JSONObject adminRelease() throws Exception {
+        long owner=sessionGeneration;
+        try(OwnerScope ignored=bind(owner)){
+            refreshSession();
+            if(!isAdministrator()||requiresPasswordChange())throw new ApiException(403,"仅限管理员下载待发布测试版",false);
+            return (JSONObject)request("GET","/api/admin/android/releases/latest",null);
+        }
+    }
+    void cancelAdminApk(){HttpURLConnection active=adminDownload;if(active!=null)java.util.concurrent.CompletableFuture.runAsync(active::disconnect);}
+    void adminApk(long owner,String tag,java.io.File file,java.util.function.BooleanSupplier cancelled,java.util.function.LongConsumer progress)throws Exception{
+        adminAsset(owner,tag,null,file,UpdateManifest.MAX_APK_BYTES,cancelled,progress);
+    }
+    void adminAsset(long owner,String tag,String name,java.io.File file,long limit,java.util.function.BooleanSupplier cancelled,java.util.function.LongConsumer progress)throws Exception{
+        if(!tag.matches("v[0-9]+\\.[0-9]+\\.[0-9]+-preview\\.[1-9][0-9]*"))throw new IllegalArgumentException("测试版标识无效");
+        if(name!=null&&!java.util.Arrays.asList("module-advanced.apk","module-admin.apk","module-official-themes.acmpack","module-cat-art.acmpack").contains(name))throw new IllegalArgumentException("测试模块标识无效");
+        final URI uri;final Snapshot captured;
+        try(OwnerScope ignored=bind(owner)){
+            captured=snapshot();
+            if(!isAdministrator()||requiresPasswordChange())throw new ApiException(403,"管理权限已失效",false);
+            uri=URI.create(captured.base+"/api/admin/android/releases/"+tag+(name==null?"/apk":"/assets/"+name));
+        }
+        // Cookie snapshot only: a large download must never hold the API monitor.
+        HttpURLConnection connection=(HttpURLConnection)uri.toURL().openConnection();
+        adminDownload=connection;
+        connection.setInstanceFollowRedirects(false);connection.setConnectTimeout(10000);connection.setReadTimeout(310000);
+        connection.setRequestProperty("Accept","application/octet-stream");connection.setRequestProperty("Cache-Control","no-store");
+        try{
+            attachCookies(connection,uri,captured);
+            if(cancelled.getAsBoolean()||owner!=sessionGeneration)throw new IOException("下载已取消");
+            int status=connection.getResponseCode();
+            if(status!=200)throw new ApiException(status,"测试版下载失败，请重新确认权限及版本",false);
+            long size=connection.getContentLengthLong();if(size>limit)throw new IOException("安装文件超过大小限制");
+            try(InputStream in=connection.getInputStream();java.io.FileOutputStream out=new java.io.FileOutputStream(file)){
+                byte[] buffer=new byte[16384];long bytes=0;int n;
+                while((n=in.read(buffer))!=-1){
+                    if(cancelled.getAsBoolean()||owner!=sessionGeneration||!isAdministrator())throw new IOException("下载已取消或账号已切换");
+                    bytes+=n;if(bytes>limit)throw new IOException("安装文件超过大小限制");out.write(buffer,0,n);progress.accept(bytes);
+                }
+                out.getFD().sync();
+            }
+            synchronized(stateLock){requireCurrent(captured);if(cancelled.getAsBoolean()||!isAdministrator()||requiresPasswordChange())throw new IOException("下载已取消或管理权限失效");}
+        }finally{if(adminDownload==connection)adminDownload=null;connection.disconnect();}
+    }
+
     JSONObject changePassword(String oldPassword, String newPassword) throws Exception {
         JSONObject body = new JSONObject().put("old_password", oldPassword).put("new_password", newPassword);
         Snapshot owner=snapshot();JSONObject result = (JSONObject) request("POST", "/api/auth/change-password", body);
@@ -612,7 +658,7 @@ final class ApiClient {
         connection.setRequestMethod(method);
         connection.setConnectTimeout(10000);
         // Ownership checks may wait up to 20 seconds for the OJ; match Web's binding timeout.
-        connection.setReadTimeout(path.startsWith("/api/me/bindings/") ? 25000 : 10000);
+        connection.setReadTimeout(path.startsWith("/api/me/bindings/") ? 25000 : path.equals("/api/admin/android/releases/latest") ? 65000 : 10000);
         connection.setInstanceFollowRedirects(false);
         connection.setRequestProperty("Accept", "application/json");
         for (Map.Entry<String,String> extra : extraHeaders.entrySet()) connection.setRequestProperty(extra.getKey(), extra.getValue());

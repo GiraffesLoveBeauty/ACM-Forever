@@ -19,6 +19,7 @@ from .acm_api.account_lifecycle_service import AccountLifecycleError, bootstrap_
 from .acm_api.database import connect_db
 from .acm_api.forum_api import forum_api
 from .acm_api.mobile_api import mobile_api
+from .acm_api.android_release_api import android_release_api, DraftReleases
 from .acm_api.forum_notifications import forum_notification_api
 from .acm_api.wiki_api import wiki_api
 from .acm_api.wiki_cache import WikiResponseCache
@@ -111,6 +112,7 @@ def create_app(*, daily_problem_sync=False, member_sync=False):
     app.config["TRAINING_TASKS_ENABLED"] = _bool_env("ACM_TRAINING_TASKS_ENABLED", True)
     app.config["WIKI_CACHE_ENABLED"] = _bool_env("ACM_WIKI_CACHE_ENABLED", True)
     app.extensions["wiki_public_cache"] = WikiResponseCache()
+    app.extensions["android_private_releases"] = DraftReleases()
     app.config["AVATAR_UPLOAD_DIR"] = db_path.parent / "uploads" / "avatars"
     app.config["MARKDOWN_UPLOAD_DIR"] = Path(os.getenv("ACM_MARKDOWN_UPLOAD_DIR", str(db_path.parent / "uploads" / "markdown"))).expanduser()
     app.config["PUBLIC_BASE_URL"] = os.getenv("ACM_PUBLIC_BASE_URL", "").strip()
@@ -401,6 +403,7 @@ def create_app(*, daily_problem_sync=False, member_sync=False):
     app.register_blueprint(bot_api, url_prefix="/internal/v1")
     app.register_blueprint(forum_api, url_prefix="/api")
     app.register_blueprint(mobile_api, url_prefix="/api/mobile/v1")
+    app.register_blueprint(android_release_api, url_prefix="/api")
     app.register_blueprint(forum_notification_api, url_prefix="/api")
     app.register_blueprint(wiki_api, url_prefix="/api")
     app.register_blueprint(markdown_api, url_prefix="/api")

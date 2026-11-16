@@ -39,7 +39,9 @@ public final class ReaderSmoke extends Instrumentation {
         if("trainingtasks".equals(mode)){TrainingTasksUiSmoke.run(this);return;}
         if("giteeupdates".equals(mode)){GiteeUpdatesUiSmoke.run(this);return;}
         if(mode.startsWith("modules-")){OptionalModulesUiSmoke.run(this,mode);return;}
+        if(mode.equals("preview-resources")||mode.equals("preview-resources-restart")){PreviewResourcesUiSmoke.run(this,mode.endsWith("-restart"));return;}
         if("seed024".equals(mode)||"verify024".equals(mode)){UpgradePersistenceUiSmoke.run(this,"seed024".equals(mode));return;}
+        if("seedrelease".equals(mode)||"verifymigration".equals(mode)||"verifypreview".equals(mode)||"verifylegacyreturn".equals(mode)||"releasechannels".equals(mode)){ReleaseChannelsUiSmoke.run(this,mode);return;}
         if("recoverysettings".equals(mode)){RecoverySettingsUiSmoke.run(this);return;}
         if("creditslogin".equals(mode)){CreditsLoginUiSmoke.run(this);return;}
         if("wikinavigation".equals(mode)){WikiNavigationUiSmoke.run(this);return;}

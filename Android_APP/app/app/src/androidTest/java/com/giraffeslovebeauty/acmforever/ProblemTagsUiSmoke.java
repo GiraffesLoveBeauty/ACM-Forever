@@ -32,7 +32,7 @@ final class ProblemTagsUiSmoke {
             URL.setURLStreamHandlerFactory(protocol->"https".equals(protocol)?new URLStreamHandler(){protected URLConnection openConnection(URL url)throws IOException{if(!"tags.test.invalid".equals(url.getHost()))throw new IOException("External traffic forbidden");return new Fixture(url);}}:null);
             prefs.edit().putBoolean("auto_login",false).putBoolean("app_update_automatic",false).putString(SearchModules.KEY,"[\"users\",\"forum\",\"wiki\",\"problems\",\"tracker\"]").apply();
             api.setBaseUrl("https://tags.test.invalid");api.setNetworkAvailable(()->true);api.login("90000001","Synthetic-Test!");
-            activity=open(MainActivity.class,new Intent());show("problems");await(()->has("共 27 道题目"),"native catalog");
+            activity=open(MainActivity.class,new Intent());show("problems");click("进入题库");await(()->has("共 27 道题目"),"native catalog");
             await(()->description("难度 800")!=null&&description("算法标签：dp")!=null&&description("算法标签：math")!=null,"catalog directly exposes real difficulty and whole tags");
             editDescription("题库搜索关键词","Needle");clickDescription("搜索题库");await(()->has("共 26 道题目"),"keyword search");
             clickDescription("筛选题库标签");await(()->candidateCount()>0,"real catalog tags");editDescription("搜索题目标签","DP");await(()->candidateCount()==2,"search candidates includes both dp and digit dp");screenshot("problem-tags-picker.png");pick("dp");

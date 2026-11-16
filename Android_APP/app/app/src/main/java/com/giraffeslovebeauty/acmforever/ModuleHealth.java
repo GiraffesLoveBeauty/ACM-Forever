@@ -25,8 +25,8 @@ final class ModuleHealth {
         publish(id,new Status(false,"检查中",""));
         try{
             String revision,number="";
-            if(ModuleSpec.nativeModule(id)){if(!ModuleStore.installedNative(c).contains(id))throw new IllegalStateException("原生模块未安装或版本不匹配");revision="App "+ModuleStore.code(c);try{ModuleSpec recorded=ModuleStore.localSpec(c,id,ModuleStore.code(c));if(!recorded.revision.isEmpty())revision=recorded.revision;number=recorded.number;}catch(Exception notRecorded){}}
-            else {ModuleStore.Checked checked=ModuleStore.inspect(c,id,true);revision=checked.revision;try{number=ModuleStore.localSpec(c,id,checked.sourceCode).number;}catch(Exception notRecorded){}}
+            if(ModuleSpec.nativeModule(id)){if(!ModuleStore.installedNative(c).contains(id))throw new IllegalStateException("原生模块未安装或版本不匹配");revision="App "+ModuleStore.code(c);try{ModuleSpec recorded=ModuleStore.localSpec(c,id,ModuleStore.installedScope(c));if(!recorded.revision.isEmpty())revision=recorded.revision;number=recorded.number;}catch(Exception notRecorded){}}
+            else {ModuleStore.Checked checked=ModuleStore.inspect(c,id,true);revision=checked.revision;try{number=ModuleStore.localSpec(c,id,checked.source).number;}catch(Exception notRecorded){}}
             Status result=new Status(true,"完整",revision,number);publish(id,result);CharacterArt.clear();return result;
         }catch(Exception failure){Status result=new Status(false,("修复中".equals(state(id).message)?"修复失败 / 待修复：":"损坏 / 待修复：")+failure.getMessage(),"");publish(id,result);CharacterArt.clear();return result;}
     }

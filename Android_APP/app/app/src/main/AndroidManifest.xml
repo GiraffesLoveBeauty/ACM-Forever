@@ -13,6 +13,9 @@
         android:label="@string/app_name"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">
+        <meta-data android:name="acmforever.distribution" android:value="${updateDistribution}" />
+        <meta-data android:name="acmforever.preview_revision" android:value="${previewRevision}" />
+        <meta-data android:name="acmforever.release_version_code" android:value="${releaseVersionCode}" />
         <receiver android:name=".TrainingReminder" android:exported="false"><intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter></receiver>
         <activity android:name=".ModuleDownloadActivity" android:exported="false" />
         <receiver android:name=".ModuleInstallReceiver" android:exported="false" />
@@ -27,7 +30,7 @@
         <activity android:name=".OjBindingsActivity" android:exported="false" />
         <activity android:name=".AccountClosureActivity" android:exported="false" />
         <activity android:name=".SpaceActivity" android:exported="false" />
-        <activity android:name=".UpdateActivity" android:exported="false" android:launchMode="singleTop" />
+        <activity android:name=".UpdateActivity" android:exported="false" />
         <activity android:name=".UpdateDownloadActivity" android:exported="false" android:launchMode="singleTop" />
         <provider android:name=".UpdateFileProvider" android:authorities="${applicationId}.updates" android:exported="false" android:grantUriPermissions="true" />
         <activity android:name=".WebFeaturesActivity" android:exported="false" />

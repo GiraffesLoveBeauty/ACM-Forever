@@ -18,13 +18,15 @@ android {
     compileSdk 35
     dynamicFeatures = [':advanced', ':admin']
     buildToolsVersion '35.0.0'
+    testBuildType providers.gradleProperty('instrumentedBuildType').getOrElse('debug')
 
     defaultConfig {
         applicationId 'com.giraffeslovebeauty.acmforever'
         minSdk 26
         targetSdk 35
-        versionCode 44
-        versionName '0.2.30'
+        versionCode 45
+        versionName '1.0.0'
+        manifestPlaceholders = [updateDistribution: 'release', previewRevision: '0', releaseVersionCode: versionCode.toString()]
         testInstrumentationRunner 'com.giraffeslovebeauty.acmforever.ReaderSmoke'
     }
 
@@ -63,6 +65,12 @@ android {
             minifyEnabled false
             if (releaseKeyStorePath) signingConfig signingConfigs.release
         }
+        preview {
+            initWith release
+            matchingFallbacks = ['release']
+            manifestPlaceholders = [updateDistribution: 'preview', previewRevision: providers.gradleProperty('previewRevision').getOrElse('1')]
+            if (releaseKeyStorePath) signingConfig signingConfigs.release
+        }
     }
 
     compileOptions {
@@ -72,6 +80,16 @@ android {
 
     testOptions {
         unitTests.returnDefaultValues = true
+    }
+}
+
+// A preview reuses the published stable code so that switching back is not a downgrade.
+// Publication additionally verifies this value against the live stable manifest.
+androidComponents {
+    onVariants(selector().withBuildType('preview')) { variant ->
+        variant.outputs.each { output ->
+            output.versionCode.set(providers.gradleProperty('previewVersionCode').map { it.toInteger() }.orElse(android.defaultConfig.versionCode - 1))
+        }
     }
 }
 

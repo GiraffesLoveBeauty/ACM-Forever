@@ -21,7 +21,13 @@ import java.util.concurrent.*;
 
 /** Process-owned update state; system downloads survive page changes and process restarts. */
 final class AppUpdates {
-    private static final String KEY="app_update_";
+    private final String KEY;
+    private final boolean administrator;
+    private final AppDistribution installed;
+    private long adminOwner=-1;
+    private String previewInstallReceipt="preview-app-update:"+UUID.randomUUID();
+    private volatile long privateTicket;
+    private boolean privateDownloading,installAuthorizing;
     private final Context context;
     private final ApiClient api;
     private final SharedPreferences prefs;
@@ -38,7 +44,7 @@ final class AppUpdates {
     private long moduleCheckGeneration;
     String modulesStatus(){return checkedModules;}
     private String moduleStatus="";private Intent moduleInstallConfirmation;
-    private boolean checking,verifying,installRequested,clearingPackages;
+    private boolean checking,verifying,installRequested,clearingPackages,noPreview;
     private int progress=-1,downloadAttempt;
     private String checkedSource="";
     private String sourceDiagnostics="";
@@ -54,8 +60,13 @@ final class AppUpdates {
         this(context,api,()->networkAvailable(context));
     }
     AppUpdates(Context context,ApiClient api,java.util.function.BooleanSupplier network){
+        this(context,api,network,false);
+    }
+    AppUpdates(Context context,ApiClient api,java.util.function.BooleanSupplier network,boolean administrator){
         this.context=context.getApplicationContext();this.api=api;prefs=AppAppearance.prefs(context);
+        this.administrator=administrator;installed=AppDistribution.installed(context);KEY=administrator?"preview_update_":"app_update_";
         this.network=java.util.Objects.requireNonNull(network);
+        if(administrator){clearStored();return;} // Private downloads never survive account/process changes.
         prefs.edit().remove(KEY+"wifi_download").apply();
         downloadId=prefs.getLong(KEY+"download",-1);verifiedName=prefs.getString(KEY+"verified","");downloadAttempt=prefs.getInt(KEY+"download_attempt",0);checkedSource=prefs.getString(KEY+"checked_source","");sourceDiagnostics=prefs.getString(KEY+"source_diagnostics","");
         try{
@@ -63,13 +74,29 @@ final class AppUpdates {
             if(source.equals(prefs.getString(KEY+"source",""))){
                 String stored=prefs.getString(KEY+"manifest","");
                 if(!stored.isEmpty()){release=new UpdateManifest(new JSONObject(stored),context.getPackageName());release.requireChannel(channel());}
-                if(release!=null&&release.versionCode>currentVersion()){
+                if(release!=null&&candidateAllowed(release)){
                     downloadId=prefs.getLong(KEY+"download",-1);verifiedName=prefs.getString(KEY+"verified","");
                     if(!verifiedFile().isFile())verifiedName="";
                 }else clearStored();
             }else clearStored();
         }catch(Exception ignored){clearStored();}
     }
+    boolean administrator(){return administrator;}
+    String installReceipt(){return administrator?previewInstallReceipt:"app-update";}
+    boolean ownsInstallReceipt(String receipt){return installReceipt().equals(receipt);}
+    boolean canOpenPrivateApk(String name){return administrator&&ready()&&name.equals(verifiedName);}
+    boolean previewInstalled(){return installed.preview;}
+    int installedPreviewRevision(){return installed.revision;}
+    private String targetPackage(){return context.getPackageName();}
+    private boolean candidateAllowed(UpdateManifest candidate){return candidate.installable(currentVersion(),installed.preview,installed.revision,installed.releaseCode,administrator);}
+    private boolean otherBusy(){return context instanceof AcmApplication&&((AcmApplication)context).otherUpdatesBusy(this);}
+    void sessionChanged(){ui.post(()->{
+        if(administrator&&(adminOwner!=api.sessionGeneration()||!api.isAdministrator())){
+            cancelDownload();checking=false;installAuthorizing=false;adminOwner=api.sessionGeneration();release=null;deleteVerified();pendingOffer=false;pendingResult="";
+            previewInstallReceipt="preview-app-update:"+UUID.randomUUID();moduleInstallConfirmation=null;awaitingModuleInstall=false;openingInstaller=false;installRequested=false;
+            if(offerDialog!=null){offerDialog.setOnDismissListener(null);offerDialog.dismiss();offerDialog=null;}save();changed();
+        }
+    });}
     void attach(Activity activity,Runnable changed){owner=new WeakReference<>(activity);listener=changed;openingDownload=false;openingInstaller=false;syncSource();changed();ui.removeCallbacks(presentOffer);ui.post(presentOffer);if(downloadId!=-1&&!verifying){ui.removeCallbacks(poll);ui.post(poll);}}
     void detach(Activity activity){if(owner.get()==activity){
         ui.removeCallbacks(presentOffer);
@@ -79,19 +106,22 @@ final class AppUpdates {
     }}
     private Activity activity(){Activity a=owner.get();return a==null||a.isFinishing()||a.isDestroyed()?null:a;}
     boolean operationActive(){return busy()||openingInstaller||awaitingModuleInstall;}
-    boolean automatic(){return prefs.getBoolean(KEY+"automatic",true);}
-    void automatic(boolean value){prefs.edit().putBoolean(KEY+"automatic",value).apply();changed();}
+    boolean automatic(){return !administrator&&!installed.preview&&prefs.getBoolean(KEY+"automatic",true);}
+    void automatic(boolean value){if(!administrator&&!installed.preview)prefs.edit().putBoolean(KEY+"automatic",value).apply();changed();}
     void maybeCheck(){if(api.isLoggedIn()&&automatic()&&!busy())check(false);}
     void startupCheck(){if(api.isLoggedIn())maybeCheck();}
     long currentVersion(){try{PackageInfo p=context.getPackageManager().getPackageInfo(context.getPackageName(),0);return Build.VERSION.SDK_INT>=28?p.getLongVersionCode():p.versionCode;}catch(Exception e){return 0;}}
     String currentName(){try{return context.getPackageManager().getPackageInfo(context.getPackageName(),0).versionName;}catch(Exception e){return "未知";}}
-    private String channel(){return (context.getApplicationInfo().flags&ApplicationInfo.FLAG_DEBUGGABLE)!=0?"debug":"release";}
+    String installedTargetName(){try{return context.getPackageManager().getPackageInfo(targetPackage(),0).versionName;}catch(Exception e){return "尚未安装";}}
+    private String channel(){return administrator?"preview":"release";}
     String endpoint(){
+        if(administrator)return api.getBaseUrl()+"/api/admin/android/releases/latest";
         String configured=prefs.getString(KEY+"url","");
         if(configured.trim().isEmpty())configured=context.getString(R.string.default_update_manifest_url);
         return UpdateManifest.https(configured);
     }
     void source(String value){
+        if(administrator)throw new IllegalArgumentException("测试版只使用当前服务器的管理员鉴权下载接口。");
         if(busy())throw new IllegalArgumentException("请等待当前检查完成，或先取消下载。");
         String checked=value.trim().isEmpty()?"":UpdateManifest.https(value);
         prefs.edit().putString(KEY+"url",checked).apply();syncSource();changed();
@@ -105,13 +135,13 @@ final class AppUpdates {
         prefs.edit().remove(KEY+"checked_build").apply();
         return true;
     }
-    boolean busy(){return checking||verifying||clearingPackages||downloadId!=-1;}
+    boolean busy(){return checking||verifying||clearingPackages||downloadId!=-1||privateDownloading||installAuthorizing;}
     boolean checking(){return checking;}
-    boolean downloading(){return downloadId!=-1;}
+    boolean downloading(){return downloadId!=-1||privateDownloading;}
     boolean verifying(){return verifying;}
     int progress(){return progress;}
-    boolean ready(){return !verifiedName.isEmpty()&&verifiedFile().isFile();}
-    boolean available(){return release!=null&&release.versionCode>currentVersion()&&release.minSdk<=Build.VERSION.SDK_INT;}
+    boolean ready(){return (!administrator||api.isAdministrator()&&adminOwner==api.sessionGeneration())&&!verifiedName.isEmpty()&&verifiedFile().isFile();}
+    boolean available(){return release!=null&&candidateAllowed(release)&&release.minSdk<=Build.VERSION.SDK_INT;}
     String error(){return error;}
     String lastCheck(){long time=prefs.getLong(KEY+"attempt",0),success=prefs.getLong(KEY+"success",0);if(time==0)return "尚未发起检查";String label=new java.text.SimpleDateFormat("MM-dd HH:mm",Locale.CHINA).format(new Date(time));return "最近检查："+label+(checking?" · 检查中":success>=time?" · 成功":" · 未完成或失败，可立即手动重试");}
     String status(){
@@ -119,20 +149,20 @@ final class AppUpdates {
         if(clearingPackages)return "正在清理已下载安装包…";
         if(checking)return "正在检查新版本…";
         if(verifying)return moduleStatus.isEmpty()?"正在校验安装包…":moduleStatus;
-        if(downloadId!=-1)return !downloadState.isEmpty()?downloadState:progress<0?"正在等待或下载安装包…":"正在下载安装包 · "+progress+"%";
+        if(downloading())return !downloadState.isEmpty()?downloadState:progress<0?"正在等待或下载安装包…":"正在下载安装包 · "+progress+"%";
         if(ready())return "新版已下载，等待安装";
         if(!error.isEmpty())return error;
-        if(release==null)return "尚未检查更新";
-        if(release.versionCode<=currentVersion())return "已是最新版";
+        if(release==null)return noPreview?"暂无待发布测试版":"尚未检查更新";
+        if(!candidateAllowed(release))return "已是最新版";
         if(release.minSdk>Build.VERSION.SDK_INT)return "新版本需要 Android API "+release.minSdk+" 或更高版本";
-        return "发现新版本 "+release.versionName;
+        return administrator?"发现待发布测试版 "+release.versionName+" · 测试"+release.previewRevision:installed.preview?"可切换至正式版 "+release.versionName:"发现新版本 "+release.versionName;
     }
     String notes(){return release==null?"":release.notes;}
-    String downloadLabel(){return release==null?"下载新版安装包":"更新 "+release.versionName+" 版本";}
+    String downloadLabel(){return release==null?"下载新版安装包":administrator?"安装测试版 "+release.versionName+" · 测试"+release.previewRevision:installed.preview?"切换正式版 "+release.versionName:"更新 "+release.versionName+" 版本";}
     void dismissError(){error="";changed();}
     private void changed(){if(listener!=null&&activity()!=null)listener.run();}
     void check(boolean manual){
-        if(!syncSource()){changed();return;}if(busy())return;
+        if(!syncSource()){changed();return;}if(busy()||otherBusy())return;
         long now=System.currentTimeMillis();
         if(!manual){
             java.time.ZoneId zone=java.time.ZoneId.systemDefault();
@@ -140,23 +170,36 @@ final class AppUpdates {
             // Persist before dispatch, so rotations/restarts and failures cannot repeat today's automatic attempt.
             if(!prefs.edit().putLong(KEY+"auto_attempt",now).commit())return;
         }
-        error="";sourceDiagnostics="";pendingResult="";checking=true;changed();
+        error="";sourceDiagnostics="";pendingResult="";checking=true;noPreview=false;if(administrator)adminOwner=api.sessionGeneration();changed();
         final long ticket=++generation;final String address=source;++moduleCheckGeneration;
         prefs.edit().putLong(KEY+"attempt",System.currentTimeMillis()).apply();
         io.execute(()->{
             try{
                 if(address.isEmpty())throw new ApiClient.UnconfiguredException();
                 if(!network.getAsBoolean())throw new ApiClient.NoNetworkException();
-                UpdateSources.Checked selected=UpdateSources.check(address,context.getPackageName(),channel(),currentVersion(),this::readManifest);
-                UpdateManifest found=selected.manifest;
+                final UpdateSources.Checked selected;
+                UpdateManifest found;
+                if(administrator){
+                    selected=null;
+                    JSONObject metadata=api.adminRelease();
+                    if(!metadata.optBoolean("available",true)){
+                        ui.post(()->{if(ticket!=generation)return;checking=false;if(adminOwner!=api.sessionGeneration()||!api.isAdministrator()){sessionChanged();return;}release=null;deleteVerified();noPreview=true;pendingOffer=false;pendingResult=manual?"暂无待发布测试版":"";prefs.edit().putLong(KEY+"success",System.currentTimeMillis()).putLong(KEY+"checked_build",currentVersion()).apply();save();changed();presentOffer();});return;
+                    }
+                    found=UpdateManifest.administrator(metadata,api.getBaseUrl());found.requireChannel(channel());
+                }
+                else {
+                    selected=UpdateSources.check(address,context.getPackageName(),channel(),currentVersion(),this::readManifest);
+                    found=selected.manifest;
+                }
                 ui.post(()->{
-                    if(ticket!=generation)return;checking=false;checkedModules="正在单独检查已下载模块…";checkedSource=selected.endpoint;sourceDiagnostics=selected.diagnostics;
+                    if(ticket!=generation)return;checking=false;checkedModules="正在单独检查已下载模块…";checkedSource=selected==null?address:selected.endpoint;sourceDiagnostics=selected==null?"":selected.diagnostics;
+                    if(administrator&&(adminOwner!=api.sessionGeneration()||!api.isAdministrator())){sessionChanged();return;}
                     if(release==null||release.versionCode!=found.versionCode||!release.sha256.equals(found.sha256)){deleteVerified();}
                     release=found;prefs.edit().putLong(KEY+"success",System.currentTimeMillis()).putLong(KEY+"checked_build",currentVersion()).apply();save();changed();
                     if((manual||automatic())&&available()&&!ready()&&(manual||promptedVersion!=found.versionCode)){
                         pendingOffer=true;presentOffer();
                     }else if(manual){
-                        pendingResult=found.versionCode<=currentVersion()?"已是最新版本":ready()?"新版已下载，请点击安装新版继续":status();presentOffer();
+                        pendingResult=!candidateAllowed(found)?"已是最新版本":ready()?"新版已下载，请点击安装新版继续":status();presentOffer();
                     }
                     checkModules(found);
                 });
@@ -165,11 +208,11 @@ final class AppUpdates {
     }
     private void checkModules(UpdateManifest found){long moduleTicket=moduleCheckGeneration;moduleIo.execute(()->{
         String report="尚未下载可选模块";
-        try{if(!ModuleStore.acquired(context).isEmpty())report=found.modulesUrl.isEmpty()?"此版本未提供模块更新清单；旧文件与设置会保留":ModuleUpdates.summary(context,(int)found.versionCode,found.versionName);}
+        try{if(!ModuleStore.acquired(context).isEmpty())report=found.modulesUrl.isEmpty()?"此版本未提供模块更新清单；旧文件与设置会保留":ModuleUpdates.summary(context,found);}
         catch(Exception failure){report="模块检查失败："+failure.getMessage();}
         String value=report;ui.post(()->{if(moduleTicket!=moduleCheckGeneration||release!=found)return;checkedModules=value;changed();});
     });}
-    String sourceStatus(){return endpoint()+(UpdateSources.GITEE_LATEST.equals(endpoint())?"\n优先 Gitee，不可用时尝试 GitHub":"\n正在使用自定义地址；清空地址可恢复 Gitee 优先")+(checkedSource.isEmpty()?"":"\n最近成功来源："+UpdateSources.label(checkedSource))+(sourceDiagnostics.isEmpty()?"":"\n更新源诊断：\n"+sourceDiagnostics);}
+    String sourceStatus(){if(administrator)return endpoint()+"\n仅管理员鉴权，手动选择待发布测试版";return endpoint()+(UpdateSources.GITEE_LATEST.equals(endpoint())?"\n优先 Gitee，不可用时尝试 GitHub":"\n正在使用自定义地址；清空地址可恢复 Gitee 优先")+(checkedSource.isEmpty()?"":"\n最近成功来源："+UpdateSources.label(checkedSource))+(sourceDiagnostics.isEmpty()?"":"\n更新源诊断：\n"+sourceDiagnostics);}
     private JSONObject readManifest(String address,int limit)throws Exception{
         HttpURLConnection connection=openManifest(address);
         try(InputStream stream=connection.getInputStream();ByteArrayOutputStream bytes=new ByteArrayOutputStream()){
@@ -205,7 +248,7 @@ final class AppUpdates {
         }
         if(!available()||ready()){pendingOffer=false;return;}
         LinearLayout panel=new LinearLayout(a);panel.setOrientation(LinearLayout.VERTICAL);
-        TextView version=new TextView(a);version.setText("ACMforever "+release.versionName);version.setContentDescription("新版版本号 "+release.versionName);version.setTextColor(MobileStyle.TEXT);version.setTextSize(23);version.setTypeface(null,android.graphics.Typeface.BOLD);version.setGravity(android.view.Gravity.CENTER);version.setPadding(0,0,0,MobileStyle.dp(a,16));panel.addView(version,new LinearLayout.LayoutParams(-1,-2));
+        TextView version=new TextView(a);version.setText("ACMforever "+release.versionName+(administrator?" · 测试"+release.previewRevision:""));version.setContentDescription("新版版本号 "+release.versionName);version.setTextColor(MobileStyle.TEXT);version.setTextSize(23);version.setTypeface(null,android.graphics.Typeface.BOLD);version.setGravity(android.view.Gravity.CENTER);version.setPadding(0,0,0,MobileStyle.dp(a,16));panel.addView(version,new LinearLayout.LayoutParams(-1,-2));
         TextView heading=new TextView(a);heading.setText("更新说明");heading.setTextColor(MobileStyle.MUTED);heading.setTextSize(13);heading.setPadding(0,0,0,MobileStyle.dp(a,8));panel.addView(heading);
         ScrollView description=new ScrollView(a){@Override protected void onMeasure(int width,int height){int limit=(int)(getResources().getDisplayMetrics().heightPixels*.24f);super.onMeasure(width,android.view.View.MeasureSpec.makeMeasureSpec(limit,android.view.View.MeasureSpec.AT_MOST));}};
         TextView copy=new TextView(a);copy.setText(notes().isEmpty()?"此版本未提供更新说明。":notes());copy.setContentDescription("新版更新说明");copy.setTextColor(MobileStyle.TEXT);copy.setTextSize(15);copy.setLineSpacing(MobileStyle.dp(a,4),1);copy.setPadding(0,0,0,MobileStyle.dp(a,16));description.addView(copy);panel.addView(description,new LinearLayout.LayoutParams(-1,-2));
@@ -216,7 +259,7 @@ final class AppUpdates {
         cancel.setTextColor(ThemePalette.readable(new int[]{ThemePalette.mix(MobileStyle.PANEL,Color.RED,.5)},MobileStyle.TEXT,4.5));
         LinearLayout.LayoutParams left=new LinearLayout.LayoutParams(0,MobileStyle.dp(a,56),1);left.setMarginEnd(MobileStyle.dp(a,6));actions.addView(download,left);
         LinearLayout.LayoutParams right=new LinearLayout.LayoutParams(0,MobileStyle.dp(a,56),1);right.setMarginStart(MobileStyle.dp(a,6));actions.addView(cancel,right);LinearLayout.LayoutParams actionBounds=new LinearLayout.LayoutParams(-1,-2);actionBounds.topMargin=MobileStyle.dp(a,16);panel.addView(actions,actionBounds);
-        AlertDialog dialog=new ModalDialogs.Builder(a).setTitle("发现新版本").setView(panel).create();offerDialog=dialog;
+        AlertDialog dialog=new ModalDialogs.Builder(a).setTitle(administrator?"待发布测试版":installed.preview?"切回正式版":"发现新版本").setView(panel).create();offerDialog=dialog;
         final long offeredVersion=release.versionCode;
         dialog.setOnDismissListener(d->{offerDialog=null;pendingOffer=false;promptedVersion=offeredVersion;});
         cancel.setOnClickListener(v->dialog.dismiss());
@@ -227,10 +270,11 @@ final class AppUpdates {
         if(!ready()&&!busy())download();
         if(!downloading()&&!verifying()&&!ready()&&error.isEmpty())return;
         openingDownload=true;
-        try{a.startActivity(new Intent(a,UpdateDownloadActivity.class));}catch(Exception e){openingDownload=false;fail(e);}
+        try{a.startActivity(new Intent(a,UpdateDownloadActivity.class).putExtra("admin_distribution",administrator));}catch(Exception e){openingDownload=false;fail(e);}
     }
     void download(){
-        if(!syncSource()){changed();return;}if(busy()||!available()||ready())return;
+        if(!syncSource()){changed();return;}if(busy()||otherBusy()||!available()||ready())return;
+        if(administrator){downloadPrivate();return;}
         downloadAttempt=0;enqueueDownload();
     }
     private void enqueueDownload(){
@@ -241,6 +285,26 @@ final class AppUpdates {
             request.setDestinationInExternalFilesDir(context,Environment.DIRECTORY_DOWNLOADS,"acmforever-"+release.versionCode+"-"+System.currentTimeMillis()+".apk");
             downloadId=downloads().enqueue(request);progress=-1;downloadState=downloadAttempt==0?"正在等待下载…":"Gitee 下载失败，正在改用 GitHub…";error="";save();changed();ui.removeCallbacks(poll);ui.postDelayed(poll,1000);
         }catch(Exception e){downloadId=-1;fail(e);}
+    }
+    private void downloadPrivate(){
+        if(!api.isAdministrator()||adminOwner!=api.sessionGeneration()){fail(new IllegalArgumentException("请重新确认管理权限。"));return;}
+        final long ticket=++privateTicket,owner=adminOwner;final UpdateManifest expected=release;
+        privateDownloading=true;progress=-1;error="";changed();
+        io.execute(()->{
+            File file=null;
+            try{
+                api.refreshSession();if(owner!=api.sessionGeneration()||!api.isAdministrator())throw new IllegalArgumentException("管理权限已失效。");
+                File folder=new File(context.getCacheDir(),"updates");if(!folder.isDirectory()&&!folder.mkdirs())throw new IOException("无法创建更新缓存。");
+                file=File.createTempFile("verified-preview-",".apk",folder);
+                api.adminApk(owner,expected.previewTag,file,()->ticket!=privateTicket,bytes->ui.post(()->{if(ticket==privateTicket){int next=(int)Math.min(100,bytes*100/expected.sizeBytes);if(next!=progress){progress=next;changed();}}}));
+                if(ticket!=privateTicket)throw new IOException("下载已取消");
+                MessageDigest digest=MessageDigest.getInstance("SHA-256");try(InputStream in=new FileInputStream(file)){byte[] buffer=new byte[16384];int n;while((n=in.read(buffer))!=-1)digest.update(buffer,0,n);}
+                StringBuilder hash=new StringBuilder();for(byte b:digest.digest())hash.append(String.format(Locale.ROOT,"%02x",b&255));
+                if(!expected.sha256.equals(hash.toString())||file.length()!=expected.sizeBytes)throw new IllegalArgumentException("安装包校验失败。");
+                validatePackage(file,expected);final File verified=file;
+                ui.post(()->{if(ticket!=privateTicket||owner!=api.sessionGeneration()||!api.isAdministrator()){verified.delete();return;}privateDownloading=false;verifiedName=verified.getName();save();changed();});
+            }catch(Exception e){if(file!=null)file.delete();ui.post(()->{if(ticket!=privateTicket)return;privateDownloading=false;fail(e);});}
+        });
     }
     private DownloadManager downloads(){return (DownloadManager)context.getSystemService(Context.DOWNLOAD_SERVICE);}
     private void pollDownload(){
@@ -283,11 +347,14 @@ final class AppUpdates {
         });
     }
     void validatePackage(File file,UpdateManifest expected)throws Exception{
-        PackageManager pm=context.getPackageManager();int flags=Build.VERSION.SDK_INT>=28?PackageManager.GET_SIGNING_CERTIFICATES:PackageManager.GET_SIGNATURES;
+        PackageManager pm=context.getPackageManager();int flags=PackageManager.GET_META_DATA|(Build.VERSION.SDK_INT>=28?PackageManager.GET_SIGNING_CERTIFICATES:PackageManager.GET_SIGNATURES);
         PackageInfo next=pm.getPackageArchiveInfo(file.getAbsolutePath(),flags),installed=pm.getPackageInfo(context.getPackageName(),flags);
         long version=next==null?-1:Build.VERSION.SDK_INT>=28?next.getLongVersionCode():next.versionCode;
-        if(next==null||!context.getPackageName().equals(next.packageName)||version!=expected.versionCode||version<=currentVersion())throw new IllegalArgumentException("APK 的包名或版本与更新清单不符。");
-        if(next.applicationInfo==null||next.applicationInfo.minSdkVersion>Build.VERSION.SDK_INT)throw new IllegalArgumentException("安装包不支持当前 Android 版本。");
+        if(next==null||!targetPackage().equals(next.packageName)||version!=expected.versionCode||!expected.versionName.equals(next.versionName)||!candidateAllowed(expected))throw new IllegalArgumentException("APK 的包名或版本与更新清单不符。");
+        if(next.applicationInfo==null||next.applicationInfo.minSdkVersion!=expected.minSdk||next.applicationInfo.minSdkVersion>Build.VERSION.SDK_INT)throw new IllegalArgumentException("安装包系统版本要求与清单不符，或不支持当前 Android 版本。");
+        if(ApkManifest.debuggable(pm,file,next)!=expected.legacyPublicDebug())throw new IllegalArgumentException("安装包调试标志与分发类型不符。");
+        AppDistribution actual=AppDistribution.archive(next);
+        if(actual.preview!=administrator||administrator&&(actual.revision!=expected.previewRevision||actual.releaseCode!=expected.releaseVersionCode)||!administrator&&actual.releaseCode!=0&&actual.releaseCode!=expected.versionCode)throw new IllegalArgumentException("安装包渠道或测试修订与清单不符。");
         Signature[] a=Build.VERSION.SDK_INT>=28?(next.signingInfo==null?null:next.signingInfo.getApkContentsSigners()):next.signatures;
         Signature[] b=Build.VERSION.SDK_INT>=28?(installed.signingInfo==null?null:installed.signingInfo.getApkContentsSigners()):installed.signatures;
         if(a==null||b==null||a.length==0||a.length!=b.length||!new HashSet<>(Arrays.asList(a)).equals(new HashSet<>(Arrays.asList(b))))throw new IllegalArgumentException("安装包签名与当前 App 不一致。");
@@ -295,6 +362,14 @@ final class AppUpdates {
     void install(Activity a){
         if(!ready()||busy()||openingInstaller)return;
         if(ModuleDownloads.get(context).active()){error="请先完成或取消正在进行的模块下载/安装。";changed();return;}
+        if(administrator){
+            installAuthorizing=true;changed();final long owner=adminOwner;final String file=verifiedName;
+            io.execute(()->{try{api.refreshSession();if(owner!=api.sessionGeneration()||!api.isAdministrator())throw new IllegalArgumentException("管理权限已失效。");ui.post(()->{installAuthorizing=false;if(owner==api.sessionGeneration()&&api.isAdministrator()&&file.equals(verifiedName))installAuthorized(a);else sessionChanged();});}catch(Exception e){ui.post(()->{installAuthorizing=false;sessionChanged();fail(e);});}});return;
+        }
+        installAuthorized(a);
+    }
+    private void installAuthorized(Activity a){
+        if(!ready()||a.isFinishing()||a.isDestroyed())return;
         if(!a.getPackageManager().canRequestPackageInstalls()){
             if(ModalDialogs.isShowing(a))return;
             new ModalDialogs.Builder(a).setTitle("允许安装更新").setMessage("打开本 App 的安装权限后，仍由系统确认安装。")
@@ -309,7 +384,7 @@ final class AppUpdates {
             Map<String,File> modules=ModuleUpdates.prepare(context,expected,()->ticket!=generation,text->ui.post(()->{if(ticket==generation){moduleStatus=text;changed();}}));
             if(ticket!=generation)return;
             if(!modules.isEmpty()||!ModuleStore.installedNative(context).isEmpty()){
-                ModuleInstaller.commit(context,"app-update",base,modules,()->ticket!=generation);
+                ModuleInstaller.commit(context,installReceipt(),base,modules,()->ticket!=generation);
                 ui.post(()->{if(ticket==generation){verifying=false;moduleStatus="";openingInstaller=true;changed();}});
             }else ui.post(()->{if(ticket==generation){verifying=false;moduleStatus="";openBaseInstaller(a);}});
         }catch(Exception e){ui.post(()->{if(ticket==generation){verifying=false;moduleStatus="";openingInstaller=false;fail(e);}});}});
@@ -321,13 +396,14 @@ final class AppUpdates {
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);a.startActivity(intent);
         }catch(Exception e){openingInstaller=false;fail(e);}
     }
-    void installerResult(int status,String message,Intent confirmation){ui.post(()->{
+    void installerResult(String receipt,int status,String message,Intent confirmation){ui.post(()->{
+        if(!ownsInstallReceipt(receipt)||administrator&&(adminOwner!=api.sessionGeneration()||!api.isAdministrator()))return;
         if(status==PackageInstaller.STATUS_PENDING_USER_ACTION){if(confirmation==null){openingInstaller=false;error="系统未提供安装确认窗口，请重试。";changed();return;}awaitingModuleInstall=true;moduleInstallConfirmation=confirmation;Activity a=activity();if(a!=null)resumeInstall(a);changed();}
-        else{awaitingModuleInstall=false;openingInstaller=false;if(status!=PackageInstaller.STATUS_SUCCESS){error=status==PackageInstaller.STATUS_FAILURE_ABORTED?"已取消系统安装，可稍后继续":"系统安装失败："+message;changed();}}
+        else{moduleInstallConfirmation=null;awaitingModuleInstall=false;openingInstaller=false;if(status!=PackageInstaller.STATUS_SUCCESS){error=status==PackageInstaller.STATUS_FAILURE_ABORTED?"已取消系统安装，可稍后继续":"系统安装失败："+message;}changed();}
     });}
-    void resumeInstall(Activity a){if(moduleInstallConfirmation!=null&&api.isLoggedIn()){Intent intent=moduleInstallConfirmation;moduleInstallConfirmation=null;try{a.startActivity(intent);}catch(Exception e){awaitingModuleInstall=false;openingInstaller=false;fail(e);}return;}if(installRequested){installRequested=false;if(a.getPackageManager().canRequestPackageInstalls())install(a);}}
+    void resumeInstall(Activity a){if(administrator&&(adminOwner!=api.sessionGeneration()||!api.isAdministrator())){sessionChanged();return;}if(moduleInstallConfirmation!=null&&api.isLoggedIn()){Intent intent=moduleInstallConfirmation;moduleInstallConfirmation=null;try{a.startActivity(intent);}catch(Exception e){awaitingModuleInstall=false;openingInstaller=false;fail(e);}return;}if(installRequested){installRequested=false;if(a.getPackageManager().canRequestPackageInstalls())install(a);}}
     void clearDownloadedPackages(){
-        if(busy()||openingInstaller){error="请等待下载、校验或安装操作结束后再清理。";changed();return;}
+        if(busy()||otherBusy()||openingInstaller){error="请等待下载、校验或安装操作结束后再清理。";changed();return;}
         clearingPackages=true;installRequested=false;error="";changed();
         io.execute(()->{
             Exception issue=null;
@@ -342,7 +418,7 @@ final class AppUpdates {
             });
         });
     }
-    void cancelDownload(){++generation;ui.removeCallbacks(poll);if(downloadId!=-1)downloads().remove(downloadId);downloadId=-1;verifying=false;moduleStatus="";progress=-1;downloadState="";save();changed();}
+    void cancelDownload(){++generation;++privateTicket;if(administrator)api.cancelAdminApk();privateDownloading=false;ui.removeCallbacks(poll);if(downloadId!=-1)downloads().remove(downloadId);downloadId=-1;verifying=false;moduleStatus="";progress=-1;downloadState="";save();changed();}
     private File verifiedFile(){return new File(new File(context.getCacheDir(),"updates"),verifiedName.matches("verified-[A-Za-z0-9_-]+\\.apk")?verifiedName:"missing");}
     private void deleteVerified(){if(!verifiedName.isEmpty())verifiedFile().delete();verifiedName="";}
     private void clearStored(){if(downloadId!=-1)downloads().remove(downloadId);downloadId=-1;downloadAttempt=0;checkedSource="";sourceDiagnostics="";deleteVerified();release=null;prefs.edit().remove(KEY+"manifest").remove(KEY+"download").remove(KEY+"verified").remove(KEY+"source").remove(KEY+"download_attempt").remove(KEY+"checked_source").remove(KEY+"source_diagnostics").apply();}

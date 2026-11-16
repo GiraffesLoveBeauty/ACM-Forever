@@ -77,13 +77,13 @@ class TagReleaseTests(unittest.TestCase):
         self.directory = Path(self.temp.name)
         self.github = FakeGitHub()
         self.tag = "v0.2.14"
-        self.filename = "acmforever-0.2.14-debug.apk"
+        self.filename = "acmforever-0.2.14.apk"
         self.commit = "a" * 40
         self.manifest = {
             "packageName": release.PACKAGE, "versionCode": 28, "versionName": "0.2.14", "minSdk": 26,
             "apkUrl": "https://github.com/" + self.github.repository + "/releases/download/" + self.tag + "/" + self.filename,
             "sha256": hashlib.sha256(b"fixture bytes").hexdigest(), "sizeBytes": len(b"fixture bytes"),
-            "channel": "debug", "signingCertificateSha256": "1" * 64, "notes": "真实更新说明",
+            "schemaVersion": 2, "distribution": "release", "signingCertificateSha256": "1" * 64, "notes": "真实更新说明",
         }
         (self.directory / self.filename).write_bytes(b"fixture bytes")
         (self.directory / (self.filename + ".sha256")).write_text(self.manifest["sha256"] + "  " + self.filename + "\n", encoding="ascii")
@@ -99,6 +99,8 @@ class TagReleaseTests(unittest.TestCase):
         tag = "v0.2.13"
         value = {**self.manifest, "versionCode": code, "versionName": "0.2.13", "channel": channel,
                  "signingCertificateSha256": certificate}
+        value.pop('schemaVersion',None)
+        value.pop('distribution',None)
         self.github.releases[tag] = {"tag_name": tag, "draft": False, "assets": [{"name": "update.json"}]}
         self.github.files[(tag, "update.json")] = json.dumps(value).encode()
         self.github.latest_tag = tag
@@ -107,6 +109,7 @@ class TagReleaseTests(unittest.TestCase):
         gradle = "versionName '0.2.14'\nversionCode 28"
         history = {"schemaVersion": 1, "currentVersionCode": 28, "entries": [{"versionName": "0.2.14"}]}
         self.assertEqual(release.validate_source(self.tag, gradle, history), ("0.2.14", 28))
+        self.assertEqual(release.validate_source(self.tag+"-preview.2",gradle,history),("0.2.14",28))
         for tag in ("v0.2.13", "0.2.14", "v0.2.14-rc1", "v0.2.14\n"):
             with self.subTest(tag=tag), self.assertRaises(ValueError): release.validate_source(tag, gradle, history)
         for bad in ({**history, "currentVersionCode": 27}, {**history, "entries": []}, {**history, "schemaVersion": 2}):
@@ -166,10 +169,10 @@ class TagReleaseTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.publish()
         self.assertNotIn("upload", self.github.operations)
 
-    def test_explicit_channel_migration_uses_separate_signing_identity(self):
-        self.previous(channel="release", certificate="2" * 64)
-        self.publish()
-        self.assertFalse(self.github.releases[self.tag]["draft"])
+    def test_debug_to_formal_migration_cannot_change_signing_identity(self):
+        self.previous(channel="debug", certificate="2" * 64)
+        with self.assertRaises(ValueError): self.publish()
+        self.assertNotIn("publish", self.github.operations)
 
     def test_published_assets_are_immutable_and_identical_rerun_does_not_write(self):
         self.publish()
@@ -347,9 +350,9 @@ class GitHubDraftAdapterTests(unittest.TestCase):
 
     def test_complete_real_adapter_handles_hidden_draft_and_immutable_rerun(self):
         github = release.GitHub("GiraffesLoveBeauty/ACM-Forever")
-        tag, filename, data = "v0.2.15", "acmforever-0.2.15-debug.apk", b"synthetic fixture"
+        tag, filename, data = "v0.2.15", "acmforever-0.2.15.apk", b"synthetic fixture"
         manifest = {"packageName": release.PACKAGE, "versionName": "0.2.15", "versionCode": 29,
-            "minSdk": 26, "channel": "debug", "signingCertificateSha256": "1" * 64,
+            "minSdk": 26, "schemaVersion": 2, "distribution": "release", "signingCertificateSha256": "1" * 64,
             "notes": "Synthetic test notes", "sha256": hashlib.sha256(data).hexdigest(), "sizeBytes": len(data),
             "apkUrl": "https://github.com/" + github.repository + "/releases/download/" + tag + "/" + filename}
         state = {"release": None, "assets": {}, "writes": [], "downloads": []}

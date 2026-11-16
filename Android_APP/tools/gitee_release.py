@@ -14,7 +14,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from tag_release import GitHub, digest, module_assets, read_manifest, validate_manifest, validate_source
+from tag_release import GitHub, digest, module_assets, read_manifest, validate_manifest, validate_source, manifest_channel
 
 GITHUB_REPOSITORY = 'GiraffesLoveBeauty/ACM-Forever'
 GITEE_REPOSITORY = 'MJJ13445/ACM-Forever'
@@ -34,10 +34,10 @@ def mirror_files(directory, target):
     directory, target = Path(directory), Path(target)
     manifest = json.loads((directory / 'update.json').read_text(encoding='utf-8'))
     validate_manifest(manifest)
-    if manifest.get('channel') not in ('debug', 'release') or not re.fullmatch(r'[0-9a-f]{64}', manifest.get('signingCertificateSha256', '')):
+    if manifest_channel(manifest) not in ('debug', 'release') or not re.fullmatch(r'[0-9a-f]{64}', manifest.get('signingCertificateSha256', '')):
         raise ValueError('Missing channel/signing identity')
     tag = 'v' + manifest['versionName']
-    name = 'acmforever-' + manifest['versionName'] + ('-debug' if manifest['channel'] == 'debug' else '') + '.apk'
+    name = 'acmforever-' + manifest['versionName'] + ('-debug' if manifest_channel(manifest) == 'debug' else '') + '.apk'
     github = 'https://github.com/' + GITHUB_REPOSITORY + '/releases/download/' + tag + '/'
     apk, checksum = directory / name, directory / (name + '.sha256')
     if (manifest.get('apkUrl') != github + name or apk.stat().st_size != manifest['sizeBytes']
@@ -90,7 +90,7 @@ def restore_github(github, directory, tag, source_commit, version, code, channel
         downloaded = Path(temp)
         manifest = read_manifest(github, current, downloaded)
         if (manifest['versionName'] != version or manifest['versionCode'] != code
-                or manifest.get('channel') != channel or manifest.get('signingCertificateSha256') != certificate):
+                or manifest_channel(manifest) != channel or manifest.get('signingCertificateSha256') != certificate):
             raise ValueError('Published manifest differs from the bundled version, channel or pinned certificate')
         for filename in names:
             if filename != 'update.json':

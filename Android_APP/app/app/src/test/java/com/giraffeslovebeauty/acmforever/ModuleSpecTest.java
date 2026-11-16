@@ -10,6 +10,20 @@ public class ModuleSpecTest {
         return new JSONObject().put("schemaVersion",1).put("versionCode",39).put("versionName","0.2.25").put("modules",modules);
     }
     @Test public void exactSizesAndNames()throws Exception{java.util.Map<String,ModuleSpec> rows=ModuleSpec.parse(catalog(),39,"0.2.25");assertEquals(4,rows.size());assertEquals("此模块未下载，预计大小2KB，是否下载？",rows.get("advanced").confirmation());}
+    @Test public void previewCatalogUsesOnlyAuthenticatedCurrentOriginAndCannotBecomePublic()throws Exception{
+        JSONObject index=catalog();String tag="v0.2.25-preview.2";index.put("previewTag",tag);
+        JSONArray rows=index.getJSONArray("modules");for(int i=0;i<rows.length();i++){JSONObject row=rows.getJSONObject(i);row.put("url","https://github.com/"+ModuleSpec.REPOSITORY+"/releases/download/"+tag+"/"+ModuleSpec.filename(row.getString("id")));}
+        java.util.Map<String,ModuleSpec> parsed=ModuleSpec.privateCatalog(index,39,"0.2.25",tag,"https://business.example",17);
+        ModuleSpec admin=parsed.get("admin");assertEquals(17,admin.owner);assertEquals(tag,admin.previewTag);
+        assertEquals(java.util.Collections.singletonList("https://business.example/api/admin/android/releases/"+tag+"/assets/module-admin.apk"),admin.downloadUrls());
+        ModuleSpec offline=ModuleSpec.storedCatalog(index,39,"0.2.25",tag).get("admin");
+        assertEquals(tag,offline.previewTag);assertEquals(-1,offline.owner);assertEquals("",offline.url);assertEquals(admin.sha256,offline.sha256);
+        assertThrows(Exception.class,()->ModuleSpec.storedCatalog(index,39,"0.2.25","v0.2.25-preview.3"));
+        assertThrows(Exception.class,()->ModuleSpec.parse(index,39,"0.2.25"));
+        assertThrows(Exception.class,()->ModuleSpec.privateCatalog(index,39,"0.2.25","v0.2.25-preview.3","https://business.example",17));
+        rows.getJSONObject(0).put("url","https://evil.invalid/module.apk");
+        assertThrows(Exception.class,()->ModuleSpec.privateCatalog(index,39,"0.2.25",tag,"https://business.example",17));
+    }
     @Test public void versionMustMatch()throws Exception{assertThrows(Exception.class,()->ModuleSpec.parse(catalog(),40,"0.2.25"));assertThrows(Exception.class,()->ModuleSpec.parse(catalog(),39,"0.2.26"));}
     @Test public void missingDuplicateAndUnknownDenied()throws Exception{JSONObject c=catalog();c.getJSONArray("modules").remove(0);assertThrows(Exception.class,()->ModuleSpec.parse(c,39,"0.2.25"));JSONObject d=catalog();d.getJSONArray("modules").put(1,d.getJSONArray("modules").getJSONObject(0));assertThrows(Exception.class,()->ModuleSpec.parse(d,39,"0.2.25"));}
     @Test public void untrustedUrlAndSizeDenied()throws Exception{for(Object size:new Object[]{0,-1,ModuleSpec.MAX_BYTES+1,"1234",1.2}){JSONObject c=catalog();c.getJSONArray("modules").getJSONObject(0).put("sizeBytes",size);assertThrows(Exception.class,()->ModuleSpec.parse(c,39,"0.2.25"));}JSONObject c=catalog();c.getJSONArray("modules").getJSONObject(0).put("url","https://elsewhere.invalid/m.apk");assertThrows(Exception.class,()->ModuleSpec.parse(c,39,"0.2.25"));}

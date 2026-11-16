@@ -44,7 +44,7 @@ final class WebFeaturesUiSmoke {
     private void notifications()throws Exception{
         feature("notifications",0);await(()->find("未读 2 条")!=null,5000,"notifications");click("全部标为已读");await(()->readThrough.get()==42,3000,"snapshot sent");await(()->find("未读 0 条")!=null,4000,"read state refreshed");check(readThrough.get()==42,"mark-read stops at observed latest id");screenshot("notifications-v026.png");
     }
-    private void tracker()throws Exception{feature("tracker",0);await(()->find("测试比赛")!=null,5000,"tracker list");check(find("A · 已 AC")!=null&&find("B · 尝试未通过")!=null,"tracker statuses remain distinct");screenshot("tracker-v026.png");}
+    private void tracker()throws Exception{feature("tracker",0);await(()->find("测试比赛")!=null,5000,"tracker list");check(walk(activity.getWindow().getDecorView(),v->v.getContentDescription()!=null&&v.getContentDescription().toString().startsWith("A. 未命名题目 · 已 AC ·"))!=null&&walk(activity.getWindow().getDecorView(),v->v.getContentDescription()!=null&&v.getContentDescription().toString().startsWith("B. 未命名题目 · 尝试未通过 ·"))!=null,"tracker statuses remain distinct in separate problem tiles");screenshot("tracker-v026.png");}
     private void revision()throws Exception{
         feature("progress",8);await(()->find("退回原因：请补充解释")!=null,5000,"review reason");Instrumentation.ActivityMonitor edit=test.addMonitor(MainActivity.class.getName(),null,false);click("修改后重新投稿");Activity opened=test.waitForMonitorWithTimeout(edit,6000);test.removeMonitor(edit);check(opened!=null,"editor launched");activity=opened;activities.add(opened);
         await(()->hint("描述问题、已经尝试的方法，或分享解题思路…")!=null,5000,"edit draft loaded");main(()->((EditText)hint("描述问题、已经尝试的方法，或分享解题思路…")).setText("Changed Markdown **explanation**"));

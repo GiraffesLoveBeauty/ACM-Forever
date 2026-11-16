@@ -18,13 +18,13 @@ public final class UpdateActivity extends Activity {
     private LinearLayout moduleActions;
     private final Runnable healthObserver=this::moduleStatus;
     private boolean painting;
-    private boolean initialCheck;
+    private boolean initialCheck,openingAdmin;
     private PullRefreshLayout pull;
     private GithubCredits credits;
     private CreditsViews creditsViews;
     private int dp(int n){return MobileStyle.dp(this,n);}
     @Override public void onCreate(Bundle state){
-        super.onCreate(state);initialCheck=state==null&&!getIntent().getBooleanExtra("manage_downloads",false);AppAppearance.load(this);AppAppearance.window(this);updates=((AcmApplication)getApplication()).updates();
+        super.onCreate(state);initialCheck=state==null&&!getIntent().getBooleanExtra("manage_downloads",false);AppAppearance.load(this);AppAppearance.window(this);updates=((AcmApplication)getApplication()).updatesFor(getIntent());
         LinearLayout root=new SpacedLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setFitsSystemWindows(true);root.setBackground(ProfileCover.drawable(this));AppAppearance.content(this,root);
         LinearLayout header=new SpacedLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);header.setPadding(dp(12),dp(8),dp(16),dp(8));header.setBackgroundColor(MobileStyle.CHROME);
         ImageButton back=new ImageButton(this);MobileStyle.flat(back);back.setImageDrawable(AppIcons.get(this,"back",MobileStyle.TEXT));back.setBackgroundColor(Color.TRANSPARENT);back.setContentDescription("返回");back.setOnClickListener(v->finish());header.addView(back,new LinearLayout.LayoutParams(dp(48),dp(48)));header.addView(text("应用更新",22));root.addView(header);
@@ -33,20 +33,26 @@ public final class UpdateActivity extends Activity {
         ImageButton close=new ImageButton(this);MobileStyle.flat(close);close.setBackgroundColor(Color.TRANSPARENT);close.setImageDrawable(AppIcons.get(this,"close",0xffaf2424));close.setContentDescription("关闭更新错误提示");close.setOnClickListener(v->updates.dismissError());banner.addView(close,new LinearLayout.LayoutParams(dp(48),dp(48)));LinearLayout.LayoutParams bannerBounds=new LinearLayout.LayoutParams(-1,-2);bannerBounds.setMargins(dp(12),dp(16),dp(12),dp(8));root.addView(banner,bannerBounds);
         ScrollView scroll=new ScrollView(this);pull=new PullRefreshLayout(this,scroll,()->!updates.busy()&&!ModalDialogs.isShowing(this),()->updates.check(true));root.addView(pull,new LinearLayout.LayoutParams(-1,0,1));body=new SpacedLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(dp(16),dp(16),dp(16),dp(24));scroll.addView(body);
         try{credits=GithubCredits.load(this);creditsViews=new CreditsViews(this,credits);}catch(Exception ignored){}
-        LinearLayout current=card();current.addView(text("ACMforever "+updates.currentName(),20));status=text("",16);status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);current.addView(status);notes=text("",14);current.addView(notes);
-        if(creditsViews!=null)creditsViews.version(current,updates.currentName());else current.addView(text("本地人员记录读取失败",12));
+        LinearLayout current=card();current.addView(text((updates.administrator()?"管理员测试渠道 · ":"ACMforever ")+updates.installedTargetName()+(updates.previewInstalled()?" · 测试"+updates.installedPreviewRevision():""),20));status=text("",16);status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);current.addView(status);notes=text("",14);current.addView(notes);
+        if(creditsViews!=null&&updates.currentVersion()>0)creditsViews.version(current,updates.installedTargetName());else if(creditsViews==null)current.addView(text("本地人员记录读取失败",12));
         last=text("",12);current.addView(last);check=button(current,"检查更新",()->updates.check(true));download=button(current,"下载新版安装包",()->updates.openDownload(this));install=button(current,"安装新版",()->updates.install(this));cancel=button(current,"取消下载",updates::cancelDownload);
         clearPackages=button(current,"清理已下载安装包",()->new ModalDialogs.Builder(this).setTitle("清理已下载安装包？").setMessage("仅删除本 App 下载的安装包，不会卸载当前 App，也不影响账号密码、主题或草稿。需要更新时可重新下载。").setNegativeButton("取消",null).setPositiveButton("确认清理",(d,w)->updates.clearDownloadedPackages()).show());
-        LinearLayout options=card();options.addView(text("自动更新选项",18));automatic=new CheckBox(this);automatic.setText("启动时自动检查更新");automatic.setMinHeight(dp(48));options.addView(automatic);
+        LinearLayout options=card();options.addView(text("更新与模块选项",18));
+        if(!updates.administrator()&&!updates.previewInstalled()){
+        automatic=new CheckBox(this);automatic.setText("启动时自动检查更新");automatic.setMinHeight(dp(48));options.addView(automatic);
         options.addView(text("自动检查默认开启，登录后每天最多主动检查一次，按手机本地时间凌晨 4:00 换日。当天手动或自动检查成功后不再主动检查；失败可手动重试。进入本页与手动检查始终立即检查。发现新版先询问，点击下载后进入猫娘下载页；安装仍需系统确认。",12));
         automatic.setOnCheckedChangeListener((b,value)->{if(!painting){updates.automatic(value);if(value)updates.maybeCheck();}});
+        }
         moduleUpdates=new CheckBox(this);moduleUpdates.setText("随 App 更新已下载模块");moduleUpdates.setMinHeight(dp(48));moduleUpdates.setChecked(ModuleStore.updateTogether(this));options.addView(moduleUpdates);
         moduleUpdates.setOnCheckedChangeListener((b,value)->{if(!painting)ModuleStore.updateTogether(this,value);});
         options.addView(text("默认勾选，仅更新已下载的模块。关闭后保留原文件和设置；旧资源包兼容时继续使用，原生模块须匹配新版 App，可能暂不可用。安装仍需系统确认。",12));
         modulesSummary=text("模块：等待版本检查",12);options.addView(modulesSummary);
         moduleActions=new SpacedLayout(this);moduleActions.setOrientation(LinearLayout.VERTICAL);options.addView(moduleActions);
         ModuleHealth.listen(healthObserver);moduleStatus();button(options,"检查本机模块 / 本地恢复",()->ModuleHealth.checkAll(this));
-        LinearLayout publishing=card();publishing.addView(text("版本发布地址",16));source=text("",12);source.setTextIsSelectable(true);publishing.addView(source);button(publishing,"设置发布地址",this::editSource);
+        if(updates.previewInstalled())current.addView(text("测试版不自动检查更新。此页手动检查正式版，可下载后覆盖切回；管理员还可进入测试渠道手动选择待发布版本。",13));
+        LinearLayout publishing=card();publishing.addView(text(updates.administrator()?"测试版 · 管理员手动选择":"正式版发布地址",16));source=text("",12);source.setTextIsSelectable(true);publishing.addView(source);if(!updates.administrator())button(publishing,"设置发布地址",this::editSource);
+        if(updates.administrator())publishing.addView(text("覆盖当前 App 并沿用本机数据。仅下载所选测试版，不包含正式版安装包。下载和安装前验证管理权限；退出后须重新检查。",13));
+        if(!updates.administrator()&&((AcmApplication)getApplication()).api().isAdministrator())button(publishing,"待发布测试版",()->{if(openingAdmin)return;openingAdmin=true;startActivity(new Intent(this,UpdateActivity.class).putExtra("admin_distribution",true));});
         releaseHistory();
         refresh();AppAppearance.paintFields(root);
     }
@@ -68,7 +74,7 @@ public final class UpdateActivity extends Activity {
             byte[] buffer=new byte[4096];int n;while((n=in.read(buffer))!=-1){if(bytes.size()+n>131072)throw new java.io.IOException("更新日志过大");bytes.write(buffer,0,n);}
             ReleaseHistory history=ReleaseHistory.parse(new String(bytes.toByteArray(),java.nio.charset.StandardCharsets.UTF_8),updates.currentName());
             for(ReleaseHistory.Entry entry:history.entries){
-                LinearLayout version=card();version.setContentDescription("更新记录 "+entry.versionName);version.addView(text("v"+entry.versionName+(entry.versionName.equals(updates.currentName())?" · 当前版本":""),18));
+                LinearLayout version=card();version.setContentDescription("更新记录 "+entry.versionName);version.addView(text("v"+entry.versionName+(entry.versionName.equals(updates.installedTargetName())?" · 当前版本":""),18));
                 if(!entry.date.isEmpty())version.addView(text("记录日期 · "+entry.date,12));version.addView(text(entry.summary,14));
                 if(creditsViews!=null)creditsViews.version(version,entry.versionName);
                 Button open=button(version,"查看更新日志与说明",()->showReleaseNotes(entry));open.setContentDescription("查看 v"+entry.versionName+" 更新说明");
@@ -85,7 +91,7 @@ public final class UpdateActivity extends Activity {
         if(isFinishing()||isDestroyed())return;painting=true;pull.loading(updates.checking());
         try{status.setText(updates.status());last.setText(updates.lastCheck());error.setText(updates.error());banner.setVisibility(updates.error().isEmpty()?View.GONE:View.VISIBLE);notes.setText(updates.notes());notes.setVisibility(updates.notes().isEmpty()?View.GONE:View.VISIBLE);
             check.setEnabled(!updates.busy());download.setText(updates.downloadLabel());download.setVisibility(updates.available()&&!updates.ready()?View.VISIBLE:View.GONE);download.setEnabled(!updates.busy());install.setVisibility(updates.ready()?View.VISIBLE:View.GONE);install.setEnabled(!updates.busy());cancel.setVisibility(updates.downloading()?View.VISIBLE:View.GONE);clearPackages.setEnabled(!updates.busy());
-            automatic.setChecked(updates.automatic());moduleUpdates.setChecked(ModuleStore.updateTogether(this));moduleUpdates.setEnabled(!updates.operationActive());modulesSummary.setText("模块："+updates.modulesStatus());for(int i=0;i<moduleActions.getChildCount();i++)moduleActions.getChildAt(i).setEnabled(!updates.operationActive());source.setText(updates.sourceStatus());
+            if(automatic!=null)automatic.setChecked(updates.automatic());moduleUpdates.setChecked(ModuleStore.updateTogether(this));moduleUpdates.setEnabled(!updates.operationActive());modulesSummary.setText("模块："+updates.modulesStatus());for(int i=0;i<moduleActions.getChildCount();i++)moduleActions.getChildAt(i).setEnabled(!updates.operationActive());source.setText(updates.sourceStatus());
         }finally{painting=false;}
     }
     private void editSource(){
@@ -93,7 +99,7 @@ public final class UpdateActivity extends Activity {
         AlertDialog dialog=new ModalDialogs.Builder(this).setTitle("版本发布地址").setView(field).setNegativeButton("取消",null).setPositiveButton("保存",null).create();ModalDialogs.show(dialog);
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{try{updates.source(field.getText().toString());dialog.dismiss();}catch(IllegalArgumentException e){field.setError(e.getMessage());}});
     }
-    @Override protected void onResume(){super.onResume();updates.attach(this,this::refresh);updates.resumeInstall(this);if(initialCheck){initialCheck=false;if(!updates.busy()&&!updates.ready())updates.check(true);}}
+    @Override protected void onResume(){super.onResume();openingAdmin=false;updates.attach(this,this::refresh);updates.resumeInstall(this);if(initialCheck){initialCheck=false;if(!updates.busy()&&!updates.ready())updates.check(true);}}
     @Override protected void onPause(){updates.detach(this);super.onPause();}
     @Override protected void onDestroy(){ModalDialogs.close(this);ModuleHealth.unlisten(healthObserver);super.onDestroy();}
 }

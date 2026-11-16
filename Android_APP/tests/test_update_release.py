@@ -78,18 +78,51 @@ class ReleaseContractTests(unittest.TestCase):
             archive.writestr("other.json", "{}")
         with self.assertRaises(KeyError): release.bundled_history(self.apk, self.history)
 
-    def test_debug_filename_channel_and_certificate(self):
-        manifest = self.generate(channel="debug", certificate="a" * 64)
-        self.assertTrue(manifest["apkUrl"].endswith("/acmforever-0.2.13-debug.apk"))
-        self.assertEqual(manifest["channel"], "debug")
-        self.assertEqual(manifest["signingCertificateSha256"], "a" * 64)
-        with self.assertRaises(ValueError): self.generate(channel="beta")
+    def test_private_admin_identity_and_no_public_url(self):
+        self.metadata["versionCode"] = 26
+        manifest = self.generate(tag="v0.2.13-preview.1", channel="preview", certificate="a" * 64)
+        self.assertNotIn("apkUrl", manifest)
+        self.assertNotIn("channel", manifest)
+        self.assertEqual(manifest["distribution"], "preview")
+        self.assertEqual(manifest["apkPath"], "/api/admin/android/releases/v0.2.13-preview.1/apk")
+        self.assertEqual(manifest["releaseVersionCode"], 27)
+        self.assertEqual(manifest["packageName"], release.PACKAGE)
+        with self.assertRaises(ValueError): self.generate(channel="release")
+        with self.assertRaises(ValueError): self.generate(channel="debug")
+
+    def test_formal_manifest_allows_legacy_debug_upgrade(self):
+        manifest = self.generate(certificate="a" * 64)
+        self.assertNotIn("channel", manifest)
+        self.assertEqual(manifest["distribution"], "release")
+        # Exact legacy UpdateManifest.requireChannel rule in 0.2.23.
+        old_channel = manifest.get("channel", "")
+        self.assertFalse(old_channel and old_channel != "debug")
+        self.assertEqual(manifest["packageName"], release.PACKAGE)
 
     def test_build_type_must_match_channel(self):
         release.verify_variant(self.badging, "release")
-        release.verify_variant(self.badging + "\napplication-debuggable\n", "debug")
-        with self.assertRaises(ValueError): release.verify_variant(self.badging, "debug")
+        release.verify_variant(self.badging, "preview")
+        with self.assertRaises(ValueError): release.verify_variant(self.badging + "\napplication-debuggable\n", "preview")
         with self.assertRaises(ValueError): release.verify_variant(self.badging + "\napplication-debuggable\n", "release")
+
+    def test_embedded_distribution_and_no_bundled_second_apk(self):
+        tree='''E: manifest
+  E: application
+    E: meta-data
+      A: android:name(0x01010003)="acmforever.distribution"
+      A: android:value(0x01010024)="release"
+    E: meta-data
+      A: android:name(0x01010003)="acmforever.preview_revision"
+      A: android:value(0x01010024)=(type 0x10)0x0
+    E: meta-data
+      A: android:name(0x01010003)="acmforever.release_version_code"
+      A: android:value(0x01010024)=(type 0x10)0x1b'''
+        release.verify_embedded_distribution(tree,self.generate())
+        with self.assertRaises(ValueError): release.verify_embedded_distribution(tree.replace('="release"','="preview"'),self.generate())
+        with ZipFile(self.apk,"w") as archive:
+            archive.writestr("assets/releases/history.json",json.dumps(self.history))
+            archive.writestr("assets/other.apk",b"must not bundle")
+        with self.assertRaises(ValueError): release.bundled_history(self.apk,self.history)
 
     def test_single_signer_must_match_pinned_certificate(self):
         output = "Signer #1 certificate SHA-256 digest: " + "a" * 64 + "\n"

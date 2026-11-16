@@ -67,7 +67,7 @@
       "avatar": "credits/avatars/334467941.png",
       "avatarSource": "https://avatars.githubusercontent.com/u/334467941?v=4",
       "avatarSha256": "0c6575304d0f2b1f7e2c734ccf592c0de2dd6ed8cfa5d7c06793d9e4f5f35ead",
-      "role": "App 制作与提交 · 当前维护 · 自0.2.22起本人Review"
+      "role": "App 开发与维护 · 0.2.22 起已完成版本的 Review"
     },
     {
       "login": "MnMeizz",
@@ -145,7 +145,7 @@
       ],
       "pr": 142,
       "status": "published",
-      "scope": "制作及 Review 均由 MiaoJJ13445 本人完成（2026-11-15本人确认，含本地审查）；PR作者、合并及公开Release已核对。该署名不表示 GitHub 人工 APPROVED。本版由#141与#142共同交付。",
+      "scope": "开发与提交：MiaoJJ13445；Review：MiaoJJ13445（本地审查）。自动发布账号单独列出，Review 署名不等同于 GitHub 人工批准。本版由 PR #141 与 #142 共同交付。",
       "evidence": [
         "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/142"
       ]
@@ -165,7 +165,7 @@
       ],
       "pr": 115,
       "status": "published",
-      "scope": "制作及 Review 均由 MiaoJJ13445 本人完成（2026-11-15本人确认，含本地审查）；PR作者、合并及公开Release已核对。该署名不表示 GitHub 人工 APPROVED。",
+      "scope": "开发与提交：MiaoJJ13445；Review：MiaoJJ13445（本地审查）。自动发布账号单独列出，Review 署名不等同于 GitHub 人工批准。",
       "evidence": [
         "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/115"
       ],
@@ -186,7 +186,7 @@
       ],
       "pr": 114,
       "status": "published",
-      "scope": "制作及 Review 均由 MiaoJJ13445 本人完成（2026-11-15本人确认，含本地审查）；PR作者、合并及公开Release已核对。该署名不表示 GitHub 人工 APPROVED。",
+      "scope": "开发与提交：MiaoJJ13445；Review：MiaoJJ13445（本地审查）。自动发布账号单独列出，Review 署名不等同于 GitHub 人工批准。",
       "evidence": [
         "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/114"
       ],
@@ -207,7 +207,7 @@
       ],
       "pr": 113,
       "status": "published",
-      "scope": "制作及 Review 均由 MiaoJJ13445 本人完成（2026-11-15本人确认，含本地审查）；PR作者、合并及公开Release已核对。该署名不表示 GitHub 人工 APPROVED。",
+      "scope": "开发与提交：MiaoJJ13445；Review：MiaoJJ13445（本地审查）。自动发布账号单独列出，Review 署名不等同于 GitHub 人工批准。",
       "evidence": [
         "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/113"
       ]
@@ -227,7 +227,7 @@
       ],
       "pr": 112,
       "status": "published",
-      "scope": "制作及 Review 均由 MiaoJJ13445 本人完成（2026-11-15本人确认，含本地审查）；PR作者、合并及公开Release已核对。该署名不表示 GitHub 人工 APPROVED。",
+      "scope": "开发与提交：MiaoJJ13445；Review：MiaoJJ13445（本地审查）。自动发布账号单独列出，Review 署名不等同于 GitHub 人工批准。",
       "evidence": [
         "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/112"
       ]
@@ -247,7 +247,7 @@
       ],
       "pr": 111,
       "status": "published",
-      "scope": "制作及 Review 均由 MiaoJJ13445 本人完成（2026-11-15本人确认，含本地审查）；PR作者、合并及公开Release已核对。该署名不表示 GitHub 人工 APPROVED。",
+      "scope": "开发与提交：MiaoJJ13445；Review：MiaoJJ13445（本地审查）。自动发布账号单独列出，Review 署名不等同于 GitHub 人工批准。",
       "evidence": [
         "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/111"
       ]
@@ -947,7 +947,7 @@
       ],
       "pr": 143,
       "status": "published",
-      "scope": "制作及 Review 均由 MiaoJJ13445 本人完成（2026-11-15本人确认，含本地审查）；PR作者、合并及公开Release已核对。该署名不表示 GitHub 人工 APPROVED。"
+      "scope": "开发与提交：MiaoJJ13445；Review：MiaoJJ13445（本地审查）。自动发布账号单独列出，Review 署名不等同于 GitHub 人工批准。"
     },
     "0.2.29": {
       "uploaders": [
@@ -964,7 +964,7 @@
       ],
       "pr": 144,
       "status": "published",
-      "scope": "维护者确认的本人Review；发布Tag及Actions成功已核对，不冒充其他成员人工批准。",
+      "scope": "开发与提交：MiaoJJ13445；Review：MiaoJJ13445（本地审查）。自动发布账号单独列出，Review 署名不等同于 GitHub 人工批准。",
       "evidence": [
         "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/144"
       ]
@@ -973,18 +973,44 @@
       "uploaders": [
         "MiaoJJ13445"
       ],
-      "reviewRequesters": [],
-      "reviewers": [],
+      "reviewRequesters": [
+        "MiaoJJ13445"
+      ],
+      "reviewers": [
+        "MiaoJJ13445"
+      ],
+      "publishers": [
+        "github-actions[bot]"
+      ],
+      "status": "published",
+      "scope": "开发与提交：MiaoJJ13445；Review：MiaoJJ13445（本地审查）。自动发布账号单独列出，Review 署名不等同于 GitHub 人工批准。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/145"
+      ],
+      "pr": 145
+    },
+    "1.0.0": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "MiaoJJ13445"
+      ],
+      "reviewers": [
+        "MiaoJJ13445"
+      ],
       "publishers": [],
-      "status": "development",
-      "scope": "本地实现及PR候选，当前版本尚未完成Review及发布。",
-      "evidence": [],
-      "pr": 0
+      "status": "reviewed",
+      "scope": "开发与提交：MiaoJJ13445；Review：MiaoJJ13445（独立窗口辅助的本地审查，2026-11-16第二轮通过，审查提交04f35c80f737a659148cb5203a446dbbdeb9d395）。Review署名不等同于GitHub人工APPROVED；自动发布账号在公开Release完成后据实补录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/150"
+      ],
+      "pr": 150
     }
   },
   "sources": [
     "https://github.com/GiraffesLoveBeauty/ACM-Forever/graphs/contributors",
     "https://github.com/GiraffesLoveBeauty/ACM-Forever/releases"
   ],
-  "historyOwnerNote": "此前 App 历史版本由 MiaoJJ13445 负责维护。自0.2.22起本人Review署名依据维护者确认，不等同于GitHub人工APPROVED记录；自动发布单独列出。当前候选的Review与发布尚未完成。"
+  "historyOwnerNote": "App 由 GitHub 用户 MiaoJJ13445 开发与维护；自 0.2.22 起，已完成版本的 Review 由 MiaoJJ13445 负责。各版本参与者详见更新记录，自动评审与安装包发布账号分别列示。"
 }

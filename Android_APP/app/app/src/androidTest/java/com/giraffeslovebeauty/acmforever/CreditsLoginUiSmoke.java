@@ -41,23 +41,30 @@ final class CreditsLoginUiSmoke {
             api.login("90000001","Synthetic-Test!");
             activity=test.startActivitySync(new Intent(context,AboutActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             await(()->has("特别鸣谢"),"about credits");
-            main(()->{check(findText("@MiaoJJ13445")!=null,"maintainer shown");check(findText("@Setsuna-Yukirin")!=null,"review requester thanked");check(findText("@chatgpt-codex-connector[bot]")!=null,"review bot distinguished");check(countImages(activity.getWindow().getDecorView())>=12,"offline participant avatars loaded");});
+            main(()->{check(findText("@MiaoJJ13445")!=null,"maintainer shown");check(findText("@Setsuna-Yukirin")!=null,"review requester thanked");check(findText("@chatgpt-codex-connector[bot]")!=null,"review bot distinguished");check(countImages(activity.getWindow().getDecorView())>=12,"offline participant avatars loaded");check(walk(activity.getWindow().getDecorView(),v->v instanceof TextView&&((TextView)v).getText().toString().contains("本人"))==null,"About attribution uses names");});
             screenshot("about-credits-v0222.png");
             activity=test.startActivitySync(new Intent(context,UpdateActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             await(()->has("已是最新版本"),"update check still works");main(()->{View confirm=findText("确认");if(confirm!=null)confirm.performClick();});
             main(()->{
                 View current=findDescription("更新记录 "+app.updates().currentName()),previous=findDescription("更新记录 0.2.21");
                 check(current!=null&&previous!=null,"current and historical cards");
-                check(walk(current,v->v instanceof TextView&&((TextView)v).getText().toString().contains("待评审与发布"))!=null,"current does not invent review");
+                try { String publication=GithubCredits.load(context).versions.get(app.updates().currentName()).publication();check(walk(current,v->v instanceof TextView&&publication.contentEquals(((TextView)v).getText()))!=null,"current uses actual snapshot status"); }
+                catch(Exception e){throw new AssertionError(e);}
                 check(countImages(previous)>=4,"historical owner, requester, reviewer and publisher avatars");
                 check(walk(previous,v->v instanceof TextView&&"@Setsuna-Yukirin".contentEquals(((TextView)v).getText()))!=null,"historical requester");
+                for (String version : Arrays.asList("0.2.29", "0.2.30")) {
+                    View row=findDescription("更新记录 "+version);
+                    check(row!=null&&countImages(row)>=4,"completed version retains all roles: "+version);
+                    check(walk(row,v->v instanceof TextView&&((TextView)v).getText().toString().contains("待评审"))==null,"completed Review is not pending: "+version);
+                    check(walk(row,v->v instanceof TextView&&"@Setsuna-Yukirin".contentEquals(((TextView)v).getText()))==null,"completed self Review has correct identity: "+version);
+                }
             });
             screenshot("update-credits-v0222.png");
             Activity old=activity;Instrumentation.ActivityMonitor monitor=test.addMonitor(UpdateActivity.class.getName(),null,false);
             try{main(old::recreate);activity=test.waitForMonitorWithTimeout(monitor,10000);check(activity!=null,"update page recreated");await(()->has("@MiaoJJ13445"),"credits survive recreation");}finally{test.removeMonitor(monitor);}
             monitor=test.addMonitor(MainActivity.class.getName(),null,false);
             try{api.logout();Activity login=test.waitForMonitorWithTimeout(monitor,10000);check(login!=null,"logout from child returns to login");activity=login;await(()->has("账号登录"),"signed out after child");assertLocked();}finally{test.removeMonitor(monitor);}
-            output.putString("stream","PASS: signed-out login only; About/Search/Update/Appearance/Wiki direct entry redirects; no navigation/settings/search entry; offline credits and avatars; historical roles distinguished; current review pending; check updates; recreation; logout from child clears navigation.\n");result=Activity.RESULT_OK;
+            output.putString("stream","PASS: signed-out login only; About/Search/Update/Appearance/Wiki direct entry redirects; no navigation/settings/search entry; offline credits and avatars; attribution uses explicit names; completed 0.2.29/0.2.30 Review identities; actual current snapshot status; check updates; recreation; logout from child clears navigation.\n");result=Activity.RESULT_OK;
         } catch(Throwable e) {output.putString("stream","FAIL: "+android.util.Log.getStackTraceString(e));try{screenshot("credits-login-failure-v0222.png");}catch(Exception ignored){}}
         finally {
             if(activity!=null)main(()->{ModalDialogs.close(activity);activity.finish();});
@@ -75,7 +82,7 @@ final class CreditsLoginUiSmoke {
     private boolean has(String value){boolean[] found={false};main(()->found[0]=findText(value)!=null);return found[0];}
     private void main(Runnable work){test.runOnMainSync(work);}
     private void await(BooleanSupplier condition,String title)throws Exception{long end=SystemClock.uptimeMillis()+15000;while(SystemClock.uptimeMillis()<end){if(condition.getAsBoolean())return;Thread.sleep(70);}throw new AssertionError("Timeout: "+title);}
-    private void screenshot(String name)throws Exception{test.waitForIdleSync();Thread.sleep(250);Bitmap b=test.getUiAutomation().takeScreenshot();if(b!=null){try(OutputStream out=new FileOutputStream(new File(context.getExternalFilesDir(null),name))){b.compress(Bitmap.CompressFormat.PNG,100,out);}b.recycle();}}
+    private void screenshot(String name)throws Exception{test.waitForIdleSync();Thread.sleep(250);Bitmap b=test.getUiAutomation().takeScreenshot();if(b!=null){try(OutputStream out=new FileOutputStream(new File(context.getFilesDir(),name))){b.compress(Bitmap.CompressFormat.PNG,100,out);}b.recycle();}}
     private static void check(boolean value,String title){if(!value)throw new AssertionError(title);}
     private final class Fixture extends HttpURLConnection {
         Fixture(URL url){super(url);}
@@ -86,7 +93,7 @@ final class CreditsLoginUiSmoke {
         public InputStream getInputStream()throws IOException{
             String body="{}";String path=url.getPath();
             if(path.equals("/api/auth/me"))body="{\"authenticated\":true,\"csrf_token\":\"synthetic\",\"role\":\"member\",\"qq_id\":\"90000001\"}";
-            if(path.endsWith("update.json"))try{body=new org.json.JSONObject().put("packageName",context.getPackageName()).put("versionCode",36).put("versionName","0.2.22").put("apkUrl","https://credits.test.invalid/test.apk").put("sha256",String.join("",Collections.nCopies(64,"a"))).put("sizeBytes",1024).put("minSdk",26).put("channel","debug").put("notes","Synthetic update").toString();}catch(Exception e){throw new IOException(e);}
+            if(path.endsWith("update.json"))try{body=new org.json.JSONObject().put("packageName",context.getPackageName()).put("versionCode",38).put("versionName","1.0.0").put("apkUrl","https://credits.test.invalid/test.apk").put("sha256",String.join("",Collections.nCopies(64,"a"))).put("sizeBytes",1024).put("minSdk",26).put("distribution","release").put("notes","Synthetic update").toString();}catch(Exception e){throw new IOException(e);}
             return new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8));
         }
     }
