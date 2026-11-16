@@ -23,6 +23,7 @@ final class NetworkReadUiSmoke {
     private final ExecutorService workers=Executors.newFixedThreadPool(3);
     private volatile boolean noStore;
     private volatile String csrf="fixture-csrf";
+    private volatile boolean evidenceCleared,failBinding;
     private final AtomicInteger bytes=new AtomicInteger(),conditional=new AtomicInteger();
     private long navigationMs;
     private NetworkReadUiSmoke(Instrumentation test){this.test=test;app=(AcmApplication)test.getTargetContext().getApplicationContext();}
@@ -48,13 +49,32 @@ final class NetworkReadUiSmoke {
             JSONObject wiki=api.getObject("/api/wiki/pages");int before=bytes.get();JSONObject unchanged=api.getObject("/api/wiki/pages");check(wiki.toString().equals(unchanged.toString())&&conditional.get()==1&&bytes.get()==before,"304 preserves representation with zero body bytes");
             noStore=true;api.getObject("/api/wiki/no-store");api.getObject("/api/wiki/no-store");check(conditional.get()==1,"no-store never sends a validator");noStore=false;
             try(ApiClient.OwnerScope ignored=api.bind(api.sessionGeneration())){csrf="refreshed-fixture-csrf";api.refreshSession();api.writeObject("POST","/api/check-csrf",new JSONObject());}
+            bindingCache(api);
             Gate stale=new Gate("/api/late401");gate=stale;Future<?> old=workers.submit(()->{try{api.getObject(stale.path);throw new AssertionError("old response accepted");}catch(ApiClient.ApiException expected){return null;}catch(Exception e){throw new CompletionException(e);}});check(stale.entered.await(3,TimeUnit.SECONDS),"old account response held");
             long stateStart=SystemClock.uptimeMillis();main(()->api.setBaseUrl("https://new.test.invalid"));check(SystemClock.uptimeMillis()-stateStart<1000,"state lock never waits for network");api.login("90000002","Synthetic-Test!");long generation=api.sessionGeneration();stale.release.countDown();old.get(3,TimeUnit.SECONDS);check(api.isLoggedIn()&&generation==api.sessionGeneration(),"late old 401 cannot clear new session");gate=null;
-            output.putString("stream","PASS: 30s held network navigation="+navigationMs+"ms; obsolete GET cancelled; 2 concurrent reads -> 1 request; JSON copies independent; like retains problem cache; writes=1; ETag304=0 body bytes; no-store respected; late401 cannot clear new session.\n");outcome=Activity.RESULT_OK;
+            output.putString("stream","PASS: 30s held network navigation="+navigationMs+"ms; obsolete GET cancelled; 2 concurrent reads -> 1 request; JSON copies independent; like retains problem cache; writes=1; ETag304=0 body bytes; no-store respected; binding changes invalidate solved/detail/training caches offline and retain forum/wiki/drafts; failed binding preserves cache; late401 cannot clear new session.\n");outcome=Activity.RESULT_OK;
         }catch(Throwable error){output.putString("stream","FAIL: "+android.util.Log.getStackTraceString(error)+"\ncounts="+counts+"\n");}
         finally{Gate pending=gate;if(pending!=null)pending.release.countDown();workers.shutdownNow();if(activity!=null)main(()->activity.finish());}test.finish(outcome,output);
     }
     private int count(String path){AtomicInteger n=counts.get(path);return n==null?0:n.get();}
+    private void bindingCache(ApiClient api)throws Exception{
+        String[] evidence={"/api/me/problems?scope=solved","/api/me/problems/codeforces/cf_1A","/api/me/training/challenges","/api/me/training/summary"};
+        String[] keep={"/api/mobile/v1/forum/posts?page=1","/api/wiki/retained","/api/forum/drafts/11"};
+        for(String path:keep)api.get(path);
+        for(String suffix:new String[]{"","/confirm"}){
+            evidenceCleared=false;for(String path:evidence)api.get(path);
+            String path="/api/me/bindings/codeforces"+suffix,method=suffix.isEmpty()?"DELETE":"POST";
+            failBinding=true;try{api.writeObject(method,path,new JSONObject());throw new AssertionError("binding must fail");}catch(ApiClient.ApiException expected){check(expected.status==500,"failed binding status");}finally{failBinding=false;}
+            check(cached(api,evidence[0]),"failed binding retains evidence");
+            api.writeObject(method,path,new JSONObject());check(evidenceCleared,"server clears old binding evidence");
+            api.setNetworkAvailable(()->false);
+            try{for(String item:evidence)check(!cached(api,item),"no stale offline evidence: "+item);for(String item:keep)check(cached(api,item),"unrelated cache retained: "+item);
+                try{api.get(evidence[0]);throw new AssertionError("live read should be offline");}catch(ApiClient.NoNetworkException expected){}
+            }finally{api.setNetworkAvailable(()->true);}
+            check(api.getObject(evidence[0]).optInt("total")==0,"live solved list uses cleared records");
+            check("abandoned".equals(api.getArray(evidence[2]).getJSONObject(0).optString("status")),"live training reflects abandonment");
+        }
+    }
     private boolean cached(ApiClient api,String path)throws Exception{api.beginReplay();try{api.get(path);return api.replayReady();}catch(ApiClient.CacheMissException ignored){return false;}finally{api.endReplay();}}
     private static final class Gate {final String path;final CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);final AtomicBoolean cancelled=new AtomicBoolean();Gate(String path){this.path=path;}}
     private void main(Runnable action){AtomicReference<Throwable> failure=new AtomicReference<>();test.runOnMainSync(()->{try{action.run();}catch(Throwable e){failure.set(e);}});if(failure.get()!=null)throw new AssertionError(failure.get());}
@@ -73,6 +93,7 @@ final class NetworkReadUiSmoke {
             if(!held){held=true;selected=gate;if(selected!=null&&selected.path.equals(url.getPath())){selected.entered.countDown();long end=SystemClock.uptimeMillis()+30000;while(selected.release.getCount()>0&&!selected.cancelled.get()&&SystemClock.uptimeMillis()<end)try{Thread.sleep(20);}catch(InterruptedException e){throw new IOException(e);}if(selected.cancelled.get())throw new IOException("cancelled");}else selected=null;}
             if(url.getPath().equals("/api/late401"))return 401;
             if(url.getPath().equals("/api/write-fail"))return 500;
+            if(url.getPath().startsWith("/api/me/bindings/")&&failBinding)return 500;
             if(url.getPath().equals("/api/check-csrf")&&!csrf.equals(getRequestProperty("X-CSRF-Token")))return 403;
             if(url.getPath().equals("/api/wiki/pages")&&getRequestProperty("If-None-Match")!=null){if(held&&conditional.get()==0)conditional.incrementAndGet();return 304;}
             return 200;
@@ -83,12 +104,16 @@ final class NetworkReadUiSmoke {
         public InputStream getInputStream()throws IOException{try{byte[] data=response().toString().getBytes(StandardCharsets.UTF_8);bytes.addAndGet(data.length);return new ByteArrayInputStream(data);}catch(Exception e){throw new IOException(e);}}
         private Object response()throws Exception{
             String path=url.getPath();if(path.equals("/api/auth/me"))return new JSONObject().put("authenticated",true).put("csrf_token",csrf).put("qq_id","90000001").put("role","member");
+            if(path.startsWith("/api/me/bindings/")&&!"GET".equals(getRequestMethod())){evidenceCleared=true;return new JSONObject().put("success",true);}
             if(path.equals("/api/mobile/v1/capabilities"))return new JSONObject().put("api_version",1).put("features",new JSONObject().put("public_member_ids",true));
             if(path.endsWith("/forum/posts"))return new JSONObject().put("rows",new JSONArray().put(new JSONObject().put("id",7).put("title","Network post").put("excerpt","plain text"))).put("total",1).put("page_size",2);
             if(path.endsWith("/leaderboard"))return new JSONObject().put("rows",new JSONArray()).put("total",0).put("positive_only",true);
             if(path.equals("/api/forum/categories"))return new JSONArray().put(new JSONObject().put("id",1).put("name","Fixture"));
             if(path.equals("/api/me/profile"))return new JSONObject().put("user",new JSONObject().put("name","Fixture"));
-            if(path.equals("/api/me/problems"))return new JSONObject().put("items",new JSONArray()).put("total",0);
+            if(path.equals("/api/me/problems"))return new JSONObject().put("items",new JSONArray()).put("total",evidenceCleared?0:1);
+            if(path.startsWith("/api/me/problems/codeforces/"))return new JSONObject().put("ac_count",evidenceCleared?0:1);
+            if(path.equals("/api/me/training/challenges"))return new JSONArray().put(new JSONObject().put("status",evidenceCleared?"abandoned":"active"));
+            if(path.equals("/api/me/training/summary"))return new JSONObject().put("active_days",evidenceCleared?0:1);
             return new JSONObject().put("value","read").put("active",true);
         }
     }

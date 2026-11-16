@@ -31,6 +31,7 @@ public final class ReaderSmoke extends Instrumentation {
     @Override public void onStart(){
         // Application.onCreate runs on the main thread. Install synthetic API state only after it finishes.
         waitForIdleSync();
+        if("composersubmit".equals(mode)){ComposerSubmitUiSmoke.run(this);return;}
         if("networkreads".equals(mode)){NetworkReadUiSmoke.run(this);return;}
         if("lists-updates".equals(mode)){ListPagingUiSmoke.run(this);return;}
         if("trainingtasks-slow".equals(mode)||"trainingtasks-scroll".equals(mode)){TrainingTasksReadUiSmoke.run(this,mode.substring("trainingtasks-".length()));return;}

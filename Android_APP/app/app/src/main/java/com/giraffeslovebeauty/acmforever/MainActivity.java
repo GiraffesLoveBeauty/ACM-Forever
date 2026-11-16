@@ -1666,6 +1666,7 @@ public final class MainActivity extends Activity {
                                 cloud.reset();syncCloudEditor();composeCategoryId=latest.category;composeTitle=latest.title;composeBody=latest.body;composerChanged();refreshComposer();return;
                             }
                             clearComposer();if(submittedFrom==requestSerial){show("forum");openWebFeature("progress",submitted);}
+                            else if("compose".equals(screen))refreshComposer();
                         });
                     } catch (Exception e) { present(() -> { composeBusy = false;if(owner!=api.sessionGeneration())return;if("compose".equals(screen)&&generation==cloud.generation())setControlsEnabled(content,true);if(submittedFrom==requestSerial)failureDialog(e); }); }
                 });

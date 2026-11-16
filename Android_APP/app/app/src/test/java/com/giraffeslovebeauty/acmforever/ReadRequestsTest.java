@@ -40,4 +40,14 @@ public class ReadRequestsTest {
         assertFalse(Arrays.asList(ReadInvalidation.paths("/api/forum/drafts/7")).contains("/api/me/problems"));
         assertEquals(10000,RetryDelay.millis(0,.5));assertEquals(20000,RetryDelay.millis(1,.5));assertEquals(40000,RetryDelay.millis(2,.5));assertEquals(60000,RetryDelay.millis(12,.5));
     }
+    @Test public void bindingChangesInvalidateAccountEvidenceButKeepCommunityAndWiki()throws Exception{
+        String[] affected={"/api/me/problems?scope=solved","/api/me/problems/codeforces/cf_1A","/api/me/problems/tracker?contest=1","/api/me/training/summary","/api/me/training/challenges","/api/me/submissions/attempts","/api/me/reviews/weak-tags","/api/training/weak-tags","/api/me/contest/reviews?contest_id=1","/api/me/training-tasks/1","/api/mobile/v1/me/public-profile","/api/mobile/v1/leaderboard"};
+        String[] retained={"/api/mobile/v1/forum/posts?page=1","/api/wiki/pages","/api/forum/drafts/11"};
+        for(String write:new String[]{"/api/me/bindings/codeforces","/api/me/bindings/codeforces/confirm"}){
+            ResponseCache cache=new ResponseCache();for(String path:affected)cache.put(path,"{}");for(String path:retained)cache.put(path,"{}");
+            for(String dependency:ReadInvalidation.paths(write))cache.removeContaining(dependency);
+            for(String path:affected)assertNull(write+" must invalidate "+path,cache.get(path));
+            for(String path:retained)assertNotNull(write+" must retain "+path,cache.get(path));
+        }
+    }
 }
