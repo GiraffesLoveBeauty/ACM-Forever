@@ -8,9 +8,10 @@ final class ModuleSpec {
     static final String REPOSITORY="GiraffesLoveBeauty/ACM-Forever";
     static final long MAX_BYTES=16L*1024*1024;
     static final Set<String> IDS=Collections.unmodifiableSet(new HashSet<>(Arrays.asList("official-themes","advanced","admin","cat-art")));
-    final String id,url,sha256,kind,revision;final long size;final int versionCode;
+    final String id,url,sha256,kind,revision,number;final long size;final int versionCode;
     ModuleSpec(String id,String url,String sha256,String kind,long size,int code){this(id,url,sha256,kind,size,code,"");}
-    ModuleSpec(String id,String url,String sha256,String kind,long size,int code,String revision){this.id=id;this.url=url;this.sha256=sha256;this.kind=kind;this.size=size;versionCode=code;this.revision=revision;}
+    ModuleSpec(String id,String url,String sha256,String kind,long size,int code,String revision){this(id,url,sha256,kind,size,code,revision,"");}
+    ModuleSpec(String id,String url,String sha256,String kind,long size,int code,String revision,String number){this.id=id;this.url=url;this.sha256=sha256;this.kind=kind;this.size=size;versionCode=code;this.revision=revision;this.number=number;}
     static String name(String id){switch(id){case "official-themes":return "官方主题库";case "advanced":return "高级个性化";case "admin":return "手机便捷管理";case "cat-art":return "分层猫娘素材";default:throw new IllegalArgumentException("未知模块");}}
     static boolean nativeModule(String id){return "advanced".equals(id)||"admin".equals(id);}
     static String filename(String id){if(!IDS.contains(id))throw new IllegalArgumentException("未知模块");return "module-"+id+(nativeModule(id)?".apk":".acmpack");}
@@ -32,7 +33,8 @@ final class ModuleSpec {
             Object rawSize=row.get("sizeBytes");if(!(rawSize instanceof Integer||rawSize instanceof Long))throw new IllegalArgumentException("模块大小无效");long size=((Number)rawSize).longValue();
             if(size<=0||size>MAX_BYTES||!hash.matches("[0-9a-f]{64}")||!(url.equals(UpdateSources.asset(version,filename(id),true))||url.equals(UpdateSources.asset(version,filename(id),false)))||!kind.equals(nativeModule(id)?"native":"assets"))throw new IllegalArgumentException("模块清单无效");
             if(row.has("revision")&&!(row.get("revision") instanceof String))throw new IllegalArgumentException("模块编号必须为字符串");String revision=row.optString("revision","");if(!revision.isEmpty()&&!revision.matches((nativeModule(id)?"n1-":"a1-")+"[0-9a-f]{64}"))throw new IllegalArgumentException("模块编号无效");
-            result.put(id,new ModuleSpec(id,url,hash,kind,size,code,revision));
+            String number="";if(row.has("number")){Object value=row.get("number");if(!(value instanceof String))throw new IllegalArgumentException("模块编号必须为字符串");number=ModuleNumber.validate(id,version,(String)value);}
+            result.put(id,new ModuleSpec(id,url,hash,kind,size,code,revision,number));
         }
         return result;
     }

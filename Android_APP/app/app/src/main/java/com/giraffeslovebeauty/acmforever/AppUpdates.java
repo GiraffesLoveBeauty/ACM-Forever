@@ -28,19 +28,22 @@ final class AppUpdates {
     private final java.util.function.BooleanSupplier network;
     private final Handler ui=new Handler(Looper.getMainLooper());
     private final ExecutorService io=Executors.newSingleThreadExecutor();
+    private final ExecutorService moduleIo=Executors.newSingleThreadExecutor();
     private WeakReference<Activity> owner=new WeakReference<>(null);
     private Runnable listener;
     private UpdateManifest release;
     private String source="",error="",verifiedName="",pendingResult="",downloadState="";
     private long downloadId=-1;private volatile long generation;
     private String checkedModules="尚未检查模块更新";
+    private long moduleCheckGeneration;
     String modulesStatus(){return checkedModules;}
     private String moduleStatus="";private Intent moduleInstallConfirmation;
     private boolean checking,verifying,installRequested,clearingPackages;
     private int progress=-1,downloadAttempt;
     private String checkedSource="";
+    private String sourceDiagnostics="";
     private long promptedVersion;
-    private boolean startupChecked,pendingOffer,openingDownload,openingInstaller;
+    private boolean pendingOffer,openingDownload,openingInstaller;
     private volatile boolean awaitingModuleInstall;
     boolean awaitingModuleInstall(){return awaitingModuleInstall;}
     private AlertDialog offerDialog;
@@ -54,7 +57,7 @@ final class AppUpdates {
         this.context=context.getApplicationContext();this.api=api;prefs=AppAppearance.prefs(context);
         this.network=java.util.Objects.requireNonNull(network);
         prefs.edit().remove(KEY+"wifi_download").apply();
-        downloadId=prefs.getLong(KEY+"download",-1);verifiedName=prefs.getString(KEY+"verified","");downloadAttempt=prefs.getInt(KEY+"download_attempt",0);checkedSource=prefs.getString(KEY+"checked_source","");
+        downloadId=prefs.getLong(KEY+"download",-1);verifiedName=prefs.getString(KEY+"verified","");downloadAttempt=prefs.getInt(KEY+"download_attempt",0);checkedSource=prefs.getString(KEY+"checked_source","");sourceDiagnostics=prefs.getString(KEY+"source_diagnostics","");
         try{
             source=endpoint();
             if(source.equals(prefs.getString(KEY+"source",""))){
@@ -75,11 +78,11 @@ final class AppUpdates {
         owner.clear();listener=null;
     }}
     private Activity activity(){Activity a=owner.get();return a==null||a.isFinishing()||a.isDestroyed()?null:a;}
-    boolean operationActive(){return busy()||openingInstaller;}
+    boolean operationActive(){return busy()||openingInstaller||awaitingModuleInstall;}
     boolean automatic(){return prefs.getBoolean(KEY+"automatic",true);}
     void automatic(boolean value){prefs.edit().putBoolean(KEY+"automatic",value).apply();changed();}
-    void maybeCheck(){if(!automatic()||busy())return;long now=System.currentTimeMillis(),success=prefs.getLong(KEY+"success",0),attempt=prefs.getLong(KEY+"attempt",0);boolean sameBuild=prefs.getLong(KEY+"checked_build",-1)==currentVersion();if((!sameBuild||now-success>=6*60*60*1000L||now<success)&&(attempt==0||now-attempt>=60000||now<attempt))check(false);}
-    void startupCheck(){if(!api.isLoggedIn()||startupChecked)return;startupChecked=true;maybeCheck();}
+    void maybeCheck(){if(api.isLoggedIn()&&automatic()&&!busy())check(false);}
+    void startupCheck(){if(api.isLoggedIn())maybeCheck();}
     long currentVersion(){try{PackageInfo p=context.getPackageManager().getPackageInfo(context.getPackageName(),0);return Build.VERSION.SDK_INT>=28?p.getLongVersionCode():p.versionCode;}catch(Exception e){return 0;}}
     String currentName(){try{return context.getPackageManager().getPackageInfo(context.getPackageName(),0).versionName;}catch(Exception e){return "未知";}}
     private String channel(){return (context.getApplicationInfo().flags&ApplicationInfo.FLAG_DEBUGGABLE)!=0?"debug":"release";}
@@ -99,7 +102,7 @@ final class AppUpdates {
         if(next.equals(source))return true;
         if(offerDialog!=null){offerDialog.setOnDismissListener(null);offerDialog.dismiss();offerDialog=null;}
         ++generation;cancelDownload();source=next;release=null;error="";checking=false;pendingOffer=false;pendingResult="";promptedVersion=0;clearStored();
-        prefs.edit().remove(KEY+"attempt").remove(KEY+"success").remove(KEY+"checked_build").apply();
+        prefs.edit().remove(KEY+"checked_build").apply();
         return true;
     }
     boolean busy(){return checking||verifying||clearingPackages||downloadId!=-1;}
@@ -129,8 +132,16 @@ final class AppUpdates {
     void dismissError(){error="";changed();}
     private void changed(){if(listener!=null&&activity()!=null)listener.run();}
     void check(boolean manual){
-        if(!syncSource()){changed();return;}if(busy())return;error="";pendingResult="";checking=true;changed();
-        final long ticket=++generation;final String address=source;
+        if(!syncSource()){changed();return;}if(busy())return;
+        long now=System.currentTimeMillis();
+        if(!manual){
+            java.time.ZoneId zone=java.time.ZoneId.systemDefault();
+            if(!api.isLoggedIn()||!automatic()||!UpdateCheckDay.due(now,prefs.getLong(KEY+"success",0),zone)||!UpdateCheckDay.due(now,prefs.getLong(KEY+"auto_attempt",0),zone))return;
+            // Persist before dispatch, so rotations/restarts and failures cannot repeat today's automatic attempt.
+            if(!prefs.edit().putLong(KEY+"auto_attempt",now).commit())return;
+        }
+        error="";sourceDiagnostics="";pendingResult="";checking=true;changed();
+        final long ticket=++generation;final String address=source;++moduleCheckGeneration;
         prefs.edit().putLong(KEY+"attempt",System.currentTimeMillis()).apply();
         io.execute(()->{
             try{
@@ -138,11 +149,8 @@ final class AppUpdates {
                 if(!network.getAsBoolean())throw new ApiClient.NoNetworkException();
                 UpdateSources.Checked selected=UpdateSources.check(address,context.getPackageName(),channel(),currentVersion(),this::readManifest);
                 UpdateManifest found=selected.manifest;
-                String moduleReport="尚未下载可选模块";
-                if(!ModuleStore.acquired(context).isEmpty())try{moduleReport=found.modulesUrl.isEmpty()?"此版本未提供模块更新清单；旧文件与设置会保留":ModuleUpdates.summary(context,(int)found.versionCode,found.versionName);}catch(Exception moduleFailure){moduleReport="模块检查失败："+moduleFailure.getMessage();}
-                final String report=moduleReport;
                 ui.post(()->{
-                    if(ticket!=generation)return;checking=false;checkedModules=report;checkedSource=selected.endpoint;
+                    if(ticket!=generation)return;checking=false;checkedModules="正在单独检查已下载模块…";checkedSource=selected.endpoint;sourceDiagnostics=selected.diagnostics;
                     if(release==null||release.versionCode!=found.versionCode||!release.sha256.equals(found.sha256)){deleteVerified();}
                     release=found;prefs.edit().putLong(KEY+"success",System.currentTimeMillis()).putLong(KEY+"checked_build",currentVersion()).apply();save();changed();
                     if((manual||automatic())&&available()&&!ready()&&(manual||promptedVersion!=found.versionCode)){
@@ -150,11 +158,18 @@ final class AppUpdates {
                     }else if(manual){
                         pendingResult=found.versionCode<=currentVersion()?"已是最新版本":ready()?"新版已下载，请点击安装新版继续":status();presentOffer();
                     }
+                    checkModules(found);
                 });
-            }catch(Exception failure){ui.post(()->{if(ticket!=generation)return;checking=false;error=failure instanceof IllegalArgumentException?failure.getMessage():FailureState.title(failure);changed();});}
+            }catch(Exception failure){ui.post(()->{if(ticket!=generation)return;checking=false;error=failure instanceof IllegalArgumentException||failure instanceof UpdateSources.Unavailable?failure.getMessage():FailureState.title(failure);changed();});}
         });
     }
-    String sourceStatus(){return endpoint()+(UpdateSources.GITEE_LATEST.equals(endpoint())?"\n优先 Gitee，不可用时尝试 GitHub":"")+(checkedSource.isEmpty()?"":"\n最近成功来源："+UpdateSources.label(checkedSource));}
+    private void checkModules(UpdateManifest found){long moduleTicket=moduleCheckGeneration;moduleIo.execute(()->{
+        String report="尚未下载可选模块";
+        try{if(!ModuleStore.acquired(context).isEmpty())report=found.modulesUrl.isEmpty()?"此版本未提供模块更新清单；旧文件与设置会保留":ModuleUpdates.summary(context,(int)found.versionCode,found.versionName);}
+        catch(Exception failure){report="模块检查失败："+failure.getMessage();}
+        String value=report;ui.post(()->{if(moduleTicket!=moduleCheckGeneration||release!=found)return;checkedModules=value;changed();});
+    });}
+    String sourceStatus(){return endpoint()+(UpdateSources.GITEE_LATEST.equals(endpoint())?"\n优先 Gitee，不可用时尝试 GitHub":"\n正在使用自定义地址；清空地址可恢复 Gitee 优先")+(checkedSource.isEmpty()?"":"\n最近成功来源："+UpdateSources.label(checkedSource))+(sourceDiagnostics.isEmpty()?"":"\n更新源诊断：\n"+sourceDiagnostics);}
     private JSONObject readManifest(String address,int limit)throws Exception{
         HttpURLConnection connection=openManifest(address);
         try(InputStream stream=connection.getInputStream();ByteArrayOutputStream bytes=new ByteArrayOutputStream()){
@@ -330,8 +345,8 @@ final class AppUpdates {
     void cancelDownload(){++generation;ui.removeCallbacks(poll);if(downloadId!=-1)downloads().remove(downloadId);downloadId=-1;verifying=false;moduleStatus="";progress=-1;downloadState="";save();changed();}
     private File verifiedFile(){return new File(new File(context.getCacheDir(),"updates"),verifiedName.matches("verified-[A-Za-z0-9_-]+\\.apk")?verifiedName:"missing");}
     private void deleteVerified(){if(!verifiedName.isEmpty())verifiedFile().delete();verifiedName="";}
-    private void clearStored(){if(downloadId!=-1)downloads().remove(downloadId);downloadId=-1;downloadAttempt=0;checkedSource="";deleteVerified();release=null;prefs.edit().remove(KEY+"manifest").remove(KEY+"download").remove(KEY+"verified").remove(KEY+"source").remove(KEY+"download_attempt").remove(KEY+"checked_source").apply();}
-    private void save(){SharedPreferences.Editor edit=prefs.edit().putString(KEY+"source",source).putLong(KEY+"download",downloadId).putInt(KEY+"download_attempt",downloadAttempt).putString(KEY+"checked_source",checkedSource).putString(KEY+"verified",verifiedName);if(release!=null)edit.putString(KEY+"manifest",release.json());else edit.remove(KEY+"manifest");edit.apply();}
+    private void clearStored(){if(downloadId!=-1)downloads().remove(downloadId);downloadId=-1;downloadAttempt=0;checkedSource="";sourceDiagnostics="";deleteVerified();release=null;prefs.edit().remove(KEY+"manifest").remove(KEY+"download").remove(KEY+"verified").remove(KEY+"source").remove(KEY+"download_attempt").remove(KEY+"checked_source").remove(KEY+"source_diagnostics").apply();}
+    private void save(){SharedPreferences.Editor edit=prefs.edit().putString(KEY+"source",source).putLong(KEY+"download",downloadId).putInt(KEY+"download_attempt",downloadAttempt).putString(KEY+"checked_source",checkedSource).putString(KEY+"source_diagnostics",sourceDiagnostics).putString(KEY+"verified",verifiedName);if(release!=null)edit.putString(KEY+"manifest",release.json());else edit.remove(KEY+"manifest");edit.apply();}
     private void fail(Exception e){error=e instanceof IllegalArgumentException?e.getMessage():FailureState.title(e);save();changed();}
     private static boolean networkAvailable(Context context){ConnectivityManager cm=(ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);NetworkCapabilities caps=cm==null?null:cm.getNetworkCapabilities(cm.getActiveNetwork());return caps!=null&&caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);}
 }

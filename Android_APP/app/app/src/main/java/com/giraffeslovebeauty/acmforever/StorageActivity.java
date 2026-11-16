@@ -5,7 +5,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.widget.*;
 
-/** Three local storage sections. All accounting and cache deletion run off the UI thread. */
+/** Explicit storage sections. All accounting and cache deletion run off the UI thread. */
 public final class StorageActivity extends MobilePageActivity {
     private TextView usage, result;
     private Button inspect, clean;
@@ -19,6 +19,8 @@ public final class StorageActivity extends MobilePageActivity {
         temporary.addView(text("清理读取缓存、PDF 缓存和超过 7 天的主题分享副本。正在阅读的 PDF、近期分享文件、账号密码、主题原图及草稿会保留。", 14));
         clean = button("清理临时文件", this::confirmClear); temporary.addView(clean);
         result = text("", 13); result.setAccessibilityLiveRegion(android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE); temporary.addView(result);
+        LinearLayout modules=card(body);modules.addView(text("模块管理",19));modules.addView(text("按需下载或删除官方主题库、高级个性化、手机便捷管理和分层猫娘素材；保留个人设置。",14));
+        modules.addView(button("管理可选模块",()->{opening=true;startActivity(new Intent(this,ModuleManagerActivity.class));}));
         LinearLayout packages = card(body); packages.addView(text("已下载安装包", 19));
         packages.addView(text("查看下载与校验状态、安装新版或删除下载的安装包。下载或校验进行中不能清理安装包。", 14));
         packages.addView(button("管理已下载安装包", () -> {

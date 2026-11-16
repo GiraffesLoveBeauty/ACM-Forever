@@ -33,6 +33,7 @@ final class PageRefresh {
     void reset(int generation){this.generation=generation;userAction=false;pending=0;failed=false;cached=false;started=false;dismissed=false;everFailed=false;retryQueued=false;closed=false;reads.clear();handler.removeCallbacksAndMessages(null);banner.setVisibility(View.GONE);loading();}
     void userAction(){userAction=true;}
     void register(int generation,Runnable read){if(!closed&&this.generation==generation)reads.add(read);}
+    void replaceRead(int generation,Runnable read){if(!closed&&this.generation==generation){reads.clear();reads.add(read);}}
     void start(int generation){
         if(closed||this.generation!=generation)return;pending++;loading();if(started)return;started=true;
         handler.postDelayed(()->{if(!closed&&this.generation==generation&&(pending>0||failed)){everFailed=true;if(!dismissed)show(false);}},DELAY_MS);

@@ -24,6 +24,13 @@ public class UpdateSourcesTest {
         for(String key:Arrays.asList(UpdateSources.GITEE_LATEST,UpdateSources.asset(VERSION,"update.json",true))){Reader r=new Reader();r.values.put(key,new IOException("404/timeout/HTML"));assertEquals(UpdateSources.GITHUB_LATEST,r.check(40).endpoint);}
         Reader r=new Reader();r.values.put(UpdateSources.asset(VERSION,"update.json",true),manifest(true,41).put("sha256","bad"));assertEquals(UpdateSources.GITHUB_LATEST,r.check(40).endpoint);
     }
+    @Test public void fallbackExplainsMissingGiteeReleaseAndBothSourceFailures()throws Exception{
+        Reader r=new Reader();r.values.put(UpdateSources.GITEE_LATEST,new IOException("HTTP 404"));
+        assertTrue(r.check(40).diagnostics.contains("Gitee：HTTP 404"));
+        r.values.put(UpdateSources.GITHUB_LATEST,new IOException("timeout"));
+        UpdateSources.Unavailable failure=assertThrows(UpdateSources.Unavailable.class,()->r.check(40));
+        assertTrue(failure.getMessage().contains("Gitee：HTTP 404"));assertTrue(failure.getMessage().contains("GitHub：timeout"));
+    }
     @Test public void prereleaseAndWrongTagAndCrossVersionUrlsNeverSelected()throws Exception{
         for(String tag:new String[]{"v0.2.26","../../main","v0.2.27#x"}){Reader r=new Reader();r.values.put(UpdateSources.GITEE_LATEST,new JSONObject().put("tag_name",tag).put("prerelease",false));assertEquals(UpdateSources.GITHUB_LATEST,r.check(40).endpoint);}
         Reader r=new Reader();((JSONObject)r.values.get(UpdateSources.GITEE_LATEST)).put("prerelease",true);assertEquals(UpdateSources.GITHUB_LATEST,r.check(40).endpoint);

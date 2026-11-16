@@ -16,6 +16,7 @@ final class ModuleDownloads {
     private final Context context;private final ExecutorService io=Executors.newSingleThreadExecutor();private final Handler main=new Handler(Looper.getMainLooper());
     private final Map<String,State> states=new HashMap<>();private final Map<String,Boolean> cancelled=new HashMap<>();private final Set<Runnable> listeners=new HashSet<>();
     private Intent confirmation;private String confirmationModule;
+    private final Set<String> removalPermissions=new HashSet<>(),cleaningRemovals=new HashSet<>();
     private ModuleDownloads(Context c){context=c;}
     synchronized State state(String id){State state=states.get(id);if(state!=null)return state;return new State(ModuleStore.available(context,id)?"done":"idle","",0,0);}
     synchronized void listen(Runnable observer){listeners.add(observer);}
@@ -25,6 +26,41 @@ final class ModuleDownloads {
     synchronized void cancel(String id){cancelled.put(id,true);}
     private synchronized boolean cancelled(String id){return Boolean.TRUE.equals(cancelled.get(id));}
     synchronized Intent confirmation(String id){if(!id.equals(confirmationModule))return null;Intent result=confirmation;confirmation=null;return result;}
+    synchronized boolean removalPermission(String id){return removalPermissions.contains(id);}
+    synchronized void confirmationFailed(String id,String message){if(context.getSharedPreferences("module_installs",0).getBoolean("remove_"+id,false))removalResult(id,PackageInstaller.STATUS_FAILURE,message,null);else installerResult(id,PackageInstaller.STATUS_FAILURE,message,null);}
+    synchronized void remove(String id,long owner){
+        if(!ModuleSpec.IDS.contains(id))return;
+        if(active()||((AcmApplication)context).updates().operationActive()){publish(id,"failed","请先完成或取消当前 App / 模块操作。",0,0);return;}
+        ApiClient api=((AcmApplication)context).api();if(!api.isLoggedIn()||owner!=api.sessionGeneration())return;
+        removalPermissions.remove(id);publish(id,"checking","正在准备删除模块…",0,0);
+        io.execute(()->{try{
+            if(!api.isLoggedIn()||owner!=api.sessionGeneration())throw new IOException("登录账号已切换");
+            if(ModuleSpec.nativeModule(id)&&ModuleStore.installedNativeChecked(context).contains(id)){
+                if(!context.getPackageManager().canRequestPackageInstalls()){synchronized(this){removalPermissions.add(id);}publish(id,"permission","请先允许系统功能包安装/卸载，再点击删除模块。",0,0);return;}
+                publish(id,"installing","等待系统卸载确认，可能重启 App…",0,0);
+                ModuleInstaller.remove(context,id,()->!api.isLoggedIn()||owner!=api.sessionGeneration());
+            }else{ModuleHealth.removeLocal(context,id);publish(id,"removed","模块已删除，个人数据和设置已保留",0,0);}
+        }catch(Exception failure){publish(id,"failed",failure.getMessage(),0,0);}});
+    }
+    synchronized void removalResult(String id,int status,String message,Intent intent){
+        if(status==PackageInstaller.STATUS_PENDING_USER_ACTION){if(intent==null){publish(id,"failed","系统未提供卸载确认窗口，未删除本机模块",0,0);return;}confirmation=intent;confirmationModule=id;publish(id,"approval","请在系统窗口确认卸载模块。",0,0);return;}
+        if(status==PackageInstaller.STATUS_SUCCESS){cleanupRemoval(id);return;}
+        context.getSharedPreferences("module_installs",0).edit().remove("remove_"+id).apply();
+        publish(id,"failed",status==PackageInstaller.STATUS_FAILURE_ABORTED?"已取消卸载，原模块和文件保留":"系统卸载失败，原文件保留："+message,0,0);
+    }
+    synchronized void reconcileRemovals(){
+        Set<String> pending=new LinkedHashSet<>();
+        for(String id:ModuleSpec.IDS)if(ModuleSpec.nativeModule(id)&&context.getSharedPreferences("module_installs",0).getBoolean("remove_"+id,false))pending.add(id);
+        if(pending.isEmpty())return;
+        Set<String> installed;
+        try{installed=ModuleStore.installedNativeChecked(context);}
+        catch(IOException unavailable){for(String id:pending)publish(id,"failed","无法确认系统模块状态，已保留文件与卸载记录，请稍后重试。",0,0);return;}
+        for(String id:pending)if(!installed.contains(id))cleanupRemoval(id);
+    }
+    private synchronized void cleanupRemoval(String id){
+        if(!cleaningRemovals.add(id))return;publish(id,"checking","正在清理已卸载模块文件…",0,0);
+        io.execute(()->{try{ModuleHealth.removeLocal(context,id);if(!context.getSharedPreferences("module_installs",0).edit().remove("remove_"+id).commit())throw new IOException("无法保存删除回执");publish(id,"removed","模块已卸载，下载副本已清理，个人设置已保留",0,0);}catch(Exception failure){publish(id,"failed","模块文件清理未完成，可重试："+failure.getMessage(),0,0);}finally{synchronized(this){cleaningRemovals.remove(id);}}});
+    }
     synchronized void start(String id){
         if(Arrays.asList("checking","downloading","verifying","installing","approval").contains(state(id).phase))return;
         if(active()){publish(id,"failed","请先完成或取消另一个模块的下载/安装。",0,0);return;}

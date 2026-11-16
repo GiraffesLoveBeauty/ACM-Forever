@@ -31,10 +31,34 @@ final class ModuleStore {
         return new File(assets(c,id),".complete-api1").isFile();
     }
     static boolean current(Context c,String id){return ModuleSpec.nativeModule(id)?available(c,id):new File(assetsAt(c,id,code(c)),".complete-api1").isFile();}
-    static Set<String> installedNative(Context c){try{String[] names=c.getPackageManager().getPackageInfo(c.getPackageName(),0).splitNames;Set<String> found=new HashSet<>();if(names!=null)for(String id:names)if(ModuleSpec.nativeModule(id))found.add(id);return found;}catch(Exception e){return Collections.emptySet();}}
+    /** Read-only availability may fall back; destructive operations must use the checked query. */
+    static Set<String> installedNative(Context c){try{return installedNativeChecked(c);}catch(IOException unavailable){return Collections.emptySet();}}
+    static Set<String> installedNativeChecked(Context c)throws IOException{
+        try{String[] names=c.getPackageManager().getPackageInfo(c.getPackageName(),0).splitNames;Set<String> found=new HashSet<>();
+            if(names!=null)for(String id:names)if(ModuleSpec.nativeModule(id))found.add(id);return found;
+        }catch(Exception failure){throw new IOException("无法确认系统模块状态，请稍后重试",failure);}
+    }
     static void acquired(Context c,String id){Set<String> ids=acquired(c);ids.add(id);if(!c.getSharedPreferences("optional_modules",0).edit().putStringSet("acquired",ids).commit())throw new IllegalStateException("无法保存已下载模块记录，请检查存储空间");}
     static Set<String> acquired(Context c){Set<String> ids=new HashSet<>(c.getSharedPreferences("optional_modules",0).getStringSet("acquired",Collections.emptySet()));ids.retainAll(ModuleSpec.IDS);ids.addAll(installedNative(c));for(String id:ModuleSpec.IDS)if(!ModuleSpec.nativeModule(id)&&available(c,id))ids.add(id);return ids;}
+    static Set<String> updateSelection(Context c)throws Exception{
+        Set<String> ids=acquired(c);
+        Set<String> pending=new HashSet<>();
+        for(String id:ids)if(ModuleSpec.nativeModule(id)&&c.getSharedPreferences("module_installs",0).getBoolean("remove_"+id,false))pending.add(id);
+        if(pending.isEmpty())return ids;
+        // A completed system removal can survive process death before local cleanup.
+        // Verify absence directly: a PackageManager failure must not count as absence.
+        Set<String> installed=installedNativeChecked(c);
+        for(String id:pending)if(!installed.contains(id))ids.remove(id);
+        return ids;
+    }
     static boolean updateTogether(Context c){return AppAppearance.prefs(c).getBoolean("app_update_modules",true);}
+    static synchronized void removeLocal(Context c,String id)throws Exception{
+        ModuleSpec.name(id);
+        if(ModuleSpec.nativeModule(id)&&installedNativeChecked(c).contains(id))throw new IOException("原生模块仍已安装，请先完成系统卸载确认");
+        ModuleRemovalFiles.remove(new File(c.getFilesDir(),"optional-modules"),id,ModuleSpec.filename(id));
+        Set<String> ids=acquired(c);ids.remove(id);
+        if(!c.getSharedPreferences("optional_modules",0).edit().putStringSet("acquired",ids).commit())throw new IOException("无法保存模块删除结果，请重试");
+    }
     static void updateTogether(Context c,boolean on){AppAppearance.prefs(c).edit().putBoolean("app_update_modules",on).apply();}
     static InputStream open(Context c,String id,String relative)throws IOException{
         if(!available(c,id))throw new FileNotFoundException("尚未下载"+ModuleSpec.name(id));ModuleFiles.safePath(relative);File root=assets(c,id),file=new File(root,relative);

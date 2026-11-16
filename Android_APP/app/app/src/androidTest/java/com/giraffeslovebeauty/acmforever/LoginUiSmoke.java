@@ -30,20 +30,11 @@ final class LoginUiSmoke {
             prefs.edit().putString("api_base_url","https://login.test.invalid").putBoolean("auto_login",false).putBoolean("save_password",false).putString("remembered_account","").apply();
             api.setBaseUrl("https://login.test.invalid");api.setNetworkAvailable(()->true);
             activity=test.startActivitySync(new Intent().setClassName(test.getTargetContext(),MainActivity.class.getName()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-            await(()->find("Cache verification topic")!=null,4000,"initial forum load");
-            clickDescription("排名");await(()->find("每一题，都算数")!=null,4000,"rank navigation");
-            java.util.concurrent.atomic.AtomicBoolean online=new java.util.concurrent.atomic.AtomicBoolean(false);java.util.concurrent.atomic.AtomicInteger checks=new java.util.concurrent.atomic.AtomicInteger();
-            api.setNetworkAvailable(()->{checks.incrementAndGet();return online.get();});clickDescription("主页");
-            await(()->find("Cache verification topic")!=null,1500,"cached page must render before network recovery");
-            await(()->find("API连接失败")!=null,12000,"ten second warning");Thread.sleep(5500);check(findOnMain("API连接失败"),"warning stays visible during retries");clickDescription("关闭API连接失败提示");
-            await(()->find("API连接失败")==null,1000,"dismiss warning");
-            int previousChecks=checks.get();await(()->checks.get()>previousChecks,12000,"retry continues after warning dismissal");online.set(true);
-            await(()->find("重连成功")!=null,12000,"automatic reconnect reports success without navigation");
-            long recovered=android.os.SystemClock.uptimeMillis();await(()->find("重连成功")==null,4200,"recovery banner closes after three seconds");check(android.os.SystemClock.uptimeMillis()-recovered>=2400,"recovery banner remains visible for three seconds");
-            api.setNetworkAvailable(()->true);clickDescription("进入账号设置");await(()->find("自动登录")!=null,4000,"login choices");
+            await(()->find("自动登录")!=null,4000,"signed-out user stays on login form");
+            check(find("Cache verification topic")==null,"signed-out user cannot read forum");
             test.runOnMainSync(()->{
                 EditText user=field("用户名 / QQ"),password=field("密码");user.setText("90000001");password.setText("Native-Test-Password!");password.setSelection(4);
-                View eye=description("显示密码");eye.performClick();check(password.getTransformationMethod() instanceof android.text.method.HideReturnsTransformationMethod,"eye reveals password");check(password.getSelectionStart()==4,"eye preserves selection");
+                View eye=description("显示密码");eye.performClick();check(password.getTransformationMethod()==null,"eye reveals password");check(password.getSelectionStart()==4,"eye preserves selection");
                 description("隐藏密码").performClick();check(password.getTransformationMethod() instanceof android.text.method.PasswordTransformationMethod,"eye masks password");
                 ((CheckBox)find("自动登录")).setChecked(true);check(((CheckBox)find("记住账号")).isChecked()&&((CheckBox)find("记住密码")).isChecked(),"automatic dependencies");
             });
@@ -58,14 +49,23 @@ final class LoginUiSmoke {
                 public String account(){return "90000001";}public String password(){return reopened.readPassword(cold.getBaseUrl(),account());}
                 public void clearSession(){reopened.clear();}public void invalidPassword(){reopened.clearPassword();}
             }),"cold client recovers encrypted session");
+            test.runOnMainSync(()->{try{
+                java.lang.reflect.Method change=MainActivity.class.getDeclaredMethod("showChangePassword");change.setAccessible(true);change.invoke(activity);
+                java.lang.reflect.Field visible=ModalDialogs.class.getDeclaredField("visible");visible.setAccessible(true);
+                java.lang.ref.WeakReference<?> ref=(java.lang.ref.WeakReference<?>)((java.util.Map<?,?>)visible.get(null)).get(activity);
+                android.app.AlertDialog dialog=(android.app.AlertDialog)ref.get();java.util.ArrayList<EditText> fields=new java.util.ArrayList<>();collectPasswords(dialog.getWindow().getDecorView(),fields);check(fields.size()==3,"current/new/confirmation all use shared eyes");
+                for(EditText input:fields){check(!input.isSaveEnabled()&&input.getTransformationMethod() instanceof android.text.method.PasswordTransformationMethod,"change password masked and not saved");input.setText("Synthetic-Visibility!");input.setSelection(3);ViewGroup row=(ViewGroup)input.getParent();View eye=row.getChildAt(1);eye.performClick();check(input.getTransformationMethod()==null&&input.getSelectionStart()==3,"each eye preserves cursor and value");eye.performClick();check(input.getTransformationMethod() instanceof android.text.method.PasswordTransformationMethod,"each eye masks independently");}
+                ModalDialogs.close(activity);
+            }catch(Exception e){throw new AssertionError(e);}});
             api.setNetworkAvailable(()->false);try{api.logout();}catch(ApiClient.NoNetworkException expected){}
             check(!prefs.contains("password_cipher")&&!prefs.contains("session_cipher")&&!prefs.getBoolean("auto_login",true),"offline logout clears persisted login");
-            output.putString("stream","PASS: cache before refresh, ten-second persistent warning, continuous retries after dismissal, green recovery, login choices, eye/cursor, Android Keystore password, account binding, cold session recovery, offline logout.\n");output.putBoolean("passed",true);result=Activity.RESULT_OK;
+            output.putString("stream","PASS: forced login gate, login choices, eye/cursor, Android Keystore password, account binding, cold session recovery, offline logout.\n");output.putBoolean("passed",true);result=Activity.RESULT_OK;
         }catch(Throwable e){output.putString("stream","FAIL: "+android.util.Log.getStackTraceString(e));output.putBoolean("passed",false);}
         finally{if(activity!=null)test.runOnMainSync(()->activity.finish());try{api.logout();}catch(Exception ignored){}prefs.edit().remove("api_base_url").remove("remembered_account").putBoolean("remember_account",false).apply();api.setBaseUrl(original);}
         test.finish(result,output);
     }
     private void check(boolean okay,String reason){if(!okay)throw new AssertionError(reason);}
+    private void collectPasswords(View view,java.util.List<EditText> found){if(view instanceof EditText)found.add((EditText)view);if(view instanceof ViewGroup)for(int i=0;i<((ViewGroup)view).getChildCount();i++)collectPasswords(((ViewGroup)view).getChildAt(i),found);}
     private boolean findOnMain(String text){boolean[] found={false};test.runOnMainSync(()->found[0]=find(text)!=null);return found[0];}
     private void await(java.util.function.BooleanSupplier condition,long timeout,String reason)throws Exception{
         long end=System.currentTimeMillis()+timeout;while(System.currentTimeMillis()<end){boolean[] okay={false};test.runOnMainSync(()->okay[0]=condition.getAsBoolean());if(okay[0])return;Thread.sleep(60);}throw new AssertionError(reason);

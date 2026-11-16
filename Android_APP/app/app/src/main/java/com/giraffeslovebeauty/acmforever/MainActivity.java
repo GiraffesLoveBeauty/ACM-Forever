@@ -52,6 +52,8 @@ public final class MainActivity extends Activity {
     private long headerAvatarOwner=-1,headerCheckOwner=-1;
     private android.net.Uri pendingPostImage;
     private EditText composeBodyInput;
+    private ComposerPreview composePreview;
+    private boolean previewOpened,previewRight;
     private CloudDrafts cloud;
     private final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
     private boolean sessionRestoreAttempted;
@@ -109,6 +111,14 @@ public final class MainActivity extends Activity {
     private String days = "7";
     private String platform = "";
     private int page = 1;
+    private int forumPageCount=1;
+    private int forumVisibleCount=ForumFeed.PAGE_SIZE;
+    private String forumKey="";
+    private ForumFeed forumFeed;
+    private LinearLayout forumRows;
+    private Button forumMore;
+    private boolean forumBusy,forumSwipe;
+    private float forumTouchY;
     private int rankPageSize = 20;
     private boolean popupLoading;
     private int postId = 0;
@@ -235,6 +245,7 @@ public final class MainActivity extends Activity {
         state.putString("query", query); state.putString("category", category); state.putString("sort", sort);
         state.putString("days", days); state.putString("platform", platform); state.putInt("page", page);
         state.putInt("rank_page_size", rankPageSize); state.putString("rank_sort", rankSort);
+        state.putInt("forum_page_count",forumPageCount);state.putInt("forum_visible_count",forumVisibleCount);state.putString("forum_key",forumKey);
         state.putStringArrayList("rank_platforms", new java.util.ArrayList<>(rankPlatforms));
         state.putString("profile_platform",profilePlatform);state.putInt("post_id", postId); state.putString("problem_state", problemState);
         state.putBoolean("return_from_bindings",returnFromBindings);
@@ -248,6 +259,7 @@ public final class MainActivity extends Activity {
             state.putString("problem_id", selectedProblem.optString("problem_id"));
         }
         state.putString("search_scope", searchScope); state.putString("search_return", searchReturn);
+        state.putBoolean("preview_open",composePreview==null?previewOpened:composePreview.opened());state.putBoolean("preview_right",composePreview==null?previewRight:composePreview.right());
         state.putString("compose_title", composeTitle); state.putString("compose_body", composeBody);
         state.putInt("compose_category", composeCategoryId); state.putInt("compose_draft", composeDraftId);
         state.putLong("compose_revision", composeRevision); state.putLong("compose_saved_revision", composeSavedRevision);
@@ -262,6 +274,8 @@ public final class MainActivity extends Activity {
         query = state.getString("query", ""); category = state.getString("category", ""); sort = state.getString("sort", "latest");
         days = state.getString("days", "7");if(!java.util.Arrays.asList("7","30","90","365","all").contains(days))days="7"; platform = state.getString("platform", ""); page = state.getInt("page", 1);
         rankPageSize = state.getInt("rank_page_size",20); rankSort = state.getString("rank_sort", "total_count");
+        forumPageCount=Math.max(1,Math.min(1000,state.getInt("forum_page_count",1)));forumKey=state.getString("forum_key","");
+        forumVisibleCount=Math.max(ForumFeed.PAGE_SIZE,state.getInt("forum_visible_count",ForumFeed.PAGE_SIZE));
         java.util.ArrayList<String> platforms = state.getStringArrayList("rank_platforms");
         if (platforms != null && !platforms.isEmpty()) { rankPlatforms.clear(); rankPlatforms.addAll(platforms); }
         profilePlatform=state.getString("profile_platform","all");postId = state.getInt("post_id", 0); problemState = state.getString("problem_state", "");
@@ -278,6 +292,7 @@ public final class MainActivity extends Activity {
                     .put("platform", state.getString("problem_platform")).put("problem_id", state.getString("problem_id"));
         } catch (org.json.JSONException ignored) { memberPreview = null; selectedProblem = null; }
         searchScope = state.getString("search_scope", "forum"); searchReturn = state.getString("search_return", "forum");
+        previewOpened=state.getBoolean("preview_open",false);previewRight=state.getBoolean("preview_right",false);
         if(state.containsKey("compose_title")){
             composeTitle = state.getString("compose_title", ""); composeBody = state.getString("compose_body", "");
             composeCategoryId = state.getInt("compose_category", 0); composeDraftId = state.getInt("compose_draft", 0);
@@ -518,10 +533,21 @@ public final class MainActivity extends Activity {
         header.addView(search, searchParams);
         ImageButton tools=new ImageButton(this);MobileStyle.flat(tools);android.graphics.drawable.Drawable plus=AppIcons.get(this,"add",MobileStyle.ON_ACCENT);tools.setImageDrawable(plus);tools.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);tools.setBackground(MobileStyle.panel(this,MobileStyle.controlFill(ACCENT),12,0));tools.setPadding(dp(8),dp(8),dp(8),dp(8));tools.setContentDescription("常用工具");tools.setOnClickListener(v->showTools(tools));header.addView(tools,new LinearLayout.LayoutParams(dp(44),dp(44)));
 
-        ScrollView scroll = new ScrollView(this);
+        ScrollView scroll = new ScrollView(this){
+            @Override public boolean dispatchTouchEvent(android.view.MotionEvent event){
+                int action=event.getActionMasked();
+                if(action==android.view.MotionEvent.ACTION_DOWN){forumTouchY=event.getY();forumSwipe=false;}
+                if(action==android.view.MotionEvent.ACTION_MOVE&&forumTouchY-event.getY()>android.view.ViewConfiguration.get(MainActivity.this).getScaledTouchSlop())forumSwipe=true;
+                boolean handled=super.dispatchTouchEvent(event);
+                if(action==android.view.MotionEvent.ACTION_UP){maybeLoadMoreForum();forumSwipe=false;}
+                if(action==android.view.MotionEvent.ACTION_CANCEL)forumSwipe=false;
+                return handled;
+            }
+        };
         pageScroll=scroll;
         scroll.setFillViewport(true);
-        root.addView(PullRefreshLayout.forPage(this,scroll,pageRefresh,()->!loginBusy&&!composeBusy&&!actionBusy&&!"compose".equals(screen)&&!ModalDialogs.isShowing(this)), new LinearLayout.LayoutParams(-1, 0, 1));
+        root.addView(PullRefreshLayout.forPage(this,scroll,pageRefresh,()->!loginBusy&&!composeBusy&&!actionBusy&&!"compose".equals(screen)&&!ModalDialogs.isShowing(this),this::refreshCurrentPage), new LinearLayout.LayoutParams(-1, 0, 1));
+        scroll.setOnScrollChangeListener((v,x,y,oldX,oldY)->{if(y>oldY)maybeLoadMoreForum();});
         content = column();
         content.setPadding(dp(12), dp(12), dp(12), dp(24));
         scroll.addView(content);
@@ -655,6 +681,7 @@ public final class MainActivity extends Activity {
         if(navigationOwner!=api.sessionGeneration()){navigation.clear();navigationOwner=api.sessionGeneration();}
         if(api.isLoggedIn()&&api.requiresPasswordChange())screen="account";
         int serial = ++requestSerial;
+        if(composePreview!=null){previewOpened=composePreview.opened();previewRight=composePreview.right();composePreview=null;}
         pageRefresh.reset(serial);if(readFromAction)pageRefresh.userAction();actionNotice.hide();detailUi=null;composeEditorShown=false;composeBodyInput=null;
         if (!api.isLoggedIn()) defaultAvatar(headerAvatar);
         else refreshHeaderAvatar(false);
@@ -769,30 +796,73 @@ public final class MainActivity extends Activity {
     }
 
     private void renderForum(int serial) {
+        String key=query+"\n"+category+"\n"+sort;
+        if(!key.equals(forumKey)){forumKey=key;forumPageCount=1;forumVisibleCount=ForumFeed.PAGE_SIZE;pendingScroll=0;}
+        forumFeed=new ForumFeed();forumBusy=false;forumSwipe=false;
         forumHeader(null);
-        loading("正在加载社区话题…");
-        loadPage(serial,() -> {
-            try {
-                String suffix = "?page=" + page + "&page_size=12&sort=" + sort
-                        + "&q=" + encode(query) + "&category=" + encode(category);
-                JSONObject result = api.getObject(api.publicPostsPath(suffix));
-                result.getJSONArray("rows");
-                present(() -> { if (serial == requestSerial) showForum(null, result); });
-            } catch (Exception e) {
-                present(() -> { if (serial == requestSerial) error(e); });
-            }
-        });
+        forumRows=column();content.addView(forumRows);loadingRegion=forumRows;
+        forumRows.addView(label("正在加载社区话题…",14,MUTED,false));
+        forumMore=action("正在加载…",false);forumMore.setContentDescription("继续加载社区话题");forumMore.setEnabled(false);
+        forumMore.setOnClickListener(v->loadMoreForum());content.addView(forumMore);
+        loadForumPages(serial,1,forumPageCount);
     }
 
-    private void showForum(JSONArray categories, JSONObject result) {
-        content.removeAllViews();
-        forumHeader(categories);
+    private void refreshCurrentPage(){
+        if(!pageRefresh.canRefresh())return;
+        if(java.util.Arrays.asList("forum","rank","problem_bank").contains(screen)){
+            page=1;forumPageCount=1;forumVisibleCount=ForumFeed.PAGE_SIZE;pendingScroll=0;readFromAction=true;loadScreen();
+        }else pageRefresh.refreshNow();
+    }
 
-        JSONArray rows = result.optJSONArray("rows");
-        if (rows == null || rows.length() == 0) status("这里还没有话题，试试其他分类或关键词。");
-        else for (int i = 0; i < rows.length(); i++) addPost(rows.optJSONObject(i));
-        int total = result.optInt("total", 0);
-        if (total > 0) addPager(total, 12);
+    private void maybeLoadMoreForum(){
+        if(!forumSwipe||!"forum".equals(screen)||forumBusy||forumFeed==null||!forumFeed.more(forumVisibleCount))return;
+        if(content.getHeight()-pageScroll.getHeight()-pageScroll.getScrollY()>dp(160))return;
+        forumSwipe=false;loadMoreForum();
+    }
+
+    private void loadMoreForum(){
+        if(!"forum".equals(screen)||forumBusy||forumFeed==null||!forumFeed.more(forumVisibleCount)||!pageRefresh.canRefresh())return;
+        int buffered=forumFeed.rows().length();
+        if(buffered>forumVisibleCount){forumVisibleCount=Math.min(buffered,forumVisibleCount+ForumFeed.PAGE_SIZE);showForum();restoreScroll();return;}
+        forumVisibleCount+=ForumFeed.PAGE_SIZE;
+        loadForumPages(requestSerial,forumFeed.lastPage()+1,forumFeed.lastPage()+1);
+    }
+
+    private void loadForumPages(int serial,int from,int to){
+        forumBusy=true;forumMore.setEnabled(false);forumMore.setText("正在加载…");
+        String parameters="&sort="+sort+"&q="+encode(query)+"&category="+encode(category);
+        loadPage(serial,()->readForumPages(serial,from,to,parameters));
+        // Incremental requests share one reconnect read; do not accumulate one retry per swipe.
+        pageRefresh.replaceRead(serial,()->{forumBusy=true;int count=forumPageCount;startRead(serial,()->readForumPages(serial,1,count,parameters));});
+    }
+
+    private void readForumPages(int serial,int from,int to,String parameters){
+        final boolean replay=api.isReplay();
+        try {
+            java.util.Map<Integer,JSONObject> batch=new java.util.LinkedHashMap<>();
+            for(int p=from;p<=to;p++){
+                String suffix="?page="+p+"&page_size="+ForumFeed.PAGE_SIZE+parameters;
+                JSONObject result=api.getObject(api.publicPostsPath(suffix));result.getJSONArray("rows");batch.put(p,result);
+                if((long)p*Math.max(ForumFeed.PAGE_SIZE,result.optInt("page_size",Math.max(ForumFeed.PAGE_SIZE,result.getJSONArray("rows").length())))>=result.optInt("total"))break;
+            }
+            present(()->{if(serial!=requestSerial)return;
+                try{for(java.util.Map.Entry<Integer,JSONObject> item:batch.entrySet())forumFeed.replace(item.getKey(),item.getValue());}
+                catch(org.json.JSONException invalid){error(invalid);return;}
+                forumPageCount=Math.max(1,forumFeed.lastPage());if(!replay)forumBusy=false;showForum();
+            });
+        }catch(Exception e){present(()->{if(serial!=requestSerial)return;if(!replay){forumBusy=false;forumMore.setText("重试加载");forumMore.setEnabled(true);forumMore.setOnClickListener(v->loadForumPages(serial,from,to));}error(e);});}
+    }
+
+    private void showForum(){
+        int y=pendingScroll>=0?pendingScroll:pageScroll.getScrollY();
+        if(loadingRegion!=null&&loadingRegion!=forumRows&&loadingRegion.getParent()==content)content.removeView(loadingRegion);
+        loadingRegion=null;forumRows.setMinimumHeight(0);forumRows.setGravity(Gravity.TOP);forumRows.setPadding(0,0,0,0);forumRows.setBackgroundColor(Color.TRANSPARENT);
+        forumRows.removeAllViews();JSONArray rows=forumFeed.visibleRows(forumVisibleCount);
+        if(rows.length()==0)forumRows.addView(label("这里还没有话题，试试其他分类或关键词。",14,MUTED,false));
+        for(int i=0;i<rows.length();i++)addPost(forumRows,rows.optJSONObject(i));
+        forumMore.setText(forumBusy?"正在刷新…":forumFeed.more(forumVisibleCount)?"继续向下滑动加载":"已显示全部话题");
+        forumMore.setEnabled(!forumBusy&&forumFeed.more(forumVisibleCount));forumMore.setOnClickListener(v->loadMoreForum());
+        pendingScroll=y;
     }
 
     private void forumHeader(JSONArray categories) {
@@ -865,8 +935,11 @@ public final class MainActivity extends Activity {
     }
 
     private void addPost(JSONObject post) {
+        addPost(content,post);
+    }
+    private void addPost(LinearLayout parent,JSONObject post) {
         if (post == null) return;
-        LinearLayout box = card();
+        LinearLayout box = card(parent);
         LinearLayout authorRow = row();
         ImageButton avatar = avatarButton(32);
         avatar.setContentDescription("查看" + value(post, "author_name", "ACM 成员") + "的公开主页");
@@ -1530,7 +1603,8 @@ public final class MainActivity extends Activity {
         body.setText(composeBody);
         body.setContentDescription("发帖正文输入");
         body.addTextChangedListener(watch(value -> { if(currentComposer(editorGeneration)){composeBody = value; composerChanged();} }));
-        box.addView(body, new LinearLayout.LayoutParams(-1, -2));
+        composePreview=new ComposerPreview(this,body,this::openBrowser,previewOpened,previewRight);
+        box.addView(composePreview,new LinearLayout.LayoutParams(-1,-2));
         space(box,12);
         WrapLayout format = new WrapLayout(this);format.setContentDescription("发帖格式工具");
         Button bold = action("加粗", false), code = action("代码块", false), quote = action("引用", false);
@@ -1548,7 +1622,7 @@ public final class MainActivity extends Activity {
         Button draftList=action("云端草稿",false);compactTool(draftList);draftList.setOnClickListener(v->showCloudDraftList());tools.addView(draftList);
         Button preview = action("预览正文", false);
         preview.setContentDescription("预览发帖正文");
-        compactTool(preview);preview.setOnClickListener(v -> { LinearLayout article = column(); article.addView(new ContentView(this, composeBody, false, this::openBrowser)); detailsDialog("正文预览", article); });tools.addView(preview);
+        compactTool(preview);preview.setOnClickListener(v -> {if(currentComposer(editorGeneration))composePreview.open();});tools.addView(preview);
         composeStatus = label(cloud.state().status, 12, MUTED, false);
         box.addView(composeStatus);
         Button save = action("保存草稿", false);
@@ -2002,10 +2076,7 @@ public final class MainActivity extends Activity {
         password.setHint("密码"); password.setSingleLine(true);
         password.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         password.setSaveEnabled(false);password.setTextSize(15);password.setPadding(dp(14),0,0,0);password.setBackgroundColor(Color.TRANSPARENT);
-        LinearLayout passwordRow=row();passwordRow.setBackground(shape(BACKGROUND,10,0));box.addView(passwordRow,new LinearLayout.LayoutParams(-1,dp(52)));
-        passwordRow.addView(password,new LinearLayout.LayoutParams(0,-1,1));
-        ImageButton eye=new ImageButton(this);eye.setImageDrawable(AppIcons.get(this,"eye",MUTED));eye.setPadding(dp(12),dp(12),dp(12),dp(12));eye.setBackgroundColor(Color.TRANSPARENT);eye.setContentDescription("显示密码");passwordRow.addView(eye,new LinearLayout.LayoutParams(dp(48),dp(48)));
-        final boolean[] visible={false};eye.setOnClickListener(v->{int start=password.getSelectionStart(),end=password.getSelectionEnd();visible[0]=!visible[0];password.setTransformationMethod(visible[0]?android.text.method.HideReturnsTransformationMethod.getInstance():android.text.method.PasswordTransformationMethod.getInstance());if(start>=0&&end>=0)password.setSelection(start,end);eye.setImageDrawable(AppIcons.get(this,visible[0]?"eye-off":"eye",MUTED));eye.setContentDescription(visible[0]?"隐藏密码":"显示密码");});
+        box.addView(password,new LinearLayout.LayoutParams(-1,dp(52)));PasswordFields.attach(password);
         final LoginOptions[] options={LoginOptions.read(preferences)};
         CheckBox remember = new CheckBox(this); remember.setText("记住账号");
         CheckBox rememberPassword=new CheckBox(this);rememberPassword.setText("记住密码");
@@ -2146,7 +2217,7 @@ public final class MainActivity extends Activity {
         menuRow(settings,"个性化设置","背景选择 · 主题选择",this::showCoverSettings);
         menuRow(settings,"搜索设置","搜索模块排序 · 历史记录",()->openSearchSettings());
         menuRow(settings, "修改密码", "保护账号安全", this::showChangePassword);
-        menuRow(settings, "存储管理", "缓存占用 · 临时文件 · 安装包", () -> openLocalSettings(StorageActivity.class));
+        menuRow(settings, "存储管理", "缓存占用 · 临时文件 · 模块 · 安装包", () -> openLocalSettings(StorageActivity.class));
         menuRow(settings, "帮助与说明", "统一帮助 · 问题反馈 · 数据与权限", () -> openLocalSettings(HelpActivity.class));
         menuRow(settings, "检查更新", "下载新版 · 自动更新选项", this::checkForUpdates);
 
@@ -2372,6 +2443,7 @@ public final class MainActivity extends Activity {
         oldPassword.setHint("当前密码"); newPassword.setHint("新密码"); confirmation.setHint("确认新密码");
         oldPassword.setInputType(129); newPassword.setInputType(129); confirmation.setInputType(129);
         form.addView(oldPassword); form.addView(newPassword); form.addView(confirmation);
+        PasswordFields.attach(oldPassword);PasswordFields.attach(newPassword);PasswordFields.attach(confirmation);
         AlertDialog dialog = new ModalDialogs.Builder(this).setTitle("修改密码").setMessage("新密码需 12–128 位、无空格，并包含至少三类字符。")
                 .setView(form).setNegativeButton("取消", null).setPositiveButton("确认修改", null).create();
         dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
