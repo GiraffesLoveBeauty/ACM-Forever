@@ -1,3 +1,4 @@
+export const MAX_NATIVE_TAGS = 20;
 const palette = {
   'grey-3': '#bfbfbf',
   'gray-3': '#bfbfbf',
@@ -29,10 +30,12 @@ export function nativeFilters(query = {}) {
   for (const key of Object.keys(result)) {
     const value = query[key];
     if (key === 'native_tags') {
-      if (typeof value === 'string')
-        result[key] = [...new Set(value.split(',').filter((id) => /^-?[0-9]{1,9}$/.test(id)))]
-          .slice(0, 20)
-          .join(',');
+      if (typeof value === 'string') {
+        // Preserve excess IDs so the API rejects the full query instead of weakening it.
+        result[key] = [...new Set(value.split(',').filter((id) => /^-?[0-9]{1,9}$/.test(id)))].join(
+          ',',
+        );
+      }
       continue;
     }
     if (

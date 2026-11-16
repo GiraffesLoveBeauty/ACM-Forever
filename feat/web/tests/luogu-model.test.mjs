@@ -97,3 +97,15 @@ test('Luogu removes hidden secondary filters from old links and returns', () => 
   assert.equal(query.problem_tag, undefined);
   assert.equal(query.native_tag, '-2');
 });
+
+test('over-limit tag URLs preserve all conditions for API validation instead of truncating', () => {
+  const tags = Array.from({ length: 21 }, (_, i) => String(i + 1)).join(',');
+  const query = { platform: 'luogu', native_tags: tags };
+  assert.equal(nativeFilters(query).native_tags, tags);
+  assert.equal(nativeParams(query).native_tags, tags);
+  const returned = new URL(
+    problemReturn('/problem-bank.html?' + new URLSearchParams(memberQuery(query))),
+    'https://example.invalid',
+  );
+  assert.equal(returned.searchParams.get('native_tags'), tags);
+});

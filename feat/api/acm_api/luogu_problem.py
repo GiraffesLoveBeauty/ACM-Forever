@@ -208,6 +208,14 @@ def parse_problem(raw, expected_id, taxonomy):
     return item, content
 
 
+def _classification_metadata_sql(problem_id):
+    """Use one classification source for filtering and display without rewriting aliases."""
+    return ("(SELECT lg.metadata_json FROM crawler_problems lg WHERE lg.platform='luogu' "
+            f"AND lg.problem_id COLLATE NOCASE IN ({problem_id},'luogu_'||{problem_id}) "
+            "ORDER BY CASE WHEN lg.problem_id GLOB 'P*' THEN 0 "
+            "WHEN lg.problem_id GLOB 'p*' THEN 1 ELSE 2 END,lg.updated_at DESC,lg.problem_id LIMIT 1)")
+
+
 async def attach_classifications(db, items):
     luogu = [item for item in items if item.get("platform") == "luogu"]
     if not luogu:
@@ -221,10 +229,12 @@ async def attach_classifications(db, items):
         item["problem_url"] = ORIGIN + "/problem/" + pid
     taxonomy = await load_taxonomy(db)
     ids = list({item["problem_id"] for item in luogu})
-    marks = ",".join("?" for _ in ids)
-    async with db.execute("SELECT problem_id,metadata_json FROM crawler_problems WHERE platform='luogu' "
-                          f"AND problem_id IN ({marks})", ids) as cursor:
-        natives = {row["problem_id"]: json.loads(row["metadata_json"]).get("luogu", {}) for row in await cursor.fetchall()}
+    marks = ",".join("(?)" for _ in ids)
+    source = _classification_metadata_sql("ids.problem_id")
+    async with db.execute(f"WITH ids(problem_id) AS (VALUES {marks}) "
+                          f"SELECT problem_id,{source} AS metadata_json FROM ids", ids) as cursor:
+        natives = {row["problem_id"]: json.loads(row["metadata_json"] or "{}").get("luogu", {})
+                   for row in await cursor.fetchall()}
     for item in luogu:
         native = natives.get(item["problem_id"], {})
         item["native_difficulty"], item["native_tags"] = classifications(native, taxonomy)
@@ -267,6 +277,8 @@ async def native_filter(db, args, platform):
         if not 1 <= len(values) <= 20:
             raise ValueError("最多选择 20 个洛谷原生标签")
         tags.update(ident(value) for value in values)
+    if len(tags) > 20:
+        raise ValueError("最多选择 20 个洛谷原生标签")
     def match(raw):
         try:
             native = json.loads(raw).get("luogu", {})
@@ -276,6 +288,5 @@ async def native_filter(db, args, platform):
     await db.create_function("luogu_native_matches", 1, match, deterministic=True)
     from .problem_tracker import problem_id_key
     await db.create_function("problem_id_key", 2, problem_id_key, deterministic=True)
-    return (" AND EXISTS(SELECT 1 FROM crawler_problems lg WHERE lg.platform='luogu' AND p.platform=lg.platform "
-            "AND lg.problem_id COLLATE NOCASE IN (problem_id_key(p.platform,p.problem_id),'luogu_'||problem_id_key(p.platform,p.problem_id)) "
-            "AND luogu_native_matches(lg.metadata_json)=1)", [])
+    source = _classification_metadata_sql("problem_id_key(p.platform,p.problem_id)")
+    return (f" AND luogu_native_matches({source})=1", [])

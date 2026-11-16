@@ -13,7 +13,7 @@ import test_luogu_problems as luogu
 from feat.api.acm_api import problem_schedule
 from feat.api.acm_api.atcoder_difficulty import MODELS_URL, apply_models
 from feat.api.acm_api.database import connect_db
-from feat.api.acm_api.luogu_problem import metadata, normalize_taxonomy, save_taxonomy
+from feat.api.acm_api.luogu_problem import canonical_problem_id, metadata, normalize_taxonomy, save_taxonomy
 from feat.api.acm_api.luogu_sync import LuoguSync
 from feat.api.acm_api.problem_bank import save_metadata_batch, save_problem
 from feat.api.acm_api.problem_sync import ATCODER_CATALOG_URL, atcoder_catalog_metadata, cf_metadata, sync_options
@@ -100,6 +100,90 @@ class ProblemBankControlsTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((data["total"],data["items"][0]["problem_id"]),(1,"P1100"))
                 for bad in ("platform=luogu&rating_min=1","platform=codeforces&rating_min=1800&rating_max=1200","platform=luogu&native_difficulty_min=4&native_difficulty_max=3","platform=codeforces&native_tags=1"):
                     self.assertEqual((await client.get(endpoint+"?"+bad)).status_code,400)
+
+    async def seed_classification_aliases(self, rows):
+        db = await connect_db(self.db_path)
+        try:
+            items = []
+            for pid, difficulty, tags, updated_at in rows:
+                item = metadata(luogu.problem(canonical_problem_id(pid), difficulty=difficulty, tags=tags), TAXONOMY)
+                items.append({**item, "problem_id": pid})
+            await save_taxonomy(db, TAXONOMY)
+            await save_metadata_batch(db, items)
+            await db.executemany(
+                "UPDATE crawler_problems SET updated_at=? WHERE platform='luogu' AND problem_id=?",
+                [(updated_at, pid) for pid, _, _, updated_at in rows],
+            )
+            await db.commit()
+        finally:
+            await db.close()
+
+    async def test_native_filters_and_display_prefer_the_canonical_record(self):
+        await self.seed_classification_aliases([
+            ("P1100", 4, [-2], "2026-11-10T00:00:00+00:00"),
+            ("luogu_P1100", 3, [-2, 1], "2026-11-15T00:00:00+00:00"),
+            ("p1100", 5, [1], "2026-11-15T00:00:00+00:00"),
+        ])
+        async with self.app.test_app():
+            client = self.app.test_client()
+            await self.login(client)
+            for endpoint in ("/api/problems", "/api/me/problems", "/api/admin/database/problems"):
+                for query in ("native_difficulty=3", "native_difficulty_min=3&native_difficulty_max=3",
+                              "native_tags=-2,1", "native_difficulty=5"):
+                    with self.subTest(endpoint=endpoint, query=query):
+                        response = await client.get(endpoint + "?platform=luogu&" + query)
+                        self.assertEqual(response.status_code, 200)
+                        data = await response.get_json()
+                        self.assertEqual(data["total"], 0)
+                        self.assertEqual(data["items"], [])
+                for query in ("", "native_difficulty_min=4&native_difficulty_max=4&native_tags=-2"):
+                    response = await client.get(endpoint + "?platform=luogu&" + query)
+                    self.assertEqual(response.status_code, 200)
+                    data = await response.get_json()
+                    self.assertGreater(data["total"], 0)
+                    self.assertEqual(data["total"], len(data["items"]))
+                    for row in data["items"]:
+                        self.assertEqual(row["problem_id"], "P1100")
+                        self.assertEqual(row["native_difficulty"]["id"], 4)
+                        self.assertEqual([tag["id"] for tag in row["native_tags"]], [-2])
+
+    async def test_native_filters_and_display_share_a_deterministic_alias_fallback(self):
+        await self.seed_classification_aliases([
+            ("p1101", 4, [-2], "2026-11-10T00:00:00+00:00"),
+            ("LUOGU_p1101", 3, [1], "2026-11-15T00:00:00+00:00"),
+            ("luogu_P1102", 3, [-2, 1], "2026-11-10T00:00:00+00:00"),
+            ("LUOGU_p1102", 5, [1], "2026-11-15T00:00:00+00:00"),
+        ])
+        async with self.app.test_app():
+            client = self.app.test_client()
+            await self.login(client)
+            for endpoint in ("/api/problems", "/api/me/problems", "/api/admin/database/problems"):
+                for query, pid, difficulty, tags in (
+                    ("native_difficulty=4&native_tag=-2", "P1101", 4, [-2]),
+                    ("native_difficulty_min=5&native_difficulty_max=5&native_tags=1", "P1102", 5, [1]),
+                ):
+                    with self.subTest(endpoint=endpoint, query=query):
+                        response = await client.get(endpoint + "?platform=luogu&" + query)
+                        self.assertEqual(response.status_code, 200)
+                        data = await response.get_json()
+                        self.assertGreater(data["total"], 0)
+                        self.assertEqual(data["total"], len(data["items"]))
+                        for row in data["items"]:
+                            self.assertEqual(row["problem_id"], pid)
+                            self.assertEqual(row["native_difficulty"]["id"], difficulty)
+                            self.assertEqual([tag["id"] for tag in row["native_tags"]], tags)
+                data = await (await client.get(endpoint + "?platform=luogu&native_difficulty=3")).get_json()
+                self.assertEqual(data["total"], 0)
+                twenty = ",".join(str(value) for value in range(1, 21))
+                for query in ("native_tags=" + twenty + ",21", "native_tag=-2&native_tags=" + twenty):
+                    response = await client.get(endpoint + "?platform=luogu&" + query)
+                    self.assertEqual(response.status_code, 400)
+                response = await client.get(endpoint + "?platform=luogu&native_tag=1&native_tags=" + twenty)
+                self.assertEqual(response.status_code, 200)
+            for pid, difficulty in (("P1101", 4), ("P1102", 5)):
+                response = await client.get("/api/me/problems/luogu/" + pid)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual((await response.get_json())["native_difficulty"]["id"], difficulty)
 
     async def test_time_boundaries_and_refresh_do_not_promote_old_problems(self):
         await self.seed()

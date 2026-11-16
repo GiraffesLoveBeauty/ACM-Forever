@@ -1,6 +1,7 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRequests } from '../lib/api.js';
+import { MAX_NATIVE_TAGS } from '../lib/luogu-problems.js';
 const props = defineProps({
   difficulty: { type: String, default: '' },
   tag: { type: String, default: '' },
@@ -18,11 +19,13 @@ const emit = defineEmits([
 const request = useRequests(),
   taxonomy = ref({ difficulties: [], tags: [], tag_types: [] }),
   busy = ref(false),
-  error = ref('');
+  error = ref(''),
+  tagError = ref('');
 const levels = computed(() => (taxonomy.value.difficulties || []).filter((item) => item.id !== 0));
 const selectedTags = computed(() => [
   ...new Set([props.tag, ...props.tags.split(',')].filter(Boolean)),
 ]);
+watch(selectedTags, () => (tagError.value = ''));
 const lower = computed(() =>
   props.difficulty && props.difficulty !== '0' ? props.difficulty : props.difficultyMin,
 );
@@ -53,8 +56,21 @@ function unrated(value) {
   emit('update:difficultyMax', '');
 }
 function tagChange(event) {
+  const values = [...event.target.selectedOptions].map((item) => item.value);
+  if (values.length > MAX_NATIVE_TAGS) {
+    tagError.value = `最多选择 ${MAX_NATIVE_TAGS} 个洛谷原生标签，已保留原有选择。`;
+    for (const option of event.target.options)
+      option.selected = selectedTags.value.includes(option.value);
+    return;
+  }
+  tagError.value = '';
   emit('update:tag', '');
-  emit('update:tags', [...event.target.selectedOptions].map((item) => item.value).join(','));
+  emit('update:tags', values.join(','));
+}
+function clearTags() {
+  tagError.value = '';
+  emit('update:tag', '');
+  emit('update:tags', '');
 }
 async function load() {
   busy.value = true;
@@ -111,7 +127,7 @@ onMounted(load);
       /><span>只看暂无评定</span></label
     >
     <label class="luogu-tags"
-      ><span>洛谷原生标签（可多选，同时满足）</span
+      ><span>洛谷原生标签（最多 {{ MAX_NATIVE_TAGS }} 个，同时满足）</span
       ><select multiple size="4" :disabled="busy" @change="tagChange">
         <option
           v-for="id in selectedTags.filter(
@@ -133,18 +149,11 @@ onMounted(load);
             {{ tag.name }}
           </option>
         </optgroup></select
-      ><button
-        v-if="selectedTags.length"
-        type="button"
-        class="btn"
-        @click="
-          emit('update:tag', '');
-          emit('update:tags', '');
-        "
-      >
+      ><button v-if="selectedTags.length" type="button" class="btn" @click="clearTags">
         清除所选标签
       </button></label
     >
+    <p v-if="tagError" role="alert">{{ tagError }}</p>
     <p>难度范围包含两端，例如“普及 → 普及+/提高−”。标签保持洛谷原生分类，多个标签取交集。</p>
     <p v-if="error" role="alert">
       {{ error }} <button class="btn" type="button" :disabled="busy" @click="load">重试分类</button>
