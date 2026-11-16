@@ -50,6 +50,7 @@ watch(
   { flush: 'sync' },
 );
 let revision = 0;
+let pendingLoad = null;
 const rows = ref([]),
   total = ref(0),
   page = ref(1),
@@ -96,34 +97,47 @@ async function load(nextPage = 1, fromRoute = false) {
       return;
     }
   }
-  const version = ++revision;
-  page.value = nextPage;
-  busy.value = true;
-  error.value = '';
   const params = new URLSearchParams({
     q: filters.q.trim(),
     platform: filters.platform,
     status: filters.status,
-    page: String(page.value),
+    page: String(nextPage),
     page_size: String(pageSize),
     labels: selectedTags.value.join(','),
     match: matchMode.value,
     ...nativeParams(filters),
     ...rangeParams(filters),
   });
-  try {
-    const data = await request(`/admin/database/problems?${params}`, {}, 'database-problems');
-    if (version !== revision) return;
-    rows.value = data.items || [];
-    facets.value = data.tag_facets || [];
-    total.value = data.total || 0;
-    page.value = data.page || 1;
-  } catch (cause) {
-    if (version === revision && cause.name !== 'AbortError')
-      error.value = cause.message || '读取题库记录失败。';
-  } finally {
-    if (version === revision) busy.value = false;
-  }
+  const query = params.toString();
+  if (pendingLoad?.query === query) return pendingLoad.promise;
+  const version = ++revision;
+  page.value = nextPage;
+  rows.value = [];
+  facets.value = [];
+  total.value = 0;
+  busy.value = true;
+  error.value = '';
+  const promise = (async () => {
+    try {
+      const data = await request(`/admin/database/problems?${query}`, {}, 'database-problems');
+      if (version !== revision) return;
+      rows.value = data.items || [];
+      facets.value = data.tag_facets || [];
+      total.value = data.total || 0;
+      page.value = data.page || 1;
+    } catch (cause) {
+      if (version === revision && cause.name !== 'AbortError')
+        error.value = cause.message || '读取题库记录失败。';
+    } finally {
+      // A replaced request must not clear the latest request's loading state.
+      if (version === revision) {
+        busy.value = false;
+        pendingLoad = null;
+      }
+    }
+  })();
+  pendingLoad = { query, promise };
+  return promise;
 }
 function reset() {
   filters.q = '';
@@ -214,7 +228,7 @@ onMounted(() => {
           ><input v-model="filters.q" type="search" placeholder="题号、题名或比赛 ID" /> </label
         ><label
           ><span>平台</span
-          ><select v-model="filters.platform">
+          ><select v-model="filters.platform" @change="load(1)">
             <option value="">全部平台</option>
             <option value="codeforces">Codeforces</option>
             <option value="atcoder">AtCoder</option>
@@ -222,7 +236,7 @@ onMounted(() => {
           </select></label
         ><label
           ><span>题面状态</span
-          ><select v-model="filters.status">
+          ><select v-model="filters.status" @change="load(1)">
             <option value="all">全部</option>
             <option value="collected">已采集题面</option>
             <option value="pending">尚未采集</option>
@@ -239,8 +253,8 @@ onMounted(() => {
         />
         <ProblemRangeFilters :filters="filters" @change="Object.assign(filters, $event)" />
         <div class="problem-database-filter-actions">
-          <button class="btn primary" type="submit" :disabled="busy">筛选</button>
-          <button class="btn" type="button" :disabled="busy" @click="reset">重置</button>
+          <button class="btn primary" type="submit">筛选</button>
+          <button class="btn" type="button" @click="reset">重置</button>
         </div>
       </form>
       <div v-if="filters.platform !== 'luogu' && facets.length" class="admin-label-filter">
