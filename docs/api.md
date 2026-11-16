@@ -271,7 +271,7 @@ Web 归属验证当前实现 Codeforces：账号存在性使用已有验证器�
 | --- | --- |
 | `rating_min/rating_max` | 显式选择 `codeforces` 或 `atcoder`；整数 0–100000，允许单边，包含上下限，倒置范围返回 400；未知/非数字难度不匹配数值区间 |
 | `native_difficulty_min/native_difficulty_max` | 仅 `platform=luogu`；按已同步字典的原生等级顺序，包含两端，允许单边；暂无评定 0 使用 `native_difficulty=0` 单独筛选，不能与区间混用 |
-| `native_tags` | 仅洛谷；逗号分隔、最多 20 个整数原生标签 ID，必须同时满足全部所选标签。兼容旧的单值 `native_tag` |
+| `native_tags` | 仅洛谷；逗号分隔、最多 20 个整数原生标签 ID，必须同时满足全部所选标签。兼容旧的单值 `native_tag`，两者合计不得超过 20 个不同标签，超限返回 400 |
 | `start_at/end_at` | Unix 秒或带时区的 ISO 8601；允许单边，范围为 `[start_at,end_at)`，结束时间必须晚于开始时间 |
 | `time_basis` | 列表为 `auto/contest/first_seen`；有时间边界时默认 CF/AtCoder 为 contest、洛谷为 first_seen；auto 使用有比赛时间则比赛时间、否则首次收录。洛谷拒绝 contest；仅填显式依据、没有时间边界返回 400 |
 | `source_time` | CF/AtCoder 比赛开始时间（Unix 秒），未知为 null；洛谷不伪造发布时间 |
@@ -279,6 +279,8 @@ Web 归属验证当前实现 Codeforces：账号存在性使用已有验证器�
 | `problem_time/time_basis` | 本行实际排序时间及其依据 contest/first_seen/unknown；最近抓取时间另行返回，不参与“新题”排序 |
 
 网页时间输入明确采用北京时间，结束时间不含。全部平台视图不比较各平台的数值难度；切换平台清除不适用参数。管理员数据库列表以 `bank_` 前缀保存页面筛选和页码，成员列表保留既有返回链接与地址参数。
+
+洛谷分类筛选与返回的原生分类共用同一条目录记录：优先规范大写 `P` 题号，其次无前缀的小写题号，最后回退 `luogu_` 历史别名（前缀及题号大小写兼容）。同级别名按 `updated_at` 降序、原始题号升序确定来源；规范记录存在时不再混用旧别名的难度或标签，也不改写历史题号。网页最多选择 20 个原生标签，超限会提示并保留原选择；直接链接中的超限条件完整提交给接口校验，不静默截取部分标签。
 
 手动全平台采集（`scope=platform`）可附同样的 `start_at/end_at`，`time_basis` 只能为 contest 或 first_seen。先按目录和已保存比赛时间筛选候选，再下载所选题面；时间未知的候选排除并通过 `result.time_unknown_count` 报告，范围外数量为 `time_filtered_count`。没有边界即为全部，不接受比赛/指定题号模式混入时间边界。首次导入时，无来源时间的题目按本次首次收录时间判断，不能用本站尚未保存的历史收录时间筛选。
 
