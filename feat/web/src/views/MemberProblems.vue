@@ -342,7 +342,10 @@ watch(
                 <b>{{ row.platform }} · {{ row.problem_id }}</b
                 ><br />{{ row.problem_name || '未命名题目' }}<br /><small
                   >难度 {{ row.problem_rating ?? '未知'
-                  }}<template v-if="row.ac_at"> · AC {{ date(row.ac_at) }}</template></small
+                  }}<template v-if="row.ac_at"> · AC {{ date(row.ac_at) }}</template
+                  ><template v-else-if="current.scope === 'solved'">
+                    · 已 AC，时间未知</template
+                  ></small
                 >
                 <div v-if="row.has_secondary" class="bank-result-tags">
                   <button
@@ -360,8 +363,7 @@ watch(
                   }}</small>
                 </div>
                 <small v-else class="muted"
-                  >原站标签：{{ tagsText(row.tags) }}
-                  · 算法标签待接入</small
+                  >原站标签：{{ tagsText(row.tags) }} · 算法标签待接入</small
                 >
               </div>
               <span class="chips"

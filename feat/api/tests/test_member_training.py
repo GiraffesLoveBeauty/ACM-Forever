@@ -34,6 +34,106 @@ class MemberTrainingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200, await response.get_json())
         return await response.get_json()
 
+    async def test_unknown_luogu_ac_times_count_as_solved_but_not_dated_activity(self):
+        from feat.api.acm_api.luogu_user_sync import sync_public_practice
+        from test_luogu_user_sync import page
+        async with self.app.test_app():
+            client = self.app.test_client()
+            await self.account_login(client, role="member")
+            await self.sql("UPDATE users SET luogu_id='1234' WHERE qq_id='12345678'")
+            db = await connect_db(self.db_path)
+            try:
+                async with db.execute("SELECT * FROM users WHERE qq_id='12345678'") as cursor:
+                    user = await cursor.fetchone()
+                with patch("feat.api.acm_api.luogu_user_sync.luogu_get", new=AsyncMock(return_value=page(["P1001", "P1002", "CF1A"]))):
+                    self.assertEqual(await sync_public_practice(None, user, db, {}), 2)
+            finally:
+                await db.close()
+            solved = await (await client.get("/api/me/problems?scope=solved&platform=luogu")).get_json()
+            self.assertEqual(solved["total"], 2)
+            self.assertEqual({row["problem_id"] for row in solved["items"]}, {"P1001", "P1002"})
+            self.assertTrue(all(row["ac_at"] == 0 for row in solved["items"]))
+            summary = await (await client.get("/api/me/training/summary")).get_json()
+            self.assertEqual(summary, {"streak_days": 0, "active_days": 0, "days": []})
+            totals = await (await client.get("/api/me/leaderboard?days=0")).get_json()
+            recent = await (await client.get("/api/me/leaderboard?days=7")).get_json()
+            self.assertEqual(totals["rows"][0]["luogu_count"], 2)
+            self.assertEqual(recent["rows"][0]["luogu_count"], 0)
+            detail = await (await client.get("/api/me/problems/luogu/P1001")).get_json()
+            self.assertIn("luogu.com.cn/problem/P1001", detail["problem_url"])
+            self.assertFalse(detail.get("statement_html"))
+
+    async def test_luogu_p_aliases_share_catalog_solved_filters_and_favorite_state(self):
+        from feat.api.acm_api.luogu_user_sync import sync_public_practice
+        from feat.api.acm_api.problem_bank import save_metadata_batch
+        from test_luogu_user_sync import page
+        async with self.app.test_app():
+            client = self.app.test_client()
+            headers = await self.account_login(client, role="member")
+            await self.sql("UPDATE users SET luogu_id='1234' WHERE qq_id='12345678'")
+            for owner, pid, stamp in (("12345678", "luogu_P1001", 123), ("12345678", "p1002", 0),
+                                      ("99999999", "LUOGU_p1001", 999)):
+                await self.sql("INSERT INTO submissions(user_qq_id,platform,problem_id,submit_time) VALUES(?,'luogu',?,?)",
+                               (owner, pid, stamp))
+            await self.sql("INSERT INTO user_problem_state(owner_qq_id,platform,problem_id,is_favorite,updated_at) "
+                           "VALUES('12345678','luogu','LUOGU_p1001',1,1)")
+            await self.sql("INSERT INTO recommendations(platform,problem_id,problem_name,problem_url) "
+                           "VALUES('luogu','luogu_P1001','Legacy recommendation','https://www.luogu.com.cn/problem/luogu_P1001')")
+            db = await connect_db(self.db_path)
+            try:
+                await save_metadata_batch(db, [
+                    {"platform": "luogu", "problem_id": pid, "contest_id": "", "problem_name": "Synthetic " + pid,
+                     "problem_url": "https://www.luogu.com.cn/problem/" + pid, "tags": [],
+                     "luogu": {"type": "P", "difficulty": 2, "tag_ids": [5]}}
+                    for pid in ("P1001", "P1002")
+                ])
+                async with db.execute("SELECT * FROM users WHERE qq_id='12345678'") as cursor:
+                    user = await cursor.fetchone()
+                with patch("feat.api.acm_api.luogu_user_sync.luogu_get", new=AsyncMock(return_value=page(["P1001", "P1002"]))) as http:
+                    self.assertEqual(await sync_public_practice(None, user, db, {}), 0)
+                self.assertEqual(http.await_count, 1)
+            finally:
+                await db.close()
+            all_rows = await (await client.get("/api/me/problems?platform=luogu")).get_json()
+            self.assertEqual(all_rows["total"], 2)
+            for filters in ("", "&native_difficulty=2", "&native_tag=5", "&native_difficulty=2&native_tag=5"):
+                response = await client.get("/api/me/problems?platform=luogu&scope=solved" + filters)
+                self.assertEqual(response.status_code, 200)
+                solved = await response.get_json()
+                self.assertEqual(solved["total"], 2)
+                self.assertEqual({row["problem_id"]: row["ac_at"] for row in solved["items"]}, {"P1001": 123, "P1002": 0})
+                self.assertTrue(all(row["native_difficulty"]["id"] == 2 for row in solved["items"]))
+            for alias in ("P1001", "p1001", "luogu_P1001"):
+                search = await (await client.get("/api/me/problems?" + urlencode({"platform": "luogu", "tag": alias}))).get_json()
+                self.assertEqual([row["problem_id"] for row in search["items"]], ["P1001"])
+            favorite = await (await client.get("/api/me/problems?platform=luogu&state=favorite")).get_json()
+            self.assertEqual([row["problem_id"] for row in favorite["items"]], ["P1001"])
+            for alias in ("P1001", "p1001", "LUOGU_p1001"):
+                response = await client.get("/api/me/problems/luogu/" + alias)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual((await response.get_json())["problem_id"], "P1001")
+            response = await client.put("/api/me/problems/luogu/P1001/state", headers=headers, json={"is_favorite": False})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual((await (await client.get("/api/me/problems?platform=luogu&state=favorite")).get_json())["total"], 0)
+            self.assertEqual(await self.sql("SELECT problem_id,submit_time FROM submissions WHERE user_qq_id='12345678' ORDER BY problem_id"),
+                             [("luogu_P1001", 123), ("p1002", 0)])
+
+    async def test_luogu_legacy_only_problem_has_a_canonical_local_detail_link(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            await self.account_login(client, role="member")
+            await self.sql("INSERT INTO submissions(user_qq_id,platform,problem_id,problem_url,submit_time) "
+                           "VALUES('12345678','luogu','LuOgU_p1001','https://www.luogu.com.cn/problem/luogu_P1001',123)")
+            solved = await (await client.get("/api/me/problems?platform=luogu&scope=solved")).get_json()
+            self.assertEqual([row["problem_id"] for row in solved["items"]], ["P1001"])
+            self.assertEqual(solved["items"][0]["problem_url"], "https://www.luogu.com.cn/problem/P1001")
+            for alias in ("P1001", "p1001", "LUOGU_p1001"):
+                response = await client.get("/api/me/problems/luogu/" + alias)
+                self.assertEqual(response.status_code, 200)
+                detail = await response.get_json()
+                self.assertEqual(detail["problem_id"], "P1001")
+                self.assertEqual(detail["problem_url"], "https://www.luogu.com.cn/problem/P1001")
+
     async def test_solved_scope_is_session_owned_stable_paginated_and_keeps_catalog(self):
         async with self.app.test_app():
             client = self.app.test_client(); await self.account_login(client, role="member")

@@ -71,8 +71,10 @@ async def _store_cf_attempts(db, qq_id, submissions, *, commit=True):
         await db.commit()
 
 
+
+
 async def _fetch_luogu_json(session, url, headers, timeout):
-    """Legacy submission callers share the public collector request gate."""
+    """Optional timed challenge verification shares the public collector request gate."""
     return json.loads(await luogu_get(session, url, headers=headers, timeout=timeout))
 
 
@@ -273,80 +275,9 @@ class Crawler:
         return f"{rand}{sha512_hash}"
 
     @staticmethod
-    async def fetch_luogu_submissions(
-        session: aiohttp.ClientSession,
-        user_row,
-        start_timestamp: int,
-        db: aiosqlite.Connection,
-        config: dict,
-    ) -> int:
-        if submission_sync_paused("luogu", config):
-            LOG.info("[同步模块] 洛谷用户过题记录同步已暂停，保留已有记录。")
-            return SYNC_PAUSED
-        luogu_uid, qq_id = user_row["luogu_id"], user_row["qq_id"]
-        added_count = 0
-        luogu_cookie = config.get("luogu_cookie")
-        luogu_csrf_token = config.get("luogu_csrf_token")
-
-        if not luogu_cookie or not luogu_csrf_token:
-            LOG.warning("[同步模块] 洛谷 Cookie 或 CSRF-Token 未配置，跳过。")
-            return -1
-
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Cookie": luogu_cookie,
-            "x-csrf-token": luogu_csrf_token,
-        }
-        page, stop_fetching = 1, False
-        sync_failed = False
-        existing_ids = await Crawler._get_existing_problem_ids(db, qq_id, "luogu")
-
-        while not stop_fetching:
-            url = f"https://www.luogu.com.cn/record/list?user={luogu_uid}&page={page}&status=12&_contentOnly=1"
-            try:
-                data = await _fetch_luogu_json(session, url, headers, 15)
-                records = data.get("currentData", {}).get("records", {}).get("result", [])
-                if not records:
-                    break
-
-                insert_tasks = []
-                for record in records:
-                    if record["submitTime"] >= start_timestamp:
-                        pid = record["problem"]["pid"]
-                        if pid in existing_ids:
-                            continue
-                        difficulty = luogu_difficulty_map.get(
-                            record["problem"].get("difficulty", 0), "未知"
-                        )
-                        insert_tasks.append(
-                            (
-                                qq_id,
-                                "luogu",
-                                pid,
-                                record["problem"]["title"],
-                                difficulty,
-                                f"https://www.luogu.com.cn/problem/{pid}",
-                                record["submitTime"],
-                            )
-                        )
-                    else:
-                        stop_fetching = True
-                        break
-
-                if insert_tasks:
-                    await db.executemany(
-                        "INSERT INTO submissions (user_qq_id, platform, problem_id, problem_name, problem_rating, problem_url, tags, submit_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                        insert_tasks,
-                    )
-                    await db.commit()
-                    added_count += len(insert_tasks)
-                page += 1
-                await asyncio.sleep(0.5)
-            except Exception as e:
-                sync_failed = True
-                LOG.error(f"处理洛谷用户 {luogu_uid} 第 {page} 页时出错: {e}")
-                break
-        return -1 if sync_failed else added_count
+    async def fetch_luogu_submissions(session, user_row, start_timestamp, db, config):
+        # A public practice snapshot has no acceptance timestamps; always read it whole.
+        return await Crawler.fetch_luogu_submission(session, user_row, start_timestamp, db, config)
 
     @staticmethod
     async def fetch_cf_submissions(session, user_row, start_timestamp, db, config):
@@ -359,90 +290,17 @@ class Crawler:
         return await fetch_history(session, user_row, start_timestamp, db, config)
 
     @staticmethod
-    async def fetch_luogu_submission(
-        session: aiohttp.ClientSession,
-        user_row,
-        start_timestamp: int,
-        db: aiosqlite.Connection,
-        config: dict,
-    ) -> int:
-        """深度同步用的洛谷爬虫（分页聚合后一次性写入）。"""
+    async def fetch_luogu_submission(session, user_row, start_timestamp, db, config):
         if submission_sync_paused("luogu", config):
             LOG.info("[同步模块] 洛谷用户过题记录同步已暂停，保留已有记录。")
             return SYNC_PAUSED
-        luogu_uid, qq_id = user_row["luogu_id"], user_row["qq_id"]
-        luogu_cookie = config.get("luogu_cookie")
-        luogu_csrf_token = config.get("luogu_csrf_token")
-
-        if not luogu_cookie or not luogu_csrf_token:
-            LOG.warning("[同步模块] 洛谷 Cookie 或 CSRF-Token 未配置，跳过。")
+        from .luogu_user_sync import sync_public_practice
+        from .luogu_client import LuoguUnavailable
+        try:
+            return await sync_public_practice(session, user_row, db, config)
+        except (aiohttp.ClientError, asyncio.TimeoutError, LuoguUnavailable, ValueError) as error:
+            LOG.warning("[同步模块] 洛谷公开练习页同步失败，保留已有记录：%s", error)
             return -1
-
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Cookie": luogu_cookie,
-            "x-csrf-token": luogu_csrf_token,
-        }
-        page, stop_fetching = 1, False
-        sync_failed = False
-        all_insert_tasks = []
-        processed_in_sync = set()
-        existing_ids = await Crawler._get_existing_problem_ids(db, qq_id, "luogu")
-        while not stop_fetching:
-            url = f"https://www.luogu.com.cn/record/list?user={luogu_uid}&page={page}&status=12&_contentOnly=1"
-            try:
-                data = await _fetch_luogu_json(session, url, headers, 30)
-                records = data.get("currentData", {}).get("records", {}).get("result", [])
-                if not records:
-                    break
-
-                page_insert_tasks = []
-                for record in records:
-                    if record["submitTime"] >= start_timestamp:
-                        pid = record["problem"]["pid"]
-                        if pid in processed_in_sync:
-                            continue
-                        processed_in_sync.add(pid)
-                        if pid in existing_ids:
-                            continue
-                        difficulty = luogu_difficulty_map.get(
-                            record["problem"].get("difficulty", 0), "未知"
-                        )
-                        page_insert_tasks.append(
-                            (
-                                qq_id,
-                                "luogu",
-                                pid,
-                                record["problem"]["title"],
-                                difficulty,
-                                f"https://www.luogu.com.cn/problem/{pid}",
-                                record["submitTime"],
-                            )
-                        )
-                    else:
-                        stop_fetching = True
-                        break
-
-                if page_insert_tasks:
-                    all_insert_tasks.extend(page_insert_tasks)
-                page += 1
-                await asyncio.sleep(0.5)
-            except Exception as e:
-                sync_failed = True
-                LOG.error(f"处理洛谷用户 {luogu_uid} 第 {page} 页时出错: {e}")
-                break
-
-        if sync_failed:
-            return -1
-        if all_insert_tasks:
-            await db.executemany(
-                "INSERT OR IGNORE INTO submissions (user_qq_id, platform, problem_id, problem_name, problem_rating, problem_url, submit_time) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                all_insert_tasks,
-            )
-            await db.commit()
-            return len(all_insert_tasks)
-
-        return 0
 
     # ================= 牛客 Nowcoder =================
 

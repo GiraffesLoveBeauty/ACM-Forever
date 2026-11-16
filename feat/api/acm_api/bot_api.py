@@ -182,7 +182,7 @@ async def get_user_summary(qq_id):
         ) as cursor:
             difficulty = [dict(row) for row in await cursor.fetchall()]
         async with db.execute(
-            "SELECT DISTINCT submit_time FROM submissions WHERE user_qq_id=? ORDER BY submit_time DESC LIMIT 5000",
+            "SELECT DISTINCT submit_time FROM submissions WHERE user_qq_id=? AND submit_time>0 ORDER BY submit_time DESC LIMIT 5000",
             (qq_id,),
         ) as cursor:
             activity_timestamps = [row["submit_time"] for row in await cursor.fetchall()]

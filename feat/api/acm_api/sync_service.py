@@ -50,6 +50,10 @@ class SyncMixin:
             return state
 
     async def _mark_platform_sync(self, qq_id, platform, status, now, *, success=False, error_code=None, error_message=None, cursor=None, full_history=False):
+        # Luogu always reads the complete public P-problem AC set, even for a day-range request.
+        # This marks snapshot coverage only; it is not acceptance-time evidence.
+        if platform == "luogu" and success:
+            full_history = True
         async with isolated_connection(self.db) as connection:
             if status == "running":
                 clause, values = "last_attempt_at=?,last_status=?,updated_at=?", [now, status, now]
