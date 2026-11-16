@@ -62,7 +62,7 @@ public final class ImagePreviewActivity extends Activity {
             String html = null; Exception issue = null;
             try {
                 ApiClient.Media data;
-                synchronized (api) {
+                try(ApiClient.OwnerScope ignored=api.bind(owner)) {
                     if (owner != api.sessionGeneration()) throw new ApiClient.ApiException(401, "登录账号已变化", false);
                     data = api.communityMedia(address);
                 }
@@ -101,9 +101,10 @@ public final class ImagePreviewActivity extends Activity {
         });
     }
     @Override protected void onResume() {
-        super.onResume();
+        super.onResume();if(refresh!=null)refresh.resume();
         if (api != null && (owner != api.sessionGeneration() || !api.isLoggedIn())) finish();
     }
+    @Override protected void onPause(){if(refresh!=null)refresh.pause();super.onPause();}
     @Override protected void onDestroy() {
         dead = true; if (refresh != null) refresh.close(); io.shutdownNow();
         if (viewer != null) {

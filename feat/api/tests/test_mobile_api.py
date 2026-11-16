@@ -106,6 +106,21 @@ class MobileApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(old_rank, {**ranks, "rows": [{k: v for k, v in row.items() if k != "public_member_id"} for row in ranks["rows"]]})
         self.assertNotIn("author_public_member_id", (await self.json_get("/api/forum/posts/" + str(self.posts["published"]))))
 
+    async def test_mobile_two_row_pages_do_not_change_web_default_or_duplicates(self):
+        db = await connect_db(self.db_path)
+        try:
+            for i in range(6):
+                await db.execute("INSERT INTO forum_posts(author_qq_id,category_id,title,body,status,created_at,updated_at) VALUES('900001',?,?,'plain content','published',?,?)", (self.category, f'Small page {i}', 1700000000+i,1700000000+i))
+            await db.commit()
+        finally:
+            await db.close()
+        a = await self.json_get('/api/mobile/v1/forum/posts?page_size=2&page=1')
+        b = await self.json_get('/api/mobile/v1/forum/posts?page_size=2&page=2')
+        self.assertEqual((a['page_size'],len(a['rows']),len(b['rows'])), (2,2,2))
+        self.assertFalse({r['id'] for r in a['rows']} & {r['id'] for r in b['rows']})
+        web = await self.json_get('/api/forum/posts?page_size=2')
+        self.assertEqual(web['page_size'], 5)
+
     async def test_motto_is_self_only_with_csrf_and_strict_input(self):
         self.assertEqual((await self.client.get("/api/mobile/v1/me/public-profile")).status_code, 401)
         headers = await self.login()

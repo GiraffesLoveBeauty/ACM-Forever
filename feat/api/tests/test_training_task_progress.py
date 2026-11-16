@@ -20,6 +20,33 @@ class TrainingProgressTests(unittest.IsolatedAsyncioTestCase):
     preview = task_contract.TrainingTaskTests.preview
     publish = task_contract.TrainingTaskTests.publish
 
+    async def test_optional_completed_ranking_is_global_stable_and_after_filter(self):
+        task = await self.create()
+        base = f'/api/admin/training-tasks/{task["id"]}/progress'
+        members = [dict(id=i + 1, name=f'Member {i}', qq_id=str(80000000+i), real_name=None,
+                        status_snapshot='A' if i % 2 else 'B', completed_problems=i//2,
+                        problem_count=30, completion='incomplete', pending=False,
+                        account_status='active') for i in range(25)]
+        with patch.object(progress, 'recipient_summaries', AsyncMock(return_value=members)), patch.object(progress, 'summary', return_value={'recipient_count': 25}):
+            plain = await (await self.client.get(base)).get_json()
+            self.assertEqual(plain['order'], 'none')
+            self.assertEqual([r['id'] for r in plain['items']], list(range(1,21)))
+            self.assertFalse(any('rank' in r for r in plain['items']))
+            first = await (await self.client.get(base, query_string={'order':'completed','page_size':20})).get_json()
+            second = await (await self.client.get(base, query_string={'order':'completed','page_size':20,'page':2})).get_json()
+            rows = first['items'] + second['items']
+            self.assertEqual(rows[0]['id'], 25)
+            self.assertEqual([r['completed_problems'] for r in rows], sorted([r['completed_problems'] for r in members], reverse=True))
+            self.assertEqual([r['rank'] for r in rows[:5]], [1,2,2,4,4])
+            self.assertEqual([r['id'] for r in rows[1:3]], [23,24])
+            filtered = await (await self.client.get(base, query_string={'order':'completed','identity':'A','page_size':2})).get_json()
+            self.assertEqual(filtered['total'], 12)
+            self.assertEqual([r['rank'] for r in filtered['items']], [1,2])
+            self.assertEqual((await self.client.get(base, query_string={'order':'bad'})).status_code, 400)
+        member = self.app.test_client()
+        await member.post('/api/auth/login', json={'qq_id':'22345678','password':'Test-Password-123!'})
+        self.assertEqual((await member.get(base, query_string={'order':'completed'})).status_code, 403)
+
     async def test_admin_real_name_search_paging_and_member_privacy(self):
         await self.sql("UPDATE users SET real_name='  合成实名甲  ' WHERE qq_id='22345678'")
         await self.seed('32345678')

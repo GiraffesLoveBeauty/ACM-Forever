@@ -17,7 +17,7 @@ public final class WebFeaturesActivity extends Activity {
     private interface Write { Object run()throws Exception; }
     private ApiClient api;private LinearLayout root,body,wikiBar;private TextView heading;private ScrollView scroll;
     private WikiReaderNavigation wikiReader;
-    private PageRefresh refresh;private ActionNotice notice;private final ExecutorService io=Executors.newSingleThreadExecutor();
+    private PageReads pageReads;private PageRefresh refresh;private ActionNotice notice;private final ExecutorService io=Executors.newSingleThreadExecutor();
     private final Handler ui=new Handler(Looper.getMainLooper());private final ArrayDeque<String> history=new ArrayDeque<>();
     private JSONObject route;private int serial;private boolean writing,active;private Runnable currentRead;
     private long accountOwner;
@@ -29,22 +29,22 @@ public final class WebFeaturesActivity extends Activity {
     private int page(){return Math.max(1,route.optInt("page",1));}
     static String encode(String value){try{return java.net.URLEncoder.encode(value,"UTF-8");}catch(java.io.UnsupportedEncodingException e){throw new AssertionError(e);}}
     @Override public void onCreate(Bundle saved){
-        super.onCreate(saved);AppAppearance.load(this);AppAppearance.window(this);api=((AcmApplication)getApplication()).api();accountOwner=api.sessionGeneration();
+        super.onCreate(saved);AppAppearance.load(this);AppAppearance.window(this);api=((AcmApplication)getApplication()).api();pageReads=new PageReads(api);accountOwner=api.sessionGeneration();
         try{route=saved==null?put(state(getIntent().getStringExtra("feature")==null?"wiki":getIntent().getStringExtra("feature")),"id",getIntent().getIntExtra("post_id",0)):new JSONObject(saved.getString("route"));}catch(Exception e){route=state("wiki");}
         if(saved==null){String slug=getIntent().getStringExtra("wiki_slug"),query=getIntent().getStringExtra("initial_query"),platform=getIntent().getStringExtra("initial_platform");if(slug!=null)put(route,"slug",slug);if(query!=null)put(route,"q",query);if("codeforces".equals(platform)||"atcoder".equals(platform))put(route,"platform",platform);}
         put(route,"problem_tag",saved==null?ProblemTags.restore(getIntent().getStringExtra("initial_problem_tag")):saved.getLong("tag_owner",-1)==accountOwner?ProblemTags.restore(route.optString("problem_tag")):"");
         if(saved!=null){java.util.ArrayList<String> back=saved.getStringArrayList("history");if(back!=null)history.addAll(back);}
         root=column();root.setFitsSystemWindows(true);root.setBackground(ProfileCover.drawable(this));AppAppearance.content(this,root);
         LinearLayout top=row();top.setPadding(dp(12),dp(8),dp(12),dp(8));top.setBackgroundColor(MobileStyle.CHROME);
-        Button back=button("返回",this::onBackPressed);top.addView(back);heading=text("",21);top.addView(heading,new LinearLayout.LayoutParams(0,-2,1));root.addView(top);
+        Button back=button("返回",this::onBackPressed);back.setOnClickListener(v->onBackPressed());top.addView(back);heading=text("",21);top.addView(heading,new LinearLayout.LayoutParams(0,-2,1));root.addView(top);
         refresh=new PageRefresh(this,root,1);notice=new ActionNotice(this,root,2);wikiBar=row();wikiBar.setVisibility(View.GONE);root.addView(wikiBar);scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setOnScrollChangeListener((View v,int x,int y,int oldX,int oldY)->{if(wikiReader!=null)wikiReader.update();});root.addView(PullRefreshLayout.forPage(this,scroll,refresh,()->!ModalDialogs.isShowing(this)),new LinearLayout.LayoutParams(-1,0,1));
         body=column();body.setPadding(dp(14),dp(16),dp(14),dp(24));scroll.addView(body);render();
     }
     @Override protected void onSaveInstanceState(Bundle out){super.onSaveInstanceState(out);if(wikiReader!=null)wikiReader.capture();out.putString("route",route.toString());out.putStringArrayList("history",new java.util.ArrayList<>(history));out.putLong("tag_owner",accountOwner);}
-    @Override protected void onResume(){super.onResume();if(accountOwner!=api.sessionGeneration()){accountOwner=api.sessionGeneration();ModalDialogs.close(this);put(route,"problem_tag","");if("tracker".equals(view())){history.clear();put(route,"page",1);render();}}active=true;ui.removeCallbacks(poll);ui.postDelayed(poll,30000);}
-    @Override protected void onPause(){if(wikiReader!=null)wikiReader.capture();active=false;ui.removeCallbacks(poll);super.onPause();}
-    @Override protected void onDestroy(){if(wikiReader!=null)wikiReader.close();serial++;ui.removeCallbacksAndMessages(null);io.shutdownNow();refresh.close();ModalDialogs.close(this);super.onDestroy();}
-    @Override public void onBackPressed(){if(writing)return;if(history.isEmpty()){finish();return;}PageMotion.change(this,false,()->{try{route=new JSONObject(history.pop());render();}catch(Exception e){finish();}});}
+    @Override protected void onResume(){super.onResume();if(accountOwner!=api.sessionGeneration()){accountOwner=api.sessionGeneration();ModalDialogs.close(this);put(route,"problem_tag","");if("tracker".equals(view())){history.clear();put(route,"page",1);render();}}active=true;refresh.resume();ui.removeCallbacks(poll);ui.postDelayed(poll,30000);}
+    @Override protected void onPause(){if(wikiReader!=null)wikiReader.capture();active=false;refresh.pause();ui.removeCallbacks(poll);super.onPause();}
+    @Override protected void onDestroy(){if(wikiReader!=null)wikiReader.close();serial++;ui.removeCallbacksAndMessages(null);io.shutdown();pageReads.close();refresh.close();ModalDialogs.close(this);super.onDestroy();}
+    @Override public void onBackPressed(){if(history.isEmpty()){finish();return;}PageMotion.change(this,false,()->{try{route=new JSONObject(history.pop());render();}catch(Exception e){finish();}});}
     private void nav(JSONObject next){if(writing)return;if(wikiReader!=null)wikiReader.capture();PageMotion.change(this,true,()->{history.push(route.toString());if(wikiReader!=null){wikiReader.close();wikiReader=null;}route=next;scroll.scrollTo(0,0);render();});}
     private void filter(String key,Object value){if(writing)return;put(route,key,value);put(route,"page",1);render();}
     private LinearLayout column(){LinearLayout box=new SpacedLayout(this);box.setOrientation(LinearLayout.VERTICAL);return box;}
@@ -64,16 +64,16 @@ public final class WebFeaturesActivity extends Activity {
     private void loadInto(LinearLayout slot,String path,Display display){
         slot.addView(text("正在加载…",14));int token=serial;long account=api.sessionGeneration();final String[] rendered={null};final boolean[] reading={false};
         java.util.function.Consumer<Object> show=data->{if(token!=serial||account!=api.sessionGeneration()||isDestroyed())return;if(data.toString().equals(rendered[0]))return;int y=scroll.getScrollY();if(wikiReader!=null&&"wiki-article".equals(view())){wikiReader.close();wikiReader=null;}slot.removeAllViews();slot.setMinimumHeight(0);slot.setBackgroundColor(Color.TRANSPARENT);try{displayInto=slot;display.show(data);rendered[0]=data.toString();AppAppearance.paintFields(slot);scroll.post(()->{if(token==serial)scroll.scrollTo(0,y);});}catch(Exception e){rendered[0]=null;error(slot,e);}};
-        currentRead=()->{if(reading[0]||token!=serial||isDestroyed())return;reading[0]=true;refresh.start(token);io.execute(()->{Object data=null;Exception failure=null;try{data=api.get(path);}catch(Exception e){failure=e;}Object result=data;Exception err=failure;runOnUiThread(()->{if(token!=serial||isDestroyed())return;reading[0]=false;if(account!=api.sessionGeneration()){rendered[0]=null;slot.removeAllViews();error(slot,new ApiClient.ApiException(401,"登录账号已切换",false));refresh.finish(token);return;}if(err==null)show.accept(result);else{boolean retain=refresh.failure(FailureState.title(err));if(rendered[0]==null&&PageRefresh.isConnectionFailure(FailureState.title(err)))refresh.actionFailure(FailureState.title(err));if(!retain||rendered[0]==null){rendered[0]=null;error(slot,err);}}refresh.finish(token);});});};
-        Runnable read=currentRead;refresh.register(token,read);io.execute(()->{api.beginReplay();try{Object cached=api.get(path);runOnUiThread(()->{if(token==serial){refresh.cached(token);show.accept(cached);}});}catch(Exception ignored){}finally{api.endReplay();}runOnUiThread(()->{if(token==serial)read.run();});});
+        currentRead=()->{if(reading[0]||token!=serial||isDestroyed())return;reading[0]=true;refresh.start(token);pageReads.network(()->{Object data=null;Exception failure=null;try{data=api.get(path);}catch(Exception e){failure=e;}Object result=data;Exception err=failure;runOnUiThread(()->{if(token!=serial||isDestroyed())return;reading[0]=false;if(account!=api.sessionGeneration()){rendered[0]=null;slot.removeAllViews();error(slot,new ApiClient.ApiException(401,"登录账号已切换",false));refresh.finish(token);return;}if(err==null)show.accept(result);else{boolean retain=refresh.failure(FailureState.title(err));if(rendered[0]==null&&PageRefresh.isConnectionFailure(FailureState.title(err)))refresh.actionFailure(FailureState.title(err));if(!retain||rendered[0]==null){rendered[0]=null;error(slot,err);}}refresh.finish(token);});});};
+        Runnable read=currentRead;refresh.register(token,read);pageReads.preview(()->{api.beginReplay();try{Object cached=api.get(path);runOnUiThread(()->{if(token==serial){refresh.cached(token);show.accept(cached);}});}catch(Exception ignored){}finally{api.endReplay();}runOnUiThread(()->{if(token==serial)read.run();});});
     }
     private LinearLayout displayInto;
     private void write(Button source,Write work,java.util.function.Consumer<Object> done){
         if(writing)return;writing=true;source.setEnabled(false);notice.hide();int token=serial;long owner=api.sessionGeneration();
-        io.execute(()->{Object data=null;Exception failure=null;try{synchronized(api){if(owner!=api.sessionGeneration())throw new IllegalStateException("登录账号已切换");data=work.run();}}catch(Exception e){failure=e;}Object result=data;Exception err=failure;runOnUiThread(()->{writing=false;if(isDestroyed()||token!=serial||owner!=api.sessionGeneration())return;source.setEnabled(true);if(err!=null)notice.show("操作",err);else done.accept(result);});});
+        io.execute(()->{Object data=null;Exception failure=null;try(ApiClient.OwnerScope ignored=api.bind(owner)){if(owner!=api.sessionGeneration())throw new IllegalStateException("登录账号已切换");data=work.run();}catch(Exception e){failure=e;}Object result=data;Exception err=failure;runOnUiThread(()->{writing=false;if(isDestroyed()||token!=serial||owner!=api.sessionGeneration())return;source.setEnabled(true);if(err!=null)notice.show("操作",err);else done.accept(result);});});
     }
     private void render(){
-        if(wikiReader!=null){wikiReader.close();wikiReader=null;}serial++;currentRead=null;refresh.reset(serial);refresh.userAction();notice.hide();body.removeAllViews();heading.setText(title());
+        if(wikiReader!=null){wikiReader.close();wikiReader=null;}pageReads.cancel();serial++;currentRead=null;refresh.reset(serial);refresh.userAction();notice.hide();body.removeAllViews();heading.setText(title());
         if(!view().startsWith("wiki")&&!api.isLoggedIn()){error(card(body),new ApiClient.ApiException(401,"请先在账号设置登录",false));return;}
         switch(view()){case "notifications":notifications();break;case "submissions":submissions();break;case "progress":progress();break;case "tracker":tracker();break;case "wiki-list":wikiList();break;case "wiki-article":wikiArticle();break;case "wiki-history":wikiHistory();break;default:wiki();}AppAppearance.paintFields(body);
     }

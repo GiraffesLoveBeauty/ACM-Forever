@@ -1,5 +1,7 @@
 # ACMforever Android
 
+当前源码候选为 **0.2.30/code44**，基于已发布的 0.2.29/PR #144，优化弱网导航、重复读取、缓存失效和重连，增加管理员题单按完成数量可选排名。含兼容后端改动，合并前需负责人联调及运维确认；本轮只提交新 PR 等待 Review，未合并或发布。范围和验证见 [android-v0.2.30-network-training.md（本轮说明）](android-v0.2.30-network-training.md)。以下版本段落为历史记录。
+
 本轮 **0.2.27/code41** 保持 Gitee 优先更新：清单、APK 与模块使用 Gitee，失败兜底 GitHub。Tag 由 GitHub Actions 发布，Gitee 暂由用户手动同步同批 Release 附件；GitHub 发包不要求 Gitee 凭据。设置 `GITEE_MIRROR_MODE=automatic` 才启用需要 `GITEE_RELEASE_TOKEN` 的自动镜像与匿名回读。详见[方案与验证](android-v0.2.27-gitee-updates.md)。PR #141 已合并，发布方式小修另提 PR；尚未创建 Tag 或发布 v0.2.27。基线 v0.2.26 已由 PR #115 合并并发布，下方旧版状态保留当时记录。自站更新和延期 1.0.0 不在本轮范围。
 
 当前源码评审候选 **0.2.26/code40** 修复论坛三行摘要、Markdown公式与“我的主题→设置”返回位置，并将搜索拖动触边自动滚动速度加倍，详见[实施与验证记录](android-v0.2.26-reader-and-theme-return.md)。本轮提交源码PR供其他成员评审，未合并或发布。基线v0.2.25已随PR #114合并并Tag发布；以下旧版本“本轮/待评审”等字样保留当时记录。

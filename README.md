@@ -21,6 +21,8 @@
 
 ## 文档
 
+- [android-v0.2.30-network-training.md（弱网导航、读取合并与可选题单排名 · 待评审）](docs/android-v0.2.30-network-training.md)
+
 - [android-v0.2.27-gitee-updates.md（Gitee 优先更新、GitHub 兜底与镜像发布 · 待评审）](docs/android-v0.2.27-gitee-updates.md)
 
 - [issue-85-member-profile.md（成员资料筛选与可恢复编辑）](docs/issue-85-member-profile.md)

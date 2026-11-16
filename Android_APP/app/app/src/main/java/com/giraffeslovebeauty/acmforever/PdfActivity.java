@@ -83,6 +83,8 @@ public final class PdfActivity extends Activity {
         hasDocument=true;page=Math.max(0,Math.min(page,renderer.getPageCount()-1));
     }
     private void closeDocument(){hasDocument=false;if(renderer!=null){renderer.close();renderer=null;}if(descriptor!=null){try{descriptor.close();}catch(Exception ignored){}descriptor=null;}}
+    @Override protected void onResume(){super.onResume();if(refresh!=null)refresh.resume();}
+    @Override protected void onPause(){if(refresh!=null)refresh.pause();super.onPause();}
     private int dp(float value){return MobileStyle.dp(this,value);}
     private Button button(String title,Runnable action){Button b=new Button(this);b.setText(title);MobileStyle.button(b,false);b.setTextSize(11);b.setMinWidth(0);b.setPadding(2,2,2,2);controls.addView(b,new LinearLayout.LayoutParams(0,dp(48),1));b.setOnClickListener(v->{if(!busy&&!dead)action.run();});return b;}
     private void setBusy(boolean value){busy=value;previous.setEnabled(!value&&page>0);next.setEnabled(!value&&renderer!=null&&page+1<renderer.getPageCount());zoomOut.setEnabled(!value&&zoom>.5f);zoomIn.setEnabled(!value&&zoom<3);fit.setEnabled(!value);}

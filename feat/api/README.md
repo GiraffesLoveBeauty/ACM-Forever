@@ -2,6 +2,8 @@
 
 本服务承接梓喵 ACM Helper WebUI 的数据库访问与业务 API。SQLite 数据库由本服务独占；WebUI 和梓喵后续都通过 HTTP API 访问数据，不直接读写数据库文件。
 
+0.2.30候选为移动论坛增加两条分页、管理员题单进度可选全体完成数量排名，以及公开能力/Wiki的ETag与gzip传输优化。默认排序与Web分页、私有缓存策略、鉴权和数据结构保持兼容，无数据库迁移；合并会触发现有部署，需后端联调和运维确认。契约、验证和回退见 [android-v0.2.30-network-training.md（本轮交付）](../../docs/android-v0.2.30-network-training.md)。
+
 当前包含以下接口：
 
 - `/api/me/problems/tracker`：0.2.24本地适配保留每题真实难度，并增加`tags: string[]`，供App直接展示算法标签；沿用既有来源、本人权限和筛选，不触发逐题抓取。旧客户端可忽略新增字段，旧服务器未返回标签时App如实提示。详见[题目优化说明](../../docs/android-v0.2.24-problem-reading.md)。

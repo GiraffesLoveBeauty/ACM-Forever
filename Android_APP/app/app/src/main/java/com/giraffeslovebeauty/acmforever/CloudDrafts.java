@@ -37,7 +37,7 @@ final class CloudDrafts {
         if(this.category==category&&this.title.equals(title)&&this.body.equals(body))return true;
         this.category=category;this.title=title;this.body=body;revision++;status="等待自动保存…";
         if(timer!=null)timer.cancel(false);
-        timer=queue.schedule(()->save(expected,null),900,TimeUnit.MILLISECONDS);return true;
+        timer=queue.schedule(()->save(expected,null),2000,TimeUnit.MILLISECONDS);return true;
     }
     void flush(long expected,Completion completion){synchronized(this){if(epoch==expected&&timer!=null)timer.cancel(false);}queue.execute(()->save(expected,completion));}
     void close(){queue.shutdownNow();}

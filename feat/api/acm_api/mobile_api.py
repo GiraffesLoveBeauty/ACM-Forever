@@ -21,6 +21,7 @@ async def capabilities():
     return jsonify({"api_version": 1, "features": {
         "public_member_ids": True, "member_profiles": True, "member_posts": True,
         "own_public_profile": True, "edit_motto": True,
+        "forum_small_pages": True, "training_progress_order": True,
     }})
 
 

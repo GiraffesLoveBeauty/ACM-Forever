@@ -29,6 +29,11 @@ public final class ReaderSmoke extends Instrumentation {
     private boolean settingsMode;
     @Override public void onCreate(Bundle arguments){super.onCreate(arguments);mode=arguments==null?"":arguments.getString("mode","");settingsMode=arguments!=null&&"settings".equals(arguments.getString("mode"));communityMode=arguments!=null&&"community".equals(arguments.getString("mode"));loginMode=arguments!=null&&"login".equals(arguments.getString("mode"));designMode=arguments!=null&&"design".equals(arguments.getString("mode"));appearanceMode=arguments!=null&&"appearance".equals(arguments.getString("mode"));webMode=arguments!=null&&"web".equals(arguments.getString("mode"));start();}
     @Override public void onStart(){
+        // Application.onCreate runs on the main thread. Install synthetic API state only after it finishes.
+        waitForIdleSync();
+        if("composerimage-success".equals(mode)||"composerimage-failure".equals(mode)){ComposerImageUiSmoke.run(this,mode.endsWith("failure"));return;}
+        if("composersubmit".equals(mode)){ComposerSubmitUiSmoke.run(this);return;}
+        if("networkreads".equals(mode)){NetworkReadUiSmoke.run(this);return;}
         if("lists-updates".equals(mode)){ListPagingUiSmoke.run(this);return;}
         if("trainingtasks-slow".equals(mode)||"trainingtasks-scroll".equals(mode)){TrainingTasksReadUiSmoke.run(this,mode.substring("trainingtasks-".length()));return;}
         if("trainingtasks".equals(mode)){TrainingTasksUiSmoke.run(this);return;}

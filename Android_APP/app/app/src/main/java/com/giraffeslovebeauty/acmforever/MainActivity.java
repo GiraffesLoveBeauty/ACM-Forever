@@ -70,8 +70,8 @@ public final class MainActivity extends Activity {
     private int ACCENT = Color.rgb(200, 235, 33);
     private int LINE = Color.rgb(229, 232, 224);
 
+    private PageReads pageReads;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
-    private final ExecutorService previewIo=Executors.newSingleThreadExecutor();
     private final ThreadLocal<LoadContext> loadContext=new ThreadLocal<>();
     private PageRefresh pageRefresh;
     private ActionNotice actionNotice;
@@ -86,8 +86,8 @@ public final class MainActivity extends Activity {
     private boolean composeEditorShown;
     private boolean presentingRead;
     private static final class LoadContext {
-        final int serial;final boolean preview;final java.util.concurrent.atomic.AtomicBoolean delivered;
-        LoadContext(int serial,boolean preview,java.util.concurrent.atomic.AtomicBoolean delivered){this.serial=serial;this.preview=preview;this.delivered=delivered;}
+        final int serial;final long owner;final boolean preview;final java.util.concurrent.atomic.AtomicBoolean delivered;
+        LoadContext(int serial,long owner,boolean preview,java.util.concurrent.atomic.AtomicBoolean delivered){this.serial=serial;this.owner=owner;this.preview=preview;this.delivered=delivered;}
     }
     private final ExecutorService avatarIo = Executors.newFixedThreadPool(2);
     private ApiClient api;
@@ -166,7 +166,7 @@ public final class MainActivity extends Activity {
         super.onCreate(state);
         application = (AcmApplication) getApplication();
         cloud = application.drafts();
-        api = application.api();
+        api = application.api();pageReads=new PageReads(api);
         preferences = getSharedPreferences("acmforever_settings", MODE_PRIVATE);
         // Application configures the shared client once. Recreating a screen must not
         // acquire its request monitor while an existing network operation is pending.
@@ -201,7 +201,7 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onResume() {
-        super.onResume();openingSpace=false;openingSearch=false;openingBindings=false;openingAbout=false;openingLocalSettings=false;
+        super.onResume();if(pageRefresh!=null)pageRefresh.resume();openingSpace=false;openingSearch=false;openingBindings=false;openingAbout=false;openingLocalSettings=false;
         if(navigationOwner!=api.sessionGeneration()){ModalDialogs.close(this);problemKeyword="";problemKeywordDraft="";problemTag="";navigation.clear();navigationOwner=api.sessionGeneration();refreshComposer();if(!"compose".equals(screen))loadScreen();}
         else{
             CloudDrafts.State draft=cloud.state();
@@ -217,7 +217,7 @@ public final class MainActivity extends Activity {
         openingUpdates=false;application.updates().attach(this,null);
     }
 
-    @Override protected void onPause(){if(application!=null)application.updates().detach(this);super.onPause();}
+    @Override protected void onPause(){if(pageRefresh!=null)pageRefresh.pause();if(application!=null)application.updates().detach(this);super.onPause();}
 
     private void acceptWebIntent(Intent intent){
         String publicMember=intent.getStringExtra("search_public_member");
@@ -306,8 +306,8 @@ public final class MainActivity extends Activity {
         ui.removeCallbacksAndMessages(null);
         ModalDialogs.close(this);
 
-        io.shutdownNow();
-        previewIo.shutdownNow();if(pageRefresh!=null)pageRefresh.close();
+        io.shutdown();if(pageReads!=null)pageReads.close();
+        if(pageRefresh!=null)pageRefresh.close();
         avatarIo.shutdownNow();
         super.onDestroy();
     }
@@ -344,8 +344,9 @@ public final class MainActivity extends Activity {
         if (!"image/png".equals(mime) && !"image/jpeg".equals(mime) && !"image/webp".equals(mime)) {
             message("请选择 PNG、JPEG 或 WebP 图片。"); return;
         }
+        long avatarAccount=api.sessionGeneration();
         io.execute(() -> {
-            try (InputStream input = getContentResolver().openInputStream(uri);
+            try (ApiClient.OwnerScope ignored=api.bind(avatarAccount);InputStream input = getContentResolver().openInputStream(uri);
                  ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
                 if (input == null) throw new IllegalStateException("无法读取所选图片。");
                 byte[] buffer = new byte[8192]; int count;
@@ -354,14 +355,14 @@ public final class MainActivity extends Activity {
                     bytes.write(buffer, 0, count);
                 }
                 api.uploadAvatar(AvatarTools.compress(bytes.toByteArray()), "image/jpeg");
-                present(() -> { message("头像已更新。"); loadScreen(); });
-            } catch (Exception e) { present(() -> failureDialog(e)); }
+                present(() -> { if(avatarAccount==api.sessionGeneration()){message("头像已更新。"); loadScreen();} });
+            } catch (Exception e) { present(() -> {if(avatarAccount==api.sessionGeneration())failureDialog(e);}); }
         });
     }
 
     @Override public void onBackPressed() {
         if (!api.isLoggedIn() && !loginBusy) { navigation.clear(); moveTaskToBack(true); return; }
-        if (loginBusy || composeBusy) { message("正在处理，请稍候…"); return; }
+        if (loginBusy) { message("正在登录，请稍候…"); return; }
         if(navigationOwner!=api.sessionGeneration()){navigation.clear();navigationOwner=api.sessionGeneration();}
         if(!allowLeavingEditor(this::onBackPressed))return;
         leaveComposeOnce=false;ModalDialogs.close(this);
@@ -386,13 +387,11 @@ public final class MainActivity extends Activity {
     }
 
     private boolean allowLeavingEditor(Runnable proceed){
-        if(!"compose".equals(screen)||leaveComposeOnce||!cloud.state().dirty)return true;
-        if(ModalDialogs.isShowing(this))return false;
-        new ModalDialogs.Builder(this).setTitle("草稿尚未保存")
-                .setMessage("离开前保存到账号，云端草稿与网页同步。保存失败时会保留当前编辑内容。")
-                .setNegativeButton("继续编辑",null)
-                .setNeutralButton("放弃未保存修改",(d,w)->{clearComposer();leaveComposeOnce=true;proceed.run();})
-                .setPositiveButton("保存并离开",(d,w)->saveComposer(proceed)).show();return false;
+        if("compose".equals(screen)&&cloud.state().dirty&&!composeBusy){
+            // composerChanged persists recovery text; the process-owned queue finishes in background.
+            long generation=cloud.generation();cloud.flush(generation,error->{});
+        }
+        return true;
     }
 
     private void syncAppearance(){
@@ -403,28 +402,28 @@ public final class MainActivity extends Activity {
     private int dp(float value) { return Math.round(value * getResources().getDisplayMetrics().density); }
 
     private void loadPage(int serial,Runnable work){
-        pageRefresh.register(serial,()->startRead(serial,work));
+        long readOwner=api.sessionGeneration();pageRefresh.register(serial,()->startRead(serial,work));
         pageRefresh.start(serial);java.util.concurrent.atomic.AtomicBoolean delivered=new java.util.concurrent.atomic.AtomicBoolean();
-        previewIo.execute(()->{
-            loadContext.set(new LoadContext(serial,true,delivered));api.beginReplay();
+        pageReads.preview(()->{
+            loadContext.set(new LoadContext(serial,readOwner,true,delivered));api.beginReplay();
             try{work.run();}finally{
                 api.endReplay();loadContext.remove();
-                try{io.execute(()->{api.beginReadCycle();loadContext.set(new LoadContext(serial,false,delivered));try{work.run();}finally{loadContext.remove();}});}
+                try{pageReads.network(()->{if(serial!=requestSerial||isDestroyed()||readOwner!=api.sessionGeneration())return;api.beginReadCycle();loadContext.set(new LoadContext(serial,readOwner,false,delivered));try{work.run();}finally{loadContext.remove();}});}
                 catch(java.util.concurrent.RejectedExecutionException ignored){/* Activity closed while the cache preview was finishing. */}
             }
         });
     }
     private void startRead(int serial,Runnable work){
-        if(isDestroyed()||serial!=requestSerial)return;
+        if(isDestroyed()||serial!=requestSerial)return;long readOwner=api.sessionGeneration();
         pageRefresh.start(serial);java.util.concurrent.atomic.AtomicBoolean delivered=new java.util.concurrent.atomic.AtomicBoolean();
-        try{io.execute(()->{api.beginReadCycle();loadContext.set(new LoadContext(serial,false,delivered));try{work.run();}finally{loadContext.remove();}});}catch(java.util.concurrent.RejectedExecutionException ignored){}
+        try{pageReads.network(()->{if(serial!=requestSerial||isDestroyed()||readOwner!=api.sessionGeneration())return;api.beginReadCycle();loadContext.set(new LoadContext(serial,readOwner,false,delivered));try{work.run();}finally{loadContext.remove();}});}catch(java.util.concurrent.RejectedExecutionException ignored){}
     }
     private void present(Runnable action){
         LoadContext context=loadContext.get();
         Exception readIssue=context!=null&&!context.preview?api.readIssue():null;
         if(context!=null&&context.preview&&!api.replayReady())return;
         runOnUiThread(()->{
-            if(isFinishing()||isDestroyed()||context!=null&&context.serial!=requestSerial)return;
+            if(isFinishing()||isDestroyed()||context!=null&&(context.serial!=requestSerial||context.owner!=api.sessionGeneration()))return;
             if(context!=null&&context.preview)pageRefresh.cached(context.serial);
             boolean previous=presentingRead;presentingRead=context!=null&&!context.preview;
             try{if(readIssue==null||!pageRefresh.failure(FailureState.title(readIssue)))action.run();}finally{
@@ -640,7 +639,7 @@ public final class MainActivity extends Activity {
     }
 
     private void navigate(String next,Runnable prepare) {
-        if (loginBusy || composeBusy) return;
+        if (loginBusy) return;
         if (!api.isLoggedIn()) { loadScreen(); return; }
         if(!next.equals(screen)&&!allowLeavingEditor(()->navigate(next,prepare)))return;
         readFromAction=true;
@@ -668,7 +667,7 @@ public final class MainActivity extends Activity {
     private void loadScreen() {
         if (loginBusy) return;
         if (!api.isLoggedIn()) {
-            ++requestSerial; navigation.clear(); screen="account"; query=""; pendingScroll=0;
+            pageReads.cancel();++requestSerial; navigation.clear(); screen="account"; query=""; pendingScroll=0;
             pageRefresh.reset(requestSerial); actionNotice.hide(); ModalDialogs.close(this);
             detailUi=null; composeEditorShown=false; composeBodyInput=null; loadingRegion=null;
             content.removeAllViews(); root.getChildAt(0).setVisibility(View.GONE); nav.setVisibility(View.GONE);
@@ -680,7 +679,7 @@ public final class MainActivity extends Activity {
         if(!externalRoot)application.updates().startupCheck();
         if(navigationOwner!=api.sessionGeneration()){navigation.clear();navigationOwner=api.sessionGeneration();}
         if(api.isLoggedIn()&&api.requiresPasswordChange())screen="account";
-        int serial = ++requestSerial;
+        pageReads.cancel();int serial = ++requestSerial;
         if(composePreview!=null){previewOpened=composePreview.opened();previewRight=composePreview.right();composePreview=null;}
         pageRefresh.reset(serial);if(readFromAction)pageRefresh.userAction();actionNotice.hide();detailUi=null;composeEditorShown=false;composeBodyInput=null;
         if (!api.isLoggedIn()) defaultAvatar(headerAvatar);
@@ -1057,7 +1056,7 @@ public final class MainActivity extends Activity {
         LinearLayout pending=commentCard();TextView state=label("我 · 正在发送…",12,MUTED,true);pending.addView(state);
         if(parent>0)pending.addView(label("回复评论 #"+parent,11,MUTED,false));pending.addView(new ContentView(this,text,false,this::openBrowser));current.comments.addView(pending,0);
         io.execute(()->{
-            int id=0;Exception failure=null;try{JSONObject response=api.postAction(current.id,"comments",text,parent);id=response.getInt("id");if(id<=0)throw new org.json.JSONException("缺少评论编号");}catch(Exception e){failure=e;}
+            int id=0;Exception failure=null;try(ApiClient.OwnerScope ignored=api.bind(account)){JSONObject response=api.postAction(current.id,"comments",text,parent);id=response.getInt("id");if(id<=0)throw new org.json.JSONException("缺少评论编号");}catch(Exception e){failure=e;}
             int confirmed=id;Exception error=failure;
             present(()->{
                 current.sending=false;if(current!=detailUi||current.serial!=requestSerial||account!=api.sessionGeneration()&&!expiredWrite(error))return;
@@ -1088,11 +1087,11 @@ public final class MainActivity extends Activity {
 
     private void mutate(Button button, ApiWork work, Runnable success) {
         if (actionBusy) return;
-        actionBusy = true; int serial = requestSerial;
+        actionBusy = true; int serial = requestSerial;long writeOwner=api.sessionGeneration();
         CharSequence title = button.getText(); button.setEnabled(false); button.setText("处理中…");
         io.execute(() -> {
             Exception failure = null;
-            try { work.run(); } catch (Exception e) { failure = e; }
+            try (ApiClient.OwnerScope ignored=api.bind(writeOwner)) { work.run(); } catch (Exception e) { failure = e; }
             Exception error = failure;
             present(() -> {
                 actionBusy = false;
@@ -1124,7 +1123,7 @@ public final class MainActivity extends Activity {
         try{post.put(key,!old);if("like".equals(kind))post.put("likes_count",Math.max(0,oldCount+(old?-1:1)));}catch(org.json.JSONException ignored){}
         reactionLabel(button,kind,post);
         io.execute(()->{
-            JSONObject response=null;Exception failure=null;try{response=api.postAction(target,kind,"",0);response.getBoolean("active");}catch(Exception e){failure=e;}
+            JSONObject response=null;Exception failure=null;try(ApiClient.OwnerScope ignored=api.bind(account)){response=api.postAction(target,kind,"",0);response.getBoolean("active");}catch(Exception e){failure=e;}
             JSONObject result=response;Exception error=failure;
             present(()->{
                 if(serial!=requestSerial||account!=api.sessionGeneration()&&!expiredWrite(error))return;
@@ -1411,10 +1410,11 @@ public final class MainActivity extends Activity {
             String[] names = {"稳定基础", "主训练", "突破上限"};
             LinearLayout[] slots = new LinearLayout[3];
             for (int i = 0; i < 3; i++) { slots[i] = column(); slots[i].setPadding(dp(16),dp(16),dp(16),dp(16)); slots[i].setBackground(shape(MobileStyle.MODULE,10,LINE)); slots[i].setMinimumHeight(dp(180)); slots[i].addView(label(names[i] + " · 正在生成…", 15, BRAND, true)); zones.addView(slots[i]); }
+            long trainingOwner=api.sessionGeneration();
             io.execute(() -> {
                 for (int i = 0; i < 3; i++) {
                     int slot = i; JSONObject result = null; Exception failure = null;
-                    try {
+                    try (ApiClient.OwnerScope ignored=api.bind(trainingOwner)) {
                         Object target = JSONObject.NULL;
                         if ("codeforces".equals(selected) || "atcoder".equals(selected)) {
                             int base = Integer.parseInt(levels.get(index)); int max = "codeforces".equals(selected) ? 3500 : 4000; int min = "codeforces".equals(selected) ? 800 : 0;
@@ -1478,7 +1478,7 @@ public final class MainActivity extends Activity {
         LinearLayout results = card(); results.addView(label("请输入比赛 ID 查询；无记录时请先同步数据。",13,MUTED,false));
         Runnable lookup=() -> {
             String id = contest.getText().toString().trim(); if (id.isEmpty()) { message("请输入比赛 ID。"); return; }
-            int serial = ++requestSerial;pageRefresh.reset(serial);if(readFromAction)pageRefresh.userAction();load.setEnabled(false);
+            pageReads.cancel();int serial = ++requestSerial;pageRefresh.reset(serial);if(readFromAction)pageRefresh.userAction();load.setEnabled(false);
             loadPage(serial,()->{try{JSONArray rows=api.getArray("/api/me/contest/reviews?contest_id="+encode(id));present(()->{showContestRows(results,id,rows);load.setEnabled(true);});}
                 catch(Exception e){present(()->{failureBox(results,FailureState.title(e),180,null);load.setEnabled(true);});}});
         };
@@ -1655,18 +1655,25 @@ public final class MainActivity extends Activity {
                 submit.setEnabled(false);
                 setControlsEnabled(box,false);
                 composeBusy = true;
-                CloudDrafts.State snapshot=cloud.state();int draftId = composeDraftId;long owner=api.sessionGeneration(),generation=composeGeneration;
+                CloudDrafts.State snapshot=cloud.state();int draftId = composeDraftId;long owner=api.sessionGeneration(),generation=composeGeneration;int submittedFrom=requestSerial;
                 io.execute(() -> {
                     try {
                         JSONObject result = api.submitDraft(owner,draftId,snapshot.editVersion);int submitted=result.getInt("id");
                         present(() -> {
-                            composeBusy = false;if(generation!=cloud.generation()){refreshComposer();return;}clearComposer(); show("forum");openWebFeature("progress",submitted);
+                            composeBusy = false;if(owner!=api.sessionGeneration()||generation!=cloud.generation()){refreshComposer();return;}
+                            CloudDrafts.State latest=cloud.state();
+                            if(!latest.title.equals(snapshot.title)||!latest.body.equals(snapshot.body)||latest.category!=snapshot.category){
+                                cloud.reset();syncCloudEditor();composeCategoryId=latest.category;composeTitle=latest.title;composeBody=latest.body;composerChanged();refreshComposer();return;
+                            }
+                            clearComposer();if(submittedFrom==requestSerial){show("forum");openWebFeature("progress",submitted);}
+                            else if("compose".equals(screen))refreshComposer();
                         });
-                    } catch (Exception e) { present(() -> { composeBusy = false; submit.setEnabled(true);setControlsEnabled(box,true);failureDialog(e); }); }
+                    } catch (Exception e) { present(() -> { composeBusy = false;if(owner!=api.sessionGeneration())return;if("compose".equals(screen)&&generation==cloud.generation())setControlsEnabled(content,true);if(submittedFrom==requestSerial)failureDialog(e); }); }
                 });
             });
         });
         content.addView(submit);
+        if(composeBusy)setControlsEnabled(content,false);
         ui.post(this::consumePostImage);
     }
 
@@ -1705,16 +1712,17 @@ public final class MainActivity extends Activity {
     }
     private void saveComposer(Runnable afterSave){
         if(composeBusy||!requireLogin("compose"))return;
-        long generation=composeGeneration;
+        long generation=composeGeneration;int savedFrom=requestSerial;
         if(!cloud.update(generation,composeCategoryId,composeTitle,composeBody)){popupLoading=false;refreshComposer();return;}
         composeBusy=true;setControlsEnabled(content,false);
         cloud.flush(generation,error->present(()->{
             composeBusy=false;if(isFinishing()||isDestroyed())return;
-            setControlsEnabled(content,true);
+            if(savedFrom!=requestSerial)popupLoading=false;
+            if("compose".equals(screen)&&generation==cloud.generation())setControlsEnabled(content,true);
             CloudDrafts.State state=cloud.state();if(state.generation!=generation||composeGeneration!=generation){popupLoading=false;refreshComposer();return;}composeDraftId=state.id;
             if(error!=null){popupLoading=false;if(composeStatus!=null)composeStatus.setText(state.status);failureDialog(error);return;}
             composeSavedRevision=composeRevision;preferences.edit().remove(recoveryKey()).apply();if(composeStatus!=null)composeStatus.setText(state.status);
-            if(afterSave!=null)afterSave.run();
+            if(afterSave!=null&&savedFrom==requestSerial)afterSave.run();
         }));
     }
     private void openDraft(int id){
@@ -1917,8 +1925,18 @@ public final class MainActivity extends Activity {
         io.execute(()->{String markdown=null;Exception failure=null;try(InputStream input=getContentResolver().openInputStream(uri);ByteArrayOutputStream bytes=new ByteArrayOutputStream()){
             String mime=getContentResolver().getType(uri);if(!"image/png".equals(mime)&&!"image/jpeg".equals(mime)&&!"image/webp".equals(mime))throw new IllegalArgumentException("请选择 PNG、JPEG 或 WebP 图片");
             if(input==null)throw new IllegalArgumentException("无法读取图片");byte[] buffer=new byte[8192];int count;while((count=input.read(buffer))!=-1){if(bytes.size()+count>20*1024*1024)throw new IllegalArgumentException("原图不能超过 20 MB");bytes.write(buffer,0,count);}if(draft!=cloud.generation())throw new IllegalStateException("草稿已切换，上传已取消");markdown=ForumImages.markdown(api.uploadForumImage(owner,ForumImages.compress(bytes.toByteArray())).getString("url"));
-        }catch(Exception e){failure=e;}String content=markdown;Exception error=failure;
-            present(()->{composeBusy=false;if(isDestroyed()||owner!=api.sessionGeneration()||draft!=cloud.generation())return;if(error!=null){actionNotice.show("上传图片",error);if(composeStatus!=null)composeStatus.setText("图片上传失败，正文已保留");return;}if(editor!=composeBodyInput||!"compose".equals(screen)){actionNotice.show("插入图片",new IllegalArgumentException("编辑页面已切换，请重新选择图片"));return;}int at=editor.getSelectionStart();if(at<0)at=editor.length();if(editor.length()+content.length()>20000){actionNotice.show("插入图片",new IllegalArgumentException("正文达到 20000 字上限，请精简后重新插入"));return;}editor.getText().insert(at,content);editor.setSelection(at+content.length());});
+        }catch(Exception e){failure=e;}String attachment=markdown;Exception error=failure;
+            present(()->{
+                composeBusy=false;if(isFinishing()||isDestroyed())return;
+                // Returning during an upload creates disabled controls, even for a different draft.
+                if("compose".equals(screen))setControlsEnabled(content,true);
+                if(owner!=api.sessionGeneration()||draft!=cloud.generation())return;
+                if(error!=null){actionNotice.show("上传图片",error);if(composeStatus!=null)composeStatus.setText("图片上传失败，正文已保留");return;}
+                if(editor!=composeBodyInput||!"compose".equals(screen)){actionNotice.show("插入图片",new IllegalArgumentException("编辑页面已切换，请重新选择图片"));return;}
+                int at=editor.getSelectionStart();if(at<0)at=editor.length();
+                if(editor.length()+attachment.length()>20000){actionNotice.show("插入图片",new IllegalArgumentException("正文达到 20000 字上限，请精简后重新插入"));return;}
+                editor.getText().insert(at,attachment);editor.setSelection(at+attachment.length());
+            });
         });
     }
 
@@ -2432,8 +2450,9 @@ public final class MainActivity extends Activity {
                     String name = input.getText().toString().trim();
                     if (name.isEmpty() || name.length() > 100) { message("昵称需要 1–100 字。"); return; }
                     if (api.isUnconfigured()) { failureDialog(connectionFailure()); return; }
-                    io.execute(() -> { try { api.updateName(name); present(this::loadScreen); }
-                    catch (Exception e) { present(() -> failureDialog(e)); } });
+                    long owner=api.sessionGeneration();int from=requestSerial;
+                    io.execute(() -> { try (ApiClient.OwnerScope ignored=api.bind(owner)){ api.updateName(name); present(()->{if(owner==api.sessionGeneration()&&from==requestSerial)loadScreen();}); }
+                    catch (Exception e) { present(() -> {if(owner==api.sessionGeneration()&&from==requestSerial)failureDialog(e);}); } });
                 }).show();
     }
 
@@ -2461,10 +2480,10 @@ public final class MainActivity extends Activity {
     private void resetAvatar() {
         if (api.isUnconfigured()) { failureDialog(connectionFailure()); return; }
         new ModalDialogs.Builder(this).setMessage("恢复默认社区头像？").setNegativeButton("取消", null)
-                .setPositiveButton("恢复", (d, w) -> io.execute(() -> {
-                    try { api.resetAvatar(); present(this::loadScreen); }
-                    catch (Exception e) { present(() -> failureDialog(e)); }
-                })).show();
+                .setPositiveButton("恢复", (d, w) -> {long owner=api.sessionGeneration();int from=requestSerial;io.execute(() -> {
+                    try (ApiClient.OwnerScope ignored=api.bind(owner)){ api.resetAvatar(); present(()->{if(owner==api.sessionGeneration()&&from==requestSerial)loadScreen();}); }
+                    catch (Exception e) { present(() -> {if(owner==api.sessionGeneration()&&from==requestSerial)failureDialog(e);}); }
+                });}).show();
     }
 
     private String encode(String value) { return UrlEncoding.form(value); }
