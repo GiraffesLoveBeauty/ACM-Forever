@@ -993,13 +993,19 @@
       "uploaders": [
         "MiaoJJ13445"
       ],
-      "reviewRequesters": [],
-      "reviewers": [],
+      "reviewRequesters": [
+        "MiaoJJ13445"
+      ],
+      "reviewers": [
+        "MiaoJJ13445"
+      ],
       "publishers": [],
-      "status": "development",
-      "scope": "本轮 Review 记录尚未收录；完成后按实际参与账号补录。",
-      "evidence": [],
-      "pr": 0
+      "status": "reviewed",
+      "scope": "开发与提交：MiaoJJ13445；Review：MiaoJJ13445（独立窗口辅助的本地审查，2026-11-16第二轮通过，审查提交04f35c80f737a659148cb5203a446dbbdeb9d395）。Review署名不等同于GitHub人工APPROVED；自动发布账号在公开Release完成后据实补录。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/150"
+      ],
+      "pr": 150
     }
   },
   "sources": [
