@@ -19,6 +19,7 @@ public final class UpdateFileProvider extends ContentProvider {
                 || uri.getPathSegments().size()!=1 || name==null || !name.matches("verified-[A-Za-z0-9_-]+\\.apk")
                 || uri.getQuery()!=null || uri.getFragment()!=null)throw new FileNotFoundException();
         File file=new File(new File(getContext().getCacheDir(),"updates"),name);
+        if((name.startsWith("verified-preview-")||name.startsWith("verified-admin-"))&&!((AcmApplication)getContext().getApplicationContext()).canOpenPrivateApk(name))throw new FileNotFoundException("Administrator session required");
         if(!file.isFile())throw new FileNotFoundException();return file;
     }
     @Override public ParcelFileDescriptor openFile(Uri uri,String mode) throws FileNotFoundException {

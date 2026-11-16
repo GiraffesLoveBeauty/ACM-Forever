@@ -23,14 +23,14 @@ final class ModuleDownloads {
     synchronized void unlisten(Runnable observer){listeners.remove(observer);}
     private synchronized void publish(String id,String phase,String message,long bytes,long total){states.put(id,new State(phase,message,bytes,total));for(Runnable listener:new ArrayList<>(listeners))main.post(listener);}
     synchronized boolean active(){for(State state:states.values())if(Arrays.asList("checking","downloading","verifying","installing","approval").contains(state.phase))return true;return false;}
-    synchronized void cancel(String id){cancelled.put(id,true);}
+    synchronized void cancel(String id){cancelled.put(id,true);if(AppDistribution.installed(context).preview)((AcmApplication)context).api().cancelAdminApk();}
     private synchronized boolean cancelled(String id){return Boolean.TRUE.equals(cancelled.get(id));}
     synchronized Intent confirmation(String id){if(!id.equals(confirmationModule))return null;Intent result=confirmation;confirmation=null;return result;}
     synchronized boolean removalPermission(String id){return removalPermissions.contains(id);}
     synchronized void confirmationFailed(String id,String message){if(context.getSharedPreferences("module_installs",0).getBoolean("remove_"+id,false))removalResult(id,PackageInstaller.STATUS_FAILURE,message,null);else installerResult(id,PackageInstaller.STATUS_FAILURE,message,null);}
     synchronized void remove(String id,long owner){
         if(!ModuleSpec.IDS.contains(id))return;
-        if(active()||((AcmApplication)context).updates().operationActive()){publish(id,"failed","请先完成或取消当前 App / 模块操作。",0,0);return;}
+        if(active()||((AcmApplication)context).updatesBusy()){publish(id,"failed","请先完成或取消当前 App / 模块操作。",0,0);return;}
         ApiClient api=((AcmApplication)context).api();if(!api.isLoggedIn()||owner!=api.sessionGeneration())return;
         removalPermissions.remove(id);publish(id,"checking","正在准备删除模块…",0,0);
         io.execute(()->{try{
@@ -64,14 +64,14 @@ final class ModuleDownloads {
     synchronized void start(String id){
         if(Arrays.asList("checking","downloading","verifying","installing","approval").contains(state(id).phase))return;
         if(active()){publish(id,"failed","请先完成或取消另一个模块的下载/安装。",0,0);return;}
-        if(((AcmApplication)context).updates().operationActive()){publish(id,"failed","App正在更新，请完成或取消更新后再下载模块。",0,0);return;}
+        if(((AcmApplication)context).updatesBusy()){publish(id,"failed","App正在更新，请完成或取消更新后再下载模块。",0,0);return;}
         cancelled.put(id,false);publish(id,"checking","正在读取模块信息…",0,0);
         io.execute(()->{try{
             if(!ModuleSpec.nativeModule(id)){ModuleHealth.Status local=ModuleHealth.verify(context,id);if(local.intact&&ModuleStore.current(context,id)){publish(id,"done","本机模块已检查并恢复，无需下载",0,0);return;}}
             ModuleSpec spec=ModuleNetwork.catalog(context).get(id);if(spec==null)throw new IOException("缺少模块信息");File file=ModuleStore.archive(context,id);
             if(!ModuleSpec.nativeModule(id)&&ModuleStore.reuse(context,spec)){if(cancelled(id)||!OptionalModules.allowed(context,id))throw new IOException("操作取消或权限已变化");ModuleStore.acquired(context,id);if(!ModuleHealth.verify(context,id).intact)throw new IOException("模块恢复验证失败");publish(id,"done","已复用并恢复本机完整模块",0,0);return;}
             if(file.isFile())try{ModuleFiles.verify(file,spec,ModuleStore.trusted(context));}catch(Exception invalid){java.nio.file.Files.deleteIfExists(file.toPath());}
-            if(!file.isFile()){publish(id,"downloading","正在下载…",0,spec.size);ModuleNetwork.download(spec,file,n->publish(id,"downloading","正在下载…",n,spec.size),()->cancelled(id));}
+            if(!file.isFile()){publish(id,"downloading","正在下载…",0,spec.size);ModuleNetwork.download(context,spec,file,n->publish(id,"downloading","正在下载…",n,spec.size),()->cancelled(id));}
             if(cancelled(id))throw new IOException("已取消下载");publish(id,"verifying","正在校验签名与版本…",spec.size,spec.size);
             try{ModuleFiles.verify(file,spec,ModuleStore.trusted(context));}catch(Exception e){java.nio.file.Files.deleteIfExists(file.toPath());throw e;}
             if(cancelled(id))throw new IOException("已取消下载");if(!OptionalModules.allowed(context,id))throw new IOException("登录状态或权限已变化");
@@ -83,7 +83,7 @@ final class ModuleDownloads {
         if(!OptionalModules.allowed(context,id))throw new IOException("请重新登录有权使用该模块的账号");
         if(ModuleStore.code(context)!=spec.versionCode)throw new IOException("App版本已变化，请重新下载");
         if(Build.VERSION.SDK_INT>=26&&!context.getPackageManager().canRequestPackageInstalls()){publish(id,"permission","请允许此应用安装功能包，再点击继续安装。",spec.size,spec.size);return;}
-        if(((AcmApplication)context).updates().operationActive())throw new IOException("App正在更新，请完成后再安装模块");
+        if(((AcmApplication)context).updatesBusy())throw new IOException("App正在更新，请完成后再安装模块");
         publish(id,"installing","等待系统安装确认…",spec.size,spec.size);
         ModuleInstaller.commit(context,id,null,Collections.singletonMap(id,file),()->cancelled(id)||!OptionalModules.allowed(context,id));
     }

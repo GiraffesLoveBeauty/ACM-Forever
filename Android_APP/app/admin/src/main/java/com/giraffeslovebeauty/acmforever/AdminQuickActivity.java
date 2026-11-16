@@ -28,6 +28,7 @@ public final class AdminQuickActivity extends MobilePageActivity {
         body.addView(button("社团题单管理",()->startActivity(new Intent(this,AdminTrainingActivity.class))));body.addView(button("账号管理",()->startActivity(new Intent(this,AdminAccountsActivity.class))));
         String[][] pages={{"posts","待审核话题"},{"reports","用户举报"},{"tasks","同步任务"},{"members","成员查询"},{"training","生成训练"},{"contests","复盘管理"},{"settings","比赛播报"}};
         for(String[] item:pages)body.addView(button(item[1],()->nav(item[0])));
+        body.addView(button("待发布测试版下载",()->startActivity(new Intent(this,UpdateActivity.class).putExtra("admin_distribution",true))));
         LinearLayout web=card(body);web.addView(text("完整管理后台",18));web.addView(text("批量开户、Excel 导入、题库采集、CF 选题、校 OJ 与 Wiki 编辑请到网页处理。浏览器需要单独登录。",13));web.addView(button("打开网页后台",()->{openExternal(api.getBaseUrl()+"/admin.html");}));}
     private void moderation(){body.addView(button("刷新",this::render));LinearLayout slot=card(body);slot.addView(text("正在读取…",14));String endpoint="/api/forum/moderation/"+mode;boolean posts="posts".equals(mode);
         read(endpoint,slot,true,value->{JSONArray rows=(JSONArray)value;if(rows.length()==0)slot.addView(text("没有待处理内容",16));for(int i=0;i<rows.length();i++){JSONObject item=rows.getJSONObject(i);LinearLayout box=card(slot);box.addView(text(item.optString("title"),19));box.addView(text((posts?"投稿人：":"举报人：")+item.optString(posts?"author_name":"reporter_name"),12));

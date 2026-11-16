@@ -4,6 +4,7 @@ android {
     compileSdk 35
     buildToolsVersion '35.0.0'
     defaultConfig { minSdk 26 }
+    buildTypes { preview { initWith release; matchingFallbacks = ['release'] } }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
 dependencies { implementation project(':app') }
@@ -20,3 +21,17 @@ def moduleMetadata = tasks.register('writeModuleMetadata') {
 }
 android.sourceSets.main.assets.srcDir(layout.buildDirectory.dir('generated/module-assets'))
 tasks.named('preBuild') { dependsOn moduleMetadata }
+
+def previewMetadata = tasks.register('writePreviewModuleMetadata') {
+    def code = providers.gradleProperty('previewVersionCode').orElse(provider {
+        ((rootProject.file('app/build.gradle').text =~ /versionCode (\d+)/)[0][1] as int) - 1
+    }.map { it.toString() })
+    def target = layout.buildDirectory.dir('generated/preview-module-assets')
+    inputs.property('code', code); outputs.dir(target)
+    doLast {
+        def out = new File(target.get().asFile, 'modules/advanced.json'); out.parentFile.mkdirs()
+        out.setText(groovy.json.JsonOutput.toJson([id:'advanced', api:1, versionCode:code.get().toInteger(), kind:'native', splitName:'advanced']), 'UTF-8')
+    }
+}
+android.sourceSets.preview.assets.srcDir(layout.buildDirectory.dir('generated/preview-module-assets'))
+tasks.matching { it.name == 'prePreviewBuild' }.configureEach { dependsOn previewMetadata }

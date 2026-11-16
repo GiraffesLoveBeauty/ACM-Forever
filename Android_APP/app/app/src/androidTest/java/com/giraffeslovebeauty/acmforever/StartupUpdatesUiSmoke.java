@@ -111,7 +111,7 @@ final class StartupUpdatesUiSmoke {
     private boolean has(String value){boolean[] yes={false};main(()->yes[0]=find(value)!=null);return yes[0];}
     private void click(String label){main(()->{View v=find(label);check(v!=null&&v.isEnabled(),"button available: "+label);v.performClick();});test.waitForIdleSync();}
     private void await(BooleanSupplier condition,String label)throws Exception{long end=SystemClock.uptimeMillis()+12000;while(SystemClock.uptimeMillis()<end){if(condition.getAsBoolean())return;Thread.sleep(60);}throw new AssertionError("Timeout: "+label);}
-    private void screenshot(String name)throws Exception{test.waitForIdleSync();Thread.sleep(350);Bitmap b=test.getUiAutomation().takeScreenshot();if(b!=null){try(OutputStream out=new FileOutputStream(new File(context.getExternalFilesDir(null),name))){b.compress(Bitmap.CompressFormat.PNG,100,out);}b.recycle();}}
+    private void screenshot(String name)throws Exception{test.waitForIdleSync();Thread.sleep(350);Bitmap b=test.getUiAutomation().takeScreenshot();if(b!=null){try(OutputStream out=new FileOutputStream(new File(context.getFilesDir(),name))){b.compress(Bitmap.CompressFormat.PNG,100,out);}b.recycle();}}
     private static void check(boolean value,String label){if(!value)throw new AssertionError(label);}
     private final class Fixture extends HttpURLConnection {
         Fixture(URL url){super(url);}

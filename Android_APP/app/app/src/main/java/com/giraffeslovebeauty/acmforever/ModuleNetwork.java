@@ -26,7 +26,24 @@ final class ModuleNetwork {
         }throw new IOException("模块下载重定向过多");
     }
     static Map<String,ModuleSpec> catalog(Context c)throws Exception{return catalog(c,ModuleStore.code(c),ModuleStore.version(c));}
+    static Map<String,ModuleSpec> catalog(Context c,UpdateManifest release)throws Exception{
+        if(!release.distribution.equals("preview"))return catalog(c,(int)release.versionCode,release.versionName);
+        ApiClient api=((AcmApplication)c.getApplicationContext()).api();long owner=api.sessionGeneration();
+        try(ApiClient.OwnerScope ignored=api.bind(owner)){
+            api.refreshSession();if(!api.isAdministrator()||api.requiresPasswordChange())throw new IOException("仅限管理员下载测试模块");
+            JSONObject fresh=api.adminRelease();
+            if(!release.previewTag.equals(fresh.optString("previewTag"))||!release.sha256.equals(fresh.optString("sha256")))throw new IOException("测试修订已变化，请重新检查更新");
+            return ModuleSpec.privateCatalog(fresh.getJSONObject("moduleCatalog"),(int)release.versionCode,release.versionName,release.previewTag,api.getBaseUrl(),owner);
+        }
+    }
     static synchronized Map<String,ModuleSpec> catalog(Context c,int code,String version)throws Exception{
+        AppDistribution installed=AppDistribution.installed(c);
+        if(installed.preview&&code==ModuleStore.code(c)&&version.equals(ModuleStore.version(c))){
+            ApiClient api=((AcmApplication)c.getApplicationContext()).api();JSONObject value=api.adminRelease();
+            String expected="v"+version+"-preview."+installed.revision;
+            if(!expected.equals(value.optString("previewTag")))throw new IOException("当前测试修订已更新或下架，请先选择新测试版或切回正式版");
+            return catalog(c,UpdateManifest.administrator(value,api.getBaseUrl()));
+        }
         Map<String,ModuleSpec> ready=cached;long now=android.os.SystemClock.elapsedRealtime();if(ready!=null&&cachedCode==code&&version.equals(cachedVersion)&&now-cachedAt>=0&&now-cachedAt<60000)return ready;
         File local=new File(ModuleStore.root(c,code),"catalog.json");byte[] bytes=null;Map<String,ModuleSpec> parsed=null;Exception failure=null;
         for(String address:ModuleSpec.indexUrls(version))try(InputStream in=connect(address)){
@@ -43,12 +60,25 @@ final class ModuleNetwork {
     }
     static byte[] read(InputStream in,int max)throws IOException{ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] bytes=new byte[8192];int n;while((n=in.read(bytes))!=-1){if(out.size()+n>max)throw new IOException("模块清单过大");out.write(bytes,0,n);}return out.toByteArray();}
     static void download(ModuleSpec spec,File destination,Progress progress,Cancelled cancelled)throws Exception{
+        if(!spec.previewTag.isEmpty())throw new IOException("测试模块必须通过管理员会话下载");
         Exception failure=null;
         for(String address:spec.downloadUrls()){
             if(cancelled.get())throw new IOException("已取消下载");
             try{downloadFrom(spec,address,destination,progress,cancelled);return;}catch(Exception issue){if(cancelled.get())throw new IOException("已取消下载",issue);failure=issue;}
         }
         throw failure==null?new IOException("没有可用模块下载源"):failure;
+    }
+    static void download(Context c,ModuleSpec spec,File destination,Progress progress,Cancelled cancelled)throws Exception{
+        if(spec.previewTag.isEmpty()){download(spec,destination,progress,cancelled);return;}
+        ApiClient api=((AcmApplication)c.getApplicationContext()).api();
+        File parent=destination.getParentFile();if(!parent.isDirectory()&&!parent.mkdirs())throw new IOException("无法创建下载目录");
+        File partial=File.createTempFile("preview-module-",".part",parent);
+        try{
+            api.adminAsset(spec.owner,spec.previewTag,ModuleSpec.filename(spec.id),partial,spec.size,cancelled::get,progress::update);
+            if(cancelled.get()||spec.owner!=api.sessionGeneration()||!api.isAdministrator())throw new IOException("测试模块下载已取消或权限失效");
+            if(partial.length()!=spec.size||!spec.sha256.equals(ModuleFiles.hash(partial)))throw new IOException("测试模块大小或SHA-256不匹配");
+            java.nio.file.Files.move(partial.toPath(),destination.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING,java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+        }finally{java.nio.file.Files.deleteIfExists(partial.toPath());}
     }
     private static void downloadFrom(ModuleSpec spec,String address,File destination,Progress progress,Cancelled cancelled)throws Exception{
         File parent=destination.getParentFile();if(!parent.isDirectory()&&!parent.mkdirs())throw new IOException("无法创建下载目录");File partial=File.createTempFile(destination.getName()+"-",".part",parent);boolean done=false;

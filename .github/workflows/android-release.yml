@@ -20,162 +20,144 @@ jobs:
       contents: write
     env:
       RELEASE_TAG: ${{ github.ref_name }}
-      RELEASE_CHANNEL: ${{ vars.ANDROID_RELEASE_CHANNEL || 'debug' }}
       GITEE_MIRROR_MODE: ${{ vars.GITEE_MIRROR_MODE || 'manual' }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - name: Validate reviewed tag and bundled version
+        id: track
         run: |
           set -euo pipefail
           test "$GITHUB_REF_TYPE" = tag
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           git merge-base --is-ancestor HEAD origin/main
           python Android_APP/tools/tag_release.py validate --tag "$RELEASE_TAG"
-          case "$RELEASE_CHANNEL" in debug|release) ;; *) echo 'Invalid release channel'; exit 1 ;; esac
           case "$GITEE_MIRROR_MODE" in manual|automatic) ;; *) echo 'Invalid Gitee mirror mode'; exit 1 ;; esac
-
-      - name: Test release contracts and publication failures
+          echo 'EXPECTED_CERTIFICATE=88c9f163cbf379aeca7bc110f66c542a838d0d8e3970f24fd96582bec8e93fe4' >> "$GITHUB_ENV"
+          if [[ "$RELEASE_TAG" =~ -preview\.([1-9][0-9]*)$ ]]; then
+            echo 'channel=preview' >> "$GITHUB_OUTPUT"
+            echo 'task=assemblePreview' >> "$GITHUB_OUTPUT"
+            echo "revision=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          else
+            echo 'channel=release' >> "$GITHUB_OUTPUT"
+            echo 'task=assembleRelease' >> "$GITHUB_OUTPUT"
+            echo 'revision=1' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Test release contracts
         run: python -m unittest discover -s Android_APP/tests -p 'test_*release*.py' -v
-
-      - name: Require Gitee mirror credential before publication
-        if: env.GITEE_MIRROR_MODE == 'automatic'
+      - name: Require Gitee credential only for automatic formal mirroring
+        if: steps.track.outputs.channel == 'release' && env.GITEE_MIRROR_MODE == 'automatic'
         env:
           GITEE_RELEASE_TOKEN: ${{ secrets.GITEE_RELEASE_TOKEN }}
-        run: |
-          test -n "$GITEE_RELEASE_TOKEN" || { echo 'Configure GITEE_RELEASE_TOKEN before publishing v0.2.27 or later.'; exit 1; }
-
-      - name: Configure pinned channel certificate
-        env:
-          RELEASE_CERTIFICATE: ${{ vars.ANDROID_RELEASE_CERT_SHA256 }}
-        run: |
-          set -euo pipefail
-          if [ "$RELEASE_CHANNEL" = debug ]; then
-            certificate='88c9f163cbf379aeca7bc110f66c542a838d0d8e3970f24fd96582bec8e93fe4'
-          else
-            test -n "$RELEASE_CERTIFICATE"
-            certificate="$(printf '%s' "$RELEASE_CERTIFICATE" | tr -d ':' | tr 'A-F' 'a-f')"
-          fi
-          [[ "$certificate" =~ ^[0-9a-f]{64}$ ]]
-          echo "EXPECTED_CERTIFICATE=$certificate" >> "$GITHUB_ENV"
-
-      - name: Restore immutable GitHub assets when retrying a published Tag
+        run: test -n "$GITEE_RELEASE_TOKEN"
+      - name: Restore immutable formal artifacts when retrying a published Tag
         id: restore
+        if: steps.track.outputs.channel == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python Android_APP/tools/gitee_release.py --restore-github --tag "$RELEASE_TAG" \
             --directory "$RUNNER_TEMP/release-assets" --source-commit "$GITHUB_SHA" \
-            --channel "$RELEASE_CHANNEL" --certificate "$EXPECTED_CERTIFICATE"
-
+            --channel release --certificate "$EXPECTED_CERTIFICATE"
       - uses: actions/setup-java@v4
         if: steps.restore.outputs.reused != 'true'
         with:
           distribution: temurin
           java-version: '17'
-
       - uses: android-actions/setup-android@v3
         if: steps.restore.outputs.reused != 'true'
         with:
           packages: platform-tools
-
       - name: Install Android SDK platform
         if: steps.restore.outputs.reused != 'true'
         run: sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
-
-      - name: Configure fixed channel signing key
+      - name: Configure existing fixed upgrade signing key
         if: steps.restore.outputs.reused != 'true'
         env:
-          DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
-          RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
-          RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
-          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
-          RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          LEGACY_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
           umask 077
+          test -n "$LEGACY_KEYSTORE_BASE64" || { echo 'Missing fixed legacy signing key'; exit 1; }
           key_path="$RUNNER_TEMP/acmforever-signing.jks"
-          if [ "$RELEASE_CHANNEL" = debug ]; then
-            test -n "$DEBUG_KEYSTORE_BASE64" || { echo 'Missing ANDROID_DEBUG_KEYSTORE_BASE64'; exit 1; }
-            printf '%s' "$DEBUG_KEYSTORE_BASE64" | base64 --decode > "$key_path"
-          else
-            test -n "$RELEASE_KEYSTORE_BASE64" && test -n "$RELEASE_KEY_ALIAS"
-            test -n "$RELEASE_KEYSTORE_PASSWORD" && test -n "$RELEASE_KEY_PASSWORD"
-            printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$key_path"
-          fi
+          printf '%s' "$LEGACY_KEYSTORE_BASE64" | base64 --decode > "$key_path"
           test -s "$key_path"
           echo "ANDROID_KEYSTORE_PATH=$key_path" >> "$GITHUB_ENV"
-
-      - name: Test and build signed APK
+          echo 'ANDROID_KEYSTORE_PASSWORD=android' >> "$GITHUB_ENV"
+          echo 'ANDROID_KEY_ALIAS=androiddebugkey' >> "$GITHUB_ENV"
+          echo 'ANDROID_KEY_PASSWORD=android' >> "$GITHUB_ENV"
+          echo 'EXPECTED_CERTIFICATE=88c9f163cbf379aeca7bc110f66c542a838d0d8e3970f24fd96582bec8e93fe4' >> "$GITHUB_ENV"
+      - name: Resolve reversible preview code from current public manifest
+        id: base
+        if: steps.track.outputs.channel == 'preview'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          code="$(python Android_APP/tools/tag_release.py preview-base --repository "$GITHUB_REPOSITORY")"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+      - name: Test both channels and build only the selected package
         if: steps.restore.outputs.reused != 'true'
         working-directory: Android_APP/app
         env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          PREVIEW_CODE: ${{ steps.base.outputs.code || '44' }}
+          PREVIEW_REVISION: ${{ steps.track.outputs.revision }}
+          BUILD_TASK: ${{ steps.track.outputs.task }}
         run: |
           set -euo pipefail
           chmod +x gradlew
-          if [ "$RELEASE_CHANNEL" = debug ]; then
-            ./gradlew --no-daemon "-PlocalDebugKeystore=$ANDROID_KEYSTORE_PATH" testDebugUnitTest lintDebug :app:assembleDebug :advanced:assembleDebug :admin:assembleDebug
-          else
-            ./gradlew --no-daemon testReleaseUnitTest lintRelease :app:assembleRelease :advanced:assembleRelease :admin:assembleRelease
-          fi
-
-      - name: Create manifest from verified signed APK
+          ./gradlew --no-daemon "-PpreviewVersionCode=$PREVIEW_CODE" "-PpreviewRevision=$PREVIEW_REVISION" \
+            testReleaseUnitTest testPreviewUnitTest lintRelease lintPreview \
+            ":app:$BUILD_TASK" ":advanced:$BUILD_TASK" ":admin:$BUILD_TASK"
+      - name: Create verified distribution manifests
         if: steps.restore.outputs.reused != 'true'
         run: |
           set -euo pipefail
-          python Android_APP/tools/create_update_manifest.py \
-            --apk "Android_APP/app/app/build/outputs/apk/$RELEASE_CHANNEL/app-$RELEASE_CHANNEL.apk" \
-            --aapt "$ANDROID_HOME/build-tools/35.0.0/aapt" \
-            --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner" \
-            --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY" --server "$GITHUB_SERVER_URL" \
-            --channel "$RELEASE_CHANNEL" --certificate "$EXPECTED_CERTIFICATE" \
-            --output-dir "$RUNNER_TEMP/release-assets"
-
-      - name: Package signed optional modules and exact-size catalog
+          variant='${{ steps.track.outputs.channel }}'
+            python Android_APP/tools/create_update_manifest.py \
+              --apk "Android_APP/app/app/build/outputs/apk/$variant/app-$variant.apk" \
+              --aapt "$ANDROID_HOME/build-tools/35.0.0/aapt" \
+              --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner" \
+              --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY" --server "$GITHUB_SERVER_URL" \
+              --channel "$variant" --certificate "$EXPECTED_CERTIFICATE" \
+              --output-dir "$RUNNER_TEMP/release-assets"
+      - name: Package four signed optional modules for the selected distribution
         if: steps.restore.outputs.reused != 'true'
         env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          RELEASE_CHANNEL: ${{ steps.track.outputs.channel }}
         run: |
-          set -euo pipefail
-          if [ "$RELEASE_CHANNEL" = debug ]; then
-            export ANDROID_KEYSTORE_PASSWORD=android ANDROID_KEY_PASSWORD=android ANDROID_KEY_ALIAS=androiddebugkey
-          fi
           python Android_APP/tools/create_module_assets.py \
             --output-dir "$RUNNER_TEMP/release-assets" --app-root Android_APP/app \
             --resources Android_APP/module-resources --repository "$GITHUB_REPOSITORY" \
             --keystore "$ANDROID_KEYSTORE_PATH" --jarsigner "$JAVA_HOME/bin/jarsigner" \
             --keytool "$JAVA_HOME/bin/keytool" --aapt "$ANDROID_HOME/build-tools/35.0.0/aapt" \
             --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner" --channel "$RELEASE_CHANNEL"
-
-      - name: Publish only after draft assets pass read-back verification
-        if: steps.restore.outputs.reused != 'true'
+      - name: Store preview APK privately and verify draft read-back
+        if: steps.track.outputs.channel == 'preview'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python Android_APP/tools/tag_release.py stage-preview --tag "$RELEASE_TAG" \
+            --directory "$RUNNER_TEMP/release-assets" --repository "$GITHUB_REPOSITORY" --source-commit "$GITHUB_SHA"
+      - name: Publish only formal package after read-back verification
+        if: steps.track.outputs.channel == 'release' && steps.restore.outputs.reused != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python Android_APP/tools/tag_release.py publish --tag "$RELEASE_TAG" \
-            --directory "$RUNNER_TEMP/release-assets" --repository "$GITHUB_REPOSITORY" \
-            --source-commit "$GITHUB_SHA"
-
-      - name: Mirror identical signed artifacts to Gitee and verify anonymous downloads
-        if: env.GITEE_MIRROR_MODE == 'automatic'
+            --directory "$RUNNER_TEMP/release-assets" --repository "$GITHUB_REPOSITORY" --source-commit "$GITHUB_SHA"
+      - name: Mirror identical formal artifacts to Gitee when explicitly configured
+        if: steps.track.outputs.channel == 'release' && env.GITEE_MIRROR_MODE == 'automatic'
         env:
           GITEE_RELEASE_TOKEN: ${{ secrets.GITEE_RELEASE_TOKEN }}
         run: |
           python Android_APP/tools/gitee_release.py --tag "$RELEASE_TAG" \
             --directory "$RUNNER_TEMP/release-assets" --source-commit "$GITHUB_SHA"
-
       - name: Remove temporary signing key
         if: always()
         run: rm -f -- "$RUNNER_TEMP/acmforever-signing.jks"

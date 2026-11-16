@@ -97,9 +97,11 @@ final class GithubCredits {
             reviewers = references(value.getJSONArray("reviewers"));
             publishers = references(value.getJSONArray("publishers"));
             status = required(value, "status", 20); scope = required(value, "scope", 500); pr = value.getInt("pr");
-            if (uploaders.isEmpty() || pr < 0 || !Arrays.asList("development", "published", "unpublished").contains(status))
+            if (uploaders.isEmpty() || pr < 0 || !Arrays.asList("development", "reviewed", "published", "unpublished").contains(status))
                 throw new JSONException("版本署名信息无效");
             if (status.equals("published") && publishers.isEmpty()) throw new JSONException("公开版本缺少发布记录");
+            if (status.equals("reviewed") && (reviewers.isEmpty() || reviewRequesters.isEmpty()
+                    || pr == 0 || !publishers.isEmpty())) throw new JSONException("已评审版本记录不完整");
             JSONArray urls = value.getJSONArray("evidence");
             if (urls.length() > 20) throw new JSONException("人员来源记录过多");
             ArrayList<String> sources = new ArrayList<>();
@@ -110,10 +112,12 @@ final class GithubCredits {
                 sources.add(url);
             }
             evidence = Collections.unmodifiableList(sources);
+            if (status.equals("reviewed") && evidence.isEmpty()) throw new JSONException("已评审版本缺少来源");
         }
         String publication() {
             if (status.equals("published")) return "已有公开发布记录";
-            if (status.equals("development")) return "当前开发版本 · 待评审与发布";
+            if (status.equals("reviewed")) return "构建快照已收录 Review 记录";
+            if (status.equals("development")) return "开发快照 · 尚未收录本轮 Review";
             return "未收录公开 APK 发布记录";
         }
     }
