@@ -271,7 +271,7 @@ test('admin pending search is coalesced and unmount cancels its request', async 
 });
 
 for (const owner of ['member', 'admin']) {
-  test(`${owner}: Luogu tag overflow reports the limit and keeps the previous selection`, async () => {
+  test(`${owner}: Luogu picker enforces the limit and applies reduced or cleared selections`, async () => {
     const fetch = globalThis.fetch;
     globalThis.fetch = (url, options) =>
       url.includes('/problems/taxonomy?')
@@ -290,49 +290,55 @@ for (const owner of ['member', 'admin']) {
     if (owner === 'member') await open();
     else await admin();
     await platform('luogu');
-    function selectTags(count) {
-      const options = Array.from({ length: 21 }, (_, i) => ({
-        value: String(i + 1),
-        selected: i < count,
-      }));
-      control('洛谷原生标签').props.onChange({
-        target: { options, selectedOptions: options.filter((option) => option.selected) },
-      });
-      return options;
+    const pickerTrigger = () =>
+      find(
+        mounted.root,
+        (node) => node.type === 'button' && node.props['aria-haspopup'] === 'dialog',
+      )[0];
+    const tag = (id) =>
+      find(
+        mounted.root,
+        (node) =>
+          node.type === 'button' &&
+          Object.hasOwn(node.props, 'aria-pressed') &&
+          node.props['aria-label'] === '标签 ' + id,
+      )[0];
+    await pickerTrigger().props.onClick();
+    await settle();
+    for (let id = 1; id <= 20; id++) {
+      tag(id).props.onClick();
+      await settle();
     }
-    selectTags(20);
+    assert.equal(tag(21).props.disabled, true);
+    assert.match(textOf(mounted.root), /已达 20 个标签上限/);
+    // The handler guards the limit even when invoked without a native disabled button.
+    tag(21).props.onClick();
     await settle();
-    const proposed = selectTags(21);
+    assert.equal(tag(21).props['aria-pressed'], false);
+    button('确认筛选').props.onClick();
     await settle();
-    const alerts = () =>
-      find(mounted.root, (node) => node.props.role === 'alert')
-        .map(textOf)
-        .join(' ');
-    assert.match(alerts(), /最多.*20/);
-    assert.equal(proposed.filter((option) => option.selected).length, 20);
-    await submit();
     assert.equal(
       query(lists().at(-1).url).get('native_tags'),
       Array.from({ length: 20 }, (_, i) => String(i + 1)).join(','),
     );
-    selectTags(21);
+    const applied = lists().length;
+    await pickerTrigger().props.onClick();
     await settle();
-    assert.match(alerts(), /最多.*20/);
-    selectTags(19);
+    assert.equal(tag(21).props.disabled, true);
+    tag(20).props.onClick();
     await settle();
-    assert.doesNotMatch(alerts(), /最多.*20/);
-    await submit();
+    assert.equal(tag(21).props.disabled, false);
+    assert.doesNotMatch(textOf(mounted.root), /已达 20 个标签上限/);
+    assert.equal(lists().length, applied);
+    button('确认筛选').props.onClick();
+    await settle();
     assert.equal(
       query(lists().at(-1).url).get('native_tags'),
       Array.from({ length: 19 }, (_, i) => String(i + 1)).join(','),
     );
-    selectTags(21);
+    button('清空').props.onClick();
     await settle();
-    assert.match(alerts(), /最多.*20/);
-    button('清除所选标签').props.onClick();
-    await settle();
-    assert.doesNotMatch(alerts(), /最多.*20/);
-    await submit();
     assert.equal(query(lists().at(-1).url).get('native_tags'), null);
+    assert.doesNotMatch(textOf(mounted.root), /已达 20 个标签上限/);
   });
 }

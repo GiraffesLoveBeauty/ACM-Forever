@@ -250,6 +250,7 @@ onMounted(() => {
           v-model:difficulty-min="filters.native_difficulty_min"
           v-model:difficulty-max="filters.native_difficulty_max"
           v-model:tags="filters.native_tags"
+          @apply="load(1)"
         />
         <ProblemRangeFilters :filters="filters" @change="Object.assign(filters, $event)" />
         <div class="problem-database-filter-actions">

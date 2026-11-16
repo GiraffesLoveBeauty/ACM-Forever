@@ -262,6 +262,7 @@ watch(
           v-model:difficulty-min="form.native_difficulty_min"
           v-model:difficulty-max="form.native_difficulty_max"
           v-model:tags="form.native_tags"
+          @apply="navigate()"
         />
         <label v-else
           ><span>标签</span
