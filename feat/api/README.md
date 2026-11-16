@@ -174,6 +174,7 @@ WebUI API 以原 WebUI 路由为兼容基线。常用路由包括：
 - `POST /api/me/avatar`、`DELETE /api/me/avatar`：当前成员头像上传与重置
 - `/api/admin/members`：成员搜索与分页
 - `/api/problems`、`/api/me/problems`：题库查询和收藏；各自的 `/<platform>/<problem_id>` GET 接口读取已采集题面与样例。列表的“打开题目”进入 `/problem.html` 站内详情页，支持公式与样例复制；仅有目录时显示等待采集提示。图片仍由原站 HTTPS 加载。
+- `GET /api/me/problems/tracker`：本地比赛进度；指定 `platform=codeforces` 或 `platform=atcoder` 时，比赛、题目和本人 AC / 尝试 / 收藏在读取阶段即限定到所选平台。不传平台时仍包含这两个平台；筛选选择比赛行、每行保留完整已收录题目，响应字段和分页语义不变，不请求原站。
 - `/api/training/*`、`/api/me/training/*`、`/api/contest/reviews`、`/api/me/contest/reviews`
 - `/api/admin/training-tasks/*`：动态身份选人、草稿、发放确认、冻结名单、延期/取消及成员进度；`/api/me/training-tasks/*`：本人任务、逐题证据与异步刷新。首期 CF 的周期内 / 历史 AC 规则，GET 只读本地证据；详见 [api.md（训练任务契约）](../../docs/training-tasks/api.md)
 - `/api/stats`、`/api/leaderboard`、`/api/me/leaderboard`
