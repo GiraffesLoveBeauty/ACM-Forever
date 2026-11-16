@@ -147,9 +147,14 @@ async def attempt_problem_metadata(db, owner, platform, problem_id):
 
 async def contest_tracker(db, owner, options):
     """Group complete local contests before filtering/paging; never perform network I/O."""
+    platforms = (options["platform"],) if options["platform"] else ("codeforces", "atcoder")
+    platform_where = "platform IN (" + ",".join("?" for _ in platforms) + ")"
     catalog = {}
     aliases = {}
-    async with db.execute("SELECT platform,contest_id,contest_name,start_time FROM crawler_contests") as cursor:
+    async with db.execute(
+        f"SELECT platform,contest_id,contest_name,start_time FROM crawler_contests WHERE {platform_where}",
+        platforms,
+    ) as cursor:
         contest_info = {(row["platform"], row["contest_id"]): dict(row) for row in await cursor.fetchall()}
 
     def add(row):
@@ -190,20 +195,20 @@ async def contest_tracker(db, owner, options):
 
     async with db.execute(
         "SELECT platform,problem_id,contest_id,problem_index,problem_name,problem_rating,problem_url,tags,metadata_json "
-        "FROM crawler_problems WHERE platform IN ('codeforces','atcoder') ORDER BY problem_id"
+        f"FROM crawler_problems WHERE {platform_where} ORDER BY problem_id", platforms
     ) as cursor:
         for row in await cursor.fetchall():
             add(dict(row))
     async with db.execute(
         "SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags FROM recommendations "
-        "WHERE platform IN ('codeforces','atcoder') ORDER BY problem_id"
+        f"WHERE {platform_where} ORDER BY problem_id", platforms
     ) as cursor:
         for row in await cursor.fetchall():
             add(dict(row))
     async with db.execute(
         "SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags,submit_time "
-        "FROM submissions WHERE user_qq_id=? AND platform IN ('codeforces','atcoder') "
-        "ORDER BY submit_time DESC,problem_id", (owner,)
+        f"FROM submissions WHERE user_qq_id=? AND {platform_where} "
+        "ORDER BY submit_time DESC,problem_id", (owner, *platforms)
     ) as cursor:
         for row in await cursor.fetchall():
             problem = add(dict(row))
@@ -214,8 +219,8 @@ async def contest_tracker(db, owner, options):
     async with db.execute(
         "SELECT platform,problem_id,contest_id,MAX(submitted_at) AS last_submit_at,"
         "MAX(CASE WHEN UPPER(TRIM(verdict)) IN ('OK','AC','ACCEPTED') THEN submitted_at END) AS ac_at "
-        "FROM submission_attempts WHERE owner_qq_id=? AND platform IN ('codeforces','atcoder') "
-        "GROUP BY platform,problem_id,contest_id", (owner,)
+        f"FROM submission_attempts WHERE owner_qq_id=? AND {platform_where} "
+        "GROUP BY platform,problem_id,contest_id", (owner, *platforms)
     ) as cursor:
         for row in await cursor.fetchall():
             problem = add(dict(row))
@@ -229,7 +234,7 @@ async def contest_tracker(db, owner, options):
                 problem["status"] = "attempted"
     async with db.execute(
         "SELECT platform,problem_id FROM user_problem_state WHERE owner_qq_id=? AND is_favorite=1 "
-        "AND platform IN ('codeforces','atcoder')", (owner,)
+        f"AND {platform_where}", (owner, *platforms)
     ) as cursor:
         for row in await cursor.fetchall():
             parsed = identity(row["platform"], row["problem_id"])

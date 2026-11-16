@@ -70,6 +70,7 @@ async function load() {
   const version = ++revision;
   Object.assign(form, current.value);
   rows.value = [];
+  facets.value = [];
   error.value = '';
   busy.value = true;
   try {
@@ -98,6 +99,10 @@ async function load() {
 }
 function navigate(page = 1) {
   router.push({ path: route.path, query: memberQuery({ ...form, page }) });
+}
+function changePlatform() {
+  form.problem_tag = '';
+  navigate();
 }
 function scope(value) {
   Object.assign(form, current.value, { scope: value });
@@ -206,7 +211,7 @@ watch(
       <form class="filters member-problem-filters" @submit.prevent="navigate()">
         <label
           ><span>平台</span
-          ><select v-model="form.platform">
+          ><select v-model="form.platform" @change="changePlatform">
             <option v-for="(label, key) in platforms" :key="key" :value="key">
               {{ label }}
             </option>
@@ -234,7 +239,7 @@ watch(
           </select></label
         >
         <div class="member-problem-filter-actions">
-          <button class="btn primary" :disabled="busy">查询</button>
+          <button class="btn primary">查询</button>
           <button type="button" class="btn" @click="clear">清除筛选</button>
         </div>
       </form>
@@ -360,8 +365,7 @@ watch(
                   }}</small>
                 </div>
                 <small v-else class="muted"
-                  >原站标签：{{ tagsText(row.tags) }}
-                  · 算法标签待接入</small
+                  >原站标签：{{ tagsText(row.tags) }} · 算法标签待接入</small
                 >
               </div>
               <span class="chips"
