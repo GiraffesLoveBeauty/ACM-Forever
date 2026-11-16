@@ -1,6 +1,6 @@
 # App 修改与维护交接规范
 
-当前为1.0.0/code45正式候选，基线0.2.30/code44已发布。本轮恢复管理员同包名待发布测试渠道并修正署名，完成本地验收，尚未外部Review、部署或发布。具体规则见文末“1.0.0 发布交接补充”与[本轮验收](android-v1.0.0-verification.md)。自站公开镜像继续等待。
+当前为1.0.0/code45正式候选，基线0.2.30/code44已发布。本轮恢复管理员同包名待发布测试渠道并修正署名；PR #150首轮本地Review的两项P2已修复并补测，当前修订待复审，尚未部署或发布。具体规则见文末“1.0.0 发布交接补充”与[本轮验收](android-v1.0.0-verification.md)。自站公开镜像继续等待。
 
 0.2.30新增的连接层维护要求继续有效：页面读取、缓存与写入分队列，GET按会话合并并限两条并发，离开取消读取而保留写事务，旧结果必须拒绝。重连只在可见页按退避策略执行；新增写入口更新关联缓存失效表。题单可选排名由后端全体筛选后分页。修改后须跑慢网切页、旧401、请求合并及草稿归属用例，不能用真实账号写生产。详见[0.2.30交付说明](android-v0.2.30-network-training.md)及[模块关联标准](android-modification-standard.md)。
 
@@ -90,3 +90,5 @@ App Tag 发布与网页部署是两条流程。推送 `main` 且改动 `feat/**`
 新Tag由`release_credits.py`拦截未完成记录，并校对APK内快照。不得为让CI变绿而伪造人员或证据。流程与模块规则以[android-modification-standard.md（修改标准）](android-modification-standard.md)为准；1.0.0本轮本地结果见[android-v1.0.0-verification.md（正式与管理员测试验收）](android-v1.0.0-verification.md)。
 
 测试版不是独立包：沿用当前普通版code、同签名覆盖，禁自动检查，只有管理员能手动下载；可手动返回同code普通版。公开正式更新仍走Gitee优先/GitHub回退，测试八附件仅存GitHub未公开草稿。私有代理所需服务器凭据和运维确认见[android-v1.0.0-release-channels.md（渠道与部署）](android-v1.0.0-release-channels.md)。
+
+模块清单、归档与解包位置按code及previewTag共同定位；保留普通旧路径，不能用相同code覆盖另一渠道。恢复记录包含源code/previewTag，未来修订需对应基础包真正运行后才可作为已启用资源。离线校验记录不授权下载；显式删除须涵盖各测试修订。系统安装回执也须对应普通/测试控制器并使旧私有凭据失效。维护此链路时必跑`releasechannels`的真实系统确认/取消、`preview-resources`、`preview-resources-restart`和旧包覆盖往返，不能仅测试相同内容模块或只用adb安装替代系统回执验收。
