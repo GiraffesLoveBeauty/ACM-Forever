@@ -35,7 +35,7 @@ final class ModuleDownloads {
         removalPermissions.remove(id);publish(id,"checking","正在准备删除模块…",0,0);
         io.execute(()->{try{
             if(!api.isLoggedIn()||owner!=api.sessionGeneration())throw new IOException("登录账号已切换");
-            if(ModuleStore.installedNative(context).contains(id)){
+            if(ModuleSpec.nativeModule(id)&&ModuleStore.installedNativeChecked(context).contains(id)){
                 if(!context.getPackageManager().canRequestPackageInstalls()){synchronized(this){removalPermissions.add(id);}publish(id,"permission","请先允许系统功能包安装/卸载，再点击删除模块。",0,0);return;}
                 publish(id,"installing","等待系统卸载确认，可能重启 App…",0,0);
                 ModuleInstaller.remove(context,id,()->!api.isLoggedIn()||owner!=api.sessionGeneration());
@@ -48,7 +48,15 @@ final class ModuleDownloads {
         context.getSharedPreferences("module_installs",0).edit().remove("remove_"+id).apply();
         publish(id,"failed",status==PackageInstaller.STATUS_FAILURE_ABORTED?"已取消卸载，原模块和文件保留":"系统卸载失败，原文件保留："+message,0,0);
     }
-    synchronized void reconcileRemovals(){for(String id:ModuleSpec.IDS)if(ModuleSpec.nativeModule(id)&&context.getSharedPreferences("module_installs",0).getBoolean("remove_"+id,false)&&!ModuleStore.installedNative(context).contains(id))cleanupRemoval(id);}
+    synchronized void reconcileRemovals(){
+        Set<String> pending=new LinkedHashSet<>();
+        for(String id:ModuleSpec.IDS)if(ModuleSpec.nativeModule(id)&&context.getSharedPreferences("module_installs",0).getBoolean("remove_"+id,false))pending.add(id);
+        if(pending.isEmpty())return;
+        Set<String> installed;
+        try{installed=ModuleStore.installedNativeChecked(context);}
+        catch(IOException unavailable){for(String id:pending)publish(id,"failed","无法确认系统模块状态，已保留文件与卸载记录，请稍后重试。",0,0);return;}
+        for(String id:pending)if(!installed.contains(id))cleanupRemoval(id);
+    }
     private synchronized void cleanupRemoval(String id){
         if(!cleaningRemovals.add(id))return;publish(id,"checking","正在清理已卸载模块文件…",0,0);
         io.execute(()->{try{ModuleHealth.removeLocal(context,id);if(!context.getSharedPreferences("module_installs",0).edit().remove("remove_"+id).commit())throw new IOException("无法保存删除回执");publish(id,"removed","模块已卸载，下载副本已清理，个人设置已保留",0,0);}catch(Exception failure){publish(id,"failed","模块文件清理未完成，可重试："+failure.getMessage(),0,0);}finally{synchronized(this){cleaningRemovals.remove(id);}}});

@@ -33,6 +33,8 @@ final class OptionalModulesUiSmoke {
                 storage();
             }else if(mode.equals("modules-pending-removal")){
                 pendingRemoval();
+            }else if(mode.equals("modules-query-failure")){
+                removalQueryFailure();
             }else if(mode.startsWith("modules-removal-")){
                 removal();
             }else if(mode.equals("modules-recovery")){
@@ -216,6 +218,50 @@ final class OptionalModulesUiSmoke {
         app.getSharedPreferences("module_installs",0).edit().putBoolean("remove_advanced",true).commit();
         try{check(ModuleStore.updateSelection(app).contains("advanced"),"cancelled or still-installed split remains in update selection");ModuleDownloads.get(app).reconcileRemovals();check(app.getSharedPreferences("module_installs",0).getBoolean("remove_advanced",false),"still-installed receipt is not treated as successful uninstall");}
         finally{app.getSharedPreferences("module_installs",0).edit().remove("remove_advanced").commit();}
+    }
+    private void removalQueryFailure()throws Exception{
+        check(ModuleStore.installedNativeChecked(app).contains("advanced"),"real advanced split installed before query-failure regression");
+        SharedPreferences receipts=app.getSharedPreferences("module_installs",0),inventory=app.getSharedPreferences("optional_modules",0);
+        boolean hadReceipt=receipts.contains("remove_advanced"),oldReceipt=receipts.getBoolean("remove_advanced",false),hadInventory=inventory.contains("acquired");
+        Set<String> oldInventory=new HashSet<>(inventory.getStringSet("acquired",Collections.emptySet()));
+        File[] archives={ModuleStore.archive(app,"advanced"),ModuleStore.archive(app,"advanced",ModuleStore.code(app)-1)};
+        byte[][] before=new byte[archives.length][];
+        for(int i=0;i<archives.length;i++)if(archives[i].isFile())before[i]=java.nio.file.Files.readAllBytes(archives[i].toPath());
+        byte[] signed=java.nio.file.Files.readAllBytes(new File(app.getFilesDir(),"module-fixtures/module-advanced.apk").toPath());
+        java.util.concurrent.atomic.AtomicBoolean unavailable=new java.util.concurrent.atomic.AtomicBoolean(true);
+        Context faulty=new ContextWrapper(app){@Override public android.content.pm.PackageManager getPackageManager(){if(unavailable.get())throw new IllegalStateException("Synthetic PackageManager query failure");return super.getPackageManager();}};
+        java.lang.reflect.Constructor<ModuleDownloads> constructor=ModuleDownloads.class.getDeclaredConstructor(Context.class);constructor.setAccessible(true);
+        ModuleDownloads jobs=constructor.newInstance(faulty);
+        java.lang.reflect.Field executor=ModuleDownloads.class.getDeclaredField("io");executor.setAccessible(true);
+        try{
+            ModuleStore.acquired(app,"advanced");Set<String> expectedInventory=new HashSet<>(inventory.getStringSet("acquired",Collections.emptySet()));
+            for(File archive:archives){archive.getParentFile().mkdirs();java.nio.file.Files.write(archive.toPath(),signed);}
+            check(receipts.edit().putBoolean("remove_advanced",true).commit(),"persistent pending receipt");
+            jobs.reconcileRemovals();check("failed".equals(jobs.state("advanced").phase),"query failure is retryable, never reported removed");
+            assertRemovalRetained(archives,signed,receipts,inventory,expectedInventory);
+            boolean blocked=false;try{ModuleStore.removeLocal(faulty,"advanced");}catch(IOException expected){blocked=true;}
+            check(blocked,"destructive cleanup refuses an unknown system state");assertRemovalRetained(archives,signed,receipts,inventory,expectedInventory);
+            // Even a queued success callback must query again before deleting files.
+            jobs.removalResult("advanced",android.content.pm.PackageInstaller.STATUS_SUCCESS,"",null);
+            await(()->"failed".equals(jobs.state("advanced").phase)&&jobs.state("advanced").message.contains("清理未完成"),"asynchronous cleanup fails closed");
+            assertRemovalRetained(archives,signed,receipts,inventory,expectedInventory);
+            unavailable.set(false);jobs.reconcileRemovals();
+            check(ModuleStore.installedNativeChecked(faulty).contains("advanced"),"real PackageManager query restored");
+            blocked=false;try{ModuleStore.removeLocal(faulty,"advanced");}catch(IOException expected){blocked=true;}
+            check(blocked,"restored query confirms installed split cannot be cleaned");assertRemovalRetained(archives,signed,receipts,inventory,expectedInventory);
+            trace("failed reconciliation, direct deletion and queued cleanup preserve both archives, inventory and receipt; recovered query retains installed split");
+        }finally{
+            ((java.util.concurrent.ExecutorService)executor.get(jobs)).shutdown();
+            check(((java.util.concurrent.ExecutorService)executor.get(jobs)).awaitTermination(5,java.util.concurrent.TimeUnit.SECONDS),"test cleanup executor finishes before fixture restoration");
+            SharedPreferences.Editor restore=receipts.edit();if(hadReceipt)restore.putBoolean("remove_advanced",oldReceipt);else restore.remove("remove_advanced");restore.commit();
+            restore=inventory.edit();if(hadInventory)restore.putStringSet("acquired",oldInventory);else restore.remove("acquired");restore.commit();
+            for(int i=0;i<archives.length;i++)if(before[i]==null)java.nio.file.Files.deleteIfExists(archives[i].toPath());else java.nio.file.Files.write(archives[i].toPath(),before[i]);
+        }
+    }
+    private void assertRemovalRetained(File[] archives,byte[] expected,SharedPreferences receipts,SharedPreferences inventory,Set<String> expectedInventory)throws Exception{
+        for(File archive:archives)check(archive.isFile()&&Arrays.equals(expected,java.nio.file.Files.readAllBytes(archive.toPath())),"signed archive preserved byte for byte: "+archive.getName());
+        check(receipts.getBoolean("remove_advanced",false),"pending receipt retained");
+        check(expectedInventory.equals(inventory.getStringSet("acquired",Collections.emptySet())),"persistent inventory retained");
     }
     private void removal()throws Exception{
         administrator();ModuleDownloads jobs=ModuleDownloads.get(app);
