@@ -3,6 +3,8 @@ import { ref, watch, computed } from 'vue';
 import { auth, useRequests } from '../lib/api.js';
 import { renderStatementMarkdown } from '../lib/statement-math.js';
 import { copyStatementSample } from '../lib/statement-samples.js';
+import AlgorithmTag from './AlgorithmTag.vue';
+import ProblemTags from './ProblemTags.vue';
 const props = defineProps({ platform: String, problemId: String });
 const data = ref(null),
   error = ref(''),
@@ -46,7 +48,10 @@ async function load() {
       {},
       'secondary',
     );
-    if (current === revision) { data.value = row; showTranslation.value = Boolean(row.translation_active); }
+    if (current === revision) {
+      data.value = row;
+      showTranslation.value = Boolean(row.translation_active);
+    }
   } catch (e) {
     if (current === revision && e.name !== 'AbortError') {
       if (e.status === 404) unprocessed.value = true;
@@ -89,7 +94,8 @@ watch(
     <p v-if="busy" role="status">正在读取持久化结果…</p>
     <p v-else-if="error" role="status">二次处理数据暂不可用：{{ error }}</p>
     <p v-else-if="unprocessed" role="status">
-      这道题尚未进行二次处理，目前展示爬虫原文。管理员可进入后台管理，预检并执行 AI 翻译或标签标注；翻译无需先完成标签。
+      这道题尚未进行二次处理，目前展示爬虫原文。管理员可进入后台管理，预检并执行 AI
+      翻译或标签标注；翻译无需先完成标签。
     </p>
     <template v-else-if="data">
       <p class="muted">
@@ -97,9 +103,10 @@ watch(
       </p>
       <h3>最终有效标签</h3>
       <div class="secondary-tags">
-        <span
+        <AlgorithmTag
           v-for="tag in data.effective_tags"
           :key="tag.id"
+          :tag="tag"
           class="secondary-tag"
           :title="tag.id"
         >
@@ -107,7 +114,7 @@ watch(
           ><small
             >{{ sources[tag.source] || tag.source
             }}{{ tag.tag_kind === 'provisional' ? ' · 临时大类' : '' }}</small
-          > </span
+          > </AlgorithmTag
         ><span v-if="!data.effective_tags.length" class="muted">空标签</span>
       </div>
       <p>
@@ -118,7 +125,7 @@ watch(
       </p>
       <details>
         <summary>查看自动标签、人工覆盖与数据来源</summary>
-        <p>原始自动标签：{{ data.auto_tags.map((t) => t.name_zh).join('、') || '空' }}</p>
+        <p>原始自动标签：<ProblemTags :tags="data.auto_tags" /></p>
         <p>
           人工新增：{{ data.manual_added_ids.join('、') || '无' }}；人工删除：{{
             data.manual_removed_ids.join('、') || '无'
@@ -134,9 +141,16 @@ watch(
       </details>
       <div class="secondary-translation">
         <h3>中文翻译</h3>
-        <p v-if="data.translation_validation_mode === 'parse_only'" class="muted">AI 自动译文 · 未进行本地内容一致性校验 · 尚未人工确认。</p>
-        <p v-if="data.translation_validation_mode === 'layout_by_id'" class="muted">本地保留结构，AI 按 ID 回填文字。图片、公式、代码和样例保持原位；图片内文字未翻译，译文尚未人工确认。</p>
-        <p v-if="data.translation_origin === 'ai_offline_corrected'" class="muted">AI 原响应经离线结构校订后启用，尚未经人工确认；原始响应与校订审计均保留。</p>
+        <p v-if="data.translation_validation_mode === 'parse_only'" class="muted">
+          AI 自动译文 · 未进行本地内容一致性校验 · 尚未人工确认。
+        </p>
+        <p v-if="data.translation_validation_mode === 'layout_by_id'" class="muted">
+          本地保留结构，AI 按 ID
+          回填文字。图片、公式、代码和样例保持原位；图片内文字未翻译，译文尚未人工确认。
+        </p>
+        <p v-if="data.translation_origin === 'ai_offline_corrected'" class="muted">
+          AI 原响应经离线结构校订后启用，尚未经人工确认；原始响应与校订审计均保留。
+        </p>
         <p>{{ translations[data.translation_status] || '状态：' + data.translation_status }}</p>
         <template v-if="data.translation_active">
           <button class="btn" @click="showTranslation = !showTranslation">
@@ -149,9 +163,11 @@ watch(
         </template>
         <p v-else class="muted">当前没有已激活的真实中文译文。下方保留原文；本页面不会调用 AI。</p>
         <p v-if="data.translation_task_states.length" class="muted">
-          历史翻译执行状态：{{
-            data.translation_task_states.join('、')
-          }}。{{ data.translation_active ? '当前展示已通过本地结构校验的保存译文；历史失败记录保留供审计。' : '历史候选未作为正式译文展示。' }}
+          历史翻译执行状态：{{ data.translation_task_states.join('、') }}。{{
+            data.translation_active
+              ? '当前展示已通过本地结构校验的保存译文；历史失败记录保留供审计。'
+              : '历史候选未作为正式译文展示。'
+          }}
         </p>
       </div>
     </template>
@@ -181,9 +197,6 @@ watch(
   display: grid;
   gap: 4px;
   padding: 10px 15px;
-  border: 1px solid #309c9166;
-  border-radius: 10px;
-  background: #309c9110;
 }
 .secondary-tag small {
   font-size: 11px;

@@ -321,12 +321,13 @@ test('problem cards display JSON, array and legacy tags as readable labels', asy
         })
       : fetch(url, options);
   mounted = await mount(Problems, routes, '/my-problems.html');
-  const cards = find(mounted.root, (node) => node.type === 'article').map(textOf);
-  assert(cards[0].includes('math, dp'));
-  assert(!cards[0].includes('["math"'));
-  assert(cards[1].includes('graphs, trees'));
-  assert(cards[2].includes('greedy,sortings'));
-  assert(cards[3].includes('无标签'));
+  const cards = find(mounted.root, (node) => node.type === 'article');
+  const labels = cards.map((card) =>
+    find(card, (node) => String(node.props.class).includes('algorithm-tag')).map(textOf),
+  );
+  assert.deepEqual(labels, [['math', 'dp'], ['graphs', 'trees'], ['greedy', 'sortings'], []]);
+  assert(!textOf(cards[0]).includes('["math"'));
+  assert(textOf(cards[3]).includes('无标签'));
 });
 
 test('changing platform replaces tag choices and clears stale selection without losing search', async () => {

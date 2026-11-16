@@ -1,0 +1,114 @@
+/* Bounded semantic surfaces keep these colours readable in custom themes too. */
+:root {
+  --problem-color-neutral: #52616a;
+  --problem-color-gray: #5e6570;
+  --problem-color-green: #24723b;
+  --problem-color-cyan: #007879;
+  --problem-color-blue: #3257b1;
+  --problem-color-purple: #8940a7;
+  --problem-color-orange: #a24e12;
+  --problem-color-red: #b62e3c;
+  --problem-color-brown: #80502d;
+  --problem-color-yellow: #806100;
+  --problem-color-pink: #a52d69;
+}
+[data-theme='dark'] {
+  --problem-color-neutral: #bdc8cf;
+  --problem-color-gray: #c1c5cc;
+  --problem-color-green: #89d79d;
+  --problem-color-cyan: #71d6d8;
+  --problem-color-blue: #a2baff;
+  --problem-color-purple: #d6a6f1;
+  --problem-color-orange: #f9b77d;
+  --problem-color-red: #ff9aa7;
+  --problem-color-brown: #dcb08e;
+  --problem-color-yellow: #e5ca70;
+  --problem-color-pink: #f4a0ca;
+}
+.problem-tone-neutral {
+  --problem-color: var(--problem-color-neutral);
+}
+.problem-tone-gray {
+  --problem-color: var(--problem-color-gray);
+}
+.problem-tone-green {
+  --problem-color: var(--problem-color-green);
+}
+.problem-tone-cyan {
+  --problem-color: var(--problem-color-cyan);
+}
+.problem-tone-blue {
+  --problem-color: var(--problem-color-blue);
+}
+.problem-tone-purple {
+  --problem-color: var(--problem-color-purple);
+}
+.problem-tone-orange {
+  --problem-color: var(--problem-color-orange);
+}
+.problem-tone-red {
+  --problem-color: var(--problem-color-red);
+}
+.problem-tone-brown {
+  --problem-color: var(--problem-color-brown);
+}
+.problem-tone-yellow {
+  --problem-color: var(--problem-color-yellow);
+}
+.problem-tone-pink {
+  --problem-color: var(--problem-color-pink);
+}
+.algorithm-tag,
+.problem-difficulty {
+  --problem-badge-base: #fffefa;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--problem-color) 48%, var(--problem-badge-base));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--problem-color) 7%, var(--problem-badge-base));
+  color: var(--problem-color);
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+  vertical-align: middle;
+}
+[data-theme='dark'] :is(.algorithm-tag, .problem-difficulty) {
+  --problem-badge-base: #192526;
+}
+.problem-difficulty {
+  font-weight: 700;
+}
+.problem-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 100%;
+  vertical-align: middle;
+}
+.problem-tags-empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+button.algorithm-tag {
+  cursor: pointer;
+}
+button.algorithm-tag:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--problem-color) 15%, var(--problem-badge-base));
+}
+button.algorithm-tag:focus-visible {
+  outline: 2px solid var(--problem-color);
+  outline-offset: 3px;
+}
+button.algorithm-tag:disabled {
+  cursor: default;
+  opacity: 0.65;
+}

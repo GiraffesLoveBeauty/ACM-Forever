@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 from .cf_client import problem_url as cf_problem_url
 from .luogu_problem import canonical_problem_id as luogu_problem_id
 from .problem_tags import has_problem_tag, problem_tags
+from .atcoder_difficulty import difficulty_metadata
 
 
 PLATFORMS = {"codeforces", "atcoder"}
@@ -186,6 +187,11 @@ async def contest_tracker(db, owner, options):
             problem = catalog[key]
             if problem["problem_rating"] is None:
                 problem["problem_rating"] = rating(row.get("problem_rating"))
+                if problem["platform"] == "atcoder" and problem["problem_rating"] is not None:
+                    # A fallback score is not evidence of the missing catalog model.
+                    for field in ("difficulty_source", "difficulty_raw", "difficulty_is_experimental"):
+                        problem.pop(field, None)
+                    problem.update(difficulty_metadata(row.get("metadata_json")))
             if problem["problem_name"] == problem["problem_id"] and row.get("problem_name"):
                 problem["problem_name"] = row["problem_name"]
             if not problem_tags(problem["tags"]) and problem_tags(row.get("tags")):
@@ -204,6 +210,8 @@ async def contest_tracker(db, owner, options):
                         "tags": row.get("tags") or "", "contest_name": contest_name,
                         "status": "unseen", "ac_at": None, "last_submit_at": None,
                         "is_favorite": False}
+        if row["platform"] == "atcoder":
+            catalog[key].update(difficulty_metadata(row.get("metadata_json")))
         return catalog[key]
 
     async with db.execute(

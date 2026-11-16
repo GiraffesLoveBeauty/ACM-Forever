@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { auth, useRequests } from '../lib/api.js';
+import ProblemTags from '../components/ProblemTags.vue';
 const request = useRequests(),
   data = ref(null),
   error = ref(''),
@@ -62,7 +63,7 @@ onMounted(async () => {
         <span class="muted">{{ p.problem_key }}</span>
         <h2>{{ p.title }}</h2>
         <div class="chips">
-          <span v-for="tag in p.effective_tags" :key="tag.id" class="chip">{{ tag.name_zh }}</span>
+          <ProblemTags :tags="p.effective_tags" />
         </div>
         <p class="muted">
           {{

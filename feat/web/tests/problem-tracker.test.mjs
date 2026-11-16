@@ -179,6 +179,33 @@ test('tracker renders whole contests with explicit solved, attempted and unrecor
   assert(problemLinks().some((node) => queryOf(node.props.href).problem_id === 'cf_2000D2'));
 });
 
+test('tracker colours respect rating systems and retain deduplicated tags inside local links', async () => {
+  Object.assign(trackerData.items[0].problems[0], {
+    problem_rating: 800,
+    tags: '["math", "math", "graphs"]',
+  });
+  Object.assign(trackerData.items[1].problems[0], {
+    problem_rating: 800,
+    difficulty_source: 'atcoder_problems',
+  });
+  await open();
+  const cf = problemLinks().find((n) => queryOf(n.props.href).problem_id === 'cf_2000A');
+  const atcoder = problemLinks().find((n) => queryOf(n.props.href).problem_id === 'abc001_a');
+  assert.equal(find(cf, (n) => String(n.props.class).includes('problem-tone-gray')).length, 1);
+  assert.equal(
+    find(atcoder, (n) => String(n.props.class).includes('problem-tone-green')).length,
+    1,
+  );
+  const tags = find(cf, (n) => String(n.props.class).includes('algorithm-tag'));
+  assert.equal(tags.length, 2);
+  assert.deepEqual(
+    tags.map((n) => n.props['data-tag-category']),
+    ['math', 'graph'],
+  );
+  assert.equal(find(cf, (n) => n.type === 'button').length, 0);
+  assert.equal(queryOf(cf.props.href).problem_id, 'cf_2000A');
+});
+
 for (const role of ['member', 'admin', 'root']) {
   test(`${role} tracker uses the session-owned endpoint without identity parameters`, async () => {
     setAuth({ authenticated: true, role, qq_id: '12345678', csrf_token: 'test-only' }, true);

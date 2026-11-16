@@ -5,6 +5,8 @@ import { compressAvatar } from '../lib/avatar.js';
 import CommunityArt from '../components/CommunityArt.vue';
 import OjBindings from '../components/OjBindings.vue';
 import AssignedTaskOverview from '../components/AssignedTaskOverview.vue';
+import ProblemDifficulty from '../components/ProblemDifficulty.vue';
+import ProblemTags from '../components/ProblemTags.vue';
 import { problemLink } from '../lib/member-problems.js';
 const request = useRequests(),
   profile = ref(),
@@ -256,9 +258,9 @@ onBeforeUnmount(() => {
             ><span class="recent-ac-copy"
               ><b>{{ item.problem_name || item.problem_id }}</b
               ><small
-                >{{ item.platform }} · {{ item.problem_rating || '难度未知' }} ·
+                >{{ item.platform }} · <ProblemDifficulty :problem="item" /> ·
                 {{ item.submit_time ? date(item.submit_time) : 'AC 时间未知' }}</small
-              ></span
+              ><ProblemTags v-if="item.platform !== 'luogu' && item.tags" :tags="item.tags" /></span
             ><RouterLink
               class="recent-ac-open"
               :to="problemLink(item, '/home.html')"

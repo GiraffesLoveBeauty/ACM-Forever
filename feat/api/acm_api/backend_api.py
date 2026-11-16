@@ -36,6 +36,7 @@ from .luogu_problem import attach_classifications, canonical_problem_id as luogu
 from .problem_sync import sync_options
 from .problem_bank import problem_bank_status
 from .problem_listing import listing_query, NEWEST_ORDER
+from .atcoder_difficulty import attach_difficulty_metadata, difficulty_metadata
 from . import problem_schedule
 from .problem_tracker import attempt_problem_metadata, contest_tracker, problem_id_aliases, problem_id_key, tracker_options
 from .problem_tags import has_problem_tag, problem_tags
@@ -1646,6 +1647,7 @@ async def api_problems():
         async with db.execute(query, tuple(params + [size, (page - 1) * size])) as cursor:
             items = [dict(row) for row in await cursor.fetchall()]
         await attach_classifications(db, items)
+        await attach_difficulty_metadata(db, items)
         return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": size})
     finally:
         await db.close()
@@ -1711,10 +1713,16 @@ async def _problem_detail(platform, problem_id):
                 "statement_html": None, "statement_text": None, "statement_language": None,
                 "samples": [], "statement_fetched_at": None, "last_fetch_status": "never",
             }
-        native = json.loads(detail.pop("metadata_json", "{}"))
+        try:
+            native = json.loads(detail.pop("metadata_json", "{}"))
+        except (ValueError, TypeError):
+            native = {}
+        if not isinstance(native, dict):
+            native = {}
         if platform == "atcoder":
+            provenance = difficulty_metadata(native)
             for key in ("difficulty_source", "difficulty_raw", "difficulty_is_experimental"):
-                detail[key] = native.get(key)
+                detail[key] = provenance.get(key)
         if platform == "luogu":
             await attach_classifications(db, [detail])
             detail["statement_markdown"] = native.get("luogu", {}).get("markdown")
@@ -1864,6 +1872,7 @@ async def api_database_problems():
                 item["tags"] = []
             item["content_available"] = bool(item["content_available"])
         await attach_classifications(db, items)
+        await attach_difficulty_metadata(db, items)
         return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": page_size})
     except ValueError as error:
         return jsonify({"success": False, "message": str(error)}), 400
@@ -2390,6 +2399,7 @@ async def api_me_problems():
         async with db.execute(query, tuple(params + [size, (page - 1) * size])) as cursor:
             items = [dict(row) for row in await cursor.fetchall()]
         await attach_classifications(db, items)
+        await attach_difficulty_metadata(db, items)
         return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": size})
     finally:
         await db.close()

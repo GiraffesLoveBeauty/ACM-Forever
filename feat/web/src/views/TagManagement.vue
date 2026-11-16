@@ -3,6 +3,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router';
 import { date, useRequests } from '../lib/api.js';
 import { useLeaveGuard } from '../lib/admin.js';
+import AlgorithmTag from '../components/AlgorithmTag.vue';
+import ProblemTags from '../components/ProblemTags.vue';
 import {
   filterProblems,
   filterTaxonomy,
@@ -286,9 +288,7 @@ defineExpose({ requestClose });
               <i :class="p.review_status"></i
             ></span>
             <strong>{{ p.title }}</strong
-            ><span class="tm-problem-tags">{{
-              p.effective_tags.map((t) => t.name_zh).join(' · ') || '暂无标签'
-            }}</span>
+            ><ProblemTags class="tm-problem-tags" :tags="p.effective_tags" />
             <small
               >{{ reviewLabels[p.review_status]
               }}<span v-if="p.manual_history_count">
@@ -331,7 +331,10 @@ defineExpose({ requestClose });
               <span class="tm-hint">点击 × 移除；在下方词表中添加</span>
             </div>
             <div class="tm-selected-tags">
-              <button
+              <AlgorithmTag
+                as="button"
+                :tag="byId[id] || { id, name_zh: name(id) }"
+                type="button"
                 v-for="id in chosen"
                 :key="id"
                 class="tm-tag selected"
@@ -347,20 +350,21 @@ defineExpose({ requestClose });
                     : sourceLabels[detail.effective_tags.find((t) => t.id === id)?.source] || '已有'
                 }}</small
                 ><b aria-hidden="true">×</b>
-              </button>
+              </AlgorithmTag>
               <p v-if="!chosen.length" class="tm-empty-inline">
                 当前为空标签。允许保存，不会自动补充或调用 AI。
               </p>
             </div>
             <div class="tm-baseline">
               <span>原始自动标签</span
-              ><span
+              ><AlgorithmTag
+                :tag="tag"
                 v-for="tag in detail.auto_tags.tags"
                 :key="tag.id"
                 class="tm-auto"
                 :class="{ removed: !chosen.includes(tag.id) }"
                 >{{ tag.name_zh
-                }}<small>{{ !chosen.includes(tag.id) ? '已移除' : '保留' }}</small></span
+                }}<small>{{ !chosen.includes(tag.id) ? '已移除' : '保留' }}</small></AlgorithmTag
               ><span v-if="!detail.auto_tags.tags.length">无</span>
             </div>
             <p class="tm-hint">
@@ -399,7 +403,10 @@ defineExpose({ requestClose });
               </div>
             </div>
             <div class="tm-taxonomy">
-              <button
+              <AlgorithmTag
+                as="button"
+                :tag="tag"
+                type="button"
                 v-for="tag in available"
                 :key="tag.id"
                 class="tm-option"
@@ -414,7 +421,7 @@ defineExpose({ requestClose });
               >
                 <span>{{ chosen.includes(tag.id) ? '✓' : '+' }}</span
                 >{{ tag.name_zh }}<small>{{ tag.id }}</small>
-              </button>
+              </AlgorithmTag>
             </div>
             <p v-if="!available.length" class="tm-empty">
               没有找到标准标签，不能自行创建词表之外的标签。
@@ -428,10 +435,18 @@ defineExpose({ requestClose });
               </button>
             </div>
             <div v-if="dirty" class="tm-diff">
-              <span v-for="id in diff.added" :key="'a' + id" class="tm-diff-add"
-                >＋ {{ name(id) }}</span
-              ><span v-for="id in diff.removed" :key="'r' + id" class="tm-diff-remove"
-                >－ {{ name(id) }}</span
+              <AlgorithmTag
+                v-for="id in diff.added"
+                :key="'a' + id"
+                :tag="byId[id] || { id, name_zh: name(id) }"
+                class="tm-diff-add"
+                >＋ {{ name(id) }}</AlgorithmTag
+              ><AlgorithmTag
+                v-for="id in diff.removed"
+                :key="'r' + id"
+                :tag="byId[id] || { id, name_zh: name(id) }"
+                class="tm-diff-remove"
+                >－ {{ name(id) }}</AlgorithmTag
               >
             </div>
             <p v-else class="tm-hint">尚未修改标签。普通保存不会将自动标签标记为人工完整确认。</p>
@@ -858,12 +873,8 @@ defineExpose({ requestClose });
   min-height: 42px;
 }
 .tm-tag {
-  border: 1px solid #b6cfc5;
-  border-radius: 7px;
-  background: #f0f7f3;
   padding: 10px 12px;
   font-size: 13px;
-  color: #245b48;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -875,11 +886,9 @@ defineExpose({ requestClose });
 }
 .tm-tag b {
   font: 17px/1 system-ui;
-  color: #6a8b7c;
 }
 .tm-tag.added {
   border-style: dashed;
-  background: #e6f4ec;
 }
 .tm-baseline {
   display: flex;
@@ -893,9 +902,7 @@ defineExpose({ requestClose });
   padding-top: 16px;
 }
 .tm-auto {
-  border: 1px solid var(--tm-line);
   padding: 3px 7px;
-  border-radius: 4px;
 }
 .tm-auto small {
   font-size: 9px;
@@ -904,7 +911,7 @@ defineExpose({ requestClose });
 }
 .tm-auto.removed {
   text-decoration: line-through;
-  background: #faf0ec;
+  opacity: 0.65;
 }
 .tm-library-tools {
   display: flex;
@@ -952,13 +959,9 @@ defineExpose({ requestClose });
   padding: 2px;
 }
 .tm-option {
-  border: 1px solid #e3e9e5;
-  background: transparent;
-  border-radius: 6px;
   text-align: left;
   padding: 9px 10px;
   font-size: 12px;
-  color: inherit;
   cursor: pointer;
   display: grid;
   grid-template-columns: 16px 1fr;
@@ -971,18 +974,17 @@ defineExpose({ requestClose });
   overflow-wrap: anywhere;
 }
 .tm-option span {
-  color: #8c9d92;
+  color: inherit;
 }
 .tm-option.active {
-  background: #edf5ef;
-  border-color: #75a38c;
-  color: #266048;
+  outline: 2px solid currentColor;
+  outline-offset: -3px;
 }
 .tm-option.provisional {
   border-style: dashed;
 }
 .tm-option:hover {
-  border-color: var(--tm-accent);
+  text-decoration: underline;
 }
 .tm-diff {
   display: flex;
@@ -997,12 +999,10 @@ defineExpose({ requestClose });
   border-radius: 4px;
 }
 .tm-diff-add {
-  background: #e6f4e9;
-  color: #36744c;
+  border-style: dashed;
 }
 .tm-diff-remove {
-  background: #faeae3;
-  color: #aa5a3e;
+  text-decoration: line-through;
 }
 .tm-reason-label {
   display: flex;

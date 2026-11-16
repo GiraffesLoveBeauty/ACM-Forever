@@ -1,7 +1,10 @@
 <script setup>
 import { date, external } from '../lib/api.js';
 import { problemLink } from '../lib/member-problems.js';
-import { completions, verifications, platformName, tagList } from '../lib/training-tasks.js';
+import { completions, verifications, platformName } from '../lib/training-tasks.js';
+import ProblemDifficulty from './ProblemDifficulty.vue';
+import ProblemTags from './ProblemTags.vue';
+import LuoguBadges from './LuoguBadges.vue';
 defineProps({
   problems: { type: Array, default: () => [] },
   from: String,
@@ -24,10 +27,16 @@ defineEmits(['move', 'remove']);
           <span class="tt-tag"
             >{{ platformName(problem.platform) }} {{ problem.problem_id.replace(/^cf_/, '') }}</span
           >
-          <span v-if="problem.problem_rating" class="tt-tag"
-            >难度 {{ problem.problem_rating }}</span
-          >
-          <span v-for="tag in tagList(problem.tags)" :key="tag" class="tt-tag">{{ tag }}</span>
+          <ProblemDifficulty :problem="problem" />
+          <LuoguBadges
+            v-if="problem.platform === 'luogu' && problem.native_tags != null"
+            :problem="problem"
+            :difficulty="false"
+          />
+          <ProblemTags
+            v-else-if="problem.platform !== 'luogu' && problem.tags != null"
+            :tags="problem.tags"
+          />
         </div>
         <p v-if="!problem.content_available" class="tt-caption">
           站内题面尚未采集，可从可信原题入口练习。

@@ -11,6 +11,9 @@ import { rangeFilters, rangeParams, timeLabel } from '../lib/problem-filters.js'
 import { nativeFilters } from '../lib/luogu-problems.js';
 import { nativeParams } from '../lib/luogu-problems.js';
 import ProblemTracker from '../components/ProblemTracker.vue';
+import ProblemDifficulty from '../components/ProblemDifficulty.vue';
+import AlgorithmTag from '../components/AlgorithmTag.vue';
+import ProblemTags from '../components/ProblemTags.vue';
 import { filterTaxonomy, reviewLabels, sourceLabels } from '../lib/tag-management.js';
 const route = useRoute(),
   router = useRouter(),
@@ -137,19 +140,6 @@ async function favorite(row) {
   } catch (e) {
     if (e.name !== 'AbortError') error.value = e.message;
   }
-}
-function tagsText(value) {
-  let tags = value;
-  if (typeof tags === 'string' && tags.trimStart().startsWith('[')) {
-    try {
-      tags = JSON.parse(tags);
-    } catch {
-      /* Legacy text remains readable when it is not a JSON array. */
-    }
-  }
-  return Array.isArray(tags)
-    ? tags.filter((tag) => typeof tag === 'string').join(', ') || '无标签'
-    : tags || '无标签';
 }
 function clear() {
   Object.assign(form, memberFilters({ scope: current.value.scope, view: current.value.view }));
@@ -312,9 +302,11 @@ watch(
             placeholder="中文名称或英文 ID，例如：差分 / dp"
         /></label>
         <div class="bank-tag-options">
-          <button
+          <AlgorithmTag
             v-for="tag in visibleTags"
             :key="tag.id"
+            :tag="tag"
+            as="button"
             type="button"
             class="bank-tag-option"
             :class="{ active: selectedLabels.includes(tag.id) }"
@@ -324,7 +316,7 @@ watch(
             @click="toggleLabel(tag.id)"
           >
             {{ selectedLabels.includes(tag.id) ? '✓ ' : '' }}{{ tag.name_zh }}
-            <small>{{ tag.count }}</small></button
+            <small>{{ tag.count }}</small></AlgorithmTag
           ><span v-if="!visibleTags.length" class="muted">{{
             tagSearch ? '没有匹配的标准标签' : '当前范围暂无可筛选的算法标签'
           }}</span>
@@ -339,15 +331,17 @@ watch(
         </button>
         <div v-if="selectedLabels.length" class="bank-active-labels" aria-label="已选算法标签">
           <span>已选：</span
-          ><button
+          ><AlgorithmTag
             v-for="tag in selectedNames"
             :key="tag.id"
+            :tag="tag"
+            as="button"
             class="bank-selected-label"
             type="button"
             :aria-label="'取消标签筛选：' + tag.name_zh"
             @click="toggleLabel(tag.id)"
           >
-            {{ tag.name_zh }} ×</button
+            {{ tag.name_zh }} ×</AlgorithmTag
           ><button class="bank-label-more" type="button" @click="clearLabels">清空标签</button>
         </div>
       </section>
@@ -394,13 +388,7 @@ watch(
               <div class="bank-problem-info">
                 <b>{{ row.platform }} · {{ row.problem_id }}</b
                 ><br />{{ row.problem_name || '未命名题目' }}<br />
-                <LuoguBadges
-                  v-if="row.platform === 'luogu'"
-                  :problem="row"
-                  :tags="false"
-                  class="bank-luogu-difficulty"
-                />
-                <small v-else>难度 {{ row.problem_rating ?? '未知' }}</small>
+                <ProblemDifficulty :problem="row" class="bank-problem-difficulty" />
                 <small>
                   · {{ timeLabel(row)
                   }}<template v-if="row.problem_time">
@@ -413,23 +401,27 @@ watch(
                   <LuoguBadges :problem="row" :difficulty="false" />
                 </div>
                 <div v-else-if="row.has_secondary" class="bank-result-tags">
-                  <button
+                  <AlgorithmTag
                     v-for="tag in row.effective_tags"
                     :key="tag.id"
+                    :tag="tag"
+                    as="button"
                     type="button"
                     class="bank-result-tag"
                     :title="`${tag.id} · ${sourceLabels[tag.source] || tag.source} · 点击筛选`"
                     @click="toggleLabel(tag.id)"
                   >
-                    {{ tag.name_zh }}<small v-if="tag.source === 'manual_add'">人工</small></button
+                    {{ tag.name_zh
+                    }}<small v-if="tag.source === 'manual_add'">人工</small></AlgorithmTag
                   ><span v-if="!row.effective_tags.length" class="muted">空标签</span
                   ><small class="bank-review-state">{{
                     reviewLabels[row.review_status] || row.review_status
                   }}</small>
                 </div>
-                <small v-else class="muted"
-                  >原站标签：{{ tagsText(row.tags) }} · 算法标签待接入</small
-                >
+                <div v-else class="bank-result-tags">
+                  <small class="muted">原站标签：</small><ProblemTags :tags="row.tags" />
+                  <small class="muted">算法标签待接入</small>
+                </div>
               </div>
               <span class="chips"
                 ><RouterLink
@@ -491,7 +483,7 @@ watch(
   color: var(--muted, #697970);
   font-size: 13px;
 }
-.bank-luogu-difficulty {
+.bank-problem-difficulty {
   margin-top: 9px;
 }
 .bank-label-filter {
@@ -548,27 +540,19 @@ watch(
 .bank-tag-option,
 .bank-selected-label,
 .bank-result-tag {
-  border: 1px solid #b7cfc4;
-  background: var(--card-bg, #fff);
-  color: inherit;
-  border-radius: 6px;
   padding: 7px 10px;
   font-size: 12px;
   cursor: pointer;
 }
 .bank-tag-option small {
   font: 10px system-ui;
-  color: #6b7d76;
+  color: inherit;
   margin-left: 5px;
 }
 .bank-tag-option.active,
 .bank-selected-label {
-  background: #176c60;
-  color: #fff;
-  border-color: #176c60;
-}
-.bank-tag-option.active small {
-  color: #ffffffa8;
+  box-shadow: inset 0 0 0 1px currentColor;
+  font-weight: 700;
 }
 .bank-label-more {
   border: 0;
@@ -601,17 +585,15 @@ watch(
 .bank-result-tag {
   font-size: 11px;
   padding: 5px 8px;
-  color: #245b48;
-  background: #176c6008;
 }
 .bank-result-tag small {
   font-size: 9px;
   margin-left: 5px;
-  color: #a17235;
+  color: inherit;
 }
 .bank-review-state {
   font-size: 10px;
-  color: #6b7d76;
+  color: var(--muted);
   margin-left: 4px;
 }
 .bank-edit-tags {

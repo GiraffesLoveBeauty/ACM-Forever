@@ -4,6 +4,9 @@ import { useRoute } from 'vue-router';
 import { auth, useRequests, date, notify } from '../lib/api.js';
 import { adminFilters } from '../lib/admin.js';
 import { problemLink } from '../lib/member-problems.js';
+import ProblemDifficulty from './ProblemDifficulty.vue';
+import ProblemTags from './ProblemTags.vue';
+import LuoguBadges from './LuoguBadges.vue';
 const props = defineProps({ personal: { type: Boolean, default: false } });
 const route = useRoute(),
   request = useRequests();
@@ -180,7 +183,9 @@ onBeforeUnmount(() => {
       <h2>{{ label }}</h2>
       <template v-if="zones[i] && !zones[i].loading && !zones[i].error"
         ><b>{{ zones[i].problem_name || zones[i].problem_id }}</b>
-        <p>{{ zones[i].platform }} · 难度 {{ zones[i].problem_rating ?? '未知' }}</p>
+        <p>{{ zones[i].platform }} · <ProblemDifficulty :problem="zones[i]" /></p>
+        <LuoguBadges v-if="zones[i].platform === 'luogu'" :problem="zones[i]" :difficulty="false" />
+        <ProblemTags v-else :tags="zones[i].tags" />
         <p class="muted">{{ zones[i].recommendation_reason }}</p>
         <RouterLink class="btn primary" :to="problemLink(zones[i], '/home.html')"
           >打开题目 →</RouterLink
@@ -203,7 +208,9 @@ onBeforeUnmount(() => {
         <span
           ><RouterLink :to="problemLink(row, '/home.html')"
             ><b>{{ row.problem_name || row.problem_id }}</b></RouterLink
-          ><br />{{ row.platform }} · {{ row.status }} · {{ row.problem_rating ?? '未知' }}</span
+          ><br />{{ row.platform }} · {{ row.status }} · <ProblemDifficulty :problem="row" />
+          <LuoguBadges v-if="row.platform === 'luogu'" :problem="row" :difficulty="false" />
+          <ProblemTags v-else-if="row.tags" :tags="row.tags" /></span
         ><time>{{ date(row.created_at) }}</time>
       </article>
       <p v-if="!rows.length" class="empty">暂无挑战记录。</p>

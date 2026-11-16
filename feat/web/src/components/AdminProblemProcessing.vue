@@ -2,6 +2,7 @@
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { auth, useRequests } from '../lib/api.js';
 import TagManagement from '../views/TagManagement.vue';
+import ProblemTags from './ProblemTags.vue';
 import { renderStatementMarkdown } from '../lib/statement-math.js';
 import { copyStatementSample } from '../lib/statement-samples.js';
 const props = defineProps({
@@ -178,11 +179,7 @@ onBeforeUnmount(() => {
           <p>处理依据：{{ tab === 'translation' && data.existing?.translation_active ? '译文已保存并通过本地结构校验；原始响应及离线校订记录均保留。' : execution?.reason || task?.reason || data.issues?.join('、') || '暂无可用依据' }}</p>
           <template v-if="tab === 'annotation'">
             <h4>当前最终有效标签</h4>
-            <p>
-              {{
-                data.existing?.effective_tags?.map((t) => t.name_zh).join('、') || '尚无有效标签'
-              }}
-            </p>
+            <ProblemTags :tags="data.existing?.effective_tags" />
             <p class="muted">
               {{
                 data.existing
@@ -190,7 +187,8 @@ onBeforeUnmount(() => {
                   : '当前尚无持久化标注结果；本页不会生成或写入虚假的 AI 标签。'
               }}
             </p>
-            <p>爬虫原始标签：{{ data.raw_tags?.join('、') || '无' }}</p>
+            <p>爬虫原始标签：</p>
+            <ProblemTags :tags="data.raw_tags" />
           </template>
           <template v-else>
             <p class="muted">本地保留排版，AI 仅按文字 ID 翻译。图片、公式、代码和样例不交给模型重建。仅检查 ID 能否对应回填，不进行翻译准确性审核；防重复请求保护继续生效。</p>
