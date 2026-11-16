@@ -38,6 +38,8 @@ python -m api
 
 ## 数据库与部署
 
+1.0.0候选新增管理员待发布测试版代理：`/api/admin/android/releases/*`。它不代替公开正式更新源，普通更新仍为Gitee优先/GitHub兜底。运维需单独安全配置`ACM_ANDROID_GITHUB_TOKEN`（仅授予读取指定仓库私有Release草稿的必要权限）；`ACM_ANDROID_GITHUB_REPOSITORY`默认`GiraffesLoveBeauty/ACM-Forever`。缺配置返回503，不妨碍原业务。临时制品不放公开静态目录，不向客户端返回Token或临时签名URL；无需数据库迁移。此路径合并会随既有工作流部署，**合并前须完成当前head的Review及运维确认**。接口、限制与回退见[android-v1.0.0-release-channels.md（正式与测试分发）](../../docs/android-v1.0.0-release-channels.md)。
+
 移动端新增 `mobile_public_profiles` 映射表，按既有可重复初始化方式创建，保留原成员数据和做题记录。初始为现有成员分配随机稳定公开 ID；新增成员在后续初始化或移动端请求时补充，既有 ID 和座右铭不会被覆盖。生产更新前应由运维备份数据库并验证，不能用 App 直接连接或分发数据库文件。具体公开范围、字段与权限见 API 调用指南。
 
 设置 `ACM_DATABASE_PATH` 指向持久化 SQLite 文件。本仓库的 GitHub Actions 会将 `feat/` 同步到服务器 `/root/acm-forever-feat`，因此生产数据库必须放在该同步目录之外，例如：

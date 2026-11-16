@@ -1,12 +1,14 @@
 # App 修改与维护交接规范
 
-0.2.30候选新增连接层维护要求：页面读取、缓存与写入分队列，GET按会话合并并限两条并发，离开取消读取而保留写事务，旧结果必须拒绝。重连只在可见页按退避策略执行；新增写入口更新关联缓存失效表。题单可选排名由后端全体筛选后分页。修改后须跑慢网切页、旧401、请求合并及草稿归属用例，不能用真实账号写生产。详见[本轮交付说明](android-v0.2.30-network-training.md)及[模块关联标准](android-modification-standard.md)。本轮包含后端兼容改动，合并前需要联调及运维确认；自站和1.0.0继续延期。
+当前为1.0.0/code45正式候选，基线0.2.30/code44已发布。本轮恢复管理员同包名待发布测试渠道并修正署名，完成本地验收，尚未外部Review、部署或发布。具体规则见文末“1.0.0 发布交接补充”与[本轮验收](android-v1.0.0-verification.md)。自站公开镜像继续等待。
+
+0.2.30新增的连接层维护要求继续有效：页面读取、缓存与写入分队列，GET按会话合并并限两条并发，离开取消读取而保留写事务，旧结果必须拒绝。重连只在可见页按退避策略执行；新增写入口更新关联缓存失效表。题单可选排名由后端全体筛选后分页。修改后须跑慢网切页、旧401、请求合并及草稿归属用例，不能用真实账号写生产。详见[0.2.30交付说明](android-v0.2.30-network-training.md)及[模块关联标准](android-modification-standard.md)。
 
 0.2.29候选维护补充：每轮必须核对并同步更新日志、已核实的Review/发布署名、特别鸣谢与头像；候选未完成的操作仍留空。密码统一眼睛控件、内嵌发帖预览、本地04:00划日的检查次数、完整拼音模块编号/内容摘要及存储中的选择性模块删除都属联查项，具体执行[Android修改标准的必做同步](android-modification-standard.md#每轮修改与发布的必做同步)。手动删除的模块不再随App更新下载；原生模块须真正经系统移除split，不能仅删记录。普通缓存清理和升级仍保留已下载模块。
 
 0.2.25 模块化评审候选：可选代码在 `Android_APP/app/advanced`、`admin`，可选资源在 `Android_APP/module-resources`。不要使用旧历史打包脚本把它们重新塞入基础 APK；发布须同时完成基础包、四个签名模块包与模块索引的回读验证。已下载模块属于持久数据，升级/清临时文件不得删除。详见[模块维护说明](android-v0.2.25-optional-modules.md)。
 
-2026-11-08：当前0.2.24/code38继续沿用既有debug构建与Tag发布。1.0.0延期，保留[方案和历史验收记录](android-v1.0.0-release-channels.md)，双渠道代码继续留在本地。恢复正式发布时，versionCode必须高于届时已发布的0.x，不能复用历史候选code38。
+历史：2026-11-08曾延期1.0.0，0.2.24/code38当时沿用debug与Tag发布；记录保留在[渠道文档归档](android-v1.0.0-release-channels.md)。本轮已恢复实施，不能复用当时的code38或制品摘要。
 
 状态：v0.2.22 随代码提请评审；记录日期 2026-11-07。适用于 `Android_APP/app/` 原生客户端。它补充[工程协作规范](TCrB-AI项目工程规范.md)及[模块关联标准](android-modification-standard.md)，不替代团队的评审、合并和发布授权。
 
@@ -47,7 +49,7 @@
 | 外观、主题分享 | `AppAppearance`、`MobileStyle`、`LocalThemes`、`ThemePackage`、官方资源 | 主辅色、深浅色、透明度和间距一致；官方主题读取原资源；主题包往返完整还原、原图字节不损失；不包含账号数据 |
 | 更新、版本署名、关于 | `AppUpdates`、`UpdateActivity`、`GithubCredits`、`CreditsViews`、`AboutActivity`、两份 releases JSON | 版本/签名/哈希校验不删；未登录不展示更新内容。署名不依赖业务服务器或实时 GitHub；头像和历史记录缺一项就如实提示，不假称已评审或已发布 |
 
-完整接口及模块关联以[Android 修改标准](android-modification-standard.md)为准。客户端通过统一 API 访问数据，不能直连数据库，不把内部 Bot Token 放进安装包。缺失 API 使用“无API接口”，断网、连接失败、无权限和有效空结果分别显示；不要用虚构业务数据补位。缺失搜索模块和社团训练接口仍是待办，本轮不新增后端。
+完整接口及模块关联以[Android 修改标准](android-modification-standard.md)为准。客户端通过统一 API 访问数据，不能直连数据库，不把内部 Bot Token 放进安装包。缺失 API 使用“无API接口”，断网、连接失败、无权限和有效空结果分别显示；不要用虚构业务数据补位。题单与训练安排复用已经上线的真实接口，其他缺失项按修改标准的当前矩阵执行；本轮新增管理员测试分发后端，不能沿用早期“不新增后端”的历史声明。
 
 注销回执是未登录页面的唯一例外凭据。删除回执后必须通知登录门禁，同时检查当前注销页和登录主页，不能只依赖会话失效时的检查或下一次 `onResume`；会话通知可能先于回执删除完成。此类竞态测试应固定回调顺序，不以偶然通过代替验证。
 
@@ -60,6 +62,7 @@ python -m unittest discover -s Android_APP/tests -p 'test_*release*.py' -v
 python -m unittest discover -s Android_APP/tests -p 'test_theme_renderer*.py' -v
 cd Android_APP/app
 ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+./gradlew --no-daemon testReleaseUnitTest testPreviewUnitTest lintRelease lintPreview :app:assembleRelease :advanced:assembleRelease :admin:assembleRelease :app:assemblePreview :advanced:assemblePreview :admin:assemblePreview
 ```
 
 Windows 非 ASCII 路径可能要求 `android.overridePathCheck=true` 或使用 ASCII 构建副本；副本必须逐文件对应源码，不能用旧副本产物冒充本轮包。签名按受控环境配置，不在提交中写入本机路径或密钥。
@@ -79,3 +82,11 @@ APK 不提交到源码 Git，不从本机代替 Actions 手工上传。相同渠
 App Tag 发布与网页部署是两条流程。推送 `main` 且改动 `feat/**` 或服务器同步 workflow 才触发现有网页同步；不因为改了 Android 就顺带动服务器。自站镜像的独立 PR、SSH 账号、Nginx、静态目录和缓存由运维确认后单独上线，不能在未经验证的地址上切换用户下载源。
 
 交接时移交源码 PR/Tag、签名材料保管方式、Actions 权限负责人、测试方法、接口缺失列表、未完成事项及故障恢复记录。密钥用团队认可的安全方式移交，不写入文档或聊天；交接后按实际接手情况修改维护者列表，并保留历史制作者和评审者。
+
+## 1.0.0 发布交接补充（2026-11-16）
+
+用户界面的开发/Review归属统一写明确GitHub用户名；不要使用“本人”。0.2.22起已完成版本由`MiaoJJ13445`执行Review，此记录不等同GitHub人工APPROVED；0.2.21及以前保留原历史。当前候选的Review不能预填；完成后据证据补为`reviewed`，下轮据Release补录发布者，禁止每个已发布包自身一直显示待Review。
+
+新Tag由`release_credits.py`拦截未完成记录，并校对APK内快照。不得为让CI变绿而伪造人员或证据。流程与模块规则以[android-modification-standard.md（修改标准）](android-modification-standard.md)为准；1.0.0本轮本地结果见[android-v1.0.0-verification.md（正式与管理员测试验收）](android-v1.0.0-verification.md)。
+
+测试版不是独立包：沿用当前普通版code、同签名覆盖，禁自动检查，只有管理员能手动下载；可手动返回同code普通版。公开正式更新仍走Gitee优先/GitHub回退，测试八附件仅存GitHub未公开草稿。私有代理所需服务器凭据和运维确认见[android-v1.0.0-release-channels.md（渠道与部署）](android-v1.0.0-release-channels.md)。

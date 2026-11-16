@@ -772,3 +772,22 @@ PATCH 白名单为 `real_name/name/school/status/cf_handle/atcoder_handle/luogu_
 错误区分：400 `invalid_fields/invalid_profile/invalid_account/confirmation_required/invalid_revision/invalid_epoch`，字段错误附 `field_errors`；409 `profile_conflict/binding_changed` 附最新 `current` 快照，`duplicate_binding` 表示重复平台账号；生命周期使用既有 `ACCOUNT_CLOSED/ACCOUNT_CHANGED/MEMBER_NOT_FOUND`；权限/CSRF 仍为 401/403。并发冲突必须核对并以最新指纹重提，没有强制覆盖选项。
 
 浏览器草稿只存当前设备 localStorage，按非认证 `draft_scope`、QQ/代际和编辑副本隔离，不含密码、令牌、Cookie 或导入凭据。恢复先获取轻量快照，换代际/注销的草稿不可应用。每次只清理对应成功修订；请求超时先查询最新快照对账，不自动重放绑定写入。详见 [issue-85-member-profile.md（实施和验收）](issue-85-member-profile.md)。
+
+## Android 管理员待发布测试版（1.0.0候选）
+
+本地新增，尚未部署验收。所有下列GET均复用Web Cookie会话，并在数据库实时核对admin/root及首次改密状态；不是公开静态文件。普通正式更新仍读取Gitee/GitHub公开Release，不经过本组API。
+
+| 请求 | 响应 |
+| --- | --- |
+| `/api/admin/android/releases/latest` | 最新完整且目标版本尚未正式发布的测试清单；没有候选时200 `{"available":false}` |
+| `/api/admin/android/releases/{previewTag}/apk` | 当前候选基础APK，先缓冲校验大小/SHA256，再校验角色后返回 |
+| `/api/admin/android/releases/{previewTag}/modules` | 相同候选的四模块索引 |
+| `/api/admin/android/releases/{previewTag}/assets/{name}` | 仅四个固定模块附件，先缓冲验hash再验证角色 |
+
+`previewTag`格式为`vX.Y.Z-preview.N`（N≥1）。固定附件名为`module-official-themes.acmpack`、`module-advanced.apk`、`module-admin.apk`、`module-cat-art.acmpack`，其他文件名404。所请求Tag不再是当前候选时拒绝，不以共享versionCode区分修订。
+
+清单字段：schemaVersion=2、distribution=preview、packageName、versionName、versionCode、releaseVersionCode、previewRevision、previewTag、minSdk、apkPath、modulesPath、sha256、sizeBytes、notes、signingCertificateSha256、moduleCatalog。versionCode沿用当前公开普通版，releaseVersionCode是未来正式code；moduleCatalog须含恰好四个受限条目及previewTag。moduleCatalog.url保留仓库固定的草稿附件标识，**客户端必须转为当前业务源下的鉴权assets路径，不能当匿名下载链接使用**。不返回GitHub资产ID、Token、重定向签名URL或公开apkUrl。
+
+匿名401、非管理员403、首次改密未完成428；缺配置/源异常/清单非法/候选变化为503。所有响应`Cache-Control: private, no-store`、`Vary: Cookie`，不进入业务读缓存。接口等待上游后再次验证角色，下载完整大小/hash不符时不返回附件。上游清单≤32KiB、模块索引≤64KiB、APK≤150MiB、单模块≤16MiB。
+
+服务器所需`ACM_ANDROID_GITHUB_TOKEN`和发布/退役/回退顺序见[android-v1.0.0-release-channels.md（分发与运维）](android-v1.0.0-release-channels.md)。本次没有数据库迁移；`feat/**`合并会触发现有部署，必须先完成运维确认。
