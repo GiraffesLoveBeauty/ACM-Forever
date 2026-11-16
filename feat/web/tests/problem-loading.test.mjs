@@ -22,7 +22,7 @@ const originals = new Map(
 let dom, mounted, calls, holdTags;
 const response = (data, status = 200) => new Response(JSON.stringify(data), { status });
 const query = (url) => new URL(url, 'https://acm.test').searchParams;
-const lists = () => calls.filter((call) => !call.url.startsWith('/api/me/problems/tags?'));
+const lists = () => calls.filter((call) => !/\/(?:tags|taxonomy)\?/.test(call.url));
 const button = (name) =>
   find(mounted.root, (node) => node.type === 'button' && textOf(node).trim() === name)[0];
 const control = (name, kind = 'select') =>
@@ -108,6 +108,8 @@ beforeEach(() => {
   globalThis.fetch = (url, options = {}) => {
     const call = { url, options };
     calls.push(call);
+    if (url.includes('/problems/taxonomy?'))
+      return Promise.resolve(response({ difficulties: [], tags: [], tag_types: [], stale: false }));
     if (url.startsWith('/api/me/problems/tags?') && !holdTags)
       return Promise.resolve(response({ tags: [query(url).get('platform') + '-tag'] }));
     assert(
@@ -196,6 +198,19 @@ test('slow or failed tag choices do not block queries, and late old tags stay di
   assert(!textOf(mounted.root).includes('old tag'));
   assert(!button('查询').props.disabled);
 });
+test('numeric ranges clear before switching OJs and restore with browser history', async () => {
+  await open('list', '&rating_min=1200&rating_max=1600');
+  assert.equal(query(lists()[0].url).get('rating_min'), '1200');
+  await platform('atcoder');
+  assert.equal(query(lists().at(-1).url).get('platform'), 'atcoder');
+  assert.equal(query(lists().at(-1).url).get('rating_min'), null);
+  assert.equal(query(lists().at(-1).url).get('rating_max'), null);
+  mounted.router.back();
+  await settle();
+  assert.equal(query(lists().at(-1).url).get('platform'), 'codeforces');
+  assert.equal(query(lists().at(-1).url).get('rating_min'), '1200');
+  assert.equal(query(lists().at(-1).url).get('rating_max'), '1600');
+});
 test('rapid OJ changes and history navigation keep the newest URL and results', async () => {
   await open();
   await platform('atcoder');
@@ -254,3 +269,70 @@ test('admin pending search is coalesced and unmount cancels its request', async 
   mounted = null;
   assert(lists()[1].options.signal.aborted);
 });
+
+for (const owner of ['member', 'admin']) {
+  test(`${owner}: Luogu tag overflow reports the limit and keeps the previous selection`, async () => {
+    const fetch = globalThis.fetch;
+    globalThis.fetch = (url, options) =>
+      url.includes('/problems/taxonomy?')
+        ? Promise.resolve(
+            response({
+              difficulties: [],
+              tags: Array.from({ length: 21 }, (_, i) => ({
+                id: i + 1,
+                name: '标签 ' + (i + 1),
+                type: 1,
+              })),
+              tag_types: [{ id: 1, name: '算法' }],
+            }),
+          )
+        : fetch(url, options);
+    if (owner === 'member') await open();
+    else await admin();
+    await platform('luogu');
+    function selectTags(count) {
+      const options = Array.from({ length: 21 }, (_, i) => ({
+        value: String(i + 1),
+        selected: i < count,
+      }));
+      control('洛谷原生标签').props.onChange({
+        target: { options, selectedOptions: options.filter((option) => option.selected) },
+      });
+      return options;
+    }
+    selectTags(20);
+    await settle();
+    const proposed = selectTags(21);
+    await settle();
+    const alerts = () =>
+      find(mounted.root, (node) => node.props.role === 'alert')
+        .map(textOf)
+        .join(' ');
+    assert.match(alerts(), /最多.*20/);
+    assert.equal(proposed.filter((option) => option.selected).length, 20);
+    await submit();
+    assert.equal(
+      query(lists().at(-1).url).get('native_tags'),
+      Array.from({ length: 20 }, (_, i) => String(i + 1)).join(','),
+    );
+    selectTags(21);
+    await settle();
+    assert.match(alerts(), /最多.*20/);
+    selectTags(19);
+    await settle();
+    assert.doesNotMatch(alerts(), /最多.*20/);
+    await submit();
+    assert.equal(
+      query(lists().at(-1).url).get('native_tags'),
+      Array.from({ length: 19 }, (_, i) => String(i + 1)).join(','),
+    );
+    selectTags(21);
+    await settle();
+    assert.match(alerts(), /最多.*20/);
+    button('清除所选标签').props.onClick();
+    await settle();
+    assert.doesNotMatch(alerts(), /最多.*20/);
+    await submit();
+    assert.equal(query(lists().at(-1).url).get('native_tags'), null);
+  });
+}

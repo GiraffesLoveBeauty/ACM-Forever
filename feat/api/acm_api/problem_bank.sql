@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS crawler_problems (
 CREATE INDEX IF NOT EXISTS idx_crawler_problems_contest
 ON crawler_problems(platform, contest_id);
 
+-- Native filters retain legacy aliases while using a bounded identity lookup.
+CREATE INDEX IF NOT EXISTS idx_crawler_problems_identity_nocase
+ON crawler_problems(platform, problem_id COLLATE NOCASE);
+
 CREATE INDEX IF NOT EXISTS idx_crawler_problems_fetch
 ON crawler_problems(platform, last_fetch_status, requested_language);
 

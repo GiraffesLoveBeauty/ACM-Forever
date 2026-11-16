@@ -15,6 +15,7 @@ from .acm_api.problem_sync import ProblemSync, sync_options
 from .acm_api.sync_service import SyncMixin
 from .acm_api.event_log import emit
 from .acm_api.sync_policy import SYNC_PAUSED
+from .acm_api import problem_schedule
 
 
 PROBLEM_SYNC_TIMEZONE = timezone(timedelta(hours=8))
@@ -158,6 +159,7 @@ class WebTaskManager:
         self.tasks = {}
         self.problem_sync = ProblemSync(sync_engine.db_path, getattr(sync_engine, "crawler_config", {}))
         self._daily_problem_sync_task = None
+        self._problem_schedule_changed = asyncio.Event()
         self._claiming_daily_problem_sync = False
         self._member_sync_task = None
         self._claiming_all_accounts_sync = False
@@ -220,22 +222,17 @@ class WebTaskManager:
                 self._daily_problem_sync_loop(), name="daily-problem-sync",
             )
 
+    def wake_problem_schedule(self):
+        self._problem_schedule_changed.set()
+
     async def _claim_daily_problem_sync(self, platform, day):
         async with aiosqlite.connect(str(self.sync_engine.db_path)) as db:
-            async with db.execute(
-                "INSERT INTO settings(key,value) VALUES(?,?) "
-                "ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE settings.value<excluded.value",
-                (f"daily_problem_sync_{platform}", day),
-            ) as cursor:
-                claimed = cursor.rowcount == 1
-            await db.commit()
-        return claimed
+            await db.execute("PRAGMA busy_timeout=5000")
+            return await problem_schedule.claim(db, platform, day, getattr(self.sync_engine, "crawler_config", {}))
 
     async def _run_daily_problem_sync(self):
         day = datetime.now(PROBLEM_SYNC_TIMEZONE).date()
-        platforms = ["atcoder", "codeforces"]
-        if getattr(self.sync_engine, "crawler_config", {}).get("luogu_daily_problem_sync_enabled", False):
-            platforms.append("luogu")
+        platforms = problem_schedule.PLATFORMS
         for platform in platforms:
             if datetime.now(PROBLEM_SYNC_TIMEZONE).date() != day:
                 break
@@ -259,7 +256,16 @@ class WebTaskManager:
             options = sync_options(request_options)
             options["scheduled"] = True
             task_id = self.submit_problem_sync(options)["id"]
-            await asyncio.gather(self.tasks[task_id]["_task"], return_exceptions=True)
+            try:
+                await asyncio.gather(self.tasks[task_id]["_task"], return_exceptions=True)
+            finally:
+                # Shutdown cancels the child before gather finishes; persist its
+                # final status as well so a restart does not hide the interruption.
+                try:
+                    async with aiosqlite.connect(str(self.sync_engine.db_path)) as db:
+                        await problem_schedule.remember_result(db, self.tasks[task_id])
+                except (OSError, aiosqlite.Error):
+                    emit("problem_sync.result_save_failed", "每日题库更新结果暂未保存", "warning")
         return True
 
     async def _daily_problem_sync_loop(self):
@@ -267,7 +273,11 @@ class WebTaskManager:
             now = datetime.now(PROBLEM_SYNC_TIMEZONE)
             due = now.replace(hour=PROBLEM_SYNC_HOUR, minute=0, second=0, microsecond=0)
             if now < due:
-                await asyncio.sleep((due - now).total_seconds())
+                try:
+                    await asyncio.wait_for(self._problem_schedule_changed.wait(), timeout=(due - now).total_seconds())
+                except asyncio.TimeoutError:
+                    pass
+                self._problem_schedule_changed.clear()
                 continue
             try:
                 complete = await self._run_daily_problem_sync()
@@ -277,7 +287,11 @@ class WebTaskManager:
             delay = PROBLEM_SYNC_RETRY_SECONDS
             if complete:
                 delay = (due + timedelta(days=1) - datetime.now(PROBLEM_SYNC_TIMEZONE)).total_seconds()
-            await asyncio.sleep(max(0, delay))
+            try:
+                await asyncio.wait_for(self._problem_schedule_changed.wait(), timeout=max(0, delay))
+            except asyncio.TimeoutError:
+                pass
+            self._problem_schedule_changed.clear()
 
     async def submit_account_sync(self, qq_id, platforms, days=0, *, expected_epoch=None):
         if self._claiming_all_accounts_sync:

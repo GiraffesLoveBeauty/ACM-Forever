@@ -45,7 +45,9 @@ def merge_metadata(old, metadata):
             else:
                 merged[key] = value
             continue
-        if (key == "problem_rating" and value is None) or (key == "tags" and not value):
+        if key == "problem_rating" and metadata.get("difficulty_missing") is True:
+            merged[key] = None
+        elif (key == "problem_rating" and value is None) or (key == "tags" and not value):
             merged.setdefault(key, value)
         else:
             merged[key] = value
@@ -59,10 +61,10 @@ async def save_catalog_entry(db, merged):
         """INSERT INTO recommendations(platform,problem_id,problem_name,problem_rating,problem_url,tags)
         VALUES (?,?,?,?,?,?) ON CONFLICT(platform,problem_id) DO UPDATE SET
         problem_name=excluded.problem_name,problem_url=excluded.problem_url,
-        problem_rating=CASE WHEN excluded.platform='luogu' THEN NULL ELSE COALESCE(excluded.problem_rating,recommendations.problem_rating) END,
+        problem_rating=CASE WHEN excluded.platform='luogu' OR ? THEN NULL ELSE COALESCE(excluded.problem_rating,recommendations.problem_rating) END,
         tags=CASE WHEN excluded.platform='luogu' OR excluded.tags<>'' THEN excluded.tags ELSE recommendations.tags END""",
         (merged["platform"], merged["problem_id"], merged["problem_name"], merged.get("problem_rating"),
-         merged["problem_url"], ",".join(merged.get("tags", []))),
+         merged["problem_url"], ",".join(merged.get("tags", [])), int(merged.get("difficulty_missing") is True)),
     )
 
 

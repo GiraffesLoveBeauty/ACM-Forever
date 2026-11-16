@@ -263,17 +263,54 @@ Web 归属验证当前实现 Codeforces：账号存在性使用已有验证器�
 
 ## 管理员采集新题目
 
+### 采集、时间与难度筛选（#147）
+
+采集使用公开来源的分类，不调用 AI 打标或翻译。洛谷只接入公开 P 题，在同一任务中保存原生标签、难度、题面及全部结构化样例；成员 AC 同步沿用独立流程。
+
+三处列表 `GET /api/problems`、`GET /api/me/problems`、`GET /api/admin/database/problems` 共用以下筛选，先筛选再统计、分页。除成员“本人 AC”范围继续按 AC 时间倒序外，题库默认按题目时间从新到旧，同时间按平台和规范题号稳定排序，未知时间排最后。
+
+| 参数或字段 | 契约 |
+| --- | --- |
+| `rating_min/rating_max` | 显式选择 `codeforces` 或 `atcoder`；整数 0–100000，允许单边，包含上下限，倒置范围返回 400；未知/非数字难度不匹配数值区间 |
+| `native_difficulty_min/native_difficulty_max` | 仅 `platform=luogu`；按已同步字典的原生等级顺序，包含两端，允许单边；暂无评定 0 使用 `native_difficulty=0` 单独筛选，不能与区间混用 |
+| `native_tags` | 仅洛谷；逗号分隔、最多 20 个整数原生标签 ID，必须同时满足全部所选标签。兼容旧的单值 `native_tag`，两者合计不得超过 20 个不同标签，超限返回 400 |
+| `start_at/end_at` | Unix 秒或带时区的 ISO 8601；允许单边，范围为 `[start_at,end_at)`，结束时间必须晚于开始时间 |
+| `time_basis` | 列表为 `auto/contest/first_seen`；有时间边界时默认 CF/AtCoder 为 contest、洛谷为 first_seen；auto 使用有比赛时间则比赛时间、否则首次收录。洛谷拒绝 contest；仅填显式依据、没有时间边界返回 400 |
+| `source_time` | CF/AtCoder 比赛开始时间（Unix 秒），未知为 null；洛谷不伪造发布时间 |
+| `first_seen_at` | 本站首次收录时间（Unix 秒），刷新不会改变；来自目录记录的 created_at |
+| `problem_time/time_basis` | 本行实际排序时间及其依据 contest/first_seen/unknown；最近抓取时间另行返回，不参与“新题”排序 |
+
+网页时间输入明确采用北京时间，结束时间不含。全部平台视图不比较各平台的数值难度；切换平台清除不适用参数。管理员数据库列表以 `bank_` 前缀保存页面筛选和页码，成员列表保留既有返回链接与地址参数。
+
+洛谷分类筛选与返回的原生分类共用同一条目录记录：优先规范大写 `P` 题号，其次无前缀的小写题号，最后回退 `luogu_` 历史别名（前缀及题号大小写兼容）。同级别名按 `updated_at` 降序、原始题号升序确定来源；规范记录存在时不再混用旧别名的难度或标签，也不改写历史题号。网页最多选择 20 个原生标签，超限会提示并保留原选择；直接链接中的超限条件完整提交给接口校验，不静默截取部分标签。
+
+手动全平台采集（`scope=platform`）可附同样的 `start_at/end_at`，`time_basis` 只能为 contest 或 first_seen。先按目录和已保存比赛时间筛选候选，再下载所选题面；时间未知的候选排除并通过 `result.time_unknown_count` 报告，范围外数量为 `time_filtered_count`。没有边界即为全部，不接受比赛/指定题号模式混入时间边界。首次导入时，无来源时间的题目按本次首次收录时间判断，不能用本站尚未保存的历史收录时间筛选。
+
+AtCoder 数值为 AtCoder Problems 的估计难度，与 CF Rating、比赛分值分开标注。采集链路读取公开 problem-models.json，以题号关联；原始值低于 400 时沿用已有模型换算 `400×exp(raw/400−1)` 后取整。详情同时返回 `difficulty_raw/difficulty_source/difficulty_is_experimental`。来源请求失败以 `difficulty_warning` 提示并保留已有值；成功读取但没有该题有效模型时为未知，不当作 0 或沿用失效值。
+
+### 每日题库同步开关
+
+`GET /api/admin/problems/schedule` 读取三个 OJ 的独立状态；`PUT` 同一路径保存部分或全部开关，要求管理员/Root 会话及 CSRF。未登录 401、普通成员或缺少 CSRF 403、强制改密 428。写入格式只接受 platforms 对象中的已知 OJ 和布尔值：
+
+```json
+{"platforms":{"codeforces":true,"atcoder":true,"luogu":false}}
+```
+
+读取返回 `global_enabled/timezone/hour/platforms`。每个平台返回 `enabled`（保存偏好）、`effective_enabled`、`next_run_at`（Unix 秒或 null）、`last_scheduled_day` 和 `last_result`（任务 ID、状态、结束时间及可用计数/错误）。配置为北京时间每日 04:00；总开关关闭时网页明确显示停用原因，保存偏好不会绕过总开关。
+
+持久开关保存在 settings 的 `problem_sync_enabled_<platform>`；未保存时 CF/AtCoder 默认开，洛谷沿用环境默认关闭。读取开关与领取当天任务在同一个 SQLite 写事务内完成，关闭的平台不消耗当天记录；04:00 后开启可唤醒调度补跑。繁忙时等待，同平台同日领取一次，失败/取消当天不自动重复；手动任务不受每日开关限制。关闭开关不取消已经开始的任务，显式取消沿用任务接口。离页停止页面轮询，后台继续；返回可恢复当前进度。结果摘要另外持久化，服务重启后仍可查看最近结果；任务数组本身仍为进程内数据。
+
 ### 网页操作
 
 题库管理顶部的 **服务端数据库 → 初始化数据库** 会补齐 SQLite 表结构，保留已有账号、设置、题目及样例；页面显示各平台目录数量、已采集数量、失败数量和样例组数。服务启动仍自动初始化，也可使用已有 `python -m api.init_db` 命令。
 
-题库管理页的 **题库记录** 可视化浏览 `crawler_problems` 中的目录数据、采集状态、样例数和更新时间，并按平台、题面状态及题号 / 题名 / 比赛 ID 搜索。对应的 `GET /api/admin/database/problems` 仅限 Web 管理员 / Root，支持 `q`、`platform`、`status`、`page` 和 `page_size`；题面正文通过下方题目详情接口读取。
+题库管理页的 **题库记录** 可视化浏览 `crawler_problems` 中的目录数据、采集状态、样例数和更新时间，并按平台、题面状态及题号 / 题名 / 比赛 ID 搜索。对应的 `GET /api/admin/database/problems` 仅限 Web 管理员 / Root，支持 `q`、`platform`、`status`、`page` 和 `page_size`；还支持上述难度区间、时间及洛谷多标签，返回原生分类，筛选先于统计与分页。题面正文通过下方题目详情接口读取。
 
 管理页按 **服务端数据库 → 拉取题目 → 题库记录** 排列；浏览和收藏题目的独立题库通过主导航进入，不再混排在管理页。初始化、目录导入和采集批次完成后刷新题库记录，并保留记录表当前筛选和页码。
 
 题库列表右侧的 **打开题目** 进入 `/problem.html?platform=codeforces&problem_id=cf_1843A` 等站内详情页，读取服务端已保存的题面与样例。管理员使用 `GET /api/problems/<platform>/<problem_id>`，普通成员使用 `GET /api/me/problems/<platform>/<problem_id>`；都要求登录且完成首次改密。返回题名、难度、标签、原题链接 `problem_url`、`statement_html/statement_text`、题面语言、`samples`、采集时间、最近采集状态和 `content_available`。读取不触发爬虫；题目不存在返回 404，只收录目录时返回 200 且 `content_available=false`，提示等待采集或管理员重试。更新失败但仍有旧题面时继续展示已保存内容。详情页的“查看原题”按钮在新标签页打开数据库中记录的原题链接，正文尚未采集时也可使用。
 
-详情页清理外部 HTML，保留样例空格和换行并提供复制按钮；公式使用本地 KaTeX 0.19.0 输出 MathML（[配置说明](https://katex.org/docs/autorender)）。题面图片目前仍从 AtCoder / Codeforces 的 HTTPS 域名加载，尚未存入本地数据库；其它来源的图片显示占位文字。仅详情页允许这些图片域名，其它页面继续使用原有内容安全策略。
+详情页清理外部 HTML，保留样例空格和换行并提供复制按钮；公式使用本地 KaTeX 0.19.0 输出 MathML（[配置说明](https://katex.org/docs/autorender)）。题面图片目前仍从 AtCoder / Codeforces 及已批准的洛谷 HTTPS 域名加载，尚未存入本地数据库；其它来源的图片显示占位文字。仅详情页允许这些图片域名，其它页面继续使用原有内容安全策略。
 
 CF 原题未提供样例时（如 171E 的空样例区），采集成功并返回 `samples=[]`；存在一侧输入或输出、缺少 `pre` 等损坏样例仍报错。已有样例的 HTML 刷新结果意外变空时，继续保留旧题面和样例。
 
@@ -287,7 +324,7 @@ PDF 题面（如 497D）将原始字节保存到 SQLite 的 `crawler_problems.st
 
 PDF 在题目详情页内通过本地 PDF.js 绘制，支持翻页、缩放和适应宽度，同时保留单独打开按钮。渲染器、Worker、字体和字符映射资源均随前端构建部署；PDF 仍通过本站鉴权接口读取，不放宽页面的禁止嵌入策略。
 
-管理员或 Root 登录后，在 **管理后台 → 题库管理 → 拉取题目** 中选择 AtCoder / Codeforces，填写比赛 ID 和本次最多拉取题数（1–100），点击 **开始拉取**。可以指定题号（逗号或空格分隔）；留空时按比赛题序处理。AtCoder 可选英文或日文，Codeforces 使用英文且暂不支持 Gym。
+管理员或 Root 登录后，在 **管理后台 → 题库管理 → 拉取题目** 中选择 AtCoder / Codeforces / 洛谷，按平台填写比赛 ID 或 P 题号 和本次最多拉取题数（1–100），点击 **开始拉取**。可以指定题号（逗号或空格分隔）；留空时按比赛题序处理。AtCoder 可选英文或日文，Codeforces 使用英文且暂不支持 Gym。
 
 将 **拉取范围** 切换为 **该平台全部题目** 时，不需要比赛 ID 或题号，题数输入变为 **每批处理题数**（1–100，默认 100）。点击 **拉取该平台全部题目** 后，服务器先分批导入整个公开目录，再自动处理全部待采题目；批次大小不是总数量上限。页面显示目录导入进度、题面进度与批次，目录导入及批次完成后刷新题库与数据库统计。
 
@@ -299,7 +336,7 @@ PDF 在题目详情页内通过本地 PDF.js 绘制，支持翻页、缩放和�
 
 `GET /api/admin/database` 返回 `initialized`、`missing_tables` 和 `platforms` 统计数组（`platform/total/collected/failed/samples`）。`POST /api/admin/database/init` 使用服务器配置的数据库执行初始化，接受空请求或 `{}`，不接受文件路径或重置参数，返回 `success/message` 及相同统计。两者要求管理员或 Root 会话；初始化还须携带 CSRF。初始化可以重复执行，保留已有数据。
 
-`POST /api/admin/problems/sync` 让服务器直接抓取公开 AtCoder 或 Codeforces 题目，并写入服务端 `ACM_DATABASE_PATH` 指定的 SQLite。使用 Web `admin/root` 登录 Cookie，必须携带 `X-CSRF-Token`。未登录返回 401，普通成员或缺少 CSRF 返回 403，需要首次改密时返回 428。
+`POST /api/admin/problems/sync` 让服务器直接抓取公开 AtCoder、Codeforces 或洛谷 P 题目，并写入服务端 `ACM_DATABASE_PATH` 指定的 SQLite。使用 Web `admin/root` 登录 Cookie，必须携带 `X-CSRF-Token`。未登录返回 401，普通成员或缺少 CSRF 返回 403，需要首次改密时返回 428。
 
 请求示例：
 
@@ -316,7 +353,7 @@ PDF 在题目详情页内通过本地 PDF.js 绘制，支持翻页、缩放和�
 
 | 参数 | 规则 |
 | --- | --- |
-| `platform` | `atcoder`（默认）或 `codeforces` |
+| `platform` | `atcoder`（默认）、`codeforces`；洛谷参数见下节 |
 | `scope` | `contest`（默认，单场比赛）或 `platform`（该平台全部题目） |
 | `contest_id` | `scope=contest` 必填；AtCoder 比赛 ID 为字符串，如 `abc370`，最长 100 个字符；CF 为 1–99999 的普通公开比赛 ID，可传整数或数字字符串，当前不支持 Gym；全平台模式不传此字段 |
 | `problem_ids` | 可省略，最多 100 个题号；空数组表示该比赛全部题目，重复题号去重；题号必须属于指定比赛；CF 接受 `1843A` 或 `cf_1843A`，统一保存为 `cf_1843A`，与既有提交记录一致 |
@@ -324,6 +361,7 @@ PDF 在题目详情页内通过本地 PDF.js 绘制，支持翻页、缩放和�
 | `batch_size` | 仅用于全平台采集，每批处理题数，整数 1–100，默认 100；自动处理所有批次，不限制总题数 |
 | `language` | AtCoder 为 `en`（默认）或 `ja`，缺失英文时回退到日文；CF 当前只支持 `en`；单条记录只保存一种语言 |
 | `refresh` | 布尔，默认 false；true 时重新采集已保存的题目 |
+| `start_at/end_at/time_basis` | 仅全平台范围可选，见本节时间契约；不传即为全部 |
 
 只采集指定比赛的新题目时，传 `{"contest_id":"abc370"}` 即可。重复调用会继续处理尚未成功的题目；同一题的重复采集更新已有记录。参数类型、未知参数或不支持的平台返回 JSON 400 `invalid_request`。比赛及题号是否公开存在在异步抓取时核实；核实失败记录在任务结果中，不写入无效题目。这个接口不接受题面 JSON 或任意抓取 URL。
 
@@ -387,13 +425,13 @@ print(task["status"], task["progress"], task["result"])
 
 取消仍使用 `POST /api/tasks/<任务ID>/cancel`，要求同样的管理员 Cookie 与 CSRF。任务记录保存在进程内，服务重启后清空；已入库的数据保留，再次提交时可跳过成功题目。
 
-成功的题面 HTML（包含样例章节）、纯文本及 `samples` JSON 数组存于 `crawler_problems` 的同一行，没有独立样例表。样例保留输入输出的空格与换行，CF 的逐行 div 和旧版 br 排版会还原为换行。AtCoder 空白处理详见 [采集说明](crawler-samples.md#样例直接保存在题目中)。同时原子更新现有 `recommendations`，使 `GET /api/problems` 和成员题库列表能够展示新题。AtCoder 官方列表不提供估算难度和算法标签，新题的这些信息为空，已有数据在刷新时保留；CF 保存元数据中的 Rating 与 tags，缺失 Rating 为 null。下载、解析或数据库写入失败时保留已有题面与样例，并在已有题目行中记录最近失败。
+成功的题面 HTML（包含样例章节）、纯文本及 `samples` JSON 数组存于 `crawler_problems` 的同一行，没有独立样例表。样例保留输入输出的空格与换行，CF 的逐行 div 和旧版 br 排版会还原为换行。AtCoder 空白处理详见 [采集说明](crawler-samples.md#样例直接保存在题目中)。同时原子更新现有 `recommendations`，使 `GET /api/problems` 和成员题库列表能够展示新题。AtCoder 官方列表不提供估算难度和算法标签；本链路另外关联 AtCoder Problems 模型写入估计难度，算法标签仍不自动生成；CF 保存元数据中的 Rating 与 tags，缺失 Rating 为 null。下载、解析或数据库写入失败时保留已有题面与样例，并在已有题目行中记录最近失败。
 
 服务启动会自动建表；也可先在部署目录运行 `python3 -m api.init_db --database /root/acm-forever-data/acm_forever.db`，详见 [服务端初始化说明](../feat/api/README.md#单独初始化数据库与题目采集)。
 
 ### 洛谷公开 P 题库
 
-洛谷复用 `POST /api/admin/problems/sync` 和 `GET /api/tasks`，沿用管理员鉴权、首次改密限制、CSRF、202/409 与取消机制。本节参数独立于上文的 AtCoder/CF 比赛参数；本期不增加前端采集入口或成员 AC 同步。
+洛谷复用 `POST /api/admin/problems/sync` 和 `GET /api/tasks`，沿用管理员鉴权、首次改密限制、CSRF、202/409 与取消机制。本节参数独立于上文的 AtCoder/CF 比赛参数。Web 前端在成员题库和管理员题库展示原生分类，在采集页提供下述三种范围；main 已有的公开 P 题 AC 同步保持独立，训练任务时间核验继续使用其既有证据契约。
 
 | 参数 | 洛谷规则 |
 | --- | --- |
@@ -401,7 +439,7 @@ print(task["status"], task["progress"], task["result"])
 | `scope` | `problems`：指定题号；`catalog`：仅目录；`platform`：目录加缺失题面。不传时，有题号默认 problems，否则 platform |
 | `problem_ids` | problems 必填，1–100 个 P 题号，大小写规范化、去重；不接受 URL、B/AT/CF 等其他题库题号 |
 | `contest_id` | 洛谷不接受此参数 |
-| `limit` | 仅 platform 使用，本次题面上限 1–1000，默认 100；目录会独立分页导入 |
+| `limit` | 手动 platform 默认不传，持续处理全部候选；为兼容旧调用允许显式预算 1–1000。达到预算仍有剩余时为 partial，不能视作全量完成；每日预算独立 |
 | `batch_size` | 入库/题面进度批次大小 1–100，默认 50；不改变原站分页大小 |
 | `language` | 仅 `zh-CN`，默认同此值 |
 | `refresh` | 布尔，默认 false；已有非空题面时跳过，true 允许重新采集 |
@@ -414,11 +452,12 @@ print(task["status"], task["progress"], task["result"])
 
 目录逐页、逐批提交；重复题号、不完整页、总数变化或配置页数上限会报告 `catalog_complete=false` 和 partial/failed，保留已写入目录。目录之外的旧题保留，不据此推断删除。指定题号首次失败时保存仅有题号/原站链接的占位目录及失败信息，未验证题目不会有题面。取消后重跑可继续补齐。
 
-任务结果复用计数字段，增加 `catalog_pages/catalog_complete`；`progress.phase` 为 `taxonomy/catalog/statements`。洛谷 `remaining_count` 包含失败及尚未成功保存的题面，`metadata_count` 为本次已提交的目录题数；`completed` 表示本次有界任务成功，是否仍有缺失题面看 remaining_count。到达题面 limit 不代表整个平台题面已经补齐。分类缓存过期且普通刷新失败时可使用缓存，并返回 `taxonomy_warning`；无缓存时分类获取失败会停止任务。
+任务结果复用计数字段，增加 `catalog_pages/catalog_complete`；`progress.phase` 为 `taxonomy/catalog/statements`。洛谷 `remaining_count` 包含失败及尚未成功保存的题面，`metadata_count` 为本次已提交的目录题数；`completed` 表示目录完整且所选范围内的题面均已保存/有效复用。目录不完整、手动预算截断或题面失败会报告 partial/failed 和剩余数量；时间模式的剩余数仅针对所选范围。分类缓存过期且普通刷新失败时可使用缓存，并返回 `taxonomy_warning`；无缓存时分类获取失败会停止任务。
 
 | 查询接口 | 权限与新增数据 |
 | --- | --- |
 | `GET /api/problems?platform=luogu` | 管理员题库列表 |
+| `GET /api/admin/database/problems?platform=luogu` | 管理专用数据库列表；可组合原生分类、题面状态、搜索与分页 |
 | `GET /api/me/problems?platform=luogu` | 成员题库列表；原有本人记录范围、收藏、分页规则继续适用 |
 | `GET /api/problems/luogu/P1001` | 管理员本地详情 |
 | `GET /api/me/problems/luogu/P1001` | 成员本地详情 |
@@ -441,9 +480,9 @@ print(task["status"], task["progress"], task["result"])
 }
 ```
 
-难度和标签保留原生整数 ID（标签可为负数），颜色为洛谷原始令牌；不换算为 CF Rating。未知 ID 的名称/颜色可为 null，前端应显示 ID 作为兜底；难度字段缺失时 id=null，与原生 id=0（暂无评定）区分。原 `tags` 字段仍保存标签名供旧接口兼容，新前端以 native_tags 为准。详情另返回 `statement_markdown`（原始题面段落拼接）和 `native_limits`（原始 time/memory 数组及原单位，不猜测语言对应关系，缺失限制如实返回 null）；样例使用已有 `samples` 数组。HTML 由项目已有 Mistune 渲染，转义原始 HTML，限制链接协议，并保留数学公式、表格和代码块。
+难度和标签保留原生整数 ID（标签可为负数），颜色为洛谷原始令牌；不换算为 CF Rating。未知 ID 的名称/颜色可为 null，前端应显示 ID 作为兜底；难度字段缺失时 id=null，与原生 id=0（暂无评定）区分。原 `tags` 字段仍保存标签名供旧接口兼容，新前端以 native_tags 为准。详情另返回 `statement_markdown`（原始题面段落拼接）和 `native_limits`（原始 time/memory 数组及原单位，不猜测语言对应关系，缺失限制如实返回 null）；样例使用已有 `samples` 数组。题目背景等可选 Markdown 段落为 null 时按空段落处理，正文仍必须非空；这与源站合法空字段兼容，不将缺失正文当成功。HTML 由项目已有 Mistune 渲染，转义原始 HTML，限制链接协议，并保留数学公式、表格和代码块。
 
-两个列表可组合 `native_difficulty=0` 和 `native_tag=-2` 筛选；必须显式指定 `platform=luogu`，参数为单个整数 ID，无效值返回 400。原生筛选在总数和分页之前生效，可和已有搜索/标签/收藏/本人记录范围组合。上述 GET 均只读 SQLite，不触发远程采集；字典返回 `difficulties/tags/tag_types/versions/updated_at/stale`，首次采集前为空数组、updated_at=null、stale=true。字典缓存 24 小时，开启采集时才刷新。分类表初始化兼容旧数据库。
+上述三个题目列表可组合原生难度区间及多标签，例如 `native_difficulty_min=3&native_difficulty_max=5&native_tags=1,-2`；等级按字典顺序、含两端，标签取交集。兼容 `native_difficulty=0` 和 `native_tag=-2` 单值筛选；必须显式指定 `platform=luogu`，无效组合或 ID 格式返回 400。原生筛选在总数和分页之前生效，可和已有搜索/标签/收藏/本人记录范围组合。上述 GET 均只读 SQLite，不触发远程采集；字典返回 `difficulties/tags/tag_types/versions/updated_at/stale`，首次采集前为空数组、updated_at=null、stale=true。字典缓存 24 小时，开启采集时才刷新。分类表初始化兼容旧数据库。初始化额外建立 `(platform, problem_id COLLATE NOCASE)` 身份查询索引以兼容旧别名，不改写历史题号或首次收录时间。
 
 ## 已下线的 Web 功能
 

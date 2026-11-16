@@ -1,25 +1,34 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { auth } from '../lib/api.js';
 import ProblemCollection from '../components/ProblemCollection.vue';
 import ProblemDatabaseBrowser from '../components/ProblemDatabaseBrowser.vue';
 
 const manager = computed(() => ['admin', 'root'].includes(auth.role));
-const collection = ref(false);
+const route = useRoute(),
+  router = useRouter();
+const collection = computed(() => route.query.view === 'collection');
+function showCollection(value) {
+  const query = { ...route.query };
+  if (value) query.view = 'collection';
+  else delete query.view;
+  router.replace({ path: route.path, query });
+}
 </script>
 <template>
   <template v-if="manager">
     <div class="admin-panel processing-intro">
       <div>
-        <h2>题库与二次处理</h2>
+        <h2>题库管理</h2>
         <p>
-          从已采集题目直接查看 AI 标签、中文翻译和人工修正。筛选使用最终有效标签，保留爬虫原始标签。
+          采集公开题面与样例，按平台原生难度和标签筛选。每日同步和手动采集在“采集与数据库工具”中管理。
         </p>
       </div>
       <div class="chips">
-        <button class="btn" :class="{ primary: !collection }" @click="collection = false">
-          题库与 AI 管理</button
-        ><button class="btn" :class="{ primary: collection }" @click="collection = true">
+        <button class="btn" :class="{ primary: !collection }" @click="showCollection(false)">
+          题库浏览</button
+        ><button class="btn" :class="{ primary: collection }" @click="showCollection(true)">
           采集与数据库工具
         </button>
       </div>

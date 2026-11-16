@@ -91,27 +91,29 @@ CF 支持没有样例的题目及直接返回 PDF 的题面。PDF 原文件存�
 
 ### 洛谷公开 P 题库后端
 
-通过已有的管理员采集接口 `POST /api/admin/problems/sync`，可匿名采集洛谷公开 P 题库。本期先提供后端，管理页面的洛谷平台选项由前端子任务接入。最小请求如下，沿用管理员会话和 CSRF：
+通过已有的管理员采集接口 `POST /api/admin/problems/sync`，可匿名采集洛谷公开 P 题库。管理后台题库采集页及成员题库已接入对应平台、原生分类和题面展示。最小请求如下，沿用管理员会话和 CSRF：
 
 ```json
 {"platform":"luogu","scope":"problems","problem_ids":["P1001"],"refresh":false}
 ```
 
-- `scope=problems` 指定 1–100 道题；`scope=catalog` 分页导入目录；`scope=platform` 导入目录后补齐缺失题面，`limit` 默认 100、最大 1000。重跑会跳过已有题面，优先处理未尝试的题，再重试较早失败的题，避免重复失败阻塞后续题目；`refresh=true` 时重新获取。目录总量与本次题面上限不同，目录同步可能持续较长时间。
+- `scope=problems` 指定 1–100 道题；`scope=catalog` 分页导入目录；`scope=platform` 导入目录后持续分批补齐所选范围的全部缺失题面，手动请求默认不设总量上限。旧 API 显式传 `limit=1–1000` 仍可使用，但有剩余时报告 partial；每批大小与每日预算分别控制。重跑会跳过已有题面，优先处理未尝试的题，再重试较早失败的题，避免重复失败阻塞后续题目；`refresh=true` 时重新获取。目录总量与本次题面上限不同，目录同步可能持续较长时间。
 - 题目仍使用 SQLite 的 `(platform, problem_id)` 联合主键，例如 `(luogu, P1001)`，同步写入已有题库目录；不虚构比赛 ID。题面 HTML、纯文本、样例使用已有原子入库流程，原始 Markdown 段落及时间/内存限制保存在 `metadata_json.luogu`。
-- 难度、标签、类别和颜色直接来自洛谷公开配置，字典缓存 24 小时。洛谷的 `problem_rating` 为 null，通过 `native_difficulty/native_tags` 返回原生分类，避免误当作 CF 分数。未知 ID 也保留。
+- 难度、标签、类别和颜色直接来自洛谷公开配置，字典缓存 24 小时。洛谷的 `problem_rating` 为 null，通过 `native_difficulty/native_tags` 返回原生分类。可按字典顺序选择难度上下限（含两端），多选标签取交集；未知 ID 也保留。
 - 列表、详情、分类字典只读取本地数据库。成员和管理员接口、筛选参数见 [api.md（接口说明）](../../docs/api.md#洛谷公开-p-题库)。
 - 不请求提交记录，不使用 Cookie、不跟随登录或验证跳转。默认请求间隔 2 秒，遇到 403/429 停止整批任务并记录冷却时间；普通单题失败保留原题面，连续三题失败停止。目录页异常、任务取消均保留已提交数据。
 
-`ACM_LUOGU_DAILY_PROBLEM_SYNC_ENABLED=false` 为默认值。评估原站允许的采集范围、目录请求量和运行窗口后，才按需开启每日目录与缺失题面更新；同时需启用总开关 `ACM_DAILY_PROBLEM_SYNC_ENABLED`。每日任务复用北京时间 04:00 的调度和 SQLite 去重记录，每天默认最多补 100 道题面。`ACM_LUOGU_REQUEST_INTERVAL` 范围 1.2–60 秒，`ACM_LUOGU_DAILY_STATEMENT_LIMIT` 范围 1–1000，`ACM_LUOGU_CATALOG_MAX_PAGES` 默认 1000、范围 1–2000；到达页数上限会报告未完成，不删除旧题。
+`ACM_LUOGU_DAILY_PROBLEM_SYNC_ENABLED=false` 为尚未保存页面偏好时的默认值。管理员在题库采集页分别保存 CF、AtCoder、洛谷的每日开关，服务端持久值优先；有效运行仍受总开关 `ACM_DAILY_PROBLEM_SYNC_ENABLED` 控制。每日任务复用北京时间 04:00 的调度和 SQLite 去重记录，每天默认最多补 100 道题面。`ACM_LUOGU_REQUEST_INTERVAL` 范围 1.2–60 秒，`ACM_LUOGU_DAILY_STATEMENT_LIMIT` 范围 1–1000，`ACM_LUOGU_CATALOG_MAX_PAGES` 默认 1000、范围 1–2000；到达页数上限会报告未完成，不删除旧题。
 
-启动/初始化仅新增分类缓存表 `crawler_platform_taxonomies`，不会联网采集或重建业务表。升级前备份 SQLite 并在测试库验收；回退代码可保留新增表，回退题目数据需使用备份。账号验证继续使用公开资料页；成员 AC 同步复用此公共客户端；与题库采集开关独立，时间未知的 AC 不参与训练周期核验，见上文公开 AC 记录同步说明。
+启动/初始化补齐分类缓存表 `crawler_platform_taxonomies` 及题号大小写兼容索引 `idx_crawler_problems_identity_nocase`，不会联网采集或重建业务表。升级前备份 SQLite 并在测试库验收；回退代码可保留新增表，回退题目数据需使用备份。账号验证继续使用公开资料页；成员 AC 同步复用此公共客户端；与题库采集开关独立，时间未知的 AC 不参与训练周期核验，见上文公开 AC 记录同步说明。
 
 ### 每日自动更新题库
 
-API 服务默认在北京时间每天 04:00 依次更新 AtCoder 和 Codeforces 的公开题目目录。每个平台最多补采 100 道缺失题面的题目，优先处理较新的题目，已成功保存的题面和样例继续使用。管理员可在 **同步任务** 查看进度和结果，仍可手动发起全量采集。
+API 服务在北京时间每天 04:00 依次更新已开启平台的公开题目目录。尚未保存偏好时，AtCoder/Codeforces 默认开启，洛谷默认关闭；可在后台“题库管理 → 每日自动同步”独立保存开关。每个平台最多补采 100 道缺失题面的题目，优先处理较新的题目，已成功保存的题面和样例继续使用。管理员可在 **同步任务** 查看进度和结果，仍可手动发起全量采集。
 
-如果服务在 04:00 后启动，会补跑当天尚未启动的平台。遇到手动采集时自动任务会等待，同一天每个平台只自动启动一次。每日记录保存在 SQLite 中，重启服务也会沿用。设置 `ACM_DAILY_PROBLEM_SYNC_ENABLED=false` 可关闭自动任务。
+如果服务在 04:00 后启动，会补跑当天尚未启动的平台。遇到手动采集时自动任务会等待，同一天每个平台只自动启动一次。每日记录保存在 SQLite 中，重启服务也会沿用。保存开关后无需重启：04:00 后开启且当天尚未领取的平台会唤醒补跑；关闭后只停止安排新任务，正在执行的任务可另行取消。失败或取消当天不自动重试，可手动继续。读取开关与领取任务在同一数据库事务完成，避免关闭的平台继续被安排。最近每日结果持久保存；进程内任务明细仍会在重启后清空。设置 `ACM_DAILY_PROBLEM_SYNC_ENABLED=false` 关闭全局自动任务，网页会明确显示；手动采集和成员 AC 同步不受这些题库开关影响。
+
+手动全平台采集可选择全部或时间范围，支持单边开始/结束，统一为北京时间输入、左闭右开边界。CF/AtCoder 可按比赛时间或本站首次收录时间，洛谷仅按本站首次收录时间；无可靠来源时间的候选如实计数。刷新不改变首次收录时间。AtCoder 采集会关联公开 AtCoder Problems 模型保存估计难度，模型请求失败保留旧值，成功但无模型则为未知；CF 仍使用原生 Rating，洛谷不做数值换算。接口、范围筛选、排序和结果字段见 [api.md（采集与筛选契约）](../../docs/api.md#采集时间与难度筛选147)。
 
 ### 定时同步成员 AC 记录
 
@@ -141,7 +143,10 @@ CF 的全平台题库接口可能只返回 Div.1 / Div.2 共用题的一份入�
 | --- | --- |
 | `ACM_API_HOST` / `ACM_API_PORT` | 监听地址和端口，默认 `127.0.0.1:8088`，沿用原 WebUI 端口 |
 | `ACM_ACCOUNT_IMPORT_ENABLED` | Excel 导入尚未保存页面开关时的后备默认值，默认 `true`；页面保存的数据库设置优先，关闭后仍可查已有结果 |
-| `ACM_DAILY_PROBLEM_SYNC_ENABLED` | 是否每天自动更新 AtCoder 和 Codeforces 题库，默认 `true` |
+| `ACM_DAILY_PROBLEM_SYNC_ENABLED` | 每日题库调度总开关，默认 `true`；各 OJ 保存偏好在此总开关下生效 |
+| `ACM_LUOGU_DAILY_PROBLEM_SYNC_ENABLED` | 洛谷每日题库开关的后备默认值，默认 `false`；数据库保存偏好优先 |
+| `ACM_LUOGU_DAILY_STATEMENT_LIMIT` | 洛谷每日题面预算，默认 100，范围 1–1000；不限制手动全量任务 |
+| `ACM_LUOGU_REQUEST_INTERVAL` / `ACM_LUOGU_CATALOG_MAX_PAGES` | 洛谷请求间隔（默认 2 秒，1.2–60）和目录安全页数（默认 1000，1–2000）；触达目录边界报告未完成 |
 | `ACM_MEMBER_SYNC_ENABLED` | 是否自动同步全员 AC 记录，默认 `true` |
 | `ACM_MEMBER_SYNC_INTERVAL_MINUTES` | 全员 AC 自动同步间隔，默认 60 分钟，可设 1–1440 |
 | `ACM_DATABASE_PATH` | SQLite 数据库文件路径，默认 `./data/acm_forever.db` |
