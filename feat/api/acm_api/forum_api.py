@@ -112,7 +112,8 @@ async def posts():
 async def public_posts(author_qq_id=None):
     try:
         page = max(1, int(request.args.get("page", "1")))
-        page_size = min(30, max(5, int(request.args.get("page_size", "12"))))
+        minimum = 2 if request.path.startswith("/api/mobile/v1/") else 5
+        page_size = min(30, max(minimum, int(request.args.get("page_size", "12"))))
     except (TypeError, ValueError):
         return jsonify({"message": "分页参数无效。"}), 400
     sort = str(request.args.get("sort", "latest")).strip().lower()

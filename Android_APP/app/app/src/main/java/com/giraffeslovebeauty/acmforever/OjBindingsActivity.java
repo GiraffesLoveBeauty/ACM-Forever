@@ -37,7 +37,7 @@ public final class OjBindingsActivity extends MobilePageActivity {
         if (!validOwner()) { error(card(body), new ApiClient.ApiException(401, "请返回并重新登录。", false)); return; }
         LinearLayout slot = card(body); slot.addView(text("正在读取绑定状态…", 14));
         read(() -> {
-            synchronized (api) {
+            try(ApiClient.OwnerScope ignored=api.bind(owner)) {
                 if (!validOwner()) throw new ApiClient.ApiException(401, "登录账号已切换", false);
                 return api.getObject("/api/me/profile");
             }
@@ -184,7 +184,7 @@ public final class OjBindingsActivity extends MobilePageActivity {
         io.execute(() -> {
             JSONObject result = null; Exception failure = null;
             try {
-                synchronized (api) {
+                try(ApiClient.OwnerScope ignored=api.bind(owner)) {
                     if (!validOwner()) throw new ApiClient.ApiException(401, "登录账号已切换，请返回重新登录。", false);
                     result = api.writeObject(method, path, payload);
                 }
@@ -211,7 +211,7 @@ public final class OjBindingsActivity extends MobilePageActivity {
     }
 
     @Override public void onBackPressed() {
-        if (writing) { notice.show("正在处理", new IllegalArgumentException("请等待本次操作结束后返回，避免重复提交。")); return; }
+        if (writing) { finish(); return; }
         if (!platform.isEmpty() && !OjBindingState.known(getIntent().getStringExtra("platform"))) {
             platform = ""; mode = "details"; candidate = ""; challenge = null; expectedAccount = null; load();
         } else super.onBackPressed();

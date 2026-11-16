@@ -137,10 +137,23 @@ async def admin_progress(db, identity, task_id):
     if status not in {"", "on_time", "late", "incomplete", "not_started", "pending", "abnormal"}:
         raise service.TaskError("完成状态筛选无效。")
     search = request.args.get("search", "").strip().casefold()[:100]
+    order = request.args.get("order", "none")
+    if order not in {"none", "completed"}:
+        raise service.TaskError("排列方式无效。")
     selected = [r for r in members if (not cohort or r["status_snapshot"] == cohort)
                 and (not search or search in (r["real_name"] or "").casefold() or search in r["name"].casefold() or search in str(r["qq_id"] or ""))
                 and (not status or (r["pending"] if status == "pending" else r["account_status"] != "active" if status == "abnormal" else r["completion"] == status))]
-    return jsonify({"summary": overview, "items": selected[(page - 1) * size:page * size], "total": len(selected), "page": page, "page_size": size})
+    if order == "completed":
+        # Stable ties keep the recipient order. Rank is global within the filtered set.
+        selected.sort(key=lambda r: -r["completed_problems"])
+        previous = None
+        rank = 0
+        for position, row in enumerate(selected, 1):
+            if previous != row["completed_problems"]:
+                rank = position
+                previous = row["completed_problems"]
+            row["rank"] = rank
+    return jsonify({"summary": overview, "items": selected[(page - 1) * size:page * size], "total": len(selected), "page": page, "page_size": size, "order": order})
 
 
 @training_task_api.get("/admin/training-tasks/<int:task_id>/progress/<int:recipient_id>")

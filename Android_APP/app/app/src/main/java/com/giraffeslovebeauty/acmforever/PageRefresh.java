@@ -19,18 +19,22 @@ final class PageRefresh {
     private final ArrayList<Runnable> reads=new ArrayList<>();
     private int generation,pending;
     private boolean failed,cached,started,dismissed,everFailed,retryQueued,closed,userAction;
+    private boolean active=true;private int failures;
+    private final android.net.ConnectivityManager connectivity;
+    private android.net.ConnectivityManager.NetworkCallback network;
     private java.util.function.Consumer<Boolean> observer;
     void observe(java.util.function.Consumer<Boolean> observer){this.observer=observer;}
     private void loading(){if(observer!=null)observer.accept(pending>0);}
     boolean canRefresh(){return !closed&&!reads.isEmpty()&&pending==0;}
     void refreshNow(){if(!canRefresh())return;handler.removeCallbacksAndMessages(null);retryQueued=false;failed=false;started=false;dismissed=false;userAction=true;for(Runnable read:new ArrayList<>(reads))read.run();}
     PageRefresh(Context context,LinearLayout root,int index){
+        connectivity=(android.net.ConnectivityManager)context.getApplicationContext().getSystemService(Context.CONNECTIVITY_SERVICE);
         banner=new LinearLayout(context);banner.setGravity(Gravity.CENTER_VERTICAL);banner.setPadding(MobileStyle.dp(context,14),0,MobileStyle.dp(context,4),0);
         title=new TextView(context);title.setTextSize(14);title.setTypeface(null,android.graphics.Typeface.BOLD);banner.addView(title,new LinearLayout.LayoutParams(0,-2,1));
         close=new ImageButton(context);MobileStyle.flat(close);close.setPadding(12,12,12,12);close.setBackgroundColor(Color.TRANSPARENT);banner.addView(close,new LinearLayout.LayoutParams(MobileStyle.dp(context,48),MobileStyle.dp(context,48)));
         close.setOnClickListener(v->{dismissed=true;banner.setVisibility(View.GONE);});LinearLayout.LayoutParams bounds=new LinearLayout.LayoutParams(-1,-2);bounds.setMargins(MobileStyle.dp(context,12),MobileStyle.dp(context,16),MobileStyle.dp(context,12),MobileStyle.dp(context,8));root.addView(banner,index,bounds);banner.setVisibility(View.GONE);
     }
-    void reset(int generation){this.generation=generation;userAction=false;pending=0;failed=false;cached=false;started=false;dismissed=false;everFailed=false;retryQueued=false;closed=false;reads.clear();handler.removeCallbacksAndMessages(null);banner.setVisibility(View.GONE);loading();}
+    void reset(int generation){this.generation=generation;failures=0;userAction=false;pending=0;failed=false;cached=false;started=false;dismissed=false;everFailed=false;retryQueued=false;closed=false;reads.clear();handler.removeCallbacksAndMessages(null);banner.setVisibility(View.GONE);loading();}
     void userAction(){userAction=true;}
     void register(int generation,Runnable read){if(!closed&&this.generation==generation)reads.add(read);}
     void replaceRead(int generation,Runnable read){if(!closed&&this.generation==generation){reads.clear();reads.add(read);}}
@@ -43,15 +47,19 @@ final class PageRefresh {
     void actionFailure(String reason){if(!isConnectionFailure(reason))return;failed=true;everFailed=true;dismissed=false;show(false);if(pending==0)queueRetry(generation);}
     void finish(int generation){
         if(closed||this.generation!=generation)return;pending=Math.max(0,pending-1);loading();if(pending!=0)return;
-        if(failed){queueRetry(generation);return;}
+        if(failed){queueRetry(generation);return;}failures=0;
         handler.removeCallbacksAndMessages(null);retryQueued=false;
         if(everFailed){show(true);everFailed=false;handler.postDelayed(()->banner.setVisibility(View.GONE),3000);}else banner.setVisibility(View.GONE);
     }
     private void queueRetry(int revision){
-        if(retryQueued||reads.isEmpty())return;retryQueued=true;
-        handler.postDelayed(()->{retryQueued=false;if(closed||generation!=revision||pending!=0)return;failed=false;started=false;for(Runnable read:new ArrayList<>(reads))read.run();},DELAY_MS);
+        if(retryQueued||reads.isEmpty()||!active)return;retryQueued=true;
+        handler.postDelayed(()->{retryQueued=false;if(closed||!active||generation!=revision||pending!=0)return;failed=false;started=false;for(Runnable read:new ArrayList<>(reads))read.run();},RetryDelay.millis(failures++,Math.random()));
     }
+    void pause(){active=false;unwatch();}
+    void resume(){if(closed)return;active=true;watch();if(failed&&pending==0)queueRetry(generation);}
+    private void watch(){if(connectivity==null||network!=null)return;network=new android.net.ConnectivityManager.NetworkCallback(){@Override public void onAvailable(android.net.Network n){handler.post(()->{if(active&&failed&&pending==0){handler.removeCallbacksAndMessages(null);retryQueued=false;failed=false;started=false;for(Runnable read:new ArrayList<>(reads))read.run();}});}};try{connectivity.registerDefaultNetworkCallback(network);}catch(RuntimeException ignored){network=null;}}
+    private void unwatch(){if(network!=null){try{connectivity.unregisterNetworkCallback(network);}catch(RuntimeException ignored){}network=null;}}
     private void show(boolean success){title.setText(success?"重连成功":"API连接失败");int color=success?ThemePalette.readable(new int[]{MobileStyle.PANEL,MobileStyle.BACKGROUND},0xff285b32,4.5):ErrorModule.ink();title.setTextColor(color);close.setImageDrawable(AppIcons.get(banner.getContext(),"close",color));banner.setBackground(ErrorModule.background(banner.getContext(),success));close.setContentDescription(success?"关闭重连成功提示":"关闭API连接失败提示");banner.setVisibility(View.VISIBLE);}
-    void close(){closed=true;reads.clear();handler.removeCallbacksAndMessages(null);}
+    void close(){closed=true;unwatch();reads.clear();handler.removeCallbacksAndMessages(null);}
     static boolean isConnectionFailure(String reason){return java.util.Arrays.asList("无网络","请求超时","安全连接失败","无法连接服务器","服务器异常").contains(reason);}
 }

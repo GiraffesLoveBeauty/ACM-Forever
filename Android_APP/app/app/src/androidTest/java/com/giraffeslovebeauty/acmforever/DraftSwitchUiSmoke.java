@@ -32,11 +32,12 @@ final class DraftSwitchUiSmoke {
             }:null);
             prefs.edit().putString("api_base_url","https://draft-switch.test.invalid").putBoolean("auto_login",false).putBoolean("app_update_automatic",false).apply();
             api.setBaseUrl("https://draft-switch.test.invalid");api.setNetworkAvailable(()->true);api.login("90000001","Synthetic-Test!");
+            SharedPreferences.Editor clean=prefs.edit();for(String key:saved.keySet())if(key.startsWith("cloud_recovery_v021_"))clean.remove(key);clean.commit();
             activity=test.startActivitySync(new Intent().setClassName(context,MainActivity.class.getName()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK).putExtra("cloud_draft_id",11));opened.add(activity);
             await(()->body()!=null&&"Draft A original body".contentEquals(body().getText()),"draft A opened");
             Activity original=activity;EditText staleBody=body();
             Instrumentation.ActivityMonitor monitor=test.addMonitor(SpaceActivity.class.getName(),null,false);
-            click("云端草稿");Activity space=test.waitForMonitorWithTimeout(monitor,6000);test.removeMonitor(monitor);check(space!=null,"draft list Activity created");activity=space;opened.add(space);
+            click("云端草稿");Activity space=test.waitForMonitorWithTimeout(monitor,6000);test.removeMonitor(monitor);check(space!=null,"draft list Activity created; modal="+ModalDialogs.isShowing(activity)+" state="+app.drafts().state().status);activity=space;opened.add(space);
             await(()->description("云端草稿条目 22")!=null,"draft B in real list");
             monitor=test.addMonitor(MainActivity.class.getName(),null,false);
             main(()->{View card=description("云端草稿条目 22");View edit=walk(card,v->v instanceof Button&&"继续编辑".contentEquals(((Button)v).getText()));check(edit!=null,"draft B edit button");edit.performClick();});

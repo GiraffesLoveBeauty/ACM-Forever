@@ -364,6 +364,8 @@ def create_app(*, daily_problem_sync=False, member_sync=False):
 
     @app.after_request
     async def add_security_headers(response):
+        from .acm_api.read_transport import optimize_response
+        response = await optimize_response(response)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")

@@ -15,7 +15,7 @@ import java.util.concurrent.*;
 /** The five small training features share the process-owned API; no admin bridge. */
 public final class ClubActivity extends Activity {
     private final ExecutorService io=Executors.newSingleThreadExecutor();
-    private final ExecutorService previews=Executors.newSingleThreadExecutor();
+    private PageReads reads;
     private PageRefresh refresh;
     private ApiClient api;
     private SharedPreferences prefs;
@@ -24,7 +24,7 @@ public final class ClubActivity extends Activity {
     private final NavigationStack<Bundle> history=new NavigationStack<>();
     private int restoreY=-1;
     private String page="club", platform="", problem="", keyword="", tag="";
-    private int serial;
+    private volatile int serial;
     private boolean busy;
     private Button pendingSubmit;
     private static final String[] TAGS={"WA","TLE","输入格式","边界","复杂度","思路","其他"};
@@ -32,6 +32,7 @@ public final class ClubActivity extends Activity {
 
     @Override public void onCreate(Bundle state){
         super.onCreate(state);AppAppearance.load(this);AppAppearance.window(this);api=((AcmApplication)getApplication()).api();prefs=getSharedPreferences("acmforever_settings",MODE_PRIVATE);
+        reads=new PageReads(api);
         page=state==null?getIntent().getStringExtra("page"):state.getString("page");if(page==null)page="club";
         platform=state==null?getIntent().getStringExtra("platform"):state.getString("platform");problem=state==null?getIntent().getStringExtra("problem_id"):state.getString("problem");
         if(platform==null)platform="";if(problem==null)problem="";
@@ -44,8 +45,8 @@ public final class ClubActivity extends Activity {
     }
     @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putAll(snapshot());state.putParcelableArrayList("training_history",history.snapshot());}
     @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);if(busy)return;history.clear();restoreY=0;page=intent.getStringExtra("page");if(page==null)page="club";platform=intent.getStringExtra("platform");problem=intent.getStringExtra("problem_id");if(platform==null)platform="";if(problem==null)problem="";keyword="";tag="";render();}
-    @Override protected void onDestroy(){serial++;io.shutdownNow();previews.shutdownNow();refresh.close();ModalDialogs.close(this);super.onDestroy();}
-    @Override public void onBackPressed(){if(busy){notice("正在处理，请稍候。");return;}Bundle previous=history.pop();if(previous==null){finish();return;}PageMotion.change(this,false,()->{page=previous.getString("page","club");platform=previous.getString("platform","");problem=previous.getString("problem","");keyword=previous.getString("keyword","");tag=previous.getString("tag","");restoreY=previous.getInt("scroll",0);render();});}
+    @Override protected void onDestroy(){serial++;io.shutdown();reads.close();refresh.close();ModalDialogs.close(this);super.onDestroy();}
+    @Override public void onBackPressed(){Bundle previous=history.pop();if(previous==null){finish();return;}PageMotion.change(this,false,()->{page=previous.getString("page","club");platform=previous.getString("platform","");problem=previous.getString("problem","");keyword=previous.getString("keyword","");tag=previous.getString("tag","");restoreY=previous.getInt("scroll",0);render();});}
     private Bundle snapshot(){Bundle state=new Bundle();state.putString("page",page);state.putString("platform",platform);state.putString("problem",problem);state.putString("keyword",keyword);state.putString("tag",tag);state.putInt("scroll",scroll==null?0:scroll.getScrollY());return state;}
     private void go(String next){go(next,()->{});}
     private void go(String next,Runnable prepare){if(busy||page.equals(next))return;PageMotion.change(this,true,()->{history.push(snapshot());prepare.run();page=next;restoreY=0;render();});}
@@ -60,21 +61,21 @@ public final class ClubActivity extends Activity {
     private void restorePosition(){int y=restoreY>=0?restoreY:scroll.getScrollY();scroll.post(()->{scroll.scrollTo(0,y);restoreY=-1;});}
     private String date(long seconds){java.text.SimpleDateFormat f=new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm",java.util.Locale.CHINA);f.setTimeZone(java.util.TimeZone.getTimeZone("Asia/Shanghai"));return f.format(new java.util.Date(seconds*1000))+"（北京时间）";}
     private void task(Work work,java.util.function.Consumer<Object> done,LinearLayout slot){
-        if(busy)return;busy=true;int revision=serial;
-            io.execute(()->{try{Object result=work.run();runOnUiThread(()->{busy=false;if(pendingSubmit!=null)pendingSubmit.setEnabled(true);if(isDestroyed()||revision!=serial)return;slot.removeAllViews();try{done.accept(result);}catch(Exception e){error(slot,e);}});}catch(Exception e){runOnUiThread(()->{busy=false;if(pendingSubmit!=null)pendingSubmit.setEnabled(true);if(!isDestroyed()&&revision==serial)error(slot,e);});}});
+        if(busy)return;busy=true;int revision=serial;long owner=api.sessionGeneration();Button submitted=pendingSubmit;
+            io.execute(()->{try(ApiClient.OwnerScope ignored=api.bind(owner)){Object result=work.run();runOnUiThread(()->{busy=false;if(submitted!=null)submitted.setEnabled(true);if(isDestroyed()||revision!=serial||owner!=api.sessionGeneration())return;slot.removeAllViews();try{done.accept(result);}catch(Exception e){error(slot,e);}});}catch(Exception e){runOnUiThread(()->{busy=false;if(submitted!=null)submitted.setEnabled(true);if(!isDestroyed()&&revision==serial&&owner==api.sessionGeneration())error(slot,e);});}});
     }
     private void load(String path,java.util.function.Consumer<Object> done){
-        LinearLayout slot=card();slot.addView(new CodingCatView(this),new LinearLayout.LayoutParams(dp(160),dp(110)));text(slot,"正在加载…",14);int revision=serial,retained=content.getChildCount();
-        java.util.function.Consumer<Object> show=value->{if(isDestroyed()||revision!=serial)return;while(content.getChildCount()>retained)content.removeViewAt(retained);slot.setVisibility(android.view.View.GONE);try{done.accept(value);restorePosition();}catch(Exception e){error(slot,e);}};
+        LinearLayout slot=card();slot.addView(new CodingCatView(this),new LinearLayout.LayoutParams(dp(160),dp(110)));text(slot,"正在加载…",14);int revision=serial,retained=content.getChildCount();long owner=api.sessionGeneration();
+        java.util.function.Consumer<Object> show=value->{if(isDestroyed()||revision!=serial||owner!=api.sessionGeneration())return;while(content.getChildCount()>retained)content.removeViewAt(retained);slot.setVisibility(android.view.View.GONE);try{done.accept(value);restorePosition();}catch(Exception e){error(slot,e);}};
         Runnable request=()->{
-            if(isDestroyed()||revision!=serial)return;refresh.start(revision);
-            try{io.execute(()->{try{Object value=api.get(path);runOnUiThread(()->{if(!isDestroyed()&&revision==serial){show.accept(value);refresh.finish(revision);}});}catch(Exception e){runOnUiThread(()->{if(!isDestroyed()&&revision==serial){if(!refresh.failure(FailureState.title(e)))error(slot,e);refresh.finish(revision);}});}});}catch(RejectedExecutionException ignored){}
+            if(isDestroyed()||revision!=serial||owner!=api.sessionGeneration())return;refresh.start(revision);
+            reads.network(()->{if(revision!=serial)return;try(ApiClient.OwnerScope ignored=api.bind(owner)){Object value=api.get(path);runOnUiThread(()->{if(!isDestroyed()&&revision==serial&&owner==api.sessionGeneration()){show.accept(value);refresh.finish(revision);}});}catch(Exception e){runOnUiThread(()->{if(!isDestroyed()&&revision==serial&&owner==api.sessionGeneration()){if(!refresh.failure(FailureState.title(e)))error(slot,e);refresh.finish(revision);}});}});
         };
         refresh.register(revision,request);
-        previews.execute(()->{api.beginReplay();try{Object cached=api.get(path);runOnUiThread(()->{if(!isDestroyed()&&revision==serial){refresh.cached(revision);show.accept(cached);}});}catch(Exception ignored){}finally{api.endReplay();}runOnUiThread(request);});
+        reads.preview(()->{api.beginReplay();try(ApiClient.OwnerScope ignored=api.bind(owner)){Object cached=api.get(path);runOnUiThread(()->{if(!isDestroyed()&&revision==serial&&owner==api.sessionGeneration()){refresh.cached(revision);show.accept(cached);}});}catch(Exception ignored){}finally{api.endReplay();}runOnUiThread(request);});
     }
     private JSONArray rows(Object value){if(!(value instanceof JSONArray))throw new ClassCastException("数据格式异常");return (JSONArray)value;}
-    private void render(){serial++;refresh.reset(serial);refresh.userAction();content.removeAllViews();TextView marker=text(content,"ACMforever / TRAINING",11);marker.setLetterSpacing(.10f);text(content,pageTitle(),25);
+    private void render(){serial++;reads.cancel();refresh.reset(serial);refresh.userAction();content.removeAllViews();TextView marker=text(content,"ACMforever / TRAINING",11);marker.setLetterSpacing(.10f);text(content,pageTitle(),25);
         if(!page.equals("club")&&!page.equals("templates")&&!api.isLoggedIn()){text(card(),"未登录：请返回顶部头像进入账号设置登录。",16);return;}
         switch(page){case "sheets":sheets();break;case "discussions":discussions();break;case "mistakes":mistakes();break;case "reviews":reviews();break;case "templates":templates();break;case "checkin":checkin();break;default:menu();restorePosition();}
     }
@@ -134,7 +135,8 @@ public final class ClubActivity extends Activity {
         if(grants.length>0&&grants[0]==android.content.pm.PackageManager.PERMISSION_GRANTED)enableReminder(true);
         else{TrainingReminder.disable(this);refreshReminder();notice("未获得通知权限，提醒未启用；可在系统通知设置中允许后重新勾选。");}
     }
-    @Override protected void onResume(){super.onResume();openingWiki=false;if(prefs!=null)refreshReminder();}
+    @Override protected void onResume(){super.onResume();openingWiki=false;if(refresh!=null)refresh.resume();if(prefs!=null)refreshReminder();}
+    @Override protected void onPause(){if(refresh!=null)refresh.pause();super.onPause();}
     private void pickReminderTime(){
         LinearLayout form=new SpacedLayout(this);form.setOrientation(LinearLayout.VERTICAL);
         text(form,"本机时间 · "+java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(new java.util.Date())+" · "+java.util.TimeZone.getDefault().getDisplayName(),13);

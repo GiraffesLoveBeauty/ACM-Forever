@@ -21,6 +21,25 @@ import java.util.Map;
 
 /** Calls the existing Web session API. No /internal/v1 token is used by the app. */
 final class ApiClient {
+    private final Object stateLock=new Object();
+    private final ReadRequests reads=new ReadRequests();
+    private final ThreadLocal<ReadRequests.Scope> readScope=new ThreadLocal<>();
+    private final ThreadLocal<Snapshot> bound=new ThreadLocal<>();
+    private long cacheRevision;
+    private static final class Snapshot {
+        final String base,csrf;final long generation;
+        Snapshot(String base,String csrf,long generation){this.base=base;this.csrf=csrf;this.generation=generation;}
+    }
+    final class OwnerScope implements AutoCloseable {
+        final Snapshot previous;
+        OwnerScope(long expected)throws Exception{previous=bound.get();synchronized(stateLock){if(expected!=sessionGeneration)throw new ApiException(401,"登录账号已切换",false);bound.set(new Snapshot(baseUrl,csrfToken,sessionGeneration));}}
+        public void close(){if(previous==null)bound.remove();else bound.set(previous);}
+    }
+    OwnerScope bind(long owner)throws Exception{return new OwnerScope(owner);}
+    void readIn(ReadRequests.Scope scope,Runnable work)throws java.io.InterruptedIOException{scope.check();readScope.set(scope);try{work.run();}finally{readScope.remove();}}
+    private Snapshot snapshot()throws Exception{synchronized(stateLock){Snapshot b=bound.get();if(b!=null)requireCurrent(b);return new Snapshot(baseUrl,csrfToken,sessionGeneration);}}
+    private void requireCurrent(Snapshot owner)throws ApiException{if(owner.generation!=sessionGeneration||!owner.base.equals(baseUrl))throw new ApiException(401,"登录账号已切换",false);}
+    private void attachCookies(HttpURLConnection connection,URI uri,Snapshot owner)throws Exception{synchronized(stateLock){requireCurrent(owner);for(Map.Entry<String,List<String>> header:cookies.get(uri,Collections.emptyMap()).entrySet())if(header.getKey()!=null)connection.setRequestProperty(header.getKey(),String.join("; ",header.getValue()));}}
     private final CookieManager cookies = new CookieManager(null, CookiePolicy.ACCEPT_ORIGINAL_SERVER);
     private volatile String baseUrl = "";
     private volatile String csrfToken = "";
@@ -55,7 +74,7 @@ final class ApiClient {
     void setSessionChanged(Runnable listener) { sessionChanged = listener; }
     void setLoggedOut(Runnable listener) { loggedOut = listener; }
 
-    synchronized String exportSession() throws Exception {
+    String exportSession() throws Exception {synchronized(stateLock){
         if (!isLoggedIn()) return "";
         JSONArray items = new JSONArray();
         long now = System.currentTimeMillis();
@@ -70,9 +89,9 @@ final class ApiClient {
                     .put("expires", expires));
         }
         return items.length() == 0 ? "" : new JSONObject().put("origin", baseUrl).put("cookies", items).toString();
-    }
+    }}
 
-    boolean restoreSession(String value) throws Exception {
+    boolean restoreSession(String value) throws Exception {synchronized(stateLock){
         if (value.isEmpty()) return false;
         JSONObject saved = new JSONObject(value);
         if (!baseUrl.equals(saved.getString("origin"))) return false;
@@ -87,7 +106,7 @@ final class ApiClient {
             cookies.getCookieStore().add(URI.create(baseUrl), cookie);
         }
         return !cookies.getCookieStore().getCookies().isEmpty();
-    }
+    }}
     private java.util.function.BooleanSupplier networkAvailable = () -> true;
 
     void setNetworkAvailable(java.util.function.BooleanSupplier check) { networkAvailable = check; }
@@ -101,17 +120,17 @@ final class ApiClient {
     }
 
     /** Called on a storage worker, never on the UI thread. */
-    synchronized long cachedDataBytes() {
+    long cachedDataBytes() {synchronized(stateLock){
         long bytes = responses.byteSize() + readFailures.byteSize();
         for (Media item : media.values()) bytes += item.bytes.length;
         synchronized (avatarCache) {
             for (android.graphics.Bitmap bitmap : avatarCache.values()) if (!bitmap.isRecycled()) bytes += bitmap.getAllocationByteCount();
         }
         return bytes;
-    }
-    synchronized void clearReadCaches() {
-        responses.clear(); readFailures.clear(); avatarCache.clear(); media.clear();
-    }
+    }}
+    void clearReadCaches() {synchronized(stateLock){
+        responses.clear();validators.clear();cacheRevision++; readFailures.clear(); avatarCache.clear(); media.clear();
+    }}
 
     static final class UnconfiguredException extends IllegalStateException {
         UnconfiguredException() { super("未配置服务器"); }
@@ -146,7 +165,7 @@ final class ApiClient {
         }
     }
 
-    synchronized void setBaseUrl(String value) {
+    void setBaseUrl(String value) {synchronized(stateLock){
         String checked = checkedBaseUrl(value);
         if (!checked.equals(baseUrl)) {
             ++sessionGeneration;
@@ -159,13 +178,13 @@ final class ApiClient {
             mobileFeatures = null;
             mobileCheckedAt = 0;
             baseUrl = checked;
-            responses.clear();
+            responses.clear();validators.clear();cacheRevision++;
             readFailures.clear();
-            avatarCache.clear();
+            avatarCache.clear();currentAvatar="";
             media.clear();
             sessionChanged.run();
         }
-    }
+    }}
 
     boolean isUnconfigured() {
         return baseUrl.isEmpty();
@@ -183,9 +202,11 @@ final class ApiClient {
     boolean isAdministrator() { return isLoggedIn() && ("admin".equals(role) || "root".equals(role)); }
     boolean isRoot() { return isLoggedIn() && "root".equals(role); }
 
-    synchronized JSONObject refreshSession() throws Exception {
+    JSONObject refreshSession() throws Exception {
         if(isReplay())return new JSONObject();
+        Snapshot owner=snapshot();
         JSONObject result = getObject("/api/auth/me");
+        synchronized(stateLock){requireCurrent(owner);
         if (!result.optBoolean("authenticated")) {
             clearSession();
             throw new ApiException(401, "登录已失效，请重新登录。", false);
@@ -197,7 +218,7 @@ final class ApiClient {
         mustChangePassword = result.optBoolean("must_change_password");
         sessionChanged.run();
         if (mustChangePassword) throw new IllegalStateException("请先修改初始密码。");
-        return result;
+        return result;}
     }
 
     String getBaseUrl() {
@@ -206,20 +227,21 @@ final class ApiClient {
 
     boolean supportsMobile(String feature) throws Exception {
         if(!isReplay())checkConnection();
+        Snapshot featureOwner=snapshot();
         if (mobileFeatures == null || System.currentTimeMillis() - mobileCheckedAt >= 60000) {
             try {
                 JSONObject result = getObject("/api/mobile/v1/capabilities");
                 JSONObject features = result.optJSONObject("features");
                 if (result.optInt("api_version") != 1 || features == null)
                     throw new IllegalStateException("移动端 API 能力响应格式或版本不支持。");
-                mobileFeatures = features;
+                synchronized(stateLock){requireCurrent(featureOwner);mobileFeatures = features;}
             } catch (ApiException e) {
                 if (e.status != 404 && e.status != 405) throw e;
-                mobileFeatures = new JSONObject();
+                synchronized(stateLock){requireCurrent(featureOwner);mobileFeatures = new JSONObject();}
             }
-            mobileCheckedAt = System.currentTimeMillis();
+            synchronized(stateLock){requireCurrent(featureOwner);mobileCheckedAt = System.currentTimeMillis();}
         }
-        return mobileFeatures.optBoolean(feature);
+        synchronized(stateLock){requireCurrent(featureOwner);return mobileFeatures!=null&&mobileFeatures.optBoolean(feature);}
     }
 
     String publicPostsPath(String suffix) throws Exception {
@@ -274,7 +296,8 @@ final class ApiClient {
 
     Object get(String path) throws Exception {
         String key=cacheKey(path);Replay state=replay.get();
-        boolean cacheable=!path.startsWith("/api/auth/")&&!path.contains("account-closure");
+        long revision; synchronized(stateLock){revision=cacheRevision;}
+        boolean cacheable=!path.startsWith("/api/auth/")&&!path.startsWith("/api/admin/")&&!path.contains("account-closure");
         if(state!=null){
             Object cached=cacheable?responses.get(key):null;
             if(cached!=null){state.hits++;return cached;}
@@ -283,12 +306,15 @@ final class ApiClient {
             state.missed=true;throw new CacheMissException();
         }
         try{
-            Object result=request("GET",path,null);
-            if(key.equals(cacheKey(path))&&cacheable){responses.put(key,result);readFailures.remove(key);}
+            ReadRequests.Scope scope=readScope.get();if(scope==null)scope=new ReadRequests.Scope();
+            Snapshot owner=snapshot();
+            String value=reads.run(key+"\n"+revision,scope,()->{try(OwnerScope ignored=bind(owner.generation)){return request("GET",path,null).toString();}});
+            Object result=new JSONTokener(value).nextValue();
+            synchronized(stateLock){requireCurrent(owner);if(revision==cacheRevision&&key.equals(cacheKey(path))&&cacheable&&!path.startsWith("/api/admin/")){responses.put(key,result);readFailures.remove(key);}}
             return result;
         }catch(ApiException e){
             if(e.status>=500)readIssue.set(e);
-            if(cacheable&&key.equals(cacheKey(path))&&(e.status==403||e.status==404||e.status==405||e.status==410))
+            if(cacheable&&revision==cacheRevision&&key.equals(cacheKey(path))&&(e.status==403||e.status==404||e.status==405||e.status==410))
                 readFailures.put(key,new JSONObject().put("status",e.status).put("message",e.getMessage()).put("missing",e.missingContent));
             throw e;
         }catch(Exception e){
@@ -313,11 +339,13 @@ final class ApiClient {
         clearSession();
         JSONObject body = new JSONObject().put("username", identifier).put("password", password);
         if (identifier.matches("[0-9]{4,12}")) body.put("qq_id", identifier);
-        try {
+        long owner=sessionGeneration;
+        try (OwnerScope ignored=bind(owner)) {
             request("POST", "/api/auth/login", body);
             JSONObject session = getObject("/api/auth/me");
             if (!session.optBoolean("authenticated") || session.optString("csrf_token", "").isEmpty())
                 throw new org.json.JSONException("服务器未确认登录会话");
+            synchronized(stateLock){requireCurrent(snapshot());
             csrfToken = session.getString("csrf_token");
             ++sessionGeneration;
             mustChangePassword = session.optBoolean("must_change_password");
@@ -325,28 +353,28 @@ final class ApiClient {
             memberAccount = session.optString("qq_id", identifier);
             accountEpoch = session.optLong("account_epoch", 1);
             sessionChanged.run();
-            return session;
-        } catch (Exception e) { clearSession(); throw e; }
+            return session;}
+        } catch (Exception e) { synchronized(stateLock){if(owner==sessionGeneration)clearSession();} throw e; }
     }
 
-    private void clearSession() {
+    private void clearSession() {synchronized(stateLock){
         ++sessionGeneration;
         media.clear();
         avatarCache.clear();currentAvatar="";
-        responses.clear();
+        responses.clear();validators.clear();cacheRevision++;
         readFailures.clear();
         csrfToken = ""; mustChangePassword = false; role = ""; memberAccount = ""; accountEpoch = 0;
         cookies.getCookieStore().removeAll();
         cookieExpiry.clear();
         sessionChanged.run();
-    }
+    }}
 
     synchronized void logout() throws Exception {
-        try {
+        long owner=sessionGeneration;try (OwnerScope ignored=bind(owner)) {
             if (!csrfToken.isEmpty()) request("POST", "/api/auth/logout", new JSONObject());
         } finally {
-            try { clearSession(); }
-            finally { loggedOut.run(); }
+            synchronized(stateLock){if(owner==sessionGeneration){try { clearSession(); }
+            finally { loggedOut.run(); }}}
         }
     }
 
@@ -384,20 +412,19 @@ final class ApiClient {
 
     synchronized JSONObject saveDraftBound(long expected, int id, int category, String title, String body,int version) throws Exception {
         if(expected!=sessionGeneration || !isLoggedIn())throw new IllegalStateException("登录账号已切换，草稿保存已取消");
-        return saveDraft(id,category,title,body,version);
+        try(OwnerScope ignored=bind(expected)){return saveDraft(id,category,title,body,version);}
     }
 
-    synchronized void downloadPdf(String platform,String problemId,java.io.File file) throws Exception {
+    void downloadPdf(String platform,String problemId,java.io.File file) throws Exception {
         checkConnection();
-        URI uri=URI.create(baseUrl+problemPath(platform,problemId)+"/statement.pdf");
+        Snapshot owner=snapshot();URI uri=URI.create(owner.base+problemPath(platform,problemId)+"/statement.pdf");
         HttpURLConnection connection=(HttpURLConnection)uri.toURL().openConnection();
         connection.setConnectTimeout(10000);connection.setReadTimeout(30000);connection.setInstanceFollowRedirects(false);
         connection.setRequestProperty("Accept","application/pdf");
-        for(Map.Entry<String,List<String>> header:cookies.get(uri,Collections.emptyMap()).entrySet())
-            if(header.getKey()!=null)connection.setRequestProperty(header.getKey(),String.join("; ",header.getValue()));
+        attachCookies(connection,uri,owner);
         try {
             int code=connection.getResponseCode();
-            if(code!=200){readResult(connection,uri);throw new java.io.IOException("PDF 接口响应异常");}
+            if(code!=200){readResult(connection,uri,owner);throw new java.io.IOException("PDF 接口响应异常");}
             if(connection.getContentLengthLong()>32L*1024*1024)throw new java.io.IOException("PDF 超过32 MB，请使用网页阅读");
             try(InputStream input=connection.getInputStream();java.io.FileOutputStream output=new java.io.FileOutputStream(file)){
                 byte[] buffer=new byte[8192];int count,total=0;
@@ -412,7 +439,7 @@ final class ApiClient {
     synchronized JSONObject submitDraft(long expected,int draftId,int version) throws Exception {
         if(expected!=sessionGeneration||!isLoggedIn())throw new IllegalStateException("登录账号已切换，提交已取消");
         JSONObject payload=new JSONObject();if(version>0)payload.put("edit_version",version);
-        return writeObject("POST", "/api/forum/drafts/" + draftId + "/submit",payload);
+        try(OwnerScope ignored=bind(expected)){return writeObject("POST", "/api/forum/drafts/" + draftId + "/submit",payload);}
     }
 
     JSONObject deleteDraft(int draftId) throws Exception {
@@ -442,7 +469,7 @@ final class ApiClient {
         if (!isAdministrator() || requiresPasswordChange()) throw new ApiException(403, "无访问权限", false);
         if (path.equals("/api/auth/me")) return refreshSession();
         if (path.equals("/api/auth/logout")) { logout(); return new JSONObject().put("success", true); }
-        return request(method, path, "GET".equals(method) ? null : body == null ? new JSONObject() : body);
+        return "GET".equals(method)?get(path):request(method,path,body==null?new JSONObject():body);
     }
 
     synchronized Object publishTraining(long task,JSONObject payload,String key)throws Exception{
@@ -454,8 +481,8 @@ final class ApiClient {
 
     JSONObject changePassword(String oldPassword, String newPassword) throws Exception {
         JSONObject body = new JSONObject().put("old_password", oldPassword).put("new_password", newPassword);
-        JSONObject result = (JSONObject) request("POST", "/api/auth/change-password", body);
-        mustChangePassword = false;
+        Snapshot owner=snapshot();JSONObject result = (JSONObject) request("POST", "/api/auth/change-password", body);
+        synchronized(stateLock){requireCurrent(owner);mustChangePassword = false;}
         return result;
     }
 
@@ -466,7 +493,7 @@ final class ApiClient {
     android.graphics.Bitmap cachedAvatarBitmap(String path){return avatarCache.get(baseUrl+"/"+path);}
 
     android.graphics.Bitmap avatarBitmap(String path) throws Exception {
-        String base = baseUrl;
+        Snapshot owner=snapshot();String base = owner.base;
         String key=base+"/"+path;android.graphics.Bitmap cached=avatarCache.get(key);if(cached!=null)return cached;
         if (base.isEmpty() || path == null || !(path.startsWith("/uploads/avatars/") || path.equals("/assets/default-avatar.png"))) return null;
         URI address = URI.create(base).resolve(path);
@@ -490,7 +517,7 @@ final class ApiClient {
                 options.inSampleSize = 1;
                 while (Math.max(options.outWidth, options.outHeight) / options.inSampleSize > 256) options.inSampleSize *= 2;
                 options.inJustDecodeBounds = false;
-                android.graphics.Bitmap image=android.graphics.BitmapFactory.decodeByteArray(bytes,0,bytes.length,options);if(image!=null&&base.equals(baseUrl))avatarCache.put(key,image);return image;
+                android.graphics.Bitmap image=android.graphics.BitmapFactory.decodeByteArray(bytes,0,bytes.length,options);synchronized(stateLock){requireCurrent(owner);String policy=connection.getHeaderField("Cache-Control");if(image!=null&&(policy==null||!policy.toLowerCase(java.util.Locale.ROOT).contains("no-store")))avatarCache.put(key,image);}return image;
             }
         } finally { connection.disconnect(); }
     }
@@ -498,12 +525,12 @@ final class ApiClient {
     synchronized JSONObject uploadForumImage(long expected,byte[] image)throws Exception{
         if(expected!=sessionGeneration||!isLoggedIn())throw new IllegalStateException("登录账号已切换，上传已取消");checkConnection();
         if(image.length==0||image.length>5*1024*1024)throw new IllegalArgumentException("上传图片不能超过 5 MB");
-        String boundary="acmforum"+java.util.UUID.randomUUID().toString().replace("-","");URI uri=URI.create(baseUrl+"/api/forum/images");HttpURLConnection connection=(HttpURLConnection)uri.toURL().openConnection();
-        connection.setRequestMethod("POST");connection.setConnectTimeout(10000);connection.setReadTimeout(60000);connection.setInstanceFollowRedirects(false);connection.setDoOutput(true);connection.setRequestProperty("X-CSRF-Token",csrfToken);connection.setRequestProperty("Content-Type","multipart/form-data; boundary="+boundary);
-        for(Map.Entry<String,List<String>> header:cookies.get(uri,Collections.emptyMap()).entrySet())if(header.getKey()!=null)connection.setRequestProperty(header.getKey(),String.join("; ",header.getValue()));
-        try{try(OutputStream out=connection.getOutputStream()){out.write(("--"+boundary+"\r\nContent-Disposition: form-data; name=\"image\"; filename=\"image.webp\"\r\nContent-Type: image/webp\r\n\r\n").getBytes(StandardCharsets.UTF_8));out.write(image);out.write(("\r\n--"+boundary+"--\r\n").getBytes(StandardCharsets.UTF_8));}JSONObject result=(JSONObject)readResult(connection,uri);ForumImages.markdown(result.getString("url"));return result;}finally{connection.disconnect();}
+        Snapshot owner=snapshot();String boundary="acmforum"+java.util.UUID.randomUUID().toString().replace("-","");URI uri=URI.create(owner.base+"/api/forum/images");HttpURLConnection connection=(HttpURLConnection)uri.toURL().openConnection();
+        connection.setRequestMethod("POST");connection.setConnectTimeout(10000);connection.setReadTimeout(60000);connection.setInstanceFollowRedirects(false);connection.setDoOutput(true);connection.setRequestProperty("X-CSRF-Token",owner.csrf);connection.setRequestProperty("Content-Type","multipart/form-data; boundary="+boundary);
+        attachCookies(connection,uri,owner);
+        try{try(OutputStream out=connection.getOutputStream()){out.write(("--"+boundary+"\r\nContent-Disposition: form-data; name=\"image\"; filename=\"image.webp\"\r\nContent-Type: image/webp\r\n\r\n").getBytes(StandardCharsets.UTF_8));out.write(image);out.write(("\r\n--"+boundary+"--\r\n").getBytes(StandardCharsets.UTF_8));}JSONObject result=(JSONObject)readResult(connection,uri,owner);ForumImages.markdown(result.getString("url"));return result;}finally{connection.disconnect();}
     }
-    JSONObject uploadAvatar(byte[] image, String mimeType) throws Exception {
+    synchronized JSONObject uploadAvatar(byte[] image, String mimeType) throws Exception {
         checkConnection();
         if (csrfToken.isEmpty()) throw new IllegalStateException("请先登录再上传头像。");
         if (image.length == 0 || image.length > 2 * 1024 * 1024)
@@ -511,8 +538,8 @@ final class ApiClient {
         if (!"image/png".equals(mimeType) && !"image/jpeg".equals(mimeType)
                 && !"image/webp".equals(mimeType))
             throw new IllegalArgumentException("请选择 PNG、JPEG 或 WebP 图片。");
-        String boundary = "acmforever" + System.currentTimeMillis();
-        URL url = new URL(baseUrl + "/api/me/avatar");
+        Snapshot owner=snapshot();String boundary = "acmforever" + System.currentTimeMillis();
+        URL url = new URL(owner.base + "/api/me/avatar");
         URI uri = url.toURI();
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setRequestMethod("POST");
@@ -521,10 +548,9 @@ final class ApiClient {
         connection.setInstanceFollowRedirects(false);
         connection.setDoOutput(true);
         connection.setRequestProperty("Accept", "application/json");
-        connection.setRequestProperty("X-CSRF-Token", csrfToken);
+        connection.setRequestProperty("X-CSRF-Token", owner.csrf);
         connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
-        for (Map.Entry<String, List<String>> header : cookies.get(uri, Collections.emptyMap()).entrySet())
-            if (header.getKey() != null) connection.setRequestProperty(header.getKey(), String.join("; ", header.getValue()));
+        attachCookies(connection,uri,owner);
         String extension = "image/png".equals(mimeType) ? "png" : "image/webp".equals(mimeType) ? "webp" : "jpg";
         try {
             try (OutputStream out = connection.getOutputStream()) {
@@ -533,13 +559,12 @@ final class ApiClient {
                 out.write(image);
                 out.write(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
             }
-            return (JSONObject) readResult(connection, uri);
+            return (JSONObject) readResult(connection, uri,owner);
         } finally { connection.disconnect(); }
     }
 
-    synchronized JSONObject closurePreview(long owner) throws Exception {
-        requireClosureOwner(owner);
-        return (JSONObject) request("GET", "/api/me/account-closure/preview", null);
+    JSONObject closurePreview(long owner) throws Exception {
+        try(OwnerScope ignored=bind(owner)){requireClosureOwner(owner);return getObject("/api/me/account-closure/preview");}
     }
     synchronized JSONObject closeAccount(long owner, AccountClosure.Ticket ticket, JSONObject body) throws Exception {
         requireClosureOwner(owner);
@@ -553,14 +578,14 @@ final class ApiClient {
     private void requireClosureOwner(long owner) {
         if (owner != sessionGeneration || !isLoggedIn()) throw new IllegalStateException("登录账号已切换，请返回重新登录。");
     }
-    synchronized boolean forgetClosedAccount(AccountClosure.Ticket ticket) {
+    boolean forgetClosedAccount(AccountClosure.Ticket ticket) {synchronized(stateLock){
         if (!ticket.origin.equals(baseUrl)) return false;
         if (isLoggedIn()) {
             if (!ticket.account.equals(memberAccount) || ticket.epoch != accountEpoch) return false;
             clearSession(); loggedOut.run();
         }
         return true;
-    }
+    }}
     /** Receipt credentials are narrowly scoped: never attach normal cookies/CSRF or accept Set-Cookie. */
     JSONObject closureReceipt(AccountClosure.Ticket ticket) throws Exception {
         if (!networkAvailable.getAsBoolean()) throw new NoNetworkException();
@@ -570,14 +595,18 @@ final class ApiClient {
         connection.setRequestProperty("X-Closure-Receipt", ticket.token);
         try { return (JSONObject) readResult(connection, null); } finally { connection.disconnect(); }
     }
-    private synchronized Object request(String method, String path, JSONObject body) throws Exception {
-        return request(method, path, body, Collections.emptyMap());
-    }
+    private Object request(String method,String path,JSONObject body)throws Exception{return request(method,path,body,Collections.emptyMap());}
     private Object request(String method, String path, JSONObject body, Map<String,String> extraHeaders) throws Exception {
+        Snapshot expected=snapshot();
+        if(!"GET".equals(method)){synchronized(this){try(OwnerScope ignored=bind(expected.generation)){return performRequest(method,path,body,extraHeaders);}}}
+        return performRequest(method,path,body,extraHeaders);
+    }
+    private Object performRequest(String method,String path,JSONObject body,Map<String,String> extraHeaders)throws Exception{
         if(isReplay())throw new CacheMissException(); // Preview work can never perform a write or network request.
         checkConnection();
         if (!path.startsWith("/api/")) throw new IllegalArgumentException("只能调用现有 /api/* 接口。");
-        URL url = new URL(baseUrl + path);
+        Snapshot owner=snapshot();
+        URL url = new URL(owner.base + path);
         URI uri = url.toURI();
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setRequestMethod(method);
@@ -588,21 +617,27 @@ final class ApiClient {
         connection.setRequestProperty("Accept", "application/json");
         for (Map.Entry<String,String> extra : extraHeaders.entrySet()) connection.setRequestProperty(extra.getKey(), extra.getValue());
         if (path.contains("account-closure")) connection.setRequestProperty("Cache-Control", "no-store");
-        for (Map.Entry<String, List<String>> header : cookies.get(uri, Collections.emptyMap()).entrySet()) {
-            if (header.getKey() != null) connection.setRequestProperty(header.getKey(), String.join("; ", header.getValue()));
-        }
+        attachCookies(connection,uri,owner);
+        if("GET".equals(method))reads.connection(connection::disconnect);
+        Validator validator; synchronized(stateLock){validator=validators.get(cacheKey(path));}
+        if("GET".equals(method)&&validator!=null&&validatorAllowed(path))connection.setRequestProperty("If-None-Match",validator.etag);
         try {
         if (body != null) {
             connection.setDoOutput(true);
             connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-            if (!csrfToken.isEmpty() && !path.equals("/api/auth/login")) connection.setRequestProperty("X-CSRF-Token", csrfToken);
+            if (!owner.csrf.isEmpty() && !path.equals("/api/auth/login")) connection.setRequestProperty("X-CSRF-Token", owner.csrf);
             byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
             try (OutputStream out = connection.getOutputStream()) { out.write(bytes); }
         }
-            Object result=readResult(connection,uri);
-            if(!"GET".equals(method)){
-                if(path.startsWith("/api/forum/drafts")){responses.removeContaining("/api/forum/drafts");readFailures.removeContaining("/api/forum/drafts");}
-                else {responses.clear();readFailures.clear();}
+            Object result;
+            if(connection.getResponseCode()==304&&validator!=null){synchronized(stateLock){requireCurrent(owner);}result=new JSONTokener(validator.body).nextValue();}
+            else result=readResult(connection,uri,owner);
+            synchronized(stateLock){requireCurrent(owner);
+                if("GET".equals(method)&&validatorAllowed(path)){
+                    String control=connection.getHeaderField("Cache-Control"),etag=connection.getHeaderField("ETag");
+                    if(connection.getResponseCode()!=304){validators.remove(cacheKey(path));if(control!=null&&!control.toLowerCase(java.util.Locale.ROOT).contains("no-store")&&etag!=null){validators.put(cacheKey(path),new Validator(etag,result.toString()));while(validators.size()>16||validatorCharacters()>2*1024*1024)validators.remove(validators.keySet().iterator().next());}}
+                }
+                if(!"GET".equals(method)){cacheRevision++;for(String prefix:ReadInvalidation.paths(path)){responses.removeContaining(prefix);readFailures.removeContaining(prefix);}if(path.contains("avatar")){avatarCache.clear();currentAvatar="";}}
             }
             return result;
         } finally {
@@ -610,25 +645,29 @@ final class ApiClient {
         }
     }
 
+    private static final class Validator {final String etag,body;Validator(String etag,String body){this.etag=etag;this.body=body;}}
+    private final java.util.LinkedHashMap<String,Validator> validators=new java.util.LinkedHashMap<>();
+    private int validatorCharacters(){int total=0;for(Validator v:validators.values())total+=v.body.length();return total;}
+    private static boolean validatorAllowed(String path){String p=path.split("\\?",2)[0];return p.equals("/api/mobile/v1/capabilities")||p.startsWith("/api/wiki/");}
     static final class Media {final byte[] bytes;final String mime;Media(byte[] bytes,String mime){this.bytes=bytes;this.mime=mime;}}
     private final java.util.LinkedHashMap<String,Media> media=new java.util.LinkedHashMap<>(8,.75f,true);
-    synchronized void discardCommunityMedia(String address){media.remove(baseUrl+"/"+sessionGeneration+"/"+address);}
-    String communityImageUrl(String address){try{String resolved=new URI(baseUrl+"/").resolve(address).toString();return isCommunityMedia(resolved)?resolved:"";}catch(Exception ignored){return "";}}
+    void discardCommunityMedia(String address){synchronized(stateLock){media.remove(baseUrl+"/"+sessionGeneration+"/"+address);}}
+    String communityImageUrl(String address){synchronized(stateLock){try{String resolved=new URI(baseUrl+"/").resolve(address).toString();return isCommunityMedia(resolved)?resolved:"";}catch(Exception ignored){return "";}}}
     boolean isCommunityMedia(String address){try{URI uri=new URI(address),base=new URI(baseUrl);String path=uri.getRawPath(),query=uri.getRawQuery();return "https".equals(uri.getScheme())&&java.util.Objects.equals(uri.getHost(),base.getHost())&&(uri.getPort()<0?443:uri.getPort())==(base.getPort()<0?443:base.getPort())&&uri.getUserInfo()==null&&uri.getFragment()==null&&path!=null&&path.matches("/api/forum/images/[a-f0-9]{32}")&&(query==null||"variant=thumb".equals(query));}catch(Exception ignored){return false;}}
-    synchronized Media communityMedia(String address)throws Exception{
-        if(!isCommunityMedia(address))throw new IllegalArgumentException("图片地址不属于当前社区");String key=baseUrl+"/"+sessionGeneration+"/"+address;
-        Media cached=media.get(key);if(cached!=null)return cached;checkConnection();URL url=new URL(address);HttpURLConnection connection=(HttpURLConnection)url.openConnection();connection.setInstanceFollowRedirects(false);connection.setConnectTimeout(10000);connection.setReadTimeout(10000);
-        for(Map.Entry<String,List<String>> header:cookies.get(url.toURI(),Collections.emptyMap()).entrySet())if(header.getKey()!=null)connection.setRequestProperty(header.getKey(),String.join("; ",header.getValue()));
+    Media communityMedia(String address)throws Exception{
+        Snapshot owner=snapshot();if(!isCommunityMedia(address))throw new IllegalArgumentException("图片地址不属于当前社区");String key=owner.base+"/"+owner.generation+"/"+address;
+        synchronized(stateLock){Media cached=media.get(key);if(cached!=null)return cached;}checkConnection();URL url=new URL(address);HttpURLConnection connection=(HttpURLConnection)url.openConnection();connection.setInstanceFollowRedirects(false);connection.setConnectTimeout(10000);connection.setReadTimeout(10000);
+        attachCookies(connection,url.toURI(),owner);
         try{int status=connection.getResponseCode();if(status!=200)throw new ApiException(status,"图片读取失败",status==404);String mime=connection.getContentType();if(mime==null)throw new MediaFormatException("图片缺少格式");mime=mime.split(";",2)[0].trim().toLowerCase(java.util.Locale.ROOT);if(!java.util.Arrays.asList("image/png","image/jpeg","image/webp","image/gif").contains(mime))throw new MediaFormatException("不支持的图片格式");
             java.io.ByteArrayOutputStream bytes=new java.io.ByteArrayOutputStream();try(InputStream in=connection.getInputStream()){byte[] buffer=new byte[8192];int count;while((count=in.read(buffer))!=-1){if(bytes.size()+count>8*1024*1024)throw new MediaFormatException("图片超过 8 MB");bytes.write(buffer,0,count);}}
-            Media result=new Media(bytes.toByteArray(),mime);media.put(key,result);int total=0;for(Media item:media.values())total+=item.bytes.length;java.util.Iterator<Media> oldest=media.values().iterator();while((total>16*1024*1024||media.size()>8)&&oldest.hasNext()){Media item=oldest.next();total-=item.bytes.length;oldest.remove();}return result;
+            Media result=new Media(bytes.toByteArray(),mime);synchronized(stateLock){requireCurrent(owner);String policy=connection.getHeaderField("Cache-Control");if(policy!=null&&policy.toLowerCase(java.util.Locale.ROOT).contains("no-store"))return result;media.put(key,result);int total=0;for(Media item:media.values())total+=item.bytes.length;java.util.Iterator<Media> oldest=media.values().iterator();while((total>16*1024*1024||media.size()>8)&&oldest.hasNext()){Media item=oldest.next();total-=item.bytes.length;oldest.remove();}return result;}
         }finally{connection.disconnect();}
     }
 
-    private Object readResult(HttpURLConnection connection, URI uri) throws Exception {
+    private Object readResult(HttpURLConnection connection,URI uri)throws Exception{return readResult(connection,uri,uri==null?null:snapshot());}
+    private Object readResult(HttpURLConnection connection, URI uri,Snapshot owner) throws Exception {
             int status = connection.getResponseCode();
-            if (uri != null) cookies.put(uri, connection.getHeaderFields());
-            if (uri != null && isLoggedIn() && connection.getHeaderFields().keySet().stream().anyMatch(k -> "Set-Cookie".equalsIgnoreCase(k))) sessionChanged.run();
+
             InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
             StringBuilder text = new StringBuilder();
             if (stream != null) {
@@ -637,6 +676,10 @@ final class ApiClient {
                     while ((line = reader.readLine()) != null) text.append(line);
                 }
             }
+            Object parsed=null;
+            if(status>=200&&status<300)parsed=new JSONTokener(text.toString()).nextValue();
+            synchronized(stateLock){
+            if(owner!=null){requireCurrent(owner);cookies.put(uri,connection.getHeaderFields());if(isLoggedIn()&&connection.getHeaderFields().keySet().stream().anyMatch(k->"Set-Cookie".equalsIgnoreCase(k)))sessionChanged.run();}
             if (status < 200 || status >= 300) {
                 String message = "接口返回 HTTP " + status;
                 JSONObject details = null;
@@ -647,12 +690,12 @@ final class ApiClient {
                 boolean missingContent = uri != null && status == 404 && uri.getPath().matches(".*/(?:members/[A-Za-z0-9_-]{32}(?:/posts)?|posts/[0-9]+)");
                 ApiException failure = new ApiException(status, message, missingContent); failure.details = details; throw failure;
             }
-            Object result=new JSONTokener(text.toString()).nextValue();
+            Object result=parsed;
             if(uri != null && result instanceof JSONObject){JSONObject object=(JSONObject)result;String path=uri.getPath();
                 if(("/api/auth/me".equals(path)||"/api/me/avatar".equals(path))&&object.has("avatar_url"))currentAvatar=object.isNull("avatar_url")?"":object.optString("avatar_url");
                 else if("/api/me/profile".equals(path)&&object.optJSONObject("user")!=null&&object.getJSONObject("user").has("avatar_url"))currentAvatar=object.getJSONObject("user").isNull("avatar_url")?"":object.getJSONObject("user").optString("avatar_url");
             }
-            return result;
+            return result;}
     }
 
     private void checkConnection() throws Exception {
