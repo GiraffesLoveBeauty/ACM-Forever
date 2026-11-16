@@ -64,6 +64,47 @@ class ProblemTrackerTests(unittest.IsolatedAsyncioTestCase):
                 "problem_index": index, "problem_name": f"Problem {index}",
                 "problem_url": url, "problem_rating": 1200, "tags": ["math"], **kwargs}
 
+    async def test_selected_platform_bounds_aggregation_and_preserves_progress(self):
+        from feat.api.acm_api import problem_tracker
+
+        async with self.app.test_app():
+            client = self.app.test_client()
+            await self.account_login(client, role="member")
+            problems = [self.problem("100", "A"), self.problem("abc100", "A", "atcoder")]
+            await self.catalog(problems)
+            for item in problems:
+                platform, pid = item["platform"], item["problem_id"]
+                await self.execute(
+                    "INSERT INTO submissions(user_qq_id,platform,problem_id,submit_time) VALUES('12345678',?,?,10)",
+                    [(platform, pid)],
+                )
+                await self.execute(
+                    "INSERT INTO submission_attempts(owner_qq_id,platform,problem_id,contest_id,verdict,submitted_at,created_at) "
+                    "VALUES('12345678',?,?,?,'WRONG_ANSWER',20,1)",
+                    [(platform, pid, item["contest_id"])],
+                )
+                await self.execute(
+                    "INSERT INTO user_problem_state(owner_qq_id,platform,problem_id,is_favorite,updated_at) "
+                    "VALUES('12345678',?,?,1,1)", [(platform, pid)],
+                )
+            for platform in ("codeforces", "atcoder"):
+                with self.subTest(platform=platform), patch.object(
+                    problem_tracker, "problem_id_key", wraps=problem_tracker.problem_id_key
+                ) as normalize:
+                    result = await (await client.get("/api/me/problems/tracker?platform=" + platform)).get_json()
+                    # Aggregating unrelated OJs is unnecessary even when the final response is filtered.
+                    self.assertEqual({call.args[0] for call in normalize.call_args_list}, {platform})
+                    self.assertEqual(result["total"], 1)
+                    contest = result["items"][0]
+                    self.assertEqual((contest["platform"], contest["total_count"], contest["solved_count"]),
+                                     (platform, 1, 1))
+                    problem = contest["problems"][0]
+                    self.assertTrue(problem["is_favorite"])
+                    self.assertEqual((problem["status"], problem["ac_at"], problem["last_submit_at"]),
+                                     ("solved", 10, 20))
+            result = await (await client.get("/api/me/problems/tracker")).get_json()
+            self.assertEqual({item["platform"] for item in result["items"]}, {"codeforces", "atcoder"})
+
     async def test_progress_deduplicates_ac_and_uses_only_current_account(self):
         async with self.app.test_app():
             client = self.app.test_client()

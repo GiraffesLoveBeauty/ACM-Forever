@@ -28,6 +28,8 @@ const rows = ref([]),
   busy = ref(false),
   error = ref('');
 const pageSize = 20;
+let revision = 0;
+let pendingLoad = null;
 
 function platformName(value) {
   return { codeforces: 'Codeforces', atcoder: 'AtCoder' }[value] || value;
@@ -44,30 +46,46 @@ function statusClass(row) {
 function tagsText(tags) {
   return Array.isArray(tags) && tags.length ? tags.join(' · ') : '—';
 }
-async function load(nextPage = 1) {
-  page.value = nextPage;
-  busy.value = true;
-  error.value = '';
+function load(nextPage = 1) {
   const params = new URLSearchParams({
     q: filters.q.trim(),
     platform: filters.platform,
     status: filters.status,
-    page: String(page.value),
+    page: String(nextPage),
     page_size: String(pageSize),
     labels: selectedTags.value.join(','),
     match: matchMode.value,
   });
-  try {
-    const data = await request(`/admin/database/problems?${params}`, {}, 'database-problems');
-    rows.value = data.items || [];
-    facets.value = data.tag_facets || [];
-    total.value = data.total || 0;
-    page.value = data.page || 1;
-  } catch (cause) {
-    if (cause.name !== 'AbortError') error.value = cause.message || '读取题库记录失败。';
-  } finally {
-    busy.value = false;
-  }
+  const query = params.toString();
+  if (pendingLoad?.query === query) return pendingLoad.promise;
+  const version = ++revision;
+  page.value = nextPage;
+  rows.value = [];
+  facets.value = [];
+  total.value = 0;
+  busy.value = true;
+  error.value = '';
+  const promise = (async () => {
+    try {
+      const data = await request(`/admin/database/problems?${query}`, {}, 'database-problems');
+      if (version !== revision) return;
+      rows.value = data.items || [];
+      facets.value = data.tag_facets || [];
+      total.value = data.total || 0;
+      page.value = data.page || 1;
+    } catch (cause) {
+      if (version === revision && cause.name !== 'AbortError')
+        error.value = cause.message || '读取题库记录失败。';
+    } finally {
+      // A replaced request must not clear the latest request's loading state.
+      if (version === revision) {
+        busy.value = false;
+        pendingLoad = null;
+      }
+    }
+  })();
+  pendingLoad = { query, promise };
+  return promise;
 }
 function reset() {
   filters.q = '';
@@ -134,14 +152,14 @@ onMounted(() => {
           ><input v-model="filters.q" type="search" placeholder="题号、题名或比赛 ID" /> </label
         ><label
           ><span>平台</span
-          ><select v-model="filters.platform">
+          ><select v-model="filters.platform" @change="load(1)">
             <option value="">全部平台</option>
             <option value="codeforces">Codeforces</option>
             <option value="atcoder">AtCoder</option>
           </select></label
         ><label
           ><span>题面状态</span
-          ><select v-model="filters.status">
+          ><select v-model="filters.status" @change="load(1)">
             <option value="all">全部</option>
             <option value="collected">已采集题面</option>
             <option value="pending">尚未采集</option>
@@ -149,8 +167,8 @@ onMounted(() => {
           </select></label
         >
         <div class="problem-database-filter-actions">
-          <button class="btn primary" type="submit" :disabled="busy">筛选</button>
-          <button class="btn" type="button" :disabled="busy" @click="reset">重置</button>
+          <button class="btn primary" type="submit">筛选</button>
+          <button class="btn" type="button" @click="reset">重置</button>
         </div>
       </form>
       <div v-if="facets.length" class="admin-label-filter">
@@ -233,7 +251,9 @@ onMounted(() => {
                   {{ statusName(row) }}
                 </span>
                 <small>{{ row.sample_count }} 组样例</small>
-                <small v-if="row.translation_status === 'auto'" class="translation-ready">已翻译 · 未人工确认</small>
+                <small v-if="row.translation_status === 'auto'" class="translation-ready"
+                  >已翻译 · 未人工确认</small
+                >
                 <small v-else-if="row.translation_status === 'needs_review'">翻译待复核</small>
                 <small v-else-if="row.translation_status">待翻译</small>
               </td>
