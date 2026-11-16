@@ -5,6 +5,7 @@ import re
 from urllib.parse import urlsplit
 
 from .cf_client import problem_url as cf_problem_url
+from .luogu_problem import canonical_problem_id as luogu_problem_id
 from .problem_tags import has_problem_tag, problem_tags
 
 
@@ -89,7 +90,7 @@ def identity(platform, problem_id, contest_id=None, problem_index=None, problem_
 
 
 def problem_id_aliases(platform, problem_id):
-    """Recognize compact, prefixed, and legacy hyphenated CF IDs."""
+    """Recognize supported historical CF and public Luogu P-problem aliases."""
     aliases = [problem_id]
     if platform == "codeforces":
         match = CF_PROBLEM_ID.fullmatch(problem_id)
@@ -100,11 +101,23 @@ def problem_id_aliases(platform, problem_id):
             if index is not None:
                 legacy = contest + "-" + index
                 aliases.extend((legacy, "cf_" + legacy))
+    elif platform == "luogu":
+        try:
+            pid = luogu_problem_id(problem_id)
+        except ValueError:
+            pass
+        else:
+            aliases.extend((pid, "luogu_" + pid))
     return tuple(dict.fromkeys(aliases))
 
 
 def problem_id_key(platform, problem_id):
-    """Group the same aliases accepted by CF detail lookups; keep other IDs exact."""
+    """Use the same identity for grouping, personal state and local detail lookups."""
+    if platform == "luogu":
+        try:
+            return luogu_problem_id(problem_id)
+        except ValueError:
+            return problem_id
     if platform != "codeforces":
         return problem_id
     match = CF_PROBLEM_ID.fullmatch(problem_id)

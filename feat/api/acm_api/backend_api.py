@@ -32,7 +32,7 @@ from .auth_service import (
 )
 from .reporting import valid_contest_report_time
 from .cf_client import cf_request
-from .luogu_problem import attach_classifications, load_taxonomy, native_filter, problem_id as luogu_problem_id
+from .luogu_problem import attach_classifications, canonical_problem_id as luogu_problem_id, load_taxonomy, native_filter
 from .problem_sync import sync_options
 from .problem_bank import problem_bank_status
 from .problem_tracker import attempt_problem_metadata, contest_tracker, problem_id_aliases, problem_id_key, tracker_options
@@ -1474,7 +1474,7 @@ async def _save_problem_favorite(owner, platform, problem, data):
         await require_active_user(db, owner)
         favorite = int(data["is_favorite"])
         updated_at = int(time.time())
-        if platform == "codeforces":
+        if platform in {"codeforces", "luogu"}:
             id_filter, aliases = _problem_id_filter(platform, problem[:160])
             await db.execute(
                 "UPDATE user_problem_state SET is_favorite=?,updated_at=? "
@@ -1593,7 +1593,8 @@ _MEMBER_PROBLEM_QUERY = """
         FROM user_problem_state WHERE owner_qq_id=?
         GROUP BY platform,id_key
     )
-    SELECT p.platform,p.problem_id,p.problem_name,p.problem_rating,p.problem_url,p.id_key,p.ac_at,
+    SELECT p.platform,CASE WHEN p.platform='luogu' THEN p.id_key ELSE p.problem_id END AS problem_id,
+           p.problem_name,p.problem_rating,p.problem_url,p.id_key,p.ac_at,
            CASE WHEN problem_has_tags(p.effective_tags) THEN p.effective_tags ELSE '' END AS tags,
            COALESCE(s.is_favorite,0) AS is_favorite,COALESCE(s.outside_inbox,0) AS outside_inbox
     FROM ranked p LEFT JOIN personal s ON s.platform=p.platform AND s.id_key=p.id_key
@@ -1645,13 +1646,15 @@ async def api_problems():
 
 
 def _problem_id_filter(platform, problem_id):
+    case_insensitive = platform == "codeforces"
     if platform == "luogu":
         try:
             problem_id = luogu_problem_id(problem_id)
+            case_insensitive = True
         except ValueError:
             pass  # Let unknown historical IDs follow the existing local lookup.
     aliases = problem_id_aliases(platform, problem_id)
-    column = "problem_id COLLATE NOCASE" if platform == "codeforces" else "problem_id"
+    column = "problem_id COLLATE NOCASE" if case_insensitive else "problem_id"
     return column + " IN (" + ",".join("?" for _ in aliases) + ")", aliases
 
 
@@ -2329,10 +2332,10 @@ async def api_me_problems():
         if tag:
             query += (
                 " AND (p.problem_name LIKE ? OR p.problem_id LIKE ? OR p.id_key LIKE ? OR p.tags LIKE ?"
-                " OR (p.platform='codeforces' AND p.id_key=?))"
+                " OR (p.platform='codeforces' AND p.id_key=?) OR (p.platform='luogu' AND p.id_key=?))"
             )
             params.extend([f"%{tag}%"] * 4)
-            params.append(problem_id_key("codeforces", tag))
+            params.extend([problem_id_key("codeforces", tag), problem_id_key("luogu", tag)])
         if problem_tag:
             await db.create_function("problem_has_tag", 2, has_problem_tag, deterministic=True)
             query += " AND problem_has_tag(p.tags,?)=1"

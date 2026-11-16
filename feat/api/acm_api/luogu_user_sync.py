@@ -2,7 +2,7 @@
 import re
 
 from .luogu_client import ORIGIN, luogu_get, page_context
-from .luogu_problem import classifications, load_taxonomy
+from .luogu_problem import canonical_problem_id as canonical_pid, classifications, load_taxonomy
 
 MAX_PASSED_PROBLEMS = 100000
 
@@ -12,19 +12,6 @@ def uid(value):
     if not re.fullmatch(r"[1-9][0-9]{0,19}", value):
         raise ValueError("洛谷 UID 必须是正整数，请由管理员在成员资料中填写")
     return value
-
-
-def canonical_pid(value):
-    if not isinstance(value, str):
-        raise ValueError("洛谷已通过题目缺少有效题号")
-    value = value.strip()
-    if value.lower().startswith("luogu_"):
-        value = value[6:]
-    if re.fullmatch(r"(?:P|B|T|U|SP)[1-9][0-9]{0,12}|CF[1-9][0-9]{0,9}[A-Z][0-9]{0,2}", value, re.I):
-        return value.upper()
-    if re.fullmatch(r"AT_[A-Za-z0-9_]{1,100}", value, re.I):
-        return "AT_" + value[3:]
-    raise ValueError("洛谷已通过题号格式异常")
 
 
 def practice_snapshot(raw, expected_uid):
@@ -45,7 +32,17 @@ def practice_snapshot(raw, expected_uid):
             item = {"pid": item}
         if not isinstance(item, dict):
             raise ValueError("洛谷已通过列表格式异常，保留已有记录")
-        pid = canonical_pid(item.get("pid"))
+        value = item.get("pid")
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("洛谷已通过题目缺少有效题号")
+        value = value.strip()
+        if value[:6].casefold() == "luogu_":
+            value = value[6:]
+        if not value:
+            raise ValueError("洛谷已通过题目缺少有效题号")
+        if not value.upper().startswith("P"):
+            continue  # Only public P problems are in this sync's scope.
+        pid = canonical_pid(value)
         title = item.get("name", item.get("title"))
         if title is not None and (not isinstance(title, str) or len(title) > 1000):
             raise ValueError("洛谷已通过题目名称格式异常")

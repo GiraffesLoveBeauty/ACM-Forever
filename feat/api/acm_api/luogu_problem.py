@@ -23,6 +23,15 @@ def problem_id(value):
     return value.strip().upper()
 
 
+def canonical_problem_id(value):
+    """Resolve historical P-problem aliases without changing stored records."""
+    if isinstance(value, str):
+        value = value.strip()
+        if value[:6].casefold() == "luogu_":
+            value = value[6:]
+    return problem_id(value)
+
+
 def _integer(value, label, *, minimum=None):
     if type(value) is not int or (minimum is not None and value < minimum):
         raise ValueError(f"洛谷 {label} 格式异常")
@@ -201,6 +210,13 @@ async def attach_classifications(db, items):
     luogu = [item for item in items if item.get("platform") == "luogu"]
     if not luogu:
         return
+    for item in luogu:
+        try:
+            pid = canonical_problem_id(item["problem_id"])
+        except ValueError:
+            continue  # Keep unsupported historical IDs intact.
+        item["problem_id"] = pid
+        item["problem_url"] = ORIGIN + "/problem/" + pid
     taxonomy = await load_taxonomy(db)
     ids = list({item["problem_id"] for item in luogu})
     marks = ",".join("?" for _ in ids)

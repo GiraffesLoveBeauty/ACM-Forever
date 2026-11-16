@@ -27,7 +27,18 @@ class PracticeParserTests(unittest.TestCase):
         data = {"user": {"uid": 1234}, "passed": ["P1001", {"pid": "p1001"}, {"pid": "CF1A", "title": "Synthetic"}],
                 "submitted": [{"pid": "P1002"}]}
         rows = sync.practice_snapshot(page(data=data), "1234")
-        self.assertEqual([row["pid"] for row in rows], ["P1001", "CF1A"])
+        self.assertEqual([row["pid"] for row in rows], ["P1001"])
+
+    def test_non_p_entries_are_skipped_before_optional_fields_are_validated(self):
+        rows = sync.practice_snapshot(page([
+            "P1001", "B1001", "T1", "U2", "SP3", "CF1A", "UVA100", "AT1202Contest_a",
+            {"pid": "AT_abc100_a", "name": [], "difficulty": True}, "luogu_p1002",
+        ]), "1234")
+        self.assertEqual([row["pid"] for row in rows], ["P1001", "P1002"])
+        self.assertEqual(sync.practice_snapshot(page(["CF1A", "UVA100"]), "1234"), [])
+        for value in (None, True, "", "   ", "P0", "P01", "Pbroken", "luogu_P1/other"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                sync.practice_snapshot(page(["P1001", {"pid": value}]), "1234")
 
     def test_empty_is_valid_but_missing_passed_is_not(self):
         self.assertEqual(sync.practice_snapshot(page(), "1234"), [])
@@ -37,15 +48,15 @@ class PracticeParserTests(unittest.TestCase):
 
     def test_no_login_error_partial_or_wrong_owner_pages(self):
         for raw in ("<html>Login required</html>", page(account=5678), page(status=403),
-                    page(data={"passed": []}), page(["P1001", {"pid": "../P2"}])):
+                    page(data={"passed": []}), page(["P1001", {"pid": "P1/other"}])):
             with self.subTest(raw=raw), self.assertRaises(ValueError):
                 sync.practice_snapshot(raw, "1234")
 
     def test_canonical_ids_reject_urls_and_sql_fragments(self):
-        for value in ("P1001", "B1001", "T1", "U2", "SP3", "CF1A", "CF12A1", "AT_abc100_a"):
+        for value in ("P1001", "P123456789"):
             self.assertEqual(sync.canonical_pid(value), value)
         self.assertEqual(sync.canonical_pid("luogu_p1001"), "P1001")
-        for value in (None, True, "0", "P0", "P01", "P1' OR 1=1", "https://www.luogu.com.cn/problem/P1", "P1/other"):
+        for value in (None, True, "B1001", "CF1A", "AT_abc100_a", "P1234567890", "0", "P0", "P01", "P1' OR 1=1", "https://www.luogu.com.cn/problem/P1", "P1/other"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 sync.canonical_pid(value)
 
@@ -85,7 +96,7 @@ class PracticeStorageTests(unittest.IsolatedAsyncioTestCase):
     async def test_anonymous_snapshot_is_idempotent_and_not_filtered_by_time(self):
         raw = page([{"pid": "P1001", "name": "A"}, "P1002", "P1001", "CF1A"])
         count, http = await self.run_snapshot(raw, start=9999999999)
-        self.assertEqual(count, 3)
+        self.assertEqual(count, 2)
         self.assertEqual((await self.run_snapshot(raw))[0], 0)
         records = await self.rows()
         self.assertEqual({row["submit_time"] for row in records}, {0})
@@ -94,6 +105,19 @@ class PracticeStorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(http.call_args.args[1], "https://www.luogu.com.cn/user/1234/practice")
         self.assertNotIn("Cookie", http.call_args.kwargs["headers"])
         self.assertEqual((await self.one("SELECT COUNT(*) FROM submission_attempts"))[0], 0)
+
+    async def test_mixed_snapshot_only_inserts_p_problems_with_one_request(self):
+        count, http = await self.run_snapshot(page(["P1001", "CF1A", "B1001", "UVA100", "AT1202Contest_a"]))
+        self.assertEqual(count, 1)
+        self.assertEqual([row["problem_id"] for row in await self.rows()], ["P1001"])
+        self.assertEqual(http.await_count, 1)
+
+    async def test_non_p_only_snapshot_still_checks_binding_generation(self):
+        await self.db.execute("UPDATE users SET luogu_binding_version=luogu_binding_version+1 WHERE qq_id='12345678'")
+        await self.db.commit()
+        with self.assertRaises(BindingChanged):
+            await self.run_snapshot(page(["CF1A", "UVA100"]))
+        self.assertEqual(await self.rows(), [])
 
     async def test_known_times_and_legacy_aliases_are_preserved(self):
         await self.db.execute("INSERT INTO submissions(user_qq_id,platform,problem_id,submit_time) VALUES('12345678','luogu','luogu_P1001',123)")
@@ -115,7 +139,7 @@ class PracticeStorageTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_failed_or_empty_snapshot_never_deletes_history(self):
         await self.run_snapshot(page(["P1001"]))
-        for raw, expected in ((page(), 0), (page(account=4567), -1), ("<html>challenge</html>", -1), (page(["P1002", "broken"]), -1)):
+        for raw, expected in ((page(), 0), (page(account=4567), -1), ("<html>challenge</html>", -1), (page(["P1002", "Pbroken"]), -1)):
             self.assertEqual((await self.run_snapshot(raw))[0], expected)
             self.assertEqual([r["problem_id"] for r in await self.rows()], ["P1001"])
 
