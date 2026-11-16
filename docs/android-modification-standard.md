@@ -2,7 +2,7 @@
 
 ## 1.0.0 发布、署名与管理员测试渠道约束
 
-本轮为1.0.0/code45正式候选，恢复延期的同包名测试渠道；当前验证与上线边界见[android-v1.0.0-verification.md（本轮验收）](android-v1.0.0-verification.md)，契约见[android-v1.0.0-release-channels.md（双渠道）](android-v1.0.0-release-channels.md)。当前候选不代表Review已完成或已发布。
+本轮为1.0.0/code45正式发布准备，恢复延期的同包名测试渠道；PR #150第二轮本地Review通过（04f35c8），已补录实际人员记录，用户授权合并与Tag发布。当前验证与上线边界见[android-v1.0.0-verification.md（本轮验收）](android-v1.0.0-verification.md)，契约见[android-v1.0.0-release-channels.md（双渠道）](android-v1.0.0-release-channels.md)；实际公开状态以Release及后续验收为准。
 
 - 关于页、当前/历史版本共用`credits.json`。每轮分别核对源码提交者、Review发起者、实际Review者、自动发布者；保留真实GitHub用户名与头像。0.2.21及以前保留原历史人员；0.2.22起已完成版本按用户确认记录`MiaoJJ13445`。不得把上一版人员错误沿用为本轮已完成证据。
 - 发布前必须完成 **实现与测试 → 提PR → 当前head的真实Review → 修复后重新Review → 补录完成记录并核对该差异 → 授权合并 → Tag构建**。`development`保留空评审；真实Review后改为`reviewed`，填写PR/证据与人员但不预填发布者。发布快照可保持`reviewed`，下轮据实际Release补为`published`。不能使每个已发APK仍将自身标为永久“待Review”。
