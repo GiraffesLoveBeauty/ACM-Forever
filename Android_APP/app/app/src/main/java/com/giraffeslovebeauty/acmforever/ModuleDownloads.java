@@ -68,7 +68,7 @@ final class ModuleDownloads {
         cancelled.put(id,false);publish(id,"checking","正在读取模块信息…",0,0);
         io.execute(()->{try{
             if(!ModuleSpec.nativeModule(id)){ModuleHealth.Status local=ModuleHealth.verify(context,id);if(local.intact&&ModuleStore.current(context,id)){publish(id,"done","本机模块已检查并恢复，无需下载",0,0);return;}}
-            ModuleSpec spec=ModuleNetwork.catalog(context).get(id);if(spec==null)throw new IOException("缺少模块信息");File file=ModuleStore.archive(context,id);
+            ModuleSpec spec=ModuleNetwork.catalog(context).get(id);if(spec==null)throw new IOException("缺少模块信息");File file=ModuleStore.archive(context,spec);
             if(!ModuleSpec.nativeModule(id)&&ModuleStore.reuse(context,spec)){if(cancelled(id)||!OptionalModules.allowed(context,id))throw new IOException("操作取消或权限已变化");ModuleStore.acquired(context,id);if(!ModuleHealth.verify(context,id).intact)throw new IOException("模块恢复验证失败");publish(id,"done","已复用并恢复本机完整模块",0,0);return;}
             if(file.isFile())try{ModuleFiles.verify(file,spec,ModuleStore.trusted(context));}catch(Exception invalid){java.nio.file.Files.deleteIfExists(file.toPath());}
             if(!file.isFile()){publish(id,"downloading","正在下载…",0,spec.size);ModuleNetwork.download(context,spec,file,n->publish(id,"downloading","正在下载…",n,spec.size),()->cancelled(id));}

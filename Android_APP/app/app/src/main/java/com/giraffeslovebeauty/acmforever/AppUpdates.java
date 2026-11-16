@@ -25,6 +25,7 @@ final class AppUpdates {
     private final boolean administrator;
     private final AppDistribution installed;
     private long adminOwner=-1;
+    private String previewInstallReceipt="preview-app-update:"+UUID.randomUUID();
     private volatile long privateTicket;
     private boolean privateDownloading,installAuthorizing;
     private final Context context;
@@ -81,6 +82,8 @@ final class AppUpdates {
         }catch(Exception ignored){clearStored();}
     }
     boolean administrator(){return administrator;}
+    String installReceipt(){return administrator?previewInstallReceipt:"app-update";}
+    boolean ownsInstallReceipt(String receipt){return installReceipt().equals(receipt);}
     boolean canOpenPrivateApk(String name){return administrator&&ready()&&name.equals(verifiedName);}
     boolean previewInstalled(){return installed.preview;}
     int installedPreviewRevision(){return installed.revision;}
@@ -90,6 +93,7 @@ final class AppUpdates {
     void sessionChanged(){ui.post(()->{
         if(administrator&&(adminOwner!=api.sessionGeneration()||!api.isAdministrator())){
             cancelDownload();checking=false;installAuthorizing=false;adminOwner=api.sessionGeneration();release=null;deleteVerified();pendingOffer=false;pendingResult="";
+            previewInstallReceipt="preview-app-update:"+UUID.randomUUID();moduleInstallConfirmation=null;awaitingModuleInstall=false;openingInstaller=false;installRequested=false;
             if(offerDialog!=null){offerDialog.setOnDismissListener(null);offerDialog.dismiss();offerDialog=null;}save();changed();
         }
     });}
@@ -380,7 +384,7 @@ final class AppUpdates {
             Map<String,File> modules=ModuleUpdates.prepare(context,expected,()->ticket!=generation,text->ui.post(()->{if(ticket==generation){moduleStatus=text;changed();}}));
             if(ticket!=generation)return;
             if(!modules.isEmpty()||!ModuleStore.installedNative(context).isEmpty()){
-                ModuleInstaller.commit(context,"app-update",base,modules,()->ticket!=generation);
+                ModuleInstaller.commit(context,installReceipt(),base,modules,()->ticket!=generation);
                 ui.post(()->{if(ticket==generation){verifying=false;moduleStatus="";openingInstaller=true;changed();}});
             }else ui.post(()->{if(ticket==generation){verifying=false;moduleStatus="";openBaseInstaller(a);}});
         }catch(Exception e){ui.post(()->{if(ticket==generation){verifying=false;moduleStatus="";openingInstaller=false;fail(e);}});}});
@@ -392,11 +396,12 @@ final class AppUpdates {
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);a.startActivity(intent);
         }catch(Exception e){openingInstaller=false;fail(e);}
     }
-    void installerResult(int status,String message,Intent confirmation){ui.post(()->{
+    void installerResult(String receipt,int status,String message,Intent confirmation){ui.post(()->{
+        if(!ownsInstallReceipt(receipt)||administrator&&(adminOwner!=api.sessionGeneration()||!api.isAdministrator()))return;
         if(status==PackageInstaller.STATUS_PENDING_USER_ACTION){if(confirmation==null){openingInstaller=false;error="系统未提供安装确认窗口，请重试。";changed();return;}awaitingModuleInstall=true;moduleInstallConfirmation=confirmation;Activity a=activity();if(a!=null)resumeInstall(a);changed();}
-        else{awaitingModuleInstall=false;openingInstaller=false;if(status!=PackageInstaller.STATUS_SUCCESS){error=status==PackageInstaller.STATUS_FAILURE_ABORTED?"已取消系统安装，可稍后继续":"系统安装失败："+message;changed();}}
+        else{moduleInstallConfirmation=null;awaitingModuleInstall=false;openingInstaller=false;if(status!=PackageInstaller.STATUS_SUCCESS){error=status==PackageInstaller.STATUS_FAILURE_ABORTED?"已取消系统安装，可稍后继续":"系统安装失败："+message;}changed();}
     });}
-    void resumeInstall(Activity a){if(moduleInstallConfirmation!=null&&api.isLoggedIn()){Intent intent=moduleInstallConfirmation;moduleInstallConfirmation=null;try{a.startActivity(intent);}catch(Exception e){awaitingModuleInstall=false;openingInstaller=false;fail(e);}return;}if(installRequested){installRequested=false;if(a.getPackageManager().canRequestPackageInstalls())install(a);}}
+    void resumeInstall(Activity a){if(administrator&&(adminOwner!=api.sessionGeneration()||!api.isAdministrator())){sessionChanged();return;}if(moduleInstallConfirmation!=null&&api.isLoggedIn()){Intent intent=moduleInstallConfirmation;moduleInstallConfirmation=null;try{a.startActivity(intent);}catch(Exception e){awaitingModuleInstall=false;openingInstaller=false;fail(e);}return;}if(installRequested){installRequested=false;if(a.getPackageManager().canRequestPackageInstalls())install(a);}}
     void clearDownloadedPackages(){
         if(busy()||otherBusy()||openingInstaller){error="请等待下载、校验或安装操作结束后再清理。";changed();return;}
         clearingPackages=true;installRequested=false;error="";changed();

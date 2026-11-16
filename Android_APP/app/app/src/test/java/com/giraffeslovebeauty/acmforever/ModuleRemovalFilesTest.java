@@ -17,6 +17,23 @@ public class ModuleRemovalFilesTest {
         assertTrue(ModuleRemovalFiles.targets(root,"cat-art","module-cat-art.acmpack").isEmpty());assertTrue(other.exists());assertTrue(catalog.exists());assertTrue(theme.exists());
     }
     @Test public void missingRootAndRepeatedDeleteAreSafe()throws Exception{File root=new File(tmp.getRoot(),"missing");ModuleRemovalFiles.remove(root,"admin","module-admin.apk");assertFalse(root.exists());}
+    @Test public void deletionCoversAllPreviewRevisionsWithoutDeletingOtherModules()throws Exception{
+        File root=tmp.newFolder("modules");
+        for(String scope:new String[]{"44","44/previews/v1.0.0-preview.1","44/previews/v1.0.0-preview.2"}){
+            file(root,scope+"/downloads/module-cat-art.acmpack");file(root,scope+"/downloads/module-cat-art.acmpack-x.part");file(root,scope+"/installed/cat-art/image.png");
+            file(root,scope+"/downloads/module-admin.apk");file(root,scope+"/catalog.json");
+        }
+        ModuleRemovalFiles.remove(root,"cat-art","module-cat-art.acmpack");
+        assertTrue(ModuleRemovalFiles.targets(root,"cat-art","module-cat-art.acmpack").isEmpty());
+        assertTrue(new File(root,"44/previews/v1.0.0-preview.2/catalog.json").isFile());
+        assertTrue(new File(root,"44/previews/v1.0.0-preview.1/downloads/module-admin.apk").isFile());
+    }
+    @Test public void refusesLinkedPreviewDirectory()throws Exception{
+        File root=tmp.newFolder("modules"),outside=tmp.newFolder("outside");File secret=file(outside,"downloads/module-cat-art.acmpack");
+        File link=new File(root,"44/previews/v1.0.0-preview.1");link.getParentFile().mkdirs();
+        try{Files.createSymbolicLink(link.toPath(),outside.toPath());}catch(IOException|UnsupportedOperationException|SecurityException unsupported){Assume.assumeNoException(unsupported);}
+        try{ModuleRemovalFiles.remove(root,"cat-art","module-cat-art.acmpack");fail();}catch(IOException expected){assertTrue(secret.exists());}
+    }
     @Test public void rejectsWrongIdAndFilename()throws Exception{for(String[] row:new String[][]{{"../secret","module-secret.apk"},{"cat-art","module-admin.apk"}})try{ModuleRemovalFiles.remove(tmp.getRoot(),row[0],row[1]);fail();}catch(IOException expected){}}
     @Test public void refusesLinkedVersionDirectory()throws Exception{
         File root=tmp.newFolder("modules"),outside=tmp.newFolder("outside");File secret=file(outside,"downloads/module-cat-art.acmpack");

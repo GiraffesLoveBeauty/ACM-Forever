@@ -33,7 +33,10 @@ final class ModuleNetwork {
             api.refreshSession();if(!api.isAdministrator()||api.requiresPasswordChange())throw new IOException("仅限管理员下载测试模块");
             JSONObject fresh=api.adminRelease();
             if(!release.previewTag.equals(fresh.optString("previewTag"))||!release.sha256.equals(fresh.optString("sha256")))throw new IOException("测试修订已变化，请重新检查更新");
-            return ModuleSpec.privateCatalog(fresh.getJSONObject("moduleCatalog"),(int)release.versionCode,release.versionName,release.previewTag,api.getBaseUrl(),owner);
+            JSONObject index=fresh.getJSONObject("moduleCatalog");
+            Map<String,ModuleSpec> parsed=ModuleSpec.privateCatalog(index,(int)release.versionCode,release.versionName,release.previewTag,api.getBaseUrl(),owner);
+            cache(new File(ModuleStore.root(c,parsed.get("cat-art")),"catalog.json"),index.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return parsed;
         }
     }
     static synchronized Map<String,ModuleSpec> catalog(Context c,int code,String version)throws Exception{
@@ -53,10 +56,13 @@ final class ModuleNetwork {
             if(!local.isFile())throw failure==null?new IOException("没有可用模块源"):failure;
             try(InputStream in=new FileInputStream(local)){parsed=ModuleSpec.parse(new JSONObject(new String(read(in,65536),java.nio.charset.StandardCharsets.UTF_8)),code,version);}
         }else{
-            File parent=local.getParentFile();if(!parent.isDirectory()&&!parent.mkdirs())throw new IOException("无法缓存模块清单");File partial=File.createTempFile("catalog-",".part",parent);
-            try{try(FileOutputStream out=new FileOutputStream(partial)){out.write(bytes);out.getFD().sync();}java.nio.file.Files.move(partial.toPath(),local.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING,java.nio.file.StandardCopyOption.ATOMIC_MOVE);}finally{partial.delete();}
+            cache(local,bytes);
         }
         cached=parsed;cachedCode=code;cachedVersion=version;cachedAt=now;return parsed;
+    }
+    private static void cache(File local,byte[] bytes)throws IOException{
+        File parent=local.getParentFile();if(!parent.isDirectory()&&!parent.mkdirs())throw new IOException("无法缓存模块清单");File partial=File.createTempFile("catalog-",".part",parent);
+        try{try(FileOutputStream out=new FileOutputStream(partial)){out.write(bytes);out.getFD().sync();}java.nio.file.Files.move(partial.toPath(),local.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING,java.nio.file.StandardCopyOption.ATOMIC_MOVE);}finally{partial.delete();}
     }
     static byte[] read(InputStream in,int max)throws IOException{ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] bytes=new byte[8192];int n;while((n=in.read(bytes))!=-1){if(out.size()+n>max)throw new IOException("模块清单过大");out.write(bytes,0,n);}return out.toByteArray();}
     static void download(ModuleSpec spec,File destination,Progress progress,Cancelled cancelled)throws Exception{
@@ -70,9 +76,10 @@ final class ModuleNetwork {
     }
     static void download(Context c,ModuleSpec spec,File destination,Progress progress,Cancelled cancelled)throws Exception{
         if(spec.previewTag.isEmpty()){download(spec,destination,progress,cancelled);return;}
+        if(spec.owner<0||spec.url.isEmpty())throw new IOException("本地测试模块记录仅用于校验，请重新验证管理员权限后下载");
         ApiClient api=((AcmApplication)c.getApplicationContext()).api();
         File parent=destination.getParentFile();if(!parent.isDirectory()&&!parent.mkdirs())throw new IOException("无法创建下载目录");
-        File partial=File.createTempFile("preview-module-",".part",parent);
+        File partial=File.createTempFile(ModuleSpec.filename(spec.id)+"-",".part",parent);
         try{
             api.adminAsset(spec.owner,spec.previewTag,ModuleSpec.filename(spec.id),partial,spec.size,cancelled::get,progress::update);
             if(cancelled.get()||spec.owner!=api.sessionGeneration()||!api.isAdministrator())throw new IOException("测试模块下载已取消或权限失效");

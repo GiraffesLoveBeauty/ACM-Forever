@@ -16,6 +16,9 @@ public class ModuleSpecTest {
         java.util.Map<String,ModuleSpec> parsed=ModuleSpec.privateCatalog(index,39,"0.2.25",tag,"https://business.example",17);
         ModuleSpec admin=parsed.get("admin");assertEquals(17,admin.owner);assertEquals(tag,admin.previewTag);
         assertEquals(java.util.Collections.singletonList("https://business.example/api/admin/android/releases/"+tag+"/assets/module-admin.apk"),admin.downloadUrls());
+        ModuleSpec offline=ModuleSpec.storedCatalog(index,39,"0.2.25",tag).get("admin");
+        assertEquals(tag,offline.previewTag);assertEquals(-1,offline.owner);assertEquals("",offline.url);assertEquals(admin.sha256,offline.sha256);
+        assertThrows(Exception.class,()->ModuleSpec.storedCatalog(index,39,"0.2.25","v0.2.25-preview.3"));
         assertThrows(Exception.class,()->ModuleSpec.parse(index,39,"0.2.25"));
         assertThrows(Exception.class,()->ModuleSpec.privateCatalog(index,39,"0.2.25","v0.2.25-preview.3","https://business.example",17));
         rows.getJSONObject(0).put("url","https://evil.invalid/module.apk");

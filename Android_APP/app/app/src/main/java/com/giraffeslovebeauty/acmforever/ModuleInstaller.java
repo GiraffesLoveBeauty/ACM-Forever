@@ -28,11 +28,12 @@ final class ModuleInstaller {
     static void commit(Context context,String receipt,File base,Map<String,File> splits,ModuleNetwork.Cancelled cancelled)throws Exception{
         PackageInstaller installer=context.getPackageManager().getPackageInstaller();
         SharedPreferences receipts=context.getSharedPreferences("module_installs",0);
-        for(PackageInstaller.SessionInfo old:installer.getMySessions())if(receipt.equals(receipts.getString("session_"+old.getSessionId(),""))){
+        for(PackageInstaller.SessionInfo old:installer.getMySessions())if(receipt.equals(receipts.getString("session_"+old.getSessionId(),""))||receipt.startsWith("preview-app-update:")&&receipts.getString("session_"+old.getSessionId(),"").startsWith("preview-app-update:")){
             receipts.edit().remove("session_"+old.getSessionId()).commit();
             try{installer.abandonSession(old.getSessionId());}catch(SecurityException ignored){}
         }
         PackageInstaller.SessionParams params=new PackageInstaller.SessionParams(base==null?PackageInstaller.SessionParams.MODE_INHERIT_EXISTING:PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+        if(Build.VERSION.SDK_INT>=31)params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_REQUIRED);
         params.setAppPackageName(context.getPackageName());long total=base==null?0:base.length();for(File f:splits.values())total+=f.length();params.setSize(total);
         int id=installer.createSession(params);boolean committed=false;
         try(PackageInstaller.Session session=installer.openSession(id)){

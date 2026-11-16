@@ -62,7 +62,7 @@ final class ModuleFiles {
                 try(InputStream actual=new FileInputStream(file);InputStream wanted=jar.getInputStream(entry)){int n;while((n=wanted.read(a))!=-1){int offset=0;while(offset<n){int m=actual.read(b,offset,n-offset);if(m<0)return false;offset+=m;}for(int i=0;i<n;i++)if(a[i]!=b[i])return false;}if(actual.read()!=-1)return false;}
             }
         }
-        try(java.util.stream.Stream<Path> files=Files.walk(directory.toPath())){for(Path path:(Iterable<Path>)files::iterator){if(Files.isSymbolicLink(path))return false;if(Files.isRegularFile(path)){String relative=directory.toPath().relativize(path).toString().replace(File.separatorChar,'/');if(!expected.contains(relative)&&!relative.equals(".complete-api1")&&!relative.equals(".source-code"))return false;}}}
+        try(java.util.stream.Stream<Path> files=Files.walk(directory.toPath())){for(Path path:(Iterable<Path>)files::iterator){if(Files.isSymbolicLink(path))return false;if(Files.isRegularFile(path)){String relative=directory.toPath().relativize(path).toString().replace(File.separatorChar,'/');if(!expected.contains(relative)&&!relative.equals(".complete-api1")&&!relative.equals(".source-code")&&!relative.equals(".source-preview"))return false;}}}
         return !expected.isEmpty();
     }
     static void extract(File archive,File destination)throws Exception{

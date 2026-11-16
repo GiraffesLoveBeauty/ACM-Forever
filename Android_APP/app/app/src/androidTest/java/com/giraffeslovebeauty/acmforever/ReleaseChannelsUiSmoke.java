@@ -165,13 +165,46 @@ final class ReleaseChannelsUiSmoke {
             check(child!=null&&child!=parent&&child.getIntent().getBooleanExtra("admin_distribution",false),"admin update opens a distinct child page");
             test.waitForIdleSync();check(monitor.getHits()==1,"repeated admin entry taps open one page");
             Activity active=child;test.runOnMainSync(()->check(find(active.getWindow().getDecorView(),"启动时自动检查更新")==null,"preview entry only checks manually"));
+            installerOwnership(test,context,app,updates,active);
             Activity opened=child;test.runOnMainSync(opened::finish);test.waitForIdleSync();
             check(!parent.isFinishing()&&!parent.isDestroyed(),"return preserves formal update parent");
         }finally{test.removeMonitor(monitor);Activity opened=child;test.runOnMainSync(()->{if(opened!=null)opened.finish();parent.finish();});}
+        String staleReceipt=updates.installReceipt();
         api.logout();test.waitForIdleSync();check(!updates.ready(),"logout clears private ready state");
+        callback(test,context,staleReceipt,android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION,new Intent(context,UpdateActivity.class));
+        test.waitForIdleSync();check(!updates.awaitingModuleInstall(),"old private confirmation cannot survive logout");
+        AppUpdates restarted=new AppUpdates(context,api,()->true,true);check(!restarted.ownsInstallReceipt(staleReceipt),"process restart cannot reuse private installer authority");
         boolean blocked=false;try(InputStream in=context.getContentResolver().openInputStream(uri)){}catch(FileNotFoundException e){blocked=true;}check(blocked,"logged-out provider cannot serve debug APK");
         empty[0]=true;api.login(ACCOUNT,PASSWORD);test.waitForIdleSync();test.runOnMainSync(()->updates.check(true));await(test,()->!updates.busy());
         check(!updates.available()&&updates.error().isEmpty()&&updates.status().equals("暂无待发布测试版"),"released preview disappears as valid empty result");
+    }
+    private static void installerOwnership(Instrumentation test,Context context,AcmApplication app,AppUpdates updates,Activity page)throws Exception{
+        check(!ModuleStore.installedNativeChecked(context).isEmpty(),"real preview installer fixture includes native splits");
+        check(context.getPackageManager().canRequestPackageInstalls(),"isolated emulator explicitly permits system install request");
+        AppUpdates formal=app.updates();check(!formal.awaitingModuleInstall(),"formal controller initially detached");
+        test.runOnMainSync(()->updates.install(page));
+        await(test,()->updates.awaitingModuleInstall()||!updates.error().isEmpty());
+        check(updates.awaitingModuleInstall()&&updates.error().isEmpty(),"real PackageInstaller pending action reaches preview controller: "+updates.status());
+        check(!formal.awaitingModuleInstall()&&formal.error().isEmpty(),"preview confirmation never enters detached formal controller");
+        long end=SystemClock.uptimeMillis()+10000;boolean systemVisible=false;
+        while(SystemClock.uptimeMillis()<end){android.view.accessibility.AccessibilityNodeInfo window=test.getUiAutomation().getRootInActiveWindow();
+            if(window!=null&&window.getPackageName()!=null&&window.getPackageName().toString().contains("packageinstaller")){systemVisible=true;break;}Thread.sleep(100);}
+        check(systemVisible,"actual system package installer confirmation displayed from preview page");
+        try(ParcelFileDescriptor ignored=test.getUiAutomation().executeShellCommand("input keyevent KEYCODE_BACK")){Thread.sleep(300);}
+        await(test,()->!updates.awaitingModuleInstall()&&!updates.error().isEmpty());
+        check(updates.error().contains("取消")&&formal.error().isEmpty(),"real system cancellation updates preview only");
+        test.runOnMainSync(updates::dismissError);
+        callback(test,context,updates.installReceipt(),android.content.pm.PackageInstaller.STATUS_FAILURE,null);test.waitForIdleSync();
+        check(updates.error().contains("系统安装失败")&&formal.error().isEmpty(),"failure callback also preserves controller ownership");
+        test.runOnMainSync(updates::dismissError);
+        callback(test,context,"app-update",android.content.pm.PackageInstaller.STATUS_FAILURE_ABORTED,null);test.waitForIdleSync();
+        check(formal.error().contains("取消")&&updates.error().isEmpty(),"legacy formal receipt remains supported");test.runOnMainSync(formal::dismissError);
+    }
+    private static void callback(Instrumentation test,Context context,String receipt,int status,Intent confirmation)throws Exception{
+        int session=190001;context.getSharedPreferences("module_installs",0).edit().putString("session_"+session,receipt).commit();
+        Intent result=new Intent().putExtra(android.content.pm.PackageInstaller.EXTRA_SESSION_ID,session).putExtra(android.content.pm.PackageInstaller.EXTRA_STATUS,status).putExtra(android.content.pm.PackageInstaller.EXTRA_STATUS_MESSAGE,"Synthetic callback boundary");
+        if(confirmation!=null)result.putExtra(Intent.EXTRA_INTENT,confirmation);
+        test.runOnMainSync(()->new ModuleInstallReceiver().onReceive(context,result));
     }
     private static android.view.View find(android.view.View view,String label){
         if(view instanceof android.widget.TextView&&label.contentEquals(((android.widget.TextView)view).getText()))return view;

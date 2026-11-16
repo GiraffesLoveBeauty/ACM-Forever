@@ -31,6 +31,15 @@ final class ModuleSpec {
         if(!tag.matches("v"+java.util.regex.Pattern.quote(version)+"-preview\\.[1-9][0-9]*")||!tag.equals(index.getString("previewTag")))throw new IllegalArgumentException("测试模块修订不一致");
         return parse(index,code,version,tag,UpdateManifest.https(base),owner);
     }
+    /** Offline integrity metadata is not authorization to download a private asset. */
+    static Map<String,ModuleSpec> storedCatalog(JSONObject index,int code,String version,String tag)throws Exception{
+        if(tag.isEmpty())return parse(index,code,version);
+        if(!tag.matches("v"+java.util.regex.Pattern.quote(version)+"-preview\\.[1-9][0-9]*")||!tag.equals(index.getString("previewTag")))throw new IllegalArgumentException("本地测试模块修订不一致");
+        return parse(index,code,version,tag,"",-1);
+    }
+    static ModuleSpec localArchive(String id,String hash,long size,int code,String tag){
+        return new ModuleSpec(id,"",hash,nativeModule(id)?"native":"assets",size,code,"","",tag,-1);
+    }
     private static Map<String,ModuleSpec> parse(JSONObject index,int code,String version,String tag,String base,long owner)throws Exception{
         if(index.getInt("schemaVersion")!=1||index.getInt("versionCode")!=code||!version.equals(index.getString("versionName")))throw new IllegalArgumentException("模块清单与当前App版本不匹配");
         if(tag.isEmpty()&&index.has("previewTag"))throw new IllegalArgumentException("公开模块源不能包含测试修订");
@@ -45,7 +54,7 @@ final class ModuleSpec {
             if(size<=0||size>MAX_BYTES||!hash.matches("[0-9a-f]{64}")||!validUrl||!kind.equals(nativeModule(id)?"native":"assets"))throw new IllegalArgumentException("模块清单无效");
             if(row.has("revision")&&!(row.get("revision") instanceof String))throw new IllegalArgumentException("模块编号必须为字符串");String revision=row.optString("revision","");if(!revision.isEmpty()&&!revision.matches((nativeModule(id)?"n1-":"a1-")+"[0-9a-f]{64}"))throw new IllegalArgumentException("模块编号无效");
             String number="";if(row.has("number")){Object value=row.get("number");if(!(value instanceof String))throw new IllegalArgumentException("模块编号必须为字符串");number=ModuleNumber.validate(id,version,(String)value);}
-            if(!tag.isEmpty())url=base+"/api/admin/android/releases/"+tag+"/assets/"+filename(id);
+            if(!tag.isEmpty())url=base.isEmpty()?"":base+"/api/admin/android/releases/"+tag+"/assets/"+filename(id);
             result.put(id,new ModuleSpec(id,url,hash,kind,size,code,revision,number,tag,owner));
         }
         return result;
