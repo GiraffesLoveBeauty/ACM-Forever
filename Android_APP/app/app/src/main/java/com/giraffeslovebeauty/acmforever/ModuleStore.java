@@ -34,6 +34,18 @@ final class ModuleStore {
     static Set<String> installedNative(Context c){try{String[] names=c.getPackageManager().getPackageInfo(c.getPackageName(),0).splitNames;Set<String> found=new HashSet<>();if(names!=null)for(String id:names)if(ModuleSpec.nativeModule(id))found.add(id);return found;}catch(Exception e){return Collections.emptySet();}}
     static void acquired(Context c,String id){Set<String> ids=acquired(c);ids.add(id);if(!c.getSharedPreferences("optional_modules",0).edit().putStringSet("acquired",ids).commit())throw new IllegalStateException("无法保存已下载模块记录，请检查存储空间");}
     static Set<String> acquired(Context c){Set<String> ids=new HashSet<>(c.getSharedPreferences("optional_modules",0).getStringSet("acquired",Collections.emptySet()));ids.retainAll(ModuleSpec.IDS);ids.addAll(installedNative(c));for(String id:ModuleSpec.IDS)if(!ModuleSpec.nativeModule(id)&&available(c,id))ids.add(id);return ids;}
+    static Set<String> updateSelection(Context c)throws Exception{
+        Set<String> ids=acquired(c);
+        Set<String> pending=new HashSet<>();
+        for(String id:ids)if(ModuleSpec.nativeModule(id)&&c.getSharedPreferences("module_installs",0).getBoolean("remove_"+id,false))pending.add(id);
+        if(pending.isEmpty())return ids;
+        // A completed system removal can survive process death before local cleanup.
+        // Verify absence directly: a PackageManager failure must not count as absence.
+        String[] splits=c.getPackageManager().getPackageInfo(c.getPackageName(),0).splitNames;
+        Set<String> installed=splits==null?Collections.emptySet():new HashSet<>(Arrays.asList(splits));
+        for(String id:pending)if(!installed.contains(id))ids.remove(id);
+        return ids;
+    }
     static boolean updateTogether(Context c){return AppAppearance.prefs(c).getBoolean("app_update_modules",true);}
     static synchronized void removeLocal(Context c,String id)throws Exception{
         ModuleSpec.name(id);

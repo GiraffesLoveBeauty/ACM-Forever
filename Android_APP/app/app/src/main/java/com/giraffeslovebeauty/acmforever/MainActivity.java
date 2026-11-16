@@ -855,6 +855,7 @@ public final class MainActivity extends Activity {
 
     private void showForum(){
         int y=pendingScroll>=0?pendingScroll:pageScroll.getScrollY();
+        if(loadingRegion!=null&&loadingRegion!=forumRows&&loadingRegion.getParent()==content)content.removeView(loadingRegion);
         loadingRegion=null;forumRows.setMinimumHeight(0);forumRows.setGravity(Gravity.TOP);forumRows.setPadding(0,0,0,0);forumRows.setBackgroundColor(Color.TRANSPARENT);
         forumRows.removeAllViews();JSONArray rows=forumFeed.visibleRows(forumVisibleCount);
         if(rows.length()==0)forumRows.addView(label("这里还没有话题，试试其他分类或关键词。",14,MUTED,false));

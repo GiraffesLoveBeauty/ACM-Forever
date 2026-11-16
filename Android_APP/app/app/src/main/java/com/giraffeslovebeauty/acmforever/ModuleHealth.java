@@ -31,7 +31,7 @@ final class ModuleHealth {
         }catch(Exception failure){Status result=new Status(false,("修复中".equals(state(id).message)?"修复失败 / 待修复：":"损坏 / 待修复：")+failure.getMessage(),"");publish(id,result);CharacterArt.clear();return result;}
     }
     static void check(Context context,String id,java.util.function.Consumer<Status> done){Context c=context.getApplicationContext();io.execute(()->{Status result=verify(c,id);if(done!=null)main.post(()->done.accept(result));});}
-    static void checkAll(Context context){Context c=context.getApplicationContext();io.execute(()->{Set<String> ids;try{ids=ModuleStore.acquired(c);}catch(Exception unavailable){return;}for(String id:ids)verify(c,id);});}
+    static void checkAll(Context context){Context c=context.getApplicationContext();io.execute(()->{Set<String> ids;try{ModuleDownloads.get(c).reconcileRemovals();ids=ModuleStore.acquired(c);}catch(Exception unavailable){return;}for(String id:ids)verify(c,id);});}
     static synchronized void removeLocal(Context c,String id)throws Exception{
         ModuleStore.removeLocal(c,id);broken.remove(id);states.remove(id);CharacterArt.clear();
         for(Runnable observer:observers)main.post(observer);

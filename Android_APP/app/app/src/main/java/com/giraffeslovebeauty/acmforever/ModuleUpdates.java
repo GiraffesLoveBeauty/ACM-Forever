@@ -7,7 +7,7 @@ import java.util.*;
 /** Stages only modules already acquired; never downloads other optional modules. */
 final class ModuleUpdates {
     static String summary(Context c,int code,String version)throws Exception{
-        Set<String> selected=ModuleStore.acquired(c);if(selected.isEmpty())return "尚未下载可选模块";
+        Set<String> selected=ModuleStore.updateSelection(c);if(selected.isEmpty())return "尚未下载可选模块";
         Map<String,ModuleSpec> catalog=ModuleNetwork.catalog(c,code,version);
         List<String> names=new ArrayList<>();long bytes=0;StringBuilder details=new StringBuilder();
         for(String id:ModuleSpec.IDS)if(selected.contains(id)&&catalog.containsKey(id)){
@@ -20,7 +20,7 @@ final class ModuleUpdates {
     private static String shortRevision(String r){return r.isEmpty()?"旧版编号":r.length()>15?r.substring(0,15):r;}
     static Map<String,File> prepare(Context c,UpdateManifest release,ModuleNetwork.Cancelled cancelled,java.util.function.Consumer<String> status)throws Exception{
         int code=(int)release.versionCode;String version=release.versionName;Map<String,File> nativeFiles=new LinkedHashMap<>();if(!ModuleStore.updateTogether(c))return nativeFiles;
-        Set<String> ids=ModuleStore.acquired(c);if(ids.isEmpty())return nativeFiles;
+        Set<String> ids=ModuleStore.updateSelection(c);if(ids.isEmpty())return nativeFiles;
         if(release.modulesUrl.isEmpty())throw new IOException("新版未提供模块清单；可稍后重试，或关闭随 App 更新模块后仅安装基础包。旧文件与设置会保留。");
         Map<String,ModuleSpec> catalog=ModuleNetwork.catalog(c,code,version);Set<String> trusted=ModuleStore.trusted(c);
         for(String id:ids){

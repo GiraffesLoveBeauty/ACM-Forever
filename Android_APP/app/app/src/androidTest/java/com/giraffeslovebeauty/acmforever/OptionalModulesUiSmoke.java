@@ -31,6 +31,8 @@ final class OptionalModulesUiSmoke {
             trace("logged in");
             if(mode.equals("modules-storage")){
                 storage();
+            }else if(mode.equals("modules-pending-removal")){
+                pendingRemoval();
             }else if(mode.startsWith("modules-removal-")){
                 removal();
             }else if(mode.equals("modules-recovery")){
@@ -197,6 +199,23 @@ final class OptionalModulesUiSmoke {
         main(()->OptionalTestClasses.call(activity,"resetPassword",new Class<?>[]{String.class,JSONObject.class},"90000002",new JSONObject()));
         main(()->{View eye=find("显示密码");check(eye!=null,"administrator reset has eye");eye.performClick();check(find("隐藏密码")!=null,"reset eye reveals");find("隐藏密码").performClick();check(find("显示密码")!=null,"reset eye masks again");ModalDialogs.close(activity);});
         personal.delete();
+    }
+    private void pendingRemoval()throws Exception{
+        check(!ModuleStore.installedNative(app).contains("admin"),"install base and advanced only for this regression");
+        ModuleStore.acquired(app,"admin");
+        check(ModuleStore.updateSelection(app).contains("admin"),"a downloaded, never installed module remains selected without removal receipt");
+        File archive=ModuleStore.archive(app,"admin");archive.getParentFile().mkdirs();java.nio.file.Files.write(archive.toPath(),new byte[]{1,2,3});
+        app.getSharedPreferences("module_installs",0).edit().putBoolean("remove_admin",true).commit();
+        check(ModuleStore.acquired(app).contains("admin")&&!ModuleStore.updateSelection(app).contains("admin"),"pending cleanup remains visible but completed system removal is excluded before visiting manager");
+        JSONObject raw=new JSONObject(new String(java.nio.file.Files.readAllBytes(new File(app.getFilesDir(),"module-fixtures/update.json").toPath()),StandardCharsets.UTF_8));
+        Map<String,File> staged=ModuleUpdates.prepare(app,new UpdateManifest(raw,app.getPackageName()),()->false,text->{});
+        check(!staged.containsKey("admin"),"direct App update cannot reinstall explicitly deleted split");
+        ModuleHealth.checkAll(app);await(()->!app.getSharedPreferences("module_installs",0).getBoolean("remove_admin",false),"startup recovery completes receipt cleanup");
+        check(!archive.exists(),"removed split archive cleaned");
+        check(ModuleStore.installedNative(app).contains("advanced"),"other split remains installed");
+        app.getSharedPreferences("module_installs",0).edit().putBoolean("remove_advanced",true).commit();
+        try{check(ModuleStore.updateSelection(app).contains("advanced"),"cancelled or still-installed split remains in update selection");ModuleDownloads.get(app).reconcileRemovals();check(app.getSharedPreferences("module_installs",0).getBoolean("remove_advanced",false),"still-installed receipt is not treated as successful uninstall");}
+        finally{app.getSharedPreferences("module_installs",0).edit().remove("remove_advanced").commit();}
     }
     private void removal()throws Exception{
         administrator();ModuleDownloads jobs=ModuleDownloads.get(app);

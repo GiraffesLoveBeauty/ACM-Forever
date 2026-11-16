@@ -16,6 +16,7 @@ import org.json.*;
 final class ListPagingUiSmoke {
     private final Instrumentation test;private final AcmApplication app;private MainActivity activity;
     private final List<String> reads=Collections.synchronizedList(new ArrayList<>());
+    private volatile boolean failForum;
     private ListPagingUiSmoke(Instrumentation t){test=t;app=(AcmApplication)t.getTargetContext().getApplicationContext();}
     static void run(Instrumentation t){new ListPagingUiSmoke(t).run();}
     private void run(){Bundle result=new Bundle();int outcome=Activity.RESULT_CANCELED;
@@ -36,19 +37,25 @@ final class ListPagingUiSmoke {
             int[] y={0};main(()->{ScrollView scroll=(ScrollView)field("pageScroll");scroll.scrollTo(0,400);y[0]=scroll.getScrollY();invoke("openPost",int.class,1);});
             await(()->ready()&&has("预览评论"),"post detail");main(activity::onBackPressed);
             await(()->ready()&&has("Post 7"),"return restores loaded forum range");test.waitForIdleSync();main(()->check(Math.abs(((ScrollView)field("pageScroll")).getScrollY()-y[0])<=2,"return retains forum reading position: expected "+y[0]+", actual "+((ScrollView)field("pageScroll")).getScrollY()));
+            app.api().clearReadCaches();
             main(()->invoke("refreshCurrentPage"));await(()->ready()&&has("Post 2")&&!has("Post 3"),"forum pull refresh resets to first two posts");
+            // No cached first load: pagination gets a separate error card, then retry must remove it.
+            failForum=true;main(()->invoke("loadForumPages",new Class<?>[]{int.class,int.class,int.class},field("requestSerial"),2,2));
+            await(()->has("请求超时")&&has("Post 2"),"pagination failure keeps existing posts");
+            failForum=false;click("继续加载社区话题");await(()->ready()&&has("Post 2")&&!has("请求超时"),"successful pagination removes standalone error card");
             main(()->invoke("show",String.class,"rank"));await(()->ready()&&has("Rank 20"),"rank has full 20 item first page");click("下一页");await(()->ready()&&has("Rank 40"),"rank second page");
             main(()->invoke("refreshCurrentPage"));await(()->ready()&&has("Rank 20")&&!has("Rank 40"),"rank refresh resets to a full first page");
             main(()->invoke("show",String.class,"problems"));click("进入题库");await(()->ready()&&has("Problem 20"),"bank has full 20 item first page");click("下一页");await(()->ready()&&has("Problem 40"),"bank second page");
             main(()->invoke("refreshCurrentPage"));await(()->ready()&&has("Problem 20")&&!has("Problem 40"),"bank refresh resets to a full first page");
             check(reads.stream().filter(s->s.contains("/forum/posts?")).allMatch(s->s.contains("page_size=2")),"all forum pages use the promised batch size");
-            result.putString("stream","PASS: initial two posts, touch-driven incremental loading, cache/live dedup, back restores loaded range and position, full first-page rank and bank refresh.\n");outcome=Activity.RESULT_OK;
+            result.putString("stream","PASS: initial two posts, touch-driven incremental loading, cache/live dedup, back restores loaded range and position, pagination timeout/retry clears error card, full first-page rank and bank refresh.\n");outcome=Activity.RESULT_OK;
         }catch(Throwable error){result.putString("stream","FAIL: "+android.util.Log.getStackTraceString(error)+"\nReads: "+reads+"\n");}
         finally{if(activity!=null)main(()->{ModalDialogs.close(activity);activity.finish();});}test.finish(outcome,result);
     }
     private Object field(String name){try{java.lang.reflect.Field f=MainActivity.class.getDeclaredField(name);f.setAccessible(true);return f.get(activity);}catch(Exception e){throw new AssertionError(e);}}
     private void invoke(String name){try{java.lang.reflect.Method m=MainActivity.class.getDeclaredMethod(name);m.setAccessible(true);m.invoke(activity);}catch(Exception e){throw new AssertionError(e);}}
     private void invoke(String name,Class<?> type,Object argument){try{java.lang.reflect.Method m=MainActivity.class.getDeclaredMethod(name,type);m.setAccessible(true);m.invoke(activity,argument);}catch(Exception e){throw new AssertionError(e);}}
+    private void invoke(String name,Class<?>[] types,Object... arguments){try{java.lang.reflect.Method m=MainActivity.class.getDeclaredMethod(name,types);m.setAccessible(true);m.invoke(activity,arguments);}catch(Exception e){throw new AssertionError(e);}}
     private boolean ready(){boolean[] value={false};main(()->value[0]=((PageRefresh)field("pageRefresh")).canRefresh());return value[0];}
     private View find(View v,String text){if(v instanceof TextView&&(text.contentEquals(((TextView)v).getText())||text.equals(v.getContentDescription())))return v;if(v instanceof ViewGroup)for(int i=0;i<((ViewGroup)v).getChildCount();i++){View found=find(((ViewGroup)v).getChildAt(i),text);if(found!=null)return found;}return null;}
     private boolean has(String text){boolean[] value={false};main(()->value[0]=find(activity.getWindow().getDecorView(),text)!=null);return value[0];}
@@ -71,7 +78,7 @@ final class ListPagingUiSmoke {
         throw new IOException("Unexpected test endpoint: "+path);
     }
     private final class Fixture extends HttpURLConnection {
-        Fixture(URL url){super(url);}public void connect(){}public void disconnect(){}public boolean usingProxy(){return false;}public int getResponseCode(){return 200;}
+        Fixture(URL url){super(url);}public void connect(){}public void disconnect(){}public boolean usingProxy(){return false;}public int getResponseCode()throws IOException{if(failForum&&url.getPath().endsWith("/forum/posts"))throw new SocketTimeoutException("Pagination fixture timeout");return 200;}
         public OutputStream getOutputStream(){return new ByteArrayOutputStream();}
         public Map<String,List<String>> getHeaderFields(){return url.getPath().endsWith("/login")?Collections.singletonMap("Set-Cookie",Collections.singletonList("session=list-fixture; Path=/; Secure; HttpOnly")):Collections.emptyMap();}
         public InputStream getInputStream()throws IOException{reads.add(url.getPath()+(url.getQuery()==null?"":"?"+url.getQuery()));try{return new ByteArrayInputStream(response(url).toString().getBytes(StandardCharsets.UTF_8));}catch(Exception e){throw new IOException(e);}}
