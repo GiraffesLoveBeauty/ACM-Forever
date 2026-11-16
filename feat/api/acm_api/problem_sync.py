@@ -16,6 +16,8 @@ from .cf_client import CFUnavailable, cf_page, cf_request, problem_url
 from .cf_practice import normalize_problem
 from .contest_metadata import contest_metadata, refresh_contests, save_contests
 from .cf_contest_catalog import complete_cf_catalog, save_cf_contest_catalog
+from .problem_time import time_options, filter_collection_time
+from .atcoder_difficulty import MODELS_URL, apply_models
 
 ATCODER_CATALOG_URL = "https://kenkoooo.com/atcoder/resources/problems.json"
 DAILY_STATEMENT_LIMIT = 100
@@ -24,8 +26,8 @@ DAILY_STATEMENT_LIMIT = 100
 def sync_options(data):
     if not isinstance(data, dict):
         raise ValueError("请求须为 JSON 对象")
-    if set(data) - {"platform", "scope", "contest_id", "problem_ids", "limit", "batch_size", "language", "refresh"}:
-        raise ValueError("存在不支持的参数，仅支持 platform/scope/contest_id/problem_ids/limit/batch_size/language/refresh")
+    if set(data) - {"platform", "scope", "contest_id", "problem_ids", "limit", "batch_size", "language", "refresh", "start_at", "end_at", "time_basis"}:
+        raise ValueError("存在不支持的参数，仅支持 platform/scope/contest_id/problem_ids/limit/batch_size/language/refresh/start_at/end_at/time_basis")
     platform = data.get("platform", "atcoder")
     if platform == "luogu":
         from .luogu_sync import sync_options as luogu_options
@@ -83,7 +85,8 @@ def sync_options(data):
     if type(refresh) is not bool:
         raise ValueError("refresh 必须为布尔值")
     return {"platform": platform, "scope": scope, "contest_id": contest, "problem_ids": sorted(set(ids)),
-            "limit": limit, "batch_size": batch_size, "language": language, "refresh": refresh}
+            "limit": limit, "batch_size": batch_size, "language": language, "refresh": refresh,
+            **time_options({**data, "scope": scope}, platform, collection=True)}
 
 
 def cf_metadata(problems, contest):
@@ -212,6 +215,12 @@ class ProblemSync:
             finally:
                 self._next_request_at = time.monotonic() + 1.5
 
+    async def enrich_atcoder(self, http, items, result):
+        try:
+            apply_models(items, await self.download(http, MODELS_URL))
+        except (ValueError, aiohttp.ClientError, OSError, asyncio.TimeoutError) as error:
+            result["difficulty_warning"] = "估计难度刷新失败，保留已有难度：" + str(error)[:500]
+
     async def run(self, options, task):
         if options["platform"] == "luogu":
             from .luogu_sync import LuoguSync
@@ -265,6 +274,9 @@ class ProblemSync:
                     result["contest_catalog_failure_count"] = len(errors)
                     result["contest_catalog_failures"] = errors[:100]
                 result["discovered_count"] = len(items)
+                items = await filter_collection_time(db, options["platform"], items, options, result)
+                if options["platform"] == "atcoder":
+                    await self.enrich_atcoder(http, items, result)
                 if full:
                     task["progress"].update(phase="metadata", metadata_done=0, metadata_total=len(items))
                     for start in range(0, len(items), options["batch_size"]):
@@ -279,6 +291,9 @@ class ProblemSync:
                 if not full and options["platform"] == "codeforces":
                     await save_cf_contest_catalog(db, options["contest_id"], items)
                 items = [item for item in items if not requested or item["problem_id"] in requested]
+                if not full and any("difficulty_source" in item for item in items):
+                    await save_metadata_batch(db, items)
+                    result["metadata_count"] += len(items)
                 result["scope_count"] = len(items)
                 if scheduled:
                     pending = await _scheduled_pending(db, options["platform"], items)

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -80,3 +81,8 @@ class DailyProblemSyncTests(unittest.IsolatedAsyncioTestCase):
             [(item["platform"], item["status"]) for item in self.manager.snapshots()],
             [("atcoder", "cancelled")],
         )
+        with closing(sqlite3.connect(self.db_path)) as db:
+            saved = db.execute("SELECT value FROM settings WHERE key=?",
+                               ("daily_problem_sync_result_atcoder",)).fetchone()
+        self.assertIsNotNone(saved)
+        self.assertEqual(json.loads(saved[0])["status"], "cancelled")

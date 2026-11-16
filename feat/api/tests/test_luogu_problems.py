@@ -109,6 +109,17 @@ class PayloadTests(unittest.TestCase):
         self.assertNotIn('javascript:', rendered)
         self.assertNotIn('src="data:', rendered)
 
+    def test_optional_null_markdown_sections_are_omitted_but_description_remains_required(self):
+        payload = problem()
+        content = payload["content"]
+        content["background"] = None
+        content["hint"] = None
+        _, result = parse_problem(page("problem.show", {"problem": payload}), "P1001", TAXONOMY)
+        self.assertNotIn("题目背景", result["statement_html"])
+        content["description"] = None
+        with self.assertRaises(ValueError):
+            parse_problem(page("problem.show", {"problem": payload}), "P1001", TAXONOMY)
+
     def test_statement_samples_and_limits_are_exact(self):
         item, content = parse_problem(body(), "P1001", TAXONOMY)
         self.assertEqual(content["samples"], [{"index": 1, "input": "20 30\n", "output": "50\n"}])
@@ -464,6 +475,23 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             task_id = (await response.get_json())["task"]["id"]
             await self.app.task_manager.tasks[task_id]["_task"]
             self.assertEqual(self.app.task_manager.tasks[task_id]["status"], "completed")
+
+    async def test_admin_database_native_filters_apply_before_count_and_pagination(self):
+        client = self.app.test_client()
+        await self.login(client, "87654321")
+        response = await client.get("/api/admin/database/problems?platform=luogu&native_difficulty=0&native_tag=-2&page_size=1")
+        self.assertEqual(response.status_code, 200)
+        data = await response.get_json()
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["items"][0]["problem_id"], "P1001")
+        self.assertEqual(data["items"][0]["native_difficulty"]["id"], 0)
+        self.assertEqual(data["items"][0]["native_tags"][0]["id"], -2)
+        self.assertTrue(data["items"][0]["content_available"])
+        self.assertIsNone(data["items"][0]["problem_rating"])
+        response = await client.get("/api/admin/database/problems?platform=codeforces&native_difficulty=0")
+        self.assertEqual(response.status_code, 400)
+        response = await client.get("/api/admin/database/problems?platform=luogu&status=pending&native_difficulty=0")
+        self.assertEqual((await response.get_json())["total"], 0)
 
     async def test_daily_luogu_is_opt_in_and_uses_existing_persistent_claims(self):
         engine = SimpleNamespace(db_path=self.path, crawler_config={"luogu_daily_problem_sync_enabled": True, "luogu_daily_statement_limit": 500})

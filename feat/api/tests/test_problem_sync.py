@@ -150,6 +150,9 @@ class ProblemSyncTests(unittest.IsolatedAsyncioTestCase):
             "ACM_DATABASE_PATH": str(self.db_path), "ACM_WEBUI_SECRET_KEY": "test-only-secret",
         })
         self.env.start()
+        self.models_patch = patch("feat.api.acm_api.problem_sync.ProblemSync.enrich_atcoder", return_value=None)
+        self.models_patch.start()
+        self.addCleanup(self.models_patch.stop)
         self.app = create_app()
         db = await connect_db(self.db_path)
         try:

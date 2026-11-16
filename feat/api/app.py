@@ -127,6 +127,7 @@ def create_app(*, daily_problem_sync=False, member_sync=False):
     if not 1.2 <= luogu_interval <= 60 or not 1 <= luogu_daily_limit <= 1000 or not 1 <= luogu_max_pages <= 2000:
         raise ValueError("Luogu request interval must be 1.2–60, daily limit 1–1000, catalog pages 1–2000")
     crawler_config = {
+        "daily_problem_sync_enabled": bool(daily_problem_sync),
         "luogu_request_interval": luogu_interval,
         "luogu_daily_statement_limit": luogu_daily_limit,
         "luogu_catalog_max_pages": luogu_max_pages,

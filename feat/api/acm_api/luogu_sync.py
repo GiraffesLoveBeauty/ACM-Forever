@@ -12,6 +12,7 @@ from .luogu_client import ORIGIN, LuoguUnavailable, luogu_get
 from .luogu_problem import (catalog_page, load_taxonomy,
                             normalize_taxonomy, parse_problem, problem_id, save_taxonomy)
 from .problem_bank import record_problem_failure, save_metadata_batch, save_problem
+from .problem_time import time_options, filter_collection_time
 
 
 def sync_options(data):
@@ -26,10 +27,10 @@ def sync_options(data):
         raise ValueError("指定题目采集必须提供 problem_ids")
     if scope != "problems" and "problem_ids" in data:
         raise ValueError("目录/全平台采集不接受 problem_ids")
-    limit = data.get("limit", 100) if scope == "platform" else None
+    limit = data.get("limit") if scope == "platform" else None
     if scope != "platform" and "limit" in data:
         raise ValueError("洛谷 limit 仅用于 platform 的题面数量上限")
-    if scope == "platform" and (type(limit) is not int or not 1 <= limit <= 1000):
+    if scope == "platform" and limit is not None and (type(limit) is not int or not 1 <= limit <= 1000):
         raise ValueError("洛谷 limit 必须为 1–1000 的整数")
     batch = data.get("batch_size", 50)
     if type(batch) is not int or not 1 <= batch <= 100:
@@ -41,7 +42,8 @@ def sync_options(data):
     if type(refresh) is not bool:
         raise ValueError("refresh 必须为布尔值")
     return {"platform": "luogu", "scope": scope, "contest_id": None, "problem_ids": ids,
-            "limit": limit, "batch_size": batch, "language": language, "refresh": refresh}
+            "limit": limit, "batch_size": batch, "language": language, "refresh": refresh,
+            **time_options({**data, "scope": scope}, "luogu", collection=True)}
 
 
 class LuoguSync:
@@ -131,6 +133,7 @@ class LuoguSync:
                     result["discovered_count"] = len(items)
                 else:
                     items = await self.catalog(db, http, taxonomy, task)
+                items = await filter_collection_time(db, "luogu", items, options, result)
                 if options["scope"] == "catalog":
                     task["status"] = "completed"
                     return
@@ -145,7 +148,7 @@ class LuoguSync:
                     from .problem_sync import _scheduled_pending
                     pending = await _scheduled_pending(db, "luogu", pending)
                 result["skipped_count"] = len(items) - len(pending)
-                cap = options["limit"] if options["scope"] == "platform" else len(pending)
+                cap = options["limit"] if options["scope"] == "platform" and options["limit"] is not None else len(pending)
                 if options.get("scheduled"):
                     cap = min(cap, self.config.get("luogu_daily_statement_limit", 100))
                 selected = pending[:cap]
@@ -179,7 +182,7 @@ class LuoguSync:
                             raise ValueError("连续三道题采集失败，已停止本次任务；已有题面与样例保留") from error
                     task["progress"]["done"] = index
                     result["completed_batches"] = index // options["batch_size"] + int(index == len(selected) and index % options["batch_size"] != 0)
-                task["status"] = "partial" if result["failure_count"] else "completed"
+                task["status"] = "partial" if result["failure_count"] or result["remaining_count"] and not options.get("scheduled") else "completed"
         except asyncio.CancelledError:
             task["status"] = "cancelled"
             raise

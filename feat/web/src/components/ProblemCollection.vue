@@ -1,6 +1,10 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue';
 import { useProblemCollection } from '../lib/problem-collection.js';
+import { luoguCollection } from '../lib/luogu-problems.js';
+import { collectionTime } from '../lib/problem-filters.js';
+import ProblemRangeFilters from './ProblemRangeFilters.vue';
+import ProblemSyncSchedule from './ProblemSyncSchedule.vue';
 import ProblemDatabaseBrowser from './ProblemDatabaseBrowser.vue';
 import ProblemTaskProgress from './ProblemTaskProgress.vue';
 const emit = defineEmits(['published']);
@@ -31,14 +35,54 @@ const form = reactive({
   limit: 20,
   batch_size: 100,
   refresh: false,
+  range_mode: 'all',
+  start_at: '',
+  end_at: '',
+  time_basis: '',
 });
 const full = computed(() => form.scope === 'platform');
 const cf = computed(() => form.platform === 'codeforces');
+const luogu = computed(() => form.platform === 'luogu');
+watch(
+  () => form.platform,
+  (platform, previous) => {
+    Object.assign(form, {
+      range_mode: 'all',
+      start_at: '',
+      end_at: '',
+      time_basis: platform === 'luogu' ? 'first_seen' : 'contest',
+    });
+    if (platform === 'luogu')
+      Object.assign(form, {
+        scope: 'problems',
+        language: 'zh-CN',
+        limit: 100,
+        batch_size: 50,
+        problem_ids: '',
+      });
+    else if (previous === 'luogu')
+      Object.assign(form, {
+        scope: 'contest',
+        language: 'en',
+        limit: 20,
+        batch_size: 100,
+        problem_ids: '',
+      });
+  },
+);
 watch(cf, (value) => {
   if (value) form.language = 'en';
 });
 const active = computed(() => task.value && ['queued', 'running'].includes(task.value.status));
 async function submit() {
+  if (luogu.value) {
+    try {
+      await collectionSubmit({ ...luoguCollection(form), ...collectionTime(form) });
+    } catch (cause) {
+      message.value = cause.message;
+    }
+    return;
+  }
   const count = Number(full.value ? form.batch_size : form.limit);
   if (!Number.isInteger(count) || count < 1 || count > 100) {
     message.value = '题数必须为 1–100 的整数。';
@@ -65,10 +109,15 @@ async function submit() {
   if (full.value) payload.batch_size = count;
   else
     Object.assign(payload, { contest_id: form.contest_id.trim(), problem_ids: ids, limit: count });
-  await collectionSubmit(payload);
+  try {
+    await collectionSubmit({ ...payload, ...collectionTime(form) });
+  } catch (cause) {
+    message.value = cause.message;
+  }
 }
 </script>
 <template>
+  <ProblemSyncSchedule />
   <section class="admin-section" aria-labelledby="problem-db-heading">
     <div class="admin-section-heading">
       <div>
@@ -95,7 +144,9 @@ async function submit() {
               ? 'Codeforces'
               : row.platform === 'atcoder'
                 ? 'AtCoder'
-                : row.platform
+                : row.platform === 'luogu'
+                  ? '洛谷'
+                  : row.platform
           }}
           · 目录 {{ row.total }} 题 · 已采集 {{ row.collected }} 题 · 失败 {{ row.failed }} 题 ·
           样例 {{ row.samples }} 组</span
@@ -107,7 +158,7 @@ async function submit() {
     <div class="admin-section-heading">
       <div>
         <h2 id="problem-sync-heading">拉取题目</h2>
-        <p>从公开比赛采集题面与样例，保存到题库。</p>
+        <p>从公开比赛或洛谷 P 题库采集题面与样例。</p>
       </div>
       <RouterLink class="admin-jump" to="/admin.html?section=tasks">查看同步任务 →</RouterLink>
     </div>
@@ -119,21 +170,32 @@ async function submit() {
               >平台<select id="sync-platform" v-model="form.platform">
                 <option value="atcoder">AtCoder</option>
                 <option value="codeforces">Codeforces</option>
+                <option value="luogu">洛谷 · 公开 P 题库</option>
               </select></label
             >
             <label
               >拉取范围<select id="sync-scope" v-model="form.scope">
-                <option value="contest">单场比赛</option>
-                <option value="platform">该平台全部题目</option>
+                <template v-if="luogu"
+                  ><option value="problems">指定 P 题号</option>
+                  <option value="catalog">仅同步题目目录</option>
+                  <option value="platform">同步全部目录、题面与样例</option></template
+                >
+                <template v-else
+                  ><option value="contest">单场比赛</option>
+                  <option value="platform">该平台全部题目</option></template
+                >
               </select></label
             >
             <label
-              >题面语言<select id="sync-language" v-model="form.language" :disabled="cf">
-                <option value="en">英文</option>
-                <option value="ja">日文</option>
+              >题面语言<select id="sync-language" v-model="form.language" :disabled="cf || luogu">
+                <option v-if="luogu" value="zh-CN">中文</option>
+                <template v-else
+                  ><option value="en">英文</option>
+                  <option value="ja">日文</option></template
+                >
               </select></label
             >
-            <label v-if="full"
+            <label v-if="full || (luogu && form.scope === 'catalog')"
               >每批处理题数<input
                 id="sync-batch-size"
                 v-model.number="form.batch_size"
@@ -143,7 +205,7 @@ async function submit() {
                 step="1"
                 required
             /></label>
-            <label v-else
+            <label v-else-if="!luogu"
               >最多拉取题数<input
                 id="sync-limit"
                 v-model.number="form.limit"
@@ -153,7 +215,7 @@ async function submit() {
                 step="1"
                 required
             /></label>
-            <label v-if="!full"
+            <label v-if="!full && !luogu"
               >比赛 ID<input
                 id="sync-contest"
                 v-model.trim="form.contest_id"
@@ -166,13 +228,34 @@ async function submit() {
                 cf ? '普通公开比赛 ID，暂不支持 Gym。' : '填写 AtCoder 比赛 ID。'
               }}</small></label
             >
-            <label v-if="!full"
-              >指定题号（选填）<input
+            <label v-if="!full && (!luogu || form.scope === 'problems')"
+              >{{ luogu ? '指定 P 题号（必填）' : '指定题号（选填）'
+              }}<input
                 id="sync-problems"
                 v-model="form.problem_ids"
-                :placeholder="cf ? '例如 1843A, 1843B' : '例如 abc370_a, abc370_b'"
-              /><small>多个题号用逗号或空格分隔；留空时按比赛题序拉取。</small></label
+                :required="luogu"
+                maxlength="1600"
+                :placeholder="
+                  luogu ? '例如 P1001, P1002' : cf ? '例如 1843A, 1843B' : '例如 abc370_a, abc370_b'
+                "
+              /><small>{{
+                luogu
+                  ? '填写 1–100 个公开 P 题号，用逗号或空格分隔。'
+                  : '多个题号用逗号或空格分隔；留空时按比赛题序拉取。'
+              }}</small></label
             >
+            <label v-if="full"
+              >同步时间范围<select id="sync-range" v-model="form.range_mode">
+                <option value="all">全部</option>
+                <option value="time">自由选择时间范围</option>
+              </select></label
+            >
+            <ProblemRangeFilters
+              v-if="full && form.range_mode === 'time'"
+              :filters="form"
+              collection
+              @change="Object.assign(form, $event)"
+            />
           </div>
           <div class="admin-form-footer">
             <label class="admin-toggle"
@@ -185,9 +268,15 @@ async function submit() {
                   ? '提交中…'
                   : active
                     ? '正在拉取…'
-                    : full
-                      ? '拉取该平台全部题目'
-                      : '开始拉取'
+                    : luogu
+                      ? form.scope === 'catalog'
+                        ? '同步题目目录'
+                        : full
+                          ? '同步目录并补全题面'
+                          : '采集指定题目'
+                      : full
+                        ? '拉取该平台全部题目'
+                        : '开始拉取'
               }}
             </button>
           </div>
@@ -195,9 +284,15 @@ async function submit() {
       </form>
       <p class="admin-form-note">
         {{
-          full
-            ? '先导入公开题目目录，再自动逐批拉取全部题面与样例；每批题数不是总数量上限。全量采集可能持续数小时，默认跳过已采集题目，再次运行可继续未完成题目。'
-            : '默认跳过已采集题目。题数为本次上限；离开页面后后台任务继续执行。'
+          luogu
+            ? form.scope === 'problems'
+              ? '匿名采集指定 P 题目，保留原生难度和标签；默认跳过已有题面。'
+              : form.scope === 'catalog'
+                ? '只同步题目目录及原生分类，不拉取正文。目录同步可能持续较长时间。'
+                : '先同步公开 P 题目录，再分批补全全部题面、原生标签、难度和样例，不调用 AI。每批题数不是总量上限；受限或中断会显示剩余数量。'
+            : full
+              ? '先导入公开题目目录，再自动逐批拉取全部题面与样例；每批题数不是总数量上限。全量采集可能持续数小时，默认跳过已采集题目，再次运行可继续未完成题目。'
+              : '默认跳过已采集题目。题数为本次上限；离开页面后后台任务继续执行。'
         }}
       </p>
       <p v-if="message" role="status" aria-live="polite">{{ message }}</p>

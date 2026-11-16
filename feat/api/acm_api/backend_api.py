@@ -35,6 +35,8 @@ from .cf_client import cf_request
 from .luogu_problem import attach_classifications, canonical_problem_id as luogu_problem_id, load_taxonomy, native_filter
 from .problem_sync import sync_options
 from .problem_bank import problem_bank_status
+from .problem_listing import listing_query, NEWEST_ORDER
+from . import problem_schedule
 from .problem_tracker import attempt_problem_metadata, contest_tracker, problem_id_aliases, problem_id_key, tracker_options
 from .problem_tags import has_problem_tag, problem_tags
 from .database import connect_db
@@ -1628,6 +1630,10 @@ async def api_problems():
             return jsonify({"success": False, "message": str(error)}), 400
         query += extra
         params.extend(native_params)
+        try:
+            query, params = await listing_query(db, query, params, request.args, platform)
+        except ValueError as error:
+            return jsonify({"success": False, "message": str(error)}), 400
         count_query = "SELECT COUNT(*) FROM (" + query + ") filtered"
         async with db.execute(count_query, tuple(params)) as cursor:
             total = int((await cursor.fetchone())[0])
@@ -1636,7 +1642,7 @@ async def api_problems():
             size = max(1, min(500, int(request.args.get("page_size", 500))))
         except (TypeError, ValueError):
             return jsonify({"success": False, "message": "分页参数必须为整数。"}), 400
-        query += " ORDER BY CAST(p.problem_rating AS INTEGER), p.platform, p.problem_id LIMIT ? OFFSET ?"
+        query += NEWEST_ORDER + " LIMIT ? OFFSET ?"
         async with db.execute(query, tuple(params + [size, (page - 1) * size])) as cursor:
             items = [dict(row) for row in await cursor.fetchall()]
         await attach_classifications(db, items)
@@ -1706,6 +1712,9 @@ async def _problem_detail(platform, problem_id):
                 "samples": [], "statement_fetched_at": None, "last_fetch_status": "never",
             }
         native = json.loads(detail.pop("metadata_json", "{}"))
+        if platform == "atcoder":
+            for key in ("difficulty_source", "difficulty_raw", "difficulty_is_experimental"):
+                detail[key] = native.get(key)
         if platform == "luogu":
             await attach_classifications(db, [detail])
             detail["statement_markdown"] = native.get("luogu", {}).get("markdown")
@@ -1836,18 +1845,17 @@ async def api_database_problems():
 
     db = await get_db()
     try:
-        async with db.execute("SELECT COUNT(*) FROM crawler_problems" + where, tuple(params)) as cursor:
+        extra, native_params = await native_filter(db, request.args, platform)
+        base = ("SELECT platform,problem_id,contest_id,problem_index,problem_name,problem_rating,"
+                "problem_url,tags,statement_language,sample_count,last_fetch_status,"
+                f"CASE WHEN {has_content} THEN 1 ELSE 0 END AS content_available,"
+                "statement_fetched_at,created_at,updated_at FROM crawler_problems p"
+                + (where or " WHERE 1=1") + extra)
+        query, params = await listing_query(db, base, params + native_params, request.args, platform)
+        async with db.execute("SELECT COUNT(*) FROM (" + query + ") filtered", params) as cursor:
             total = int((await cursor.fetchone())[0])
         page = min(page, max(1, (total + page_size - 1) // page_size))
-        async with db.execute(
-            "SELECT platform,problem_id,contest_id,problem_index,problem_name,problem_rating,"
-            "problem_url,tags,statement_language,sample_count,last_fetch_status,"
-            f"CASE WHEN {has_content} THEN 1 ELSE 0 END AS content_available,"
-            "statement_fetched_at,updated_at FROM crawler_problems"
-            + where
-            + " ORDER BY updated_at DESC,platform,problem_id LIMIT ? OFFSET ?",
-            tuple(params + [page_size, (page - 1) * page_size]),
-        ) as cursor:
+        async with db.execute(query + NEWEST_ORDER + " LIMIT ? OFFSET ?", params + [page_size, (page - 1) * page_size]) as cursor:
             items = [dict(row) for row in await cursor.fetchall()]
         for item in items:
             try:
@@ -1855,13 +1863,10 @@ async def api_database_problems():
             except (TypeError, ValueError):
                 item["tags"] = []
             item["content_available"] = bool(item["content_available"])
-        return jsonify({
-            "items": items,
-            "total": total,
-            "returned": len(items),
-            "page": page,
-            "page_size": page_size,
-        })
+        await attach_classifications(db, items)
+        return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": page_size})
+    except ValueError as error:
+        return jsonify({"success": False, "message": str(error)}), 400
     finally:
         await db.close()
 
@@ -1876,6 +1881,25 @@ async def api_initialize_database():
     try:
         status = await problem_bank_status(db)
         return jsonify({"success": True, "message": "数据库初始化完成，已有数据已保留。", **status})
+    finally:
+        await db.close()
+
+
+@api.route("/admin/problems/schedule", methods=["GET", "PUT"])
+@admin_required
+async def api_problem_schedule():
+    manager = getattr(current_app, "task_manager", None)
+    if manager is None:
+        return jsonify({"success": False, "message": "题库调度服务未配置"}), 503
+    db = await get_db()
+    try:
+        if request.method == "PUT":
+            try:
+                await problem_schedule.update(db, await request.get_json(silent=True))
+            except ValueError as error:
+                return jsonify({"success": False, "message": str(error)}), 400
+            manager.wake_problem_schedule()
+        return jsonify(await problem_schedule.snapshot(db, getattr(manager.sync_engine, "crawler_config", {})))
     finally:
         await db.close()
 
@@ -2350,6 +2374,10 @@ async def api_me_problems():
             return jsonify({"success": False, "message": str(error)}), 400
         query += extra
         params.extend(native_params)
+        try:
+            query, params = await listing_query(db, query, params, request.args, platform)
+        except ValueError as error:
+            return jsonify({"success": False, "message": str(error)}), 400
         count_query = "SELECT COUNT(*) FROM (" + query + ") filtered"
         async with db.execute(count_query, tuple(params)) as cursor:
             total = int((await cursor.fetchone())[0])
@@ -2358,7 +2386,7 @@ async def api_me_problems():
             size = max(1, min(100 if scope == "solved" else 500, int(request.args.get("page_size", 20 if scope == "solved" else 500))))
         except (TypeError, ValueError):
             return jsonify({"success": False, "message": "分页参数必须为整数。"}), 400
-        query += (" ORDER BY ac_at DESC,p.platform,p.problem_id" if scope == "solved" else " ORDER BY CAST(p.problem_rating AS INTEGER),p.platform,p.problem_id") + " LIMIT ? OFFSET ?"
+        query += (" ORDER BY ac_at DESC,p.platform,p.problem_id" if scope == "solved" else NEWEST_ORDER) + " LIMIT ? OFFSET ?"
         async with db.execute(query, tuple(params + [size, (page - 1) * size])) as cursor:
             items = [dict(row) for row in await cursor.fetchall()]
         await attach_classifications(db, items)
