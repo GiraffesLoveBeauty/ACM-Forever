@@ -1,0 +1,74 @@
+package com.giraffeslovebeauty.acmforever;
+
+import android.app.*;
+import android.content.*;
+import android.os.*;
+import android.view.*;
+import android.widget.*;
+import java.io.*;
+import java.net.*;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+import java.util.function.BooleanSupplier;
+import org.json.*;
+
+/** Real Activities and split classes, synthetic HTTPS only; never writes production accounts. */
+final class TrainingTasksUiSmoke {
+    private final Instrumentation test;private final AcmApplication app;private Activity activity;private volatile String role="member";private volatile int syncWrites,polls,publishes,passwords;private final List<Activity> opened=new ArrayList<>();private final List<String> requests=Collections.synchronizedList(new ArrayList<>());private String publishKey;
+    private TrainingTasksUiSmoke(Instrumentation t){test=t;app=(AcmApplication)t.getTargetContext().getApplicationContext();}
+    static void run(Instrumentation t){new TrainingTasksUiSmoke(t).run();}
+    private void run(){Bundle result=new Bundle();int outcome=Activity.RESULT_CANCELED;try{
+        URL.setURLStreamHandlerFactory(protocol->"https".equals(protocol)?new URLStreamHandler(){protected URLConnection openConnection(URL u)throws IOException{if(!u.getHost().equals("training.test.invalid"))throw new IOException("External test traffic forbidden");return new Fixture(u);}}:null);
+        AppAppearance.prefs(app).edit().putString("api_base_url","https://training.test.invalid").putBoolean("auto_login",false).putBoolean("app_update_automatic",false).commit();app.api().setBaseUrl("https://training.test.invalid");app.api().setNetworkAvailable(()->true);app.api().login("90000001","Synthetic!Only42");
+        activity=open(MainActivity.class,new Intent());main(()->invoke(activity,"show","problems"));await(()->has("进入题库"),"practice overview");check(!has("社团题单管理"),"ordinary member has no management entry");click("进入题库");await(()->has("Practice fixture"),"problem bank is a child page");main(()->activity.onBackPressed());await(()->has("进入题库"),"bank returns to practice");
+        activity=open(TrainingTasksActivity.class,new Intent());await(()->has("打开题单"),"assigned list from member API");Activity list=activity;main(()->((MobilePageActivity)activity).scroll.scrollTo(0,100));Instrumentation.ActivityMonitor monitor=test.addMonitor(TrainingTasksActivity.class.getName(),null,false);try{click("打开题单");activity=test.waitForMonitorWithTimeout(monitor,8000);check(activity!=null,"task detail opened");opened.add(activity);}finally{test.removeMonitor(monitor);}await(()->has("查看题面与样例"),"real problem detail and evidence");click("刷新进度");await(()->syncWrites==1&&polls>=2&&has("刷新进度"),"GET polling finishes without reposting");check(syncWrites==1,"exactly one empty-body refresh POST");main(()->activity.onBackPressed());test.waitForIdleSync();activity=list;await(()->has("打开题单"),"same list retained on return");
+        activity=open(TrainingTasksActivity.class,new Intent().putExtra("mode","schedule"));await(()->has("本地提醒设置")&&has("打开题单"),"my schedule");check(requests.stream().noneMatch(s->s.contains("/club/checkin")||s.contains("/club/sheets")),"no obsolete task or checkin endpoints");
+        role="admin";app.api().refreshSession();activity=open(MainActivity.class,new Intent());main(()->invoke(activity,"show","problems"));await(()->has("社团题单管理"),"fresh administrator practice entry");
+        activity=open(TrainingTasksActivity.class,new Intent());await(()->has("✓ 全部题单")&&has("打开题单"),"administrator defaults to all tasks even if not assigned");
+        check(requests.stream().anyMatch(s->s.contains("/api/admin/training-tasks?state=&page=1&page_size=20")),"all states without creator filter");
+        click("我的题单");await(()->has("✓ 我的题单")&&has("进行中"),"administrator can read personal assignments");click("全部题单");await(()->has("草稿")&&has("打开题单"),"all task states restored");
+        activity=open(TrainingTasksActivity.class,new Intent().putExtra("task_id",7L).putExtra("all_tasks",true));await(()->has("管理题单 / 查看成员进度")&&has("查看题面与样例"),"unassigned administrator can read task and problem detail");check(!has("刷新进度"),"all task detail never submits a personal refresh");
+        activity=open(OptionalTestClasses.type("AdminQuickActivity"),new Intent());await(()->has("手机便捷管理")&&has("账号管理"),"quick management home");main(()->{int[] heading=new int[2],entry=new int[2];find("手机便捷管理").getLocationOnScreen(heading);find("社团题单管理").getLocationOnScreen(entry);check(entry[1]>heading[1],"management links must be below decorative title");});
+        activity=open(OptionalTestClasses.type("AdminTrainingActivity"),new Intent());await(()->has("新建题单"),"installed admin split task management");click("新建题单");fill("题单标题（1–100字）","Mobile task fixture");fill("Markdown 说明（最多5000字）","Task description");fill("每行一个标准题号：1843A 或 codeforces 1843A","1843A");click("校验题目，下一步");await(()->has("社员"),"business identity options");click("社员");fill("开始时间（北京时间 yyyy-MM-dd HH:mm，可空）","2026-11-16 12:00");fill("截止时间（北京时间 yyyy-MM-dd HH:mm，可空）","2026-11-20 12:00");click("保存并预览发布");await(()->has("确认发布"),"audience preview");click("确认发布");await(()->publishes==1&&has("完成情况"),"version and idempotency guarded publish");click("完成情况");await(()->has("逐题证据"),"administrator progress");
+        activity=open(OptionalTestClasses.type("AdminAccountsActivity"),new Intent());await(()->has("选择此账号"),"account snapshots from account list");click("选择此账号");click("批量重设普通成员临时密码");click("确认");await(()->passwords==1&&has("本次操作结果"),"batch password operation with original epoch and credential version");check(has("导出 Excel / 系统分享"),"explicit successful-result export");
+        role="member";main(()->{test.callActivityOnPause(activity);test.callActivityOnResume(activity);});await(()->has("无访问权限"),"demotion hides sensitive management content");check(!has("本次操作结果"),"sensitive results hidden after demotion");
+        result.putString("stream","PASS: practice, member tasks, GET polling, admin publish, snapshot batch and demotion\n");outcome=Activity.RESULT_OK;
+    }catch(Throwable e){StringBuilder tree=new StringBuilder();try{main(()->dump(activity.getWindow().getDecorView(),tree));}catch(Throwable ignored){}result.putString("stream","FAIL: "+android.util.Log.getStackTraceString(e)+"\nVisible: "+tree+"\nRequests: "+requests);}finally{for(Activity a:opened)main(()->{ModalDialogs.close(a);a.finish();});}test.finish(outcome,result);}
+    private Activity open(Class<?> type,Intent intent){Activity a=test.startActivitySync(intent.setClassName(app,type.getName()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK));opened.add(a);return a;}
+    private void invoke(Activity a,String method,String value){try{java.lang.reflect.Method m=a.getClass().getDeclaredMethod(method,String.class);m.setAccessible(true);m.invoke(a,value);}catch(Exception e){throw new AssertionError(e);}}
+    private void main(Runnable work){Throwable[] failure={null};test.runOnMainSync(()->{try{work.run();}catch(Throwable e){failure[0]=e;}});if(failure[0]!=null)throw new AssertionError(failure[0]);}
+    private View walk(View v,String label){if(v instanceof TextView&&(label.contentEquals(((TextView)v).getText())||label.equals(v.getContentDescription())))return v;if(v instanceof ViewGroup)for(int i=0;i<((ViewGroup)v).getChildCount();i++){View found=walk(((ViewGroup)v).getChildAt(i),label);if(found!=null)return found;}return null;}
+    private View find(String label){try{java.lang.reflect.Field f=ModalDialogs.class.getDeclaredField("visible");f.setAccessible(true);java.lang.ref.WeakReference<?> ref=(java.lang.ref.WeakReference<?>)((Map<?,?>)f.get(null)).get(activity);AlertDialog d=ref==null?null:(AlertDialog)ref.get();if(d!=null&&d.isShowing()){View v=walk(d.getWindow().getDecorView(),label);if(v!=null)return v;}}catch(Exception e){throw new AssertionError(e);}return activity==null?null:walk(activity.getWindow().getDecorView(),label);}
+    private boolean has(String label){boolean[] ok={false};main(()->ok[0]=find(label)!=null);return ok[0];}
+    private void click(String label){main(()->{View v=find(label);check(v!=null,"missing "+label);v.performClick();});test.waitForIdleSync();}
+    private void fill(String hint,String value){main(()->{EditText input=(EditText)find(hint);check(input!=null,"input "+hint);input.setText(value);});}
+    private void dump(View v,StringBuilder b){if(v instanceof TextView)b.append(((TextView)v).getText()).append(" | ");if(v instanceof ViewGroup)for(int i=0;i<((ViewGroup)v).getChildCount();i++)dump(((ViewGroup)v).getChildAt(i),b);}
+    private void await(BooleanSupplier condition,String what)throws Exception{long end=SystemClock.uptimeMillis()+18000;while(SystemClock.uptimeMillis()<end){if(condition.getAsBoolean())return;Thread.sleep(80);}throw new AssertionError("Timeout: "+what);}
+    private static void check(boolean condition,String message){if(!condition)throw new AssertionError(message);}
+    private JSONObject task(boolean draft)throws Exception{return new JSONObject().put("id",7).put("version",1).put("title",draft?"Mobile task fixture":"Assigned fixture").put("description","Task description").put("state",draft?"draft":"published").put("phase",draft?"draft":"active").put("creator_name","Coach fixture").put("starts_at",1794787200).put("due_at",1795132800).put("rule","period_ac").put("statuses",new JSONArray().put("社员")).put("problems",problems()).put("recipient",recipient()).put("summary",new JSONObject().put("recipient_count",1)).put("audit",new JSONArray());}
+    private JSONArray problems()throws Exception{return new JSONArray().put(new JSONObject().put("platform","codeforces").put("problem_id","cf_1843A").put("problem_name","Practice fixture").put("problem_rating",800).put("tags",new JSONArray().put("math")).put("status","pending").put("verification","coverage_missing"));}
+    private JSONObject recipient()throws Exception{return new JSONObject().put("id",8).put("name","Member fixture").put("real_name",JSONObject.NULL).put("status_snapshot","社员").put("problem_count",1).put("pending_problems",1).put("completion","incomplete");}
+    private final class Fixture extends HttpURLConnection {
+        private final ByteArrayOutputStream sent=new ByteArrayOutputStream();Fixture(URL u){super(u);}public void connect(){}public void disconnect(){}public boolean usingProxy(){return false;}public OutputStream getOutputStream(){return sent;}public int getResponseCode(){return 200;}
+        public Map<String,List<String>> getHeaderFields(){return url.getPath().endsWith("/login")?Collections.singletonMap("Set-Cookie",Collections.singletonList("session=training-fixture; Path=/; Secure; HttpOnly")):Collections.emptyMap();}
+        public InputStream getInputStream()throws IOException{try{String path=url.getPath(),method=getRequestMethod();requests.add(method+" "+path+(url.getQuery()==null?"":"?"+url.getQuery()));Object value=new JSONObject();
+            if(path.equals("/api/auth/me"))value=new JSONObject().put("authenticated",true).put("csrf_token","test-only-csrf").put("qq_id","90000001").put("role",role);
+            else if(path.equals("/api/me/training-tasks"))value=new JSONObject().put("items",new JSONArray().put(task(false))).put("total",1);
+            else if(path.equals("/api/me/training-tasks/7/refresh")){check("POST".equals(method)&&new JSONObject(sent.toString("UTF-8")).length()==0,"refresh empty object");check("test-only-csrf".equals(getRequestProperty("X-CSRF-Token")),"refresh CSRF");syncWrites++;value=new JSONObject().put("status","queued");}
+            else if(path.equals("/api/me/training-tasks/7")){JSONObject t=task(false);if(syncWrites>0)t.put("refresh",new JSONObject().put("status",++polls>=2?"completed":"queued"));value=t;}
+            else if(path.equals("/api/admin/training-tasks/options"))value=new JSONObject().put("enabled",true).put("statuses",new JSONArray().put("社员"));
+            else if(path.endsWith("/resolve-problems")){JSONObject body=new JSONObject(sent.toString("UTF-8"));check(body.getJSONArray("problems").getJSONObject(0).getString("problem_id").equals("1843A"),"resolve input");value=new JSONObject().put("items",problems()).put("errors",new JSONArray()).put("duplicates",0);}
+            else if(path.equals("/api/admin/training-tasks")){if("POST".equals(method)){JSONObject b=new JSONObject(sent.toString("UTF-8"));check(b.getJSONArray("statuses").getString(0).equals("社员"),"business status");check(b.getLong("starts_at")<b.getLong("due_at"),"valid typed timestamps");value=task(true);}else value=new JSONObject().put("items",new JSONArray().put(task(true))).put("total",1);}
+            else if(path.endsWith("/audience-preview"))value=new JSONObject().put("preview_token","preview-fixture").put("recipient_count",1).put("excluded_count",0).put("unbound_count",0).put("total",1).put("items",new JSONArray().put(new JSONObject().put("name","Member fixture").put("qq_id","90000002").put("status","社员")));
+            else if(path.endsWith("/publish")){JSONObject b=new JSONObject(sent.toString("UTF-8"));check(b.getInt("version")==1&&b.getString("preview_token").equals("preview-fixture"),"publish optimistic version and preview token");String key=getRequestProperty("Idempotency-Key");check(key!=null&&key.length()>=16,"publish idempotency key");if(publishKey==null)publishKey=key;else check(publishKey.equals(key),"stable retry key");publishes++;value=task(false);}
+            else if(path.endsWith("/progress"))value=new JSONObject().put("summary",new JSONObject().put("recipient_count",1)).put("items",new JSONArray().put(recipient())).put("total",1);
+            else if(path.equals("/api/admin/training-tasks/7"))value=task(publishes==0);
+            else if(path.equals("/api/admin/web-accounts"))value=new JSONArray().put(new JSONObject().put("qq_id","90000002").put("name","Member fixture").put("real_name","Student fixture").put("role","member").put("account_state","active").put("is_active",true).put("account_epoch",3).put("credential_version",7));
+            else if(path.endsWith("/reset-temporary-password")){JSONObject b=new JSONObject(sent.toString("UTF-8"));check(b.getLong("expected_account_epoch")==3&&b.getLong("expected_credential_version")==7,"captured account snapshot");passwords++;value=new JSONObject().put("username","90000002").put("temporary_password","Synthetic!42").put("expires_at",1800000000);}
+            else if(path.equals("/api/me/problems"))value=new JSONObject().put("items",problems()).put("total",1);
+            else if(path.equals("/api/me/profile"))value=new JSONObject().put("user",new JSONObject().put("name","Fixture"));
+            else if(path.endsWith("/categories")||path.equals("/api/forum/posts"))value=new JSONArray();
+            return new ByteArrayInputStream(value.toString().getBytes(StandardCharsets.UTF_8));
+        }catch(Exception e){throw new IOException(e);}}
+    }
+}

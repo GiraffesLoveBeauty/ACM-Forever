@@ -29,6 +29,10 @@ public final class ReaderSmoke extends Instrumentation {
     private boolean settingsMode;
     @Override public void onCreate(Bundle arguments){super.onCreate(arguments);mode=arguments==null?"":arguments.getString("mode","");settingsMode=arguments!=null&&"settings".equals(arguments.getString("mode"));communityMode=arguments!=null&&"community".equals(arguments.getString("mode"));loginMode=arguments!=null&&"login".equals(arguments.getString("mode"));designMode=arguments!=null&&"design".equals(arguments.getString("mode"));appearanceMode=arguments!=null&&"appearance".equals(arguments.getString("mode"));webMode=arguments!=null&&"web".equals(arguments.getString("mode"));start();}
     @Override public void onStart(){
+        if("lists-updates".equals(mode)){ListPagingUiSmoke.run(this);return;}
+        if("trainingtasks-slow".equals(mode)||"trainingtasks-scroll".equals(mode)){TrainingTasksReadUiSmoke.run(this,mode.substring("trainingtasks-".length()));return;}
+        if("trainingtasks".equals(mode)){TrainingTasksUiSmoke.run(this);return;}
+        if("giteeupdates".equals(mode)){GiteeUpdatesUiSmoke.run(this);return;}
         if(mode.startsWith("modules-")){OptionalModulesUiSmoke.run(this,mode);return;}
         if("seed024".equals(mode)||"verify024".equals(mode)){UpgradePersistenceUiSmoke.run(this,"seed024".equals(mode));return;}
         if("recoverysettings".equals(mode)){RecoverySettingsUiSmoke.run(this);return;}

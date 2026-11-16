@@ -1,0 +1,12 @@
+package com.giraffeslovebeauty.acmforever;
+import org.junit.Test;
+import org.json.*;
+import java.io.*;
+import java.util.*;
+import java.util.zip.*;
+import static org.junit.Assert.*;
+public class AdminContractsTest {
+    @Test public void snapshotBindsDisplayedGenerationWithoutMutatingInput()throws Exception{JSONObject snapshot=new JSONObject().put("account_epoch",3).put("credential_version",7),request=new JSONObject().put("is_active",false);JSONObject bound=AdminAccountSnapshot.bind(snapshot,request);snapshot.put("credential_version",8);assertEquals(7,bound.getInt("expected_credential_version"));assertEquals(3,bound.getInt("expected_account_epoch"));assertFalse(request.has("expected_account_epoch"));assertThrows(Exception.class,()->AdminAccountSnapshot.bind(new JSONObject().put("account_epoch",3),request));}
+    @Test public void exportedWorkbookContainsOnlySuccessfulCredentialsAndTextCells()throws Exception{JSONArray rows=new JSONArray().put(new JSONObject().put("username","=cmd").put("real_name","<student&>").put("temporary_password","Synthetic!42").put("expires_at",1800000000)).put(new JSONObject().put("username","failed-should-not-export").put("outcome","结果未知"));byte[] bytes=AccountWorkbook.create(rows);Set<String> names=new HashSet<>();String sheet="";try(ZipInputStream zip=new ZipInputStream(new ByteArrayInputStream(bytes))){ZipEntry e;while((e=zip.getNextEntry())!=null){names.add(e.getName());String content=new String(zip.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8);if(e.getName().endsWith("sheet1.xml"))sheet=content;}}assertEquals(5,names.size());assertTrue(sheet.contains("&lt;student&amp;&gt;"));assertTrue(sheet.contains("=cmd"));assertTrue(sheet.contains("Synthetic!42"));assertFalse(sheet.contains("failed-should-not-export"));assertFalse(sheet.contains("<f>"));assertThrows(Exception.class,()->AccountWorkbook.create(new JSONArray()));}
+    @Test public void typedTimesAreStrictBeijingAndProblemsRetainOrder()throws Exception{assertEquals(1800000000L,((Number)AdminTrainingActivity.parseDate(AdminTrainingActivity.dateInput(1800000000L))).longValue());assertThrows(Exception.class,()->AdminTrainingActivity.parseDate("2026-02-30 12:00"));JSONArray p=AdminTrainingActivity.parseProblems("1843A\ncodeforces 1B\natcoder abc300_a");assertEquals(3,p.length());assertEquals("codeforces",p.getJSONObject(0).getString("platform"));assertEquals("1B",p.getJSONObject(1).getString("problem_id"));}
+}

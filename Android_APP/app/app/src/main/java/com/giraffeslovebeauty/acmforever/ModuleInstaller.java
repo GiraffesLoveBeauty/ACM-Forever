@@ -9,6 +9,22 @@ import java.util.*;
 
 /** APK streams must be fsynced AND closed before commit. No silent installs. */
 final class ModuleInstaller {
+    static void remove(Context context,String module,ModuleNetwork.Cancelled cancelled)throws Exception{
+        if(!ModuleSpec.nativeModule(module))throw new IOException("不是原生模块");
+        PackageInstaller installer=context.getPackageManager().getPackageInstaller();String receipt="remove:"+module;
+        SharedPreferences receipts=context.getSharedPreferences("module_installs",0);
+        for(PackageInstaller.SessionInfo old:installer.getMySessions())if(receipt.equals(receipts.getString("session_"+old.getSessionId(),""))){installer.abandonSession(old.getSessionId());receipts.edit().remove("session_"+old.getSessionId()).commit();}
+        PackageInstaller.SessionParams params=new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_INHERIT_EXISTING);
+        params.setAppPackageName(context.getPackageName());if(Build.VERSION.SDK_INT>=31)params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_REQUIRED);
+        int id=installer.createSession(params);boolean committed=false;
+        try(PackageInstaller.Session session=installer.openSession(id)){
+            session.removeSplit(module);if(cancelled.get())throw new IOException("登录状态已变化，已取消卸载");
+            if(!receipts.edit().putString("session_"+id,receipt).putBoolean("remove_"+module,true).commit())throw new IOException("无法保存卸载回执");
+            Intent callback=new Intent(context,ModuleInstallReceiver.class).setAction(context.getPackageName()+".MODULE_REMOVE."+id);
+            int flags=PendingIntent.FLAG_UPDATE_CURRENT;if(Build.VERSION.SDK_INT>=31)flags|=PendingIntent.FLAG_MUTABLE;
+            session.commit(PendingIntent.getBroadcast(context,id,callback,flags).getIntentSender());committed=true;
+        }finally{if(!committed){installer.abandonSession(id);receipts.edit().remove("session_"+id).remove("remove_"+module).apply();}}
+    }
     static void commit(Context context,String receipt,File base,Map<String,File> splits,ModuleNetwork.Cancelled cancelled)throws Exception{
         PackageInstaller installer=context.getPackageManager().getPackageInstaller();
         SharedPreferences receipts=context.getSharedPreferences("module_installs",0);

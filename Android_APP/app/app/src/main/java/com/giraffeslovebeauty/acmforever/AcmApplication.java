@@ -48,6 +48,7 @@ public class AcmApplication extends Application {
             vault.clear();
             vault.clearPassword();
         });
+        ModuleHealth.checkAll(this);
     }
 
     ApiClient api() { return api; }

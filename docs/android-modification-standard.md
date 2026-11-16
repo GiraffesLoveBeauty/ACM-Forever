@@ -1,6 +1,29 @@
-# Android 修改标准与模块关联（v0.2.26）
+# Android 修改标准与模块关联（v0.2.29）
 
-当前源码评审候选0.2.26/code40的论坛、主题返回和搜索拖动修复见[实施记录](android-v0.2.26-reader-and-theme-return.md)。Markdown公式须在解析前保留原文，不能全局替换代码块或二次扫描转义货币；共享阅读器变更须联查论坛、预览、Wiki和题面。高级个性化的页面位置须随页面及Activity状态保存，首次恢复不能被onResume的重复渲染覆盖。以下0.2.25段落保留模块实施时的记录。
+## 每轮修改与发布的必做同步
+
+本轮五项补充仍属于尚未合并的0.2.29候选；见[交互、更新日与模块管理说明](android-v0.2.29-maintenance-followup.md)。修改以下关联时，源码、验证及说明须在同一PR交付，不能只改页面文案：
+
+1. **密码统一控件**：运行中的所有密码输入，以及管理员生成的临时密码，都通过`PasswordFields`提供普通眼睛显隐；默认隐藏，切换保留光标。改密的当前/新/确认、重置、OJ确认、注销均检查；不将密码或显隐状态写入实例状态，不因切换可见而改变提交值。历史排除的管理壳不作为验收入口。
+2. **发帖内嵌预览**：`ComposerPreview`与当前编辑器共存，默认下方、可切右侧，左上关闭、右上切换。布局变化不能替换编辑器、丢光标或切换草稿归属；继续复用清洗后的`ContentView`，禁止原生JS桥。正文修改后预览同步，切换/关闭销毁旧阅读器；转屏和返回保存布局状态。
+3. **自动检查日**：`UpdateCheckDay`以手机当前时区、本地04:00划日，不是UTC日或固定24小时。默认开启；登录后每天最多主动尝试一次，即使失败也不在当天自动重试。任意手动/自动检查成功均阻止当天再次主动检查。主动尝试在发起前持久记录，进程重建不重置。手动检查和进入更新页仍立即检查；关闭开关、改变源、升级App不能绕过当天记录。没有后台定时唤醒；下次启动/回到主页时按当前日判断。
+4. **特别鸣谢与版本日志**：每轮核对公开贡献者、新增参与者及头像摘要，核实上一版PR/Review/Release后同步`credits.json`与`history.json`，关于页及更新页共用快照。0.2.22起已完成的本人Review按维护者2026-11-15的确认署名；新候选未完成的评审、发布必须留空。核对上传、发起Review、实际Review、自动发布四类职责，保留证据与历史人员，不把机器人无意见或本人署名写成人工批准。版本号/code、当前日志、鸣谢版本键三者一致。
+5. **模块编号与下载**：稳定ID/文件名不能改成展示编号；展示`number`使用完整拼音与声调-App版本-标准大写罗马数字（如`guan_1_fang_1_zhu_3_ti_2_ku_4-0.2.29-I`）。`revision`只按真实内容判定更新，编号或App版本变化不能让未变资源重复下载；原生包须匹配主包code与证书。旧清单字段可缺，不能伪造旧编号。基础包、四模块、两份JSON与校验文件共八附件必须完整核验；已发布Tag/附件不可覆盖。
+6. **模块管理与恢复**：`StorageActivity → ModuleManagerActivity`提供主动下载和删除。清临时文件/普通升级不删除模块，显式删除才清除该ID全部版本的下载与解压副本，并移出随App更新集合；保留凭据、私人主题与原图。原生split须经`PackageInstaller.removeSplit`及系统确认，成功后再清本地文件；取消/失败不当作删除成功。回执跨进程保留，启动后台健康检查与模块管理页均恢复清理；更新摘要和实际安装统一使用`ModuleStore.updateSelection()`，有卸载回执且PackageManager确认split不存在时，即使本地清理未完成也排除该ID。查询失败不得视为卸载成功，仍安装或仅下载未卸载的模块保留。库存仍展示待清理记录，不能靠隐藏库存冒充清理完成。模块作业与App安装互斥；清理与本地恢复共用锁序。普通成员不获得管理模块下载/打开入口，但可删除本机已保留的管理模块。
+
+论坛增量分页成功渲染时须移除独立读取错误区域，再清空引用；保留列表容器、已加载帖子与阅读位置。覆盖无缓存首屏成功、后续分页超时、重试成功，不能只验证缓存命中时的恢复。
+
+原生模块的主动删除判定、卸载回执恢复、更新选择及`ModuleStore.removeLocal()`删除前保护，必须使用`installedNativeChecked()`严格查询。只读可用性使用的空集合回退不能用于破坏性操作；查询异常应保留各版本归档、已下载记录和持久回执，不发布删除成功。异步清理执行时仍须重新查询，不能只信任调度前快照或系统成功回调；恢复查询后仍安装的split继续保留，明确不存在时才恢复清理。
+
+提交前核对密码全入口、预览/草稿重建、04:00/时区/失败/手动成功抑制、显式关闭、模块选择性删除/取消/恢复及未变内容复用；相关回归见本轮说明。测试通过只说明已执行范围，不替代当前head的Review、真机验收或发布授权。
+
+本轮0.2.29/code43涉及管理员全部题单、论坛两条增量加载、首屏刷新、更新诊断与可读模块编号，见[本轮行为与验证](android-v0.2.29-lists-updates.md)。以下版本段落保留历史实施背景，以本轮补充约束和实际源码为准。
+
+本轮0.2.28/code42接入正式训练任务、练习总览和模块独立编号/恢复，详见[实施与验收说明](android-v0.2.28-practice-recovery.md)。题单就是管理员下发的training task，不再请求`/api/club/sheets`；旧打卡提交已移除，提醒本地保留。管理写操作绑定读取时账号/任务版本；发布幂等键与预览配对，禁止通用自动写重试。
+
+0.2.27/code41更新源改为Gitee优先、GitHub兜底，详见[源选择与发布配置](android-v0.2.27-gitee-updates.md)。`UpdateSources`控制正式Release解析和清单兜底；`UpdateManifest.downloadUrls`仅为固定Gitee仓库添加同版本GitHub备选；`ModuleSpec/ModuleNetwork`控制固定仓库的同版本模块和CDN白名单。自定义清单不能被静默替换。不可删除原APK/模块的哈希、版本、签名校验，或在校验失败时直接安装。`gitee_release.py`只允许匹配源码Tag的Actions运行，Secret仅发布端使用；八附件匿名回读后才解除预发布状态，PATCH 必须携带原 `tag_name/name/body`。GitHub 已公开而 Gitee 未完成时，重跑须先核对真实 Tag/commit、源码版本、渠道和固定证书，再下载校验原始八附件；成功恢复后跳过构建和 GitHub 发布，不允许用重新打包的不同字节覆盖首发文件。1.0.0和自站PR继续独立保留。
+
+上一公开版本0.2.26/code40的论坛、主题返回和搜索拖动修复见[实施记录](android-v0.2.26-reader-and-theme-return.md)。Markdown公式须在解析前保留原文，不能全局替换代码块或二次扫描转义货币；共享阅读器变更须联查论坛、预览、Wiki和题面。高级个性化的页面位置须随页面及Activity状态保存，首次恢复不能被onResume的重复渲染覆盖。以下0.2.25段落保留模块实施时的记录。
 
 首页及我的空间话题卡片统一用`ForumExcerpt`执行网页`postExcerpt`的文字摘要规则，最多三行，末尾省略；不要直接显示原始`excerpt`，也不要为摘要逐卡增加WebView。0.2.26搜索拖动边缘滚动上限为192dp/秒，旧版96是历史值；调整时须联查帧率无关性、掉帧限速、反向/离开即停以及列表边界。
 
@@ -25,7 +48,7 @@
 | `SearchActivity`、`SearchModules`、`SearchHotPosts` | 搜索顶栏、首次聚焦、热搜、结果、模块设置和历史记录 | 热搜仅首批30条热门候选，按真实阅读量选至多4条；异步返回不抢输入焦点，搜索设置入口唯一，公开 ID、本人接口范围、缓存及模块独立失败 |
 | `ModuleOrderView`、`ModuleDragPhysics`、`ModuleEdgeScroll` | 整卡纵向拖拽、90%缩放、边框提前让位、逐项弹簧传播与慢速边缘滚动 | 所有行均受列表上下边界约束，不能只限制选中行；开启列表裁剪；边缘速度按经过时间及密度计算，不能按每帧固定距离；原始行身份不等于bringToFront后的绘制次序；首个拦截事件、取消不保存、松手保存、无障碍及父滚动拦截继续联查 |
 | `ModalDialogs`、`KeyboardInputs`、窗口样式 | 普通弹窗/全屏表单和软键盘 | 自定义全屏Dialog安装编辑器后清除阻挡IME的窗口标志；仅搜索入口主动显示，普通表单点击唤起；不绕过权限/防重 |
-| `MobilePageActivity`、`PullRefreshLayout`、`PageRefresh` | 搜索与便捷管理的页面壳、缓存读取、串行后台操作 | 页面代次、会话代次、槽位绑定；下拉只重复注册的读取，排序长按不能被父滚动抢占，不得刷新草稿或重放写操作 |
+| `MobilePageActivity`、`PullRefreshLayout`、`PageRefresh` | 搜索与便捷管理的页面壳、缓存读取、串行后台操作 | 页面代次、会话代次、槽位绑定；缓存展示不能启动下一轮轮询，使用仅在有效网络响应展示并结束后执行的回调；下拉只重复注册的读取，排序长按不能被父滚动抢占，不得刷新草稿或重放写操作 |
 | `AdminQuickActivity`、`AdminApiPolicy`、`AdminMemberEdits` | 手机便捷管理和 API 白名单 | 服务端角色重验证、CSRF、审核版本、敏感内容禁止通用缓存 |
 | `SyncTaskResult` | 同步任务的数值结果展示 | `-1`也可能是已有成员抓取失败，显示通用“同步失败”；不能据此推断成员不存在。新增条数与未绑定/抓取异常/暂停仍各自展示 |
 | `ChallengeDifficulty` | 管理员单题训练的难度选项和默认值 | 与 `acm_api/difficulty.py` 的有效值及网页训练默认值一致；切换平台同步难度，空选项不得发送请求 |
@@ -34,16 +57,16 @@
 | `ProblemTags`、`ProblemTagPicker`、题库与搜索/比赛进度 | 原始标签候选搜索、完整标签精确筛选 | `tag`关键词与`problem_tag`完整标签分开编码；真实候选、平台切换清标签、筛选归第一页、翻页/返回/重建保留、单窗防重及会话代次 |
 | `OjBindingsActivity`、`OjBindingState` | 本人 OJ 绑定列表、归属核验、绑定/改绑/解绑与同步 | 复用 `/api/me/profile` 的 `bindings` 能力；是否绑定取账号字段而非 AC 数；确认请求必须核对实际输入与验证码所属账号；密码/确认不持久化，写入不自动重试，返回个人中心/账号页刷新 |
 | `AccountClosureActivity`、`AccountClosureFlow`、`AccountClosure`、`SessionVault`及`MainActivity`登录页 | 本人账户注销、实时开关、确认和结果回执 | 独立加密回执先保存再提交；未登录时仍须有本机回执查询入口；当前密码不持久化；管理员不能提交；转屏/断网/重启只查询，不重放POST；已明确的提交前拒绝可清回执，查询限流不得清理；必须匹配回执与提交时间才报成功，同QQ新代账号不可被旧回执退出 |
-| `ClubActivity`、`TrainingReminder` | 题单、讨论、错题、复习、打卡和本地提醒 | 缺失接口保留真实报错，通知授权、返回来源页 |
+| `TrainingTasksActivity`、`TrainingUi`、`ClubActivity`、`TrainingReminder` | 正式题单/安排，讨论、错题、复习占位和本地提醒 | 任务证据与待核验分开；网络请求完成后才安排下一轮，已有读写请求时不重绘使其代次失效；缓存/网络双次展示和子页返回均保留当前滚动位置；停止后台页轮询，通知设置不丢 |
 | `CloudDrafts` 与主页面编辑器 | 云端多草稿和自动保存 | 账号+草稿代次；切换草稿、返回旧页、迟到写入、Markdown 导入归属 |
 | `PdfActivity`、`ContentView`、阅读器资源 | PDF、Markdown/公式/代码与图片 | 缩放/翻页/复制、受限媒体地址、缓存边界 |
 | `ImagePreviewActivity`、`PageRefresh`、`ApiClient.MediaFormatException` | 图片失败后的原页手动/自动恢复 | 仅连接失败重试；格式/尺寸/权限错误不循环；十秒预警、关闭仍重试、成功三秒消失、会话代次与退出取消 |
-| `StorageActivity`、`TemporaryStorage`、`PdfFiles`、`HelpActivity`、`AppUpdates` | 三块存储管理及本机帮助说明 | 文件操作在后台；目录读取失败不能算作零占用或清理成功；主动清理PDF失败时保留索引供重试并报告错误，退出时仍丢弃全部索引访问；保留凭据、主题、草稿、活动PDF与近期分享；安装包单独清理，下载/校验/安装期间拒绝；新页面继续强制登录 |
+| `StorageActivity`、`ModuleManagerActivity`、`TemporaryStorage`、`PdfFiles`、`HelpActivity`、`AppUpdates` | 缓存、临时文件、模块及安装包四块存储管理，本机帮助说明 | 文件操作在后台；目录读取失败不能算作零占用或清理成功；主动清理PDF失败时保留索引供重试并报告错误，退出时仍丢弃全部索引访问；保留凭据、主题、草稿、活动PDF与近期分享；模块仅主动选择才删除，安装包单独清理，下载/校验/安装期间拒绝；新页面继续强制登录 |
 | `AppAppearance`、`MobileStyle`、`ProfileCover`、`LocalThemes` | 主题、主辅色、全屏背景、模块/控件透明度 | 深浅色、状态栏、原位变色、保存/预览/删除本机主题 |
 | `ThemePackage`、`LocalThemes`、`ProfileCover` | `.acmtheme`格式、隔离安装、原图字节与非破坏性裁剪 | [格式规范](android-theme-package-v1.md)；布尔选项、主辅色/透明度、模板浅深配色、原图及裁剪同时往返；文件I/O不在主线程，先校验后登记，导入不覆盖当前外观 |
 | `ThemeShareProvider`（基础包）、`AdvancedAppearanceActivity`（高级模块） | 后台生成私人主题文件并调用系统分享 | 独立只读附件、ClipData读取授权、随机文件名与缓存回收；不共用APK Provider，不包含账号字段，不自动发送QQ/微信消息 |
 | `OfficialThemeView`、`theme-renderer/` | 原Vue/CSS/SVG离线主题层，无原生JS桥 | [源文件关联](android-official-theme-adaptation-v0.2.17.md)；原源变化重跑构建工具和指纹检查，禁止用重新描摹替代；原生控件仍使用共享样式 |
-| `AppUpdates`、`UpdateManifest`、更新页面与 Provider | 检查、下载、校验及系统安装 | 当前GitHub单源、取消/重建/进程恢复、包名版本签名、更新日志 |
+| `AppUpdates`、`UpdateManifest`、更新页面与 Provider | 检查、下载、校验及系统安装 | Gitee优先/GitHub兜底与自定义源、取消/重建/进程恢复、包名版本签名、更新日志 |
 | `tools/create_update_manifest.py`、`tag_release.py` | 同一 APK 的清单和GitHub Release事务 | `.github/workflows/android-release.yml`、签名渠道、不可变目录和 latest |
 | `OptionalModules`、`ModuleDownloads`、`ModuleStore`、`ModuleUpdates`、`ModuleInstaller` | 按需下载、真实系统安装及升级保留 | 登录/管理员和账号代次、索引版本、签名叶证书、大小/哈希、分包版本、未来资源隔离、取消和旧目录保留；不得按偏好标记判定已安装原生功能 |
 | `tools/create_module_assets.py`、`module-resources/`、`app/advanced/`、`app/admin/` | 四模块制品、资源源文件与真实拆包 | 与基础APK同版本和证书；八附件必须全部回读通过才能公开，不把模块包或密钥提交源码库 |
@@ -76,20 +99,20 @@ Wiki完整目录与阅读导航的本地适配见[android-wiki-navigation-local-
 
 ## 仍缺的业务接口与不需要接口的部分
 
-基准为 main `f30b33cf` 的代码核查，不是服务器部署证明。其余缺失能力保留第二优先级，本轮不新增业务后端。
+本轮按 main `52d28788` 更新题单/安排状态；其他项沿用原核查，不是服务器部署证明。其余缺失能力保留第二优先级，本轮不新增业务后端。
 
 | 能力 | App 既有占位路径 | 网页已有基础 / 尚缺部分 |
 | --- | --- | --- |
-| 社团题单 | `GET /api/club/sheets` | Web 有随机训练，尚无教练题单下发、截止和成员完成进度 |
+| 社团题单 | 已接入 `/api/me/training-tasks`，不再缺列表/详情接口 | 管理员下发、截止、完成进度及同步已在当前main实现；仍缺全量关键词搜索契约 |
 | 按题讨论 | `GET/POST /api/club/problem-discussions` | Web 有泛论坛、评论、审核、举报；尚缺平台+题号关联与讨论标签检索 |
 | 私人错题本 | `GET/PUT/DELETE /api/me/club/mistakes` | Web 有收藏；尚缺私人错因笔记/标签。退休笔记接口不能代替 |
 | 间隔补题复习 | `GET/PUT /api/me/club/reviews` | Web 有赛事六态；尚缺复习阶段、到期和1/3/7天推进 |
-| 每日目标与打卡 | `GET/POST /api/me/club/checkin` | Web 有汇总和活跃日；尚缺目标、达标和幂等打卡 |
+| 每日目标与打卡 | 本轮移除旧打卡提交和该占位请求 | 入口改为“训练安排”，使用正式任务摘要；通知及时间继续本地保存 |
 | 完整公开成员搜索 | 暂复用公开排行榜 | Web/移动已有公开ID、资料和已发布话题；完整成员目录超出现有搜索范围 |
 
-这些 `/club/` 路径是客户端已有约定，当前仓库尚无对应后端路由；后续需先确定契约，不能把界面存在当作API已实现。本轮搜索还需要对应的关键词/分页契约。
+除已替换的题单/打卡外，表中的 `/club/` 路径仍是客户端已有约定，当前仓库尚无对应后端路由；后续需先确定契约，不能把界面存在当作API已实现。本轮搜索还需要对应的关键词/分页契约。
 
-更新分发使用GitHub公开静态 JSON/APK，不需要业务 `/api/mobile/v1/releases/*`；自站客户端与镜像已从本PR拆分，另待配置和review。相册背景、裁剪、主辅色、透明度、本机主题、搜索设置/历史、通知时间均本机保存，不需要上传接口。公开成员ID/平台题数/已发布话题已有移动接口，不再列为缺失；本人OJ绑定的新本地实现见下节，不改变服务器已开放的平台范围。
+更新分发使用Gitee公开Release的JSON/APK并保留GitHub兜底，不需要业务 `/api/mobile/v1/releases/*`；自站客户端与镜像已从本PR拆分，另待配置和review。相册背景、裁剪、主辅色、透明度、本机主题、搜索设置/历史、通知时间均本机保存，不需要上传接口。公开成员ID/平台题数/已发布话题已有移动接口，不再列为缺失；本人OJ绑定的新本地实现见下节，不改变服务器已开放的平台范围。
 
 ## 本人 OJ 绑定（本地新增，2026-11-06）
 
@@ -146,7 +169,7 @@ CF申请验证码后，将验证码保存到公开资料再确认；改绑、解
 - 单元测试、Lint、构建及受影响的真实 Activity 流程通过后再打包；回归见 [本轮实施与验收](android-v0.2.19.md)。不要把测试夹具当线上数据。
 - 只暂存本任务路径，检查敏感信息、`git diff --cached --check`，源码与文档分别提交；PR 写清测试与尚未部署的配置。新增文档在根 README 添加入口。
 
-当前GitHub发布配置见 [Tag发布](android-tag-release-v0.2.14.md)。自站更新另开PR；原讨论保留在 [PR #100](https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/100)。
+当前GitHub发布配置见 [Tag发布](android-tag-release-v0.2.14.md)。v0.2.27 的客户端保持 Gitee 优先；发布工作流默认 `GITEE_MIRROR_MODE=manual`，GitHub 正常发包，Gitee 由用户手动同步同批附件。只有设为 `automatic` 才要求发布凭据并运行自动镜像；不得把发布方式选择误改成 App 更新源优先级。自站更新另开PR；原讨论保留在 [PR #100](https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/100)。
 
 ## v0.2.19新增关联
 
@@ -161,3 +184,9 @@ CF申请验证码后，将验证码保存到公开资料再确认；改绑、解
 - `ModuleOrderView`开启子元素裁剪，模块不能覆盖搜索设置的历史记录/添加操作区；90%缩放、纵向跟手和松手保存继续保留。
 - `ModuleEdgeScroll`最高96dp/秒，边缘深度平方调速、120ms加速，离开边缘立即停止，改变方向清旧速度，单帧最多计50ms。保留小数像素并积分加速过程，60Hz/120Hz同时间距离应一致；不能恢复为每帧固定9dp。
 - v0.2.21 已随 PR #110 合并并由 Tag 发布；下述[android-v0.2.21.md](android-v0.2.21.md)保留当时验证记录。本轮 v0.2.22 另提 PR 交其他成员评审，不合并或发布，不改自站或发布链。网站共享后端变化另见[网站更新核对](web-updates-since-android-v0.2.20.md)，不代表已部署或已在App专门适配。
+## 0.2.29 补充约束
+
+- 管理员全部题单走现有管理API，读取前重新核实角色；普通成员和训练安排不得切到全量接口，全部题单详情不得触发本人进度刷新写入。
+- 论坛分页每批2条；缓存和网络响应按页替换、按帖子ID去重。新增分页不得累积重连请求，返回保留已加载范围与阅读位置。题库和榜单仍完整加载第一页。
+- 模块 `number` 是拼音声调-App版本-罗马数字的可读编号；不得取代稳定模块ID、独立内容 `revision`、摘要、签名或原生分包版本约束。旧清单兼容，内容未变的资源包继续本机复用。
+- 0.2.22起已完成历史版本的本人Review署名为 MiaoJJ13445，来源为本人确认；不等于GitHub人工APPROVED，未来候选不得预填已Review。详细边界见 [android-v0.2.29-lists-updates.md（本轮行为与验证）](android-v0.2.29-lists-updates.md)。

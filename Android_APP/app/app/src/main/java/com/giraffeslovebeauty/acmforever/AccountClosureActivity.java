@@ -61,7 +61,7 @@ public final class AccountClosureActivity extends MobilePageActivity {
         EditText password = null;
         if (state.ticket.canClose) {
             password = input(box, "当前 ACMForever 登录密码", ""); password.setSaveEnabled(false);
-            password.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            PasswordFields.attach(password);
             password.setFilters(new InputFilter[]{new InputFilter.LengthFilter(256)});
         }
         if (!state.message.isEmpty()) { TextView error = text(state.message, 14); error.setTextColor(ErrorModule.ink()); box.addView(error); }

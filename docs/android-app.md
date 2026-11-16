@@ -1,5 +1,7 @@
 # ACMforever Android
 
+本轮 **0.2.27/code41** 保持 Gitee 优先更新：清单、APK 与模块使用 Gitee，失败兜底 GitHub。Tag 由 GitHub Actions 发布，Gitee 暂由用户手动同步同批 Release 附件；GitHub 发包不要求 Gitee 凭据。设置 `GITEE_MIRROR_MODE=automatic` 才启用需要 `GITEE_RELEASE_TOKEN` 的自动镜像与匿名回读。详见[方案与验证](android-v0.2.27-gitee-updates.md)。PR #141 已合并，发布方式小修另提 PR；尚未创建 Tag 或发布 v0.2.27。基线 v0.2.26 已由 PR #115 合并并发布，下方旧版状态保留当时记录。自站更新和延期 1.0.0 不在本轮范围。
+
 当前源码评审候选 **0.2.26/code40** 修复论坛三行摘要、Markdown公式与“我的主题→设置”返回位置，并将搜索拖动触边自动滚动速度加倍，详见[实施与验证记录](android-v0.2.26-reader-and-theme-return.md)。本轮提交源码PR供其他成员评审，未合并或发布。基线v0.2.25已随PR #114合并并Tag发布；以下旧版本“本轮/待评审”等字样保留当时记录。
 
 本轮 0.2.25 可选模块为源码评审候选，构建、下载签名、模块入口与升级保留见 [可选模块说明](android-v0.2.25-optional-modules.md)。本地验收已完成，提交源码 PR 供其他成员 review；尚未合并或公开发布。
@@ -122,3 +124,5 @@ Windows 的 `Android_APP/tools/` 内带历史版本号的本地脚本保留当�
 debug 与 release 构建分支均完成单测/Lint/打包及实际清单生成检查；release 分支仅借本机调试密钥验证签名配置，没有正式签名制品发布。最终本机结果见 [安装说明-v0.2.13.md（实际 APK 与回归结果）](../Android_APP/docs/安装说明-v0.2.13.md)。生产更新源、正式私钥构建、远端 APK 下载与真机安装仍需发布验收，本机模拟响应不作为这些流程已通过的证据。
 
 网络锁修复前的 `b041a471db892c9f704e2be6048bdaaf8fe1a6ca`，API、Android、browser 三项 CI 均已成功，属于旧 head 结果。本轮修复后，debug/release 各 67 项单测、十二组界面回归、9 项发布清单测试及实际 APK 清单核验通过；上轮 Wiki/Markdown、旧 P1、论坛作者主页与 Activity 重建会话再次通过。新增回归先在旧代码失败，后在修复后通过；证据路径见安装说明。新提交的远端检查按其 head 另行核对，本轮未修改后端或网页。
+
+- [android-v0.2.28-practice-recovery.md（练习、正式题单与模块编号/恢复）](android-v0.2.28-practice-recovery.md)

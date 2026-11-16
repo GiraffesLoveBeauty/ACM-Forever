@@ -1,8 +1,12 @@
-# 打一辈子爱臭美 / ACMforever v0.2.26（源码评审候选）
+# 打一辈子爱臭美 / ACMforever v0.2.27（源码评审候选）
 
 当前工程及发布说明以 [android-app.md（Android 工程、更新渠道、构建与发布）](../docs/android-app.md) 为准。以下旧版条目保留其当时状态。
 
-## v0.2.26（待评审）
+## v0.2.27（待评审）
+
+默认从 Gitee 公开 Release 检查更新、下载 APK 和配套模块，GitHub 保留兜底；自定义地址保持用户选择。Tag 仍由 GitHub Actions 编译签名并发布 GitHub Release，Gitee 暂由用户手动同步同批附件，GitHub 发包不要求 Gitee 凭据。可选自动镜像须设置 `GITEE_MIRROR_MODE=automatic` 并配置 `GITEE_RELEASE_TOKEN`。详见[范围、配置与验收](../docs/android-v0.2.27-gitee-updates.md)。PR #141 已合并，发布方式小修另提 PR；尚未创建 Tag 或发布 v0.2.27。
+
+## v0.2.26（历史记录，已发布）
 
 修复论坛 Markdown 公式显示为原始代码、三行话题摘要及我的主题返回位置；搜索拖动触边自动滚动速度加倍，保留渐进加速及边界保护。详见[范围与验收](../docs/android-v0.2.26-reader-and-theme-return.md)。本轮提交源码PR供其他成员评审，未合并或发布安装包。
 
@@ -111,7 +115,7 @@
 
 ## 当前功能
 
-底部为主页（论坛）、排名、中间猫娘剪影发帖、题库、个人中心；顶部头像进入账号设置。社团训练位于题库“训练工具”，含题单、按题讨论、错题本、补题复习、Wiki 和打卡提醒，退出训练返回实际来源页面。重管理仍由 Web 承担。
+底部为主页（论坛）、排名、中间猫娘剪影发帖、练习、个人中心；顶部头像进入账号设置。“练习”包含训练工具与题库入口，题库子页才显示筛选/搜索/列表。正式社团题单及“我的训练安排”已接入现有任务API，提醒本地保留。仅管理员可见题单管理，复用便捷管理模块；批量开户、导入和采集仍在Web。
 
 保留话题收藏/我的收藏、云端多草稿/自动保存/切换/删除、Markdown 编辑与导入；排行榜近 7/30/90/365 日及生涯、多平台组合、排序、每页 10/20/50/100 人；PDF 翻页、缩放、适应宽度；网页六态赛事复盘。排行榜排除所选平台合计通过数为零的成员，旧服务器也会在客户端重新过滤、分页。
 
@@ -134,3 +138,5 @@
 工具链为 JDK 17、SDK 35、Gradle 8.9、AGP 8.7.3。执行 `:app:assembleDebug :app:lintDebug :app:testDebugUnitTest`。PDF 原生烟测使用独立 `src/androidTest` 测试包，不进入交付 APK。调试签名沿用被忽略的 `dist/signing/debug.keystore`，不得提交密钥。
 
 浏览器原型仍为 v0.2.0，未同步本轮修改；体验本版请安装 APK。[当前App功能清单-v0.2.1.md（上版范围）](docs/当前App功能清单-v0.2.1.md)、[网页与App功能对照目录-v0.2.0-2026-11-03.md（改动前对照）](docs/网页与App功能对照目录-v0.2.0-2026-11-03.md) 和 [README-v0.1.12.md（历史说明）](README-v0.1.12.md) 保留作历史记录。
+
+- [android-v0.2.28-practice-recovery.md（练习、正式题单与模块编号/恢复）](../docs/android-v0.2.28-practice-recovery.md)

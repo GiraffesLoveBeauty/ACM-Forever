@@ -26,6 +26,8 @@ def module_assets(directory, manifest, repository):
     if path.stat().st_size > 65536:
         raise ValueError("Module catalog exceeds 64 KiB")
     index = json.loads(path.read_text(encoding="utf-8"))
+    from create_module_assets import validate_catalog
+    validate_catalog(index, manifest["versionName"], manifest["versionCode"], repository)
     if (index.get("schemaVersion") != 1 or index.get("versionCode") != manifest["versionCode"]
             or index.get("versionName") != manifest["versionName"] or len(index.get("modules", [])) != 4):
         raise ValueError("Incomplete module catalog")
@@ -102,6 +104,20 @@ class GitHub:
 
     def latest(self):
         return self.api("/releases/latest", missing=True)
+
+    def tag_commit(self, tag):
+        """Resolve lightweight or annotated tags without trusting target_commitish."""
+        obj = self.api("/git/ref/tags/" + quote(tag, safe=""))["object"]
+        for _ in range(6):
+            sha = obj.get("sha", "")
+            if not re.fullmatch(r"[0-9a-f]{40}", sha):
+                raise ValueError("Invalid GitHub Tag object")
+            if obj.get("type") == "commit":
+                return sha
+            if obj.get("type") != "tag":
+                break
+            obj = self.api("/git/tags/" + sha)["object"]
+        raise ValueError("GitHub Tag does not identify a commit")
 
     def release(self, tag):
         current = self.api("/releases/tags/" + quote(tag, safe=""), missing=True)
