@@ -1925,8 +1925,18 @@ public final class MainActivity extends Activity {
         io.execute(()->{String markdown=null;Exception failure=null;try(InputStream input=getContentResolver().openInputStream(uri);ByteArrayOutputStream bytes=new ByteArrayOutputStream()){
             String mime=getContentResolver().getType(uri);if(!"image/png".equals(mime)&&!"image/jpeg".equals(mime)&&!"image/webp".equals(mime))throw new IllegalArgumentException("请选择 PNG、JPEG 或 WebP 图片");
             if(input==null)throw new IllegalArgumentException("无法读取图片");byte[] buffer=new byte[8192];int count;while((count=input.read(buffer))!=-1){if(bytes.size()+count>20*1024*1024)throw new IllegalArgumentException("原图不能超过 20 MB");bytes.write(buffer,0,count);}if(draft!=cloud.generation())throw new IllegalStateException("草稿已切换，上传已取消");markdown=ForumImages.markdown(api.uploadForumImage(owner,ForumImages.compress(bytes.toByteArray())).getString("url"));
-        }catch(Exception e){failure=e;}String content=markdown;Exception error=failure;
-            present(()->{composeBusy=false;if(isDestroyed()||owner!=api.sessionGeneration()||draft!=cloud.generation())return;if(error!=null){actionNotice.show("上传图片",error);if(composeStatus!=null)composeStatus.setText("图片上传失败，正文已保留");return;}if(editor!=composeBodyInput||!"compose".equals(screen)){actionNotice.show("插入图片",new IllegalArgumentException("编辑页面已切换，请重新选择图片"));return;}int at=editor.getSelectionStart();if(at<0)at=editor.length();if(editor.length()+content.length()>20000){actionNotice.show("插入图片",new IllegalArgumentException("正文达到 20000 字上限，请精简后重新插入"));return;}editor.getText().insert(at,content);editor.setSelection(at+content.length());});
+        }catch(Exception e){failure=e;}String attachment=markdown;Exception error=failure;
+            present(()->{
+                composeBusy=false;if(isFinishing()||isDestroyed())return;
+                // Returning during an upload creates disabled controls, even for a different draft.
+                if("compose".equals(screen))setControlsEnabled(content,true);
+                if(owner!=api.sessionGeneration()||draft!=cloud.generation())return;
+                if(error!=null){actionNotice.show("上传图片",error);if(composeStatus!=null)composeStatus.setText("图片上传失败，正文已保留");return;}
+                if(editor!=composeBodyInput||!"compose".equals(screen)){actionNotice.show("插入图片",new IllegalArgumentException("编辑页面已切换，请重新选择图片"));return;}
+                int at=editor.getSelectionStart();if(at<0)at=editor.length();
+                if(editor.length()+attachment.length()>20000){actionNotice.show("插入图片",new IllegalArgumentException("正文达到 20000 字上限，请精简后重新插入"));return;}
+                editor.getText().insert(at,attachment);editor.setSelection(at+attachment.length());
+            });
         });
     }
 
