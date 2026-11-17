@@ -2293,7 +2293,12 @@ async def api_me_problem_tags():
         return jsonify({"success": False, "message": "无效的题目平台。"}), 400
     db = await get_db()
     try:
-        return jsonify({"tags": await listing_tags(db, _me_qq_id(), platform), "tags_version": await listing_version(db, _me_qq_id())})
+        # A sync commit between these reads must not pair old tags with a new version.
+        await db.execute("BEGIN")
+        owner = _me_qq_id()
+        tags = await listing_tags(db, owner, platform)
+        version = await listing_version(db, owner)
+        return jsonify({"tags": tags, "tags_version": version})
     finally:
         await db.close()
 

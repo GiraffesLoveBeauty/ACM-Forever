@@ -2,9 +2,11 @@
 
 import unittest
 from urllib.parse import urlencode
+from unittest.mock import patch
 
 import test_api_contract as contract
-from feat.api.acm_api.database import connect_db
+from feat.api.acm_api import backend_api
+from feat.api.acm_api.database import connect_db, isolated_connection
 from feat.api.acm_api.problem_bank import save_metadata_batch
 from feat.api.acm_api.problem_tags import has_problem_tag, problem_tags
 
@@ -68,6 +70,46 @@ class MemberProblemTagTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await client.get("/api/me/problems/tags?platform=invalid")).status_code, 400)
             await self.execute("UPDATE web_accounts SET must_change_password=1 WHERE qq_id='12345678'", [()])
             self.assertEqual((await client.get("/api/me/problems/tags")).status_code, 428)
+
+    async def test_tag_options_and_version_share_a_snapshot_during_sync(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            await self.account_login(client, role="member")
+            await self.execute(
+                "INSERT INTO recommendations(platform,problem_id,problem_name,problem_url,tags) "
+                "VALUES('codeforces','cf_100A','Synthetic','https://example.test','old-tag')", [()],
+            )
+            await self.execute(
+                "INSERT INTO submissions(user_qq_id,platform,problem_id,tags,submit_time) "
+                "VALUES('12345678','codeforces','100-A','old-tag',1)", [()],
+            )
+            original_version = backend_api.listing_version
+            for source in ("public", "private"):
+                with self.subTest(source=source):
+                    if source == "private":
+                        await self.execute("UPDATE recommendations SET tags=''", [()])
+                    before = await (await client.get("/api/me/problems/tags?platform=codeforces")).get_json()
+                    self.assertEqual(before["tags"], ["old-tag"])
+
+                    async def sync_between_tags_and_version(read_db, owner):
+                        async with isolated_connection(read_db) as writer:
+                            if source == "public":
+                                await writer.execute("UPDATE recommendations SET tags='new-tag'")
+                            else:
+                                await writer.execute("UPDATE submissions SET tags='new-tag'")
+                            await writer.commit()
+                        return await original_version(read_db, owner)
+
+                    with patch.object(backend_api, "listing_version", sync_between_tags_and_version):
+                        response = await client.get("/api/me/problems/tags?platform=codeforces")
+                    self.assertEqual(response.status_code, 200)
+                    during = await response.get_json()
+                    self.assertEqual(during, before)
+                    after = await (await client.get("/api/me/problems/tags?platform=codeforces")).get_json()
+                    listing = await (await client.get("/api/me/problems?platform=codeforces")).get_json()
+                    self.assertEqual(after["tags"], ["new-tag"])
+                    self.assertNotEqual(after["tags_version"], before["tags_version"])
+                    self.assertEqual(after["tags_version"], listing["tags_version"])
 
     async def test_list_exact_tags_filter_before_count_and_paging_and_combine_with_own_state(self):
         async with self.app.test_app():
