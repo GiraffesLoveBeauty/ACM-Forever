@@ -2,6 +2,7 @@
 
 import json
 import unittest
+from unittest.mock import AsyncMock, patch
 
 import test_api_contract as contract
 from feat.api.acm_api.database import connect_db
@@ -271,6 +272,166 @@ class ProblemDifficultyApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([row["problem_id"] for row in data["recent_ac"]], ["abc200_a"])
             self.assertEqual(data["recent_ac"][0].get("difficulty_source"), "atcoder_problems")
             self.assertEqual((await client.get("/api/member/87654321")).status_code, 403)
+
+    async def challenge_history(self, rows):
+        await self.execute(
+            "INSERT INTO random_challenges(qq_id,platform,problem_id,problem_name,problem_rating,"
+            "problem_url,tags,challenge_rating,time_limit_minutes,status,created_at,expires_at) "
+            "VALUES(?,?,?,'Synthetic challenge',?,?,'dp',1700,45,'active',100,200)",
+            [(owner, platform, pid, rating,
+              f"https://atcoder.jp/contests/abc200/tasks/{pid}")
+             for owner, platform, pid, rating in rows],
+        )
+
+    async def test_generated_challenges_and_both_history_views_keep_confirmed_model_source(self):
+        from feat.api.service_runtime import create_web_challenge
+
+        async with self.app.test_app():
+            client = self.app.test_client()
+            headers = await self.account_login(client, role="admin")
+            await self.catalog([problem(
+                difficulty_source="atcoder_problems", difficulty_raw=1450,
+                difficulty_is_experimental=True, private_payload="do-not-publish",
+            )])
+            generated = []
+
+            async def provider(*args, **kwargs):
+                row = await create_web_challenge(self.db_path, *args, **kwargs)
+                self.assertTrue(row["success"])
+                row["source"], row["weak_tag"] = "provider selection", "preserved tag"
+                generated.append(dict(row))
+                return row
+
+            self.app.config["PLUGIN_CONFIG"]["_challenge_provider"] = provider
+            with patch("feat.api.acm_api.backend_api.aiohttp.ClientSession",
+                       side_effect=AssertionError("difficulty enrichment must stay local")):
+                for path in ("/api/challenge/start", "/api/me/challenge/start"):
+                    with self.subTest(path=path):
+                        response = await client.post(path, headers=headers, json={
+                            "platform": "atcoder", "difficulty": 1450, "owner_qq_id": "12345678",
+                        })
+                        self.assertEqual(response.status_code, 200, await response.get_json())
+                        row = await response.get_json()
+                        self.assertEqual({key: row.get(key) for key in FIELDS}, {
+                            "difficulty_source": "atcoder_problems", "difficulty_raw": 1450,
+                            "difficulty_is_experimental": True,
+                        })
+                        for key, value in generated[-1].items():
+                            self.assertEqual(row[key], value, (path, key))
+                        self.no_private_metadata(row)
+
+                await self.challenge_history([("12345678", "atcoder", "abc200_a", 1450)])
+                for path in ("/api/challenge/list?qq_id=12345678", "/api/me/training/challenges"):
+                    with self.subTest(path=path):
+                        rows = await self.get(client, path)
+                        self.assertEqual(len(rows), 1)
+                        self.assertEqual({key: rows[0].get(key) for key in FIELDS}, {
+                            "difficulty_source": "atcoder_problems", "difficulty_raw": 1450,
+                            "difficulty_is_experimental": True,
+                        })
+                        self.assertEqual(rows[0]["problem_rating"], 1450)
+                        self.assertEqual(rows[0]["challenge_rating"], 1700)
+                        self.assertEqual(rows[0]["status"], "active")
+                        self.no_private_metadata(rows)
+
+            db = await connect_db(self.db_path)
+            try:
+                async with db.execute("PRAGMA table_info(random_challenges)") as cursor:
+                    self.assertFalse(set(FIELDS) & {row["name"] for row in await cursor.fetchall()})
+                async with db.execute("SELECT challenge_rating FROM users WHERE qq_id='12345678'") as cursor:
+                    self.assertEqual((await cursor.fetchone())["challenge_rating"], 1000)
+                async with db.execute("SELECT problem_rating,challenge_rating,status FROM random_challenges") as cursor:
+                    self.assertEqual([tuple(row) for row in await cursor.fetchall()], [(1450, 1700, "active")])
+            finally:
+                await db.close()
+
+    async def test_challenge_history_unknown_or_mismatched_scores_never_borrow_model_source(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            await self.account_login(client, role="admin")
+            await self.catalog([
+                problem("A", 1450, difficulty_source="atcoder_problems", difficulty_raw=1450),
+                problem("B", 800), problem("C", 900),
+            ])
+            await self.execute("UPDATE crawler_problems SET metadata_json='{broken' WHERE problem_id=?",
+                               [("abc200_c",)])
+            records = [("12345678", "atcoder", "abc200_a", 400),
+                       ("12345678", "atcoder", "abc200_b", 800),
+                       ("12345678", "atcoder", "abc200_c", 900),
+                       ("12345678", "atcoder", "abc200_d", 1450),
+                       ("12345678", "codeforces", "abc200_a", 1450)]
+            await self.challenge_history(records)
+            with patch("feat.api.acm_api.backend_api.aiohttp.ClientSession",
+                       side_effect=AssertionError("history must not fetch remote model data")):
+                for path in ("/api/challenge/list?qq_id=12345678", "/api/me/training/challenges"):
+                    rows = await self.get(client, path)
+                    self.assertEqual(len(rows), len(records))
+                    self.assertEqual({(row["platform"], row["problem_id"], row["problem_rating"])
+                                      for row in rows}, {(platform, pid, rating)
+                                                       for _, platform, pid, rating in records})
+                    for row in rows:
+                        self.assertTrue(all(row.get(key) is None for key in FIELDS), row)
+                        self.assertEqual(row["challenge_rating"], 1700)
+                        self.assertEqual(row["status"], "active")
+                    self.no_private_metadata(rows)
+
+    async def test_generated_legacy_scores_and_incomplete_provider_results_keep_their_contract(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            headers = await self.account_login(client, role="admin")
+            await self.catalog([problem(
+                difficulty_source="atcoder_problems", difficulty_raw=1450,
+                difficulty_is_experimental=False,
+            )])
+            legacy = {"success": True, "platform": "atcoder", "problem_id": "abc200_a",
+                      "problem_rating": 400, "recommendation_reason": "preserved reason",
+                      "source": "provider source", "weak_tag": "provider weak tag",
+                      "difficulty_source": "atcoder_problems", "difficulty_raw": 1450,
+                      "difficulty_is_experimental": False}
+            failed = {"success": False, "message": "No matching local candidate"}
+            incomplete = {"success": True, "platform": "atcoder", "problem_rating": 1450}
+            with patch("feat.api.acm_api.backend_api.aiohttp.ClientSession",
+                       side_effect=AssertionError("generation enrichment must stay local")):
+                for path in ("/api/challenge/start", "/api/me/challenge/start"):
+                    for payload, status in ((legacy, 200), (failed, 400), (incomplete, 200)):
+                        with self.subTest(path=path, payload=payload):
+                            provider = AsyncMock(return_value=dict(payload))
+                            self.app.config["PLUGIN_CONFIG"]["_challenge_provider"] = provider
+                            response = await client.post(path, headers=headers,
+                                                         json={"platform": "atcoder", "difficulty": 400})
+                            self.assertEqual(response.status_code, status)
+                            row = await response.get_json()
+                            self.assertTrue(all(row.get(key) is None for key in FIELDS), row)
+                            for key, value in payload.items():
+                                if key not in FIELDS:
+                                    self.assertEqual(row[key], value, key)
+                            self.assertEqual(row["source"], payload.get("source", "random"))
+                            self.assertEqual(row["weak_tag"], payload.get("weak_tag", ""))
+                            self.no_private_metadata(row)
+
+    async def test_challenge_model_metadata_does_not_expand_member_scope_or_change_owner(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            headers = await self.account_login(client, role="member")
+            await self.catalog([problem(difficulty_source="atcoder_problems", difficulty_raw=1450)])
+            await self.execute("INSERT INTO users(qq_id,name,status) VALUES(?,'Other member','现役')",
+                               [("87654321",)])
+            await self.challenge_history([("12345678", "atcoder", "abc200_a", 1450),
+                                          ("87654321", "atcoder", "abc200_b", 1450)])
+            provider = AsyncMock(return_value={"success": True, "platform": "atcoder",
+                                             "problem_id": "abc200_a", "problem_rating": 1450})
+            self.app.config["PLUGIN_CONFIG"]["_challenge_provider"] = provider
+            body = {"platform": "atcoder", "difficulty": 1450, "owner_qq_id": "87654321"}
+            self.assertEqual((await client.post("/api/me/challenge/start", json=body)).status_code, 403)
+            generated = await client.post("/api/me/challenge/start", headers=headers, json=body)
+            self.assertEqual(generated.status_code, 200)
+            self.assertEqual(provider.await_args.kwargs["owner_qq_id"], "12345678")
+            self.assertEqual((await generated.get_json()).get("difficulty_source"), "atcoder_problems")
+            rows = await self.get(client, "/api/me/training/challenges?qq_id=87654321&owner_qq_id=87654321")
+            self.assertEqual([row["problem_id"] for row in rows], ["abc200_a"])
+            self.assertEqual(rows[0].get("difficulty_source"), "atcoder_problems")
+            self.assertEqual((await client.get("/api/challenge/list?qq_id=87654321")).status_code, 403)
+            self.assertEqual((await client.post("/api/challenge/start", headers=headers, json=body)).status_code, 403)
 
 
 if __name__ == "__main__":
