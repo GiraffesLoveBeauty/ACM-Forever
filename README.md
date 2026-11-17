@@ -21,6 +21,8 @@
 
 ## 文档
 
+- [issue-155-problem-bank-performance.md（题库读取优化、索引迁移与性能验证）](docs/issue-155-problem-bank-performance.md)
+
 - [android-v0.2.30-network-training.md（弱网导航、读取合并与可选题单排名 · 待评审）](docs/android-v0.2.30-network-training.md)
 
 - [android-v0.2.27-gitee-updates.md（Gitee 优先更新、GitHub 兜底与镜像发布 · 待评审）](docs/android-v0.2.27-gitee-updates.md)
