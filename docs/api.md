@@ -217,7 +217,7 @@ response.raise_for_status()
 
 成员题库将 Codeforces 的 `100A`、`cf_100A` 及大小写别名视为同一题。标签选项、列表和比赛进度按同一优先级取非空标签；本人 AC 与收藏也跨这些别名合并。AtCoder 仍按原题号精确区分。
 
-`GET /api/me/problems?scope=solved` 从会话读取 QQ，客户端的 `qq_id/owner_qq_id` 不改变归属。以平台和题号去重，返回 `ac_at`（Unix 秒），按最近 AC 时间倒序，再按平台、题号稳定排序。`platform/tag/problem_tag/state=favorite/page/page_size` 与总数使用相同条件；`tag` 同时匹配题名、题号和标签，独立的 `problem_tag` 按完整标签忽略大小写匹配（最长 100 字符，超长返回 400），兼容逗号等分隔的旧标签及 JSON 标签数组，不把 `math` 匹配为 `mathematics`，`%`、`_` 不作为通配符。标签与搜索、收藏、本人 AC 范围共同生效，先筛选再统计与分页。本人范围默认每页 20、上限 100，默认全站目录仍为 500、上限 500。返回 `items/total/returned/page/page_size/next_cursor/tags_version`；无效 `scope` 或非整数分页参数返回 400。
+`GET /api/me/problems?scope=solved` 从会话读取 QQ，客户端的 `qq_id/owner_qq_id` 不改变归属。以平台和题号去重，返回 `ac_at`（Unix 秒），按最近 AC 时间倒序，再按平台、题号稳定排序。`platform/tag/problem_tag/state=favorite/page/page_size` 与总数使用相同条件；`tag` 同时匹配题名、题号和当前成员可见的有效标签：公共标签为空时包含本人的 AC 标签回退，已有公共标签时不搜索被其替代的私人标签，也不搜索其他成员的标签；该条件与计数、分页共用。独立的 `problem_tag` 按完整标签忽略大小写匹配（最长 100 字符，超长返回 400），兼容逗号等分隔的旧标签及 JSON 标签数组，不把 `math` 匹配为 `mathematics`，`%`、`_` 不作为通配符。标签与搜索、收藏、本人 AC 范围共同生效，先筛选再统计与分页。本人范围默认每页 20、上限 100，默认全站目录仍为 500、上限 500。返回 `items/total/returned/page/page_size/next_cursor/tags_version`；无效 `scope` 或非整数分页参数返回 400。
 
 `GET /api/me/problems/tags?platform=codeforces` 返回 `tags: string[]` 与不透明字符串 `tags_version`，供题库标签下拉框使用，沿用成员登录和首次改密限制。下拉选项、列表展示及标签筛选使用同一份有效标签：按已采集目录 → 推荐目录 → 会话本人的 AC 元数据取第一份非空标签，空字符串和 JSON 空数组均允许回退；不读取其他成员独有的提交标签，也不混入被优先来源替代的旧标签。比赛进度采用相同优先顺序。平台可为空或 `codeforces/atcoder/luogu/nowcoder/cjlu`，无效平台返回 400。按完整标签忽略大小写去重并排序，排除空白和超过 100 字符的标签；列表不受当前题目页码、搜索或收藏筛选限制，不联网或触发采集。
 
@@ -226,7 +226,7 @@ response.raise_for_status()
 
 GET /api/problems 和 GET /api/me/problems 的公共列表读取同步时维护的轻量摘要，筛选和精确总数共用条件，页面只批量关联当前成员的当页状态；不读取题面大字段，不在请求时合并全站 submissions。本人 AC 按成员/OJ 的有序索引查找。洛谷多标签筛选及列表分类补充使用预建原生标签关系，补充分类时不读取包含 Markdown 正文的元数据；其它原始算法标签继续使用 problem_tag。题面仍通过原有详情接口按需读取。
 
-tags_version 由公共目录版本与本人私人回退版本组成，客户端应整体比较，不能解析为时间。网页按平台复用标签，切换平台时使用 60 秒有效期，并在列表返回版本变化时刷新；另一成员仅修改自己的标签不会使本人的标签缓存失效。标签缓存仅存在于当前页面实例，不跨账号共享。GET /api/problems 同样返回 next_cursor/tags_version，并保持管理员目录忽略 scope 的既有行为；管理员数据维护列表 GET /api/admin/database/problems 保留原返回结构。
+tags_version 由公共目录版本与本人私人回退版本组成，客户端应整体比较，不能解析为时间。标签接口在同一个 SQLite 只读事务快照中读取选项和版本：同步即使在两次读取之间提交，响应仍返回同一快照的旧选项与旧版本，下一次请求可读到新选项与新版本，避免旧选项被缓存为新版本。网页按平台复用标签，切换平台时使用 60 秒有效期，并在列表返回版本变化时刷新；另一成员仅修改自己的标签不会使本人的标签缓存失效。标签缓存仅存在于当前页面实例，不跨账号共享。GET /api/problems 同样返回 next_cursor/tags_version，并保持管理员目录忽略 scope 的既有行为；管理员数据维护列表 GET /api/admin/database/problems 保留原返回结构。
 
 迁移、外部写入恢复、索引成本及合成性能测试见 [issue-155-problem-bank-performance.md（题库读取优化与维护）](issue-155-problem-bank-performance.md)。
 
