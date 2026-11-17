@@ -148,6 +148,46 @@ test('selections are drafts until confirmation and cancellation preserves applie
   assert.deepEqual(changes, [['-2', '2']]);
   assert.equal(dialogs().length, 0);
 });
+for (const [name, flags] of [
+  ['native composition', { isComposing: true, keyCode: 13 }],
+  ['legacy composition confirmation', { isComposing: false, keyCode: 229 }],
+  ['Vue composition state', { isComposing: false, keyCode: 13, target: { composing: true } }],
+]) {
+  test(`${name}: Enter keeps drafts and the IME default action until composition ends`, async () => {
+    await render(['-2']);
+    await open();
+    tag('字符串').props.onClick();
+    await settle();
+    const input = find(
+      mounted.root,
+      (node) => node.type === 'input' && node.props.type === 'search',
+    )[0];
+    let prevented = false;
+    input.props.onKeydown({
+      key: 'Enter',
+      ...flags,
+      preventDefault: () => (prevented = true),
+    });
+    await settle();
+    assert.equal(prevented, false);
+    assert.equal(dialogs().length, 1);
+    assert.equal(tag('字符串').props['aria-pressed'], true);
+    assert.deepEqual([...value.value], ['-2']);
+    assert.deepEqual(changes, []);
+
+    input.props.onKeydown({
+      key: 'Enter',
+      isComposing: false,
+      keyCode: 13,
+      target: { composing: false },
+      preventDefault: () => (prevented = true),
+    });
+    await settle();
+    assert.equal(prevented, true);
+    assert.equal(dialogs().length, 0);
+    assert.deepEqual(changes, [['-2', '2']]);
+  });
+}
 test('search crosses categories, no-results is explicit and category arrows change tabs', async () => {
   await render();
   await open();
