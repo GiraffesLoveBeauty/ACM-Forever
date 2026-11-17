@@ -49,7 +49,14 @@ beforeEach(() => {
         statuses: ['动态实验组'],
         capabilities: [
           { platform: 'codeforces', label: 'Codeforces', can_publish: true },
-          { platform: 'luogu', label: '洛谷', can_publish: true },
+          {
+            platform: 'luogu',
+            label: '洛谷',
+            can_publish: true,
+            period_ac: false,
+            historical_ac: true,
+            snapshot_ac: true,
+          },
           { platform: 'atcoder', label: 'AtCoder', can_publish: false },
         ],
         max_problems: 50,
@@ -66,7 +73,7 @@ beforeEach(() => {
                 ? p.problem_id
                 : 'cf_' + p.problem_id,
           tags: [],
-          supported: p.platform !== 'luogu',
+          supported: true,
           can_publish: true,
         })),
         errors: [],
@@ -501,11 +508,12 @@ test('admin can add and publish Luogu P problems without an AC capability warnin
   await set('标准题号', 'P1001', 'textarea');
   await click('校验并添加');
   assert(textOf(mounted.root).includes('洛谷 P1001'));
-  assert(textOf(mounted.root).includes('暂不核验 AC'));
+  assert(!textOf(mounted.root).includes('完成进度不会自动更新'));
   assert(!textOf(mounted.root).includes('发布前需要更换'));
   await click('下一步');
   await set('动态实验组', ['动态实验组']);
-  assert(textOf(mounted.root).includes('以上 AC 规则仅用于 Codeforces'));
+  assert(textOf(mounted.root).includes('洛谷无法证明已做题的重复 AC'));
+  await set('使用洛谷周期内新增 AC', true);
   await click('保存并预览');
   assert.equal(stored.problems.at(-1).platform, 'luogu');
   assert.equal(stored.problems.at(-1).problem_id, 'P1001');
@@ -513,4 +521,37 @@ test('admin can add and publish Luogu P problems without an AC capability warnin
   await click('确认发布');
   assert(calls.some((call) => call.url.endsWith('/publish')));
   assert(textOf(mounted.root).includes('洛谷 P1001'));
+});
+
+test('publishing a period task with Luogu requires explicit snapshot consent', async () => {
+  stored = {
+    id: 17,
+    version: 1,
+    state: 'draft',
+    title: '洛谷周训练',
+    description: '',
+    statuses: ['动态实验组'],
+    starts_at: 1700000000,
+    due_at: 1900000000,
+    rule: 'period_ac',
+    luogu_snapshot: false,
+    problems: [
+      { platform: 'luogu', problem_id: 'P1001', problem_name: '洛谷合成题', supported: true },
+    ],
+    audit: [],
+  };
+  mounted = await mount(
+    Root,
+    [{ path: '/admin.html', component: Training }],
+    '/admin.html?section=training&task_id=17&tab=edit&step=2',
+  );
+  assert(textOf(mounted.root).includes('使用洛谷周期内新增 AC（快照核验）'));
+  await click('保存并预览');
+  assert(textOf(mounted.root).includes('请确认洛谷周期内新增 AC'));
+  assert(!calls.some((c) => c.url.endsWith('/audience-preview')));
+  await set('使用洛谷周期内新增 AC', true);
+  await click('保存并预览');
+  const save = calls.find((c) => c.options.method === 'PATCH');
+  assert.equal(save.body.luogu_snapshot, true);
+  assert(calls.some((c) => c.url.endsWith('/audience-preview')));
 });

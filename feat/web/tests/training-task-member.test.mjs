@@ -7,6 +7,7 @@ import { setAuth } from '../src/lib/api.js';
 import { cleanupCompiled, find, loadSfc, mount, settle, textOf } from './helpers/vue-harness.mjs';
 const Member = (await import(await loadSfc('src/views/TrainingTasks.vue'))).default;
 const Overview = (await import(await loadSfc('src/components/AssignedTaskOverview.vue'))).default;
+const Review = (await import(await loadSfc('src/components/TaskProgressReview.vue'))).default;
 const Root = { render: () => h(RouterView) };
 const keys = [
   'window',
@@ -22,7 +23,7 @@ const keys = [
 const original = new Map(
   keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]),
 );
-let dom, mounted, calls, fail, queued;
+let dom, mounted, calls, fail, queued, taskOverride;
 const task = () => ({
   id: 17,
   title: '固定名单训练',
@@ -67,6 +68,7 @@ const task = () => ({
     },
   ],
   refresh: queued ? { id: 'queue-1', status: 'running' } : null,
+  ...(taskOverride || {}),
 });
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status });
 beforeEach(() => {
@@ -84,6 +86,7 @@ beforeEach(() => {
   calls = [];
   fail = false;
   queued = false;
+  taskOverride = null;
   globalThis.fetch = async (url, options = {}) => {
     calls.push({ url, options });
     if (fail) return json({ message: '合成网络异常，已有进度保留' }, 503);
@@ -184,7 +187,7 @@ test('Luogu-only member tasks open problem links without CF binding or refresh c
   assert(copy.includes('暂不核验 AC'));
   assert(!copy.includes('绑定 Codeforces'));
   assert(!copy.includes('刷新进度'));
-  assert(!copy.includes('已同步 Codeforces 实际提交记录'));
+  assert(!copy.includes('Codeforces 实际提交记录'));
   assert(!copy.includes('发布前需要更换'));
   const statement = find(mounted.root, (n) => n.type === 'a' && textOf(n) === '查看题目')[0];
   assert(statement.props.href.includes('platform=luogu'));
@@ -202,7 +205,98 @@ test('mixed CF and Luogu member tasks retain the CF refresh action', async () =>
   const copy = textOf(mounted.root);
   assert(copy.includes('洛谷题目的完成进度不会自动更新'));
   assert(copy.includes('实际 AC'));
-  assert(copy.includes('已同步 Codeforces 实际提交记录'));
+  assert(copy.includes('Codeforces 实际提交记录'));
   await click('刷新进度');
   assert(calls.some((call) => call.url.endsWith('/refresh')));
+});
+
+test('Luogu uncertain AC is separate from task credit and never shown as an actual submission time', async () => {
+  taskOverride = {
+    luogu_snapshot: true,
+    problems: [
+      {
+        id: 9,
+        platform: 'luogu',
+        problem_id: 'P1001',
+        problem_name: '洛谷合成题',
+        is_ac: true,
+        status: 'timing_unknown',
+        verification: 'verified',
+        evidence: { accepted_at: null, observed_at: 1800000000, evidence_type: 'snapshot' },
+        tags: [],
+      },
+    ],
+  };
+  mounted = await mount(Root, routes, '/training-tasks.html?task_id=17');
+  const text = textOf(mounted.root);
+  assert(text.includes('已 AC，完成时段待确认'));
+  assert(text.includes('AC 时间未知'));
+  assert(text.includes('洛谷快照核验'));
+  assert(!text.includes('实际 AC：'));
+  assert(text.includes('无法核验已做题的重复 AC'));
+  assert(text.includes('洛谷 AC 集合快照（实际 AC 时间未知）'));
+  assert(!text.includes('Codeforces 实际提交记录'));
+});
+test('mixed tasks describe both actual submissions and Luogu snapshots', async () => {
+  const cfProblems = task().problems;
+  taskOverride = {
+    luogu_snapshot: true,
+    problems: [...cfProblems, { platform: 'luogu', problem_id: 'P1001', tags: [] }],
+  };
+  mounted = await mount(Root, routes, '/training-tasks.html?task_id=17');
+  assert(
+    textOf(mounted.root).includes('Codeforces 实际提交记录；洛谷 AC 集合快照（实际 AC 时间未知）'),
+  );
+});
+test('Luogu binding remains administrator managed and blocks refresh only when all platforms are unbound', async () => {
+  taskOverride = {
+    problems: [
+      {
+        platform: 'luogu',
+        problem_id: 'P1001',
+        status: 'pending',
+        verification: 'unbound',
+        tags: [],
+      },
+    ],
+  };
+  mounted = await mount(Root, routes, '/training-tasks.html?task_id=17');
+  assert(textOf(mounted.root).includes('洛谷 UID 请联系管理员'));
+  assert(
+    find(mounted.root, (n) => n.type === 'button' && textOf(n).includes('查看账号绑定')).length,
+  );
+  assert(
+    find(mounted.root, (n) => n.type === 'button' && textOf(n).includes('刷新进度'))[0].props
+      .disabled,
+  );
+});
+test('completed queue tasks still surface a failed Luogu fetch', async () => {
+  taskOverride = { refresh: { status: 'completed', result: { luogu: -1 } } };
+  mounted = await mount(Root, routes, '/training-tasks.html?task_id=17');
+  assert(textOf(mounted.root).includes('同步失败，已有进度保留'));
+});
+test('administrator review submits the server progress version and a public reason', async () => {
+  let payload;
+  const ReviewPage = {
+    render: () =>
+      h(Review, {
+        problem: { id: 9, problem_id: 'P1001', progress_version: 4, can_review: true },
+        taskVersion: 2,
+        onReview: (value) => {
+          payload = value;
+        },
+      }),
+  };
+  mounted = await mount(Root, [{ path: '/review.html', component: ReviewPage }], '/review.html');
+  const reason = find(mounted.root, (n) => n.type === 'textarea')[0];
+  reason.props['onUpdate:modelValue']('核对现场验收记录');
+  await settle();
+  find(mounted.root, (n) => n.type === 'form')[0].props.onSubmit({ preventDefault() {} });
+  assert.deepEqual(payload, {
+    problem_id: 9,
+    version: 4,
+    task_version: 2,
+    decision: 'on_time',
+    reason: '核对现场验收记录',
+  });
 });

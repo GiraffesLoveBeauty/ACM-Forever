@@ -379,6 +379,17 @@ async def connect_db(db_path):
     await db.executescript(Path(__file__).with_name("wiki.sql").read_text(encoding="utf-8"))
     await db.executescript(Path(__file__).with_name("account_closure.sql").read_text(encoding="utf-8"))
     await db.executescript(Path(__file__).with_name("training_tasks.sql").read_text(encoding="utf-8"))
+    # Additive migration: old tasks retain their exact-submission policy.
+    for table, additions in (
+        ("training_tasks", (("luogu_snapshot", "INTEGER NOT NULL DEFAULT 0"),)),
+        ("training_task_progress", (("snapshot_json", "TEXT"), ("uncertain_json", "TEXT"),
+                                    ("review_json", "TEXT"), ("evidence_version", "INTEGER NOT NULL DEFAULT 0"))),
+    ):
+        async with db.execute(f"PRAGMA table_info({table})") as cursor:
+            columns = {row["name"] for row in await cursor.fetchall()}
+        for column, definition in additions:
+            if column not in columns:
+                await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
     async with db.execute("PRAGMA table_info(cf_practice_job_members)") as cursor:
         columns = {row["name"] for row in await cursor.fetchall()}
     if "account_epoch" not in columns:

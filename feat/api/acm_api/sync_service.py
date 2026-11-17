@@ -85,7 +85,7 @@ class SyncMixin:
                 return False
             cursor_result = await connection.execute("UPDATE user_platform_sync_state SET " + clause + " WHERE " + where, values)
             await connection.commit()
-            if cursor_result.rowcount and platform == "codeforces":
+            if cursor_result.rowcount and platform in {"codeforces", "luogu"}:
                 from .training_task_progress import reconcile
                 try:
                     await connection.execute("BEGIN IMMEDIATE")

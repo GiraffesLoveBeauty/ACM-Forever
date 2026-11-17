@@ -164,6 +164,7 @@ class WebTaskManager:
         self._problem_schedule_changed = asyncio.Event()
         self._claiming_daily_problem_sync = False
         self._member_sync_task = None
+        self._training_sync_task = None
         self._claiming_all_accounts_sync = False
 
     async def _logged_task(self, operation, item, *args, **kwargs):
@@ -423,6 +424,74 @@ class WebTaskManager:
                 emit("member_sync.schedule_failed", "全员过题记录暂无法安排同步，稍后重试", "warning")
             await asyncio.sleep(60)
 
+    def start_training_task_sync(self):
+        if self._training_sync_task is None:
+            self._training_sync_task = asyncio.create_task(
+                self._training_task_sync_loop(), name="training-task-snapshots")
+
+    async def schedule_training_snapshots(self, *, now=None):
+        """Prioritize assigned Luogu snapshots through the existing account queue."""
+        now = int(time.time()) if now is None else now
+        if any(t.get("qq_id") == "*" and t.get("status") in {"queued", "running"} for t in self.tasks.values()):
+            return 0
+        async with isolated_connection(self.sync_engine.db) as db:
+            candidates = await db.execute("""
+                SELECT r.qq_id,r.account_epoch,u.luogu_id,u.luogu_binding_version,
+                  MIN(CASE WHEN t.starts_at>? THEN t.starts_at ELSE t.due_at END) AS priority,
+                  MAX(CASE
+                    WHEN t.starts_at>? THEN COALESCE(json_extract(x.snapshot_json,'$.last_checked_at'),0)=0
+                    WHEN COALESCE(json_extract(x.snapshot_json,'$.last_request_at'),0)<t.starts_at THEN 1
+                    ELSE COALESCE(json_extract(x.snapshot_json,'$.last_checked_at'),0) < ? - CASE WHEN t.due_at-?<=600 THEN 120 ELSE 900 END
+                  END) AS needed
+                FROM training_task_recipients r JOIN training_tasks t ON t.id=r.task_id
+                JOIN training_task_problems p ON p.task_id=t.id AND p.platform='luogu'
+                JOIN training_task_progress x ON x.recipient_id=r.id AND x.problem_id=p.id
+                JOIN users u ON u.qq_id=r.qq_id AND u.account_state='active' AND u.account_epoch=r.account_epoch
+                JOIN web_accounts a ON a.qq_id=u.qq_id AND a.is_active=1
+                LEFT JOIN user_platform_sync_state s ON s.user_qq_id=u.qq_id AND s.platform='luogu'
+                WHERE t.state='published' AND (t.rule='historical_ac' OR t.luogu_snapshot=1)
+                  AND r.closed=0 AND t.starts_at<=?+300 AND t.due_at>=?-600
+                  AND u.luogu_id IS NOT NULL AND TRIM(u.luogu_id)<>''
+                  AND COALESCE(s.next_retry_at,0)<=? AND COALESCE(s.last_status,'')<>'paused'
+                  AND x.on_time_json IS NULL AND x.late_json IS NULL AND x.uncertain_json IS NULL AND x.history_json IS NULL
+                  AND (COALESCE(x.binding_key,CASE WHEN COALESCE(json_extract(r.bindings_json,'$.luogu.account'),'')<>''
+                       THEN json_extract(r.bindings_json,'$.luogu.account')||':'||json_extract(r.bindings_json,'$.luogu.version') END)
+                       =u.luogu_id||':'||u.luogu_binding_version
+                    OR (x.binding_key IS NULL AND COALESCE(json_extract(r.bindings_json,'$.luogu.account'),'')=''
+                        AND u.luogu_binding_version=COALESCE(json_extract(r.bindings_json,'$.luogu.version'),0)+1))
+                GROUP BY r.qq_id,r.account_epoch HAVING needed=1 ORDER BY priority,r.qq_id LIMIT 20
+                """, (now, now, now, now, now, now, now))
+            candidates = [dict(r) for r in await candidates.fetchall()]
+        submitted = 0
+        for candidate in candidates:
+            qq = candidate["qq_id"]
+            if any(t.get("qq_id") == qq and t.get("status") in {"queued", "running"} for t in self.tasks.values()):
+                continue
+            lock = self.sync_engine._sync_user_locks.get(qq)
+            if lock is not None and lock.locked():
+                continue
+            async with isolated_connection(self.sync_engine.db) as db:
+                claim = await db.execute("""INSERT INTO binding_rate_limits(qq_id,platform,action,window_start,attempts,last_at)
+                    SELECT qq_id,'luogu','training_task_auto',?,1,? FROM users
+                    WHERE qq_id=? AND account_state='active' AND account_epoch=? AND luogu_id=? AND luogu_binding_version=?
+                    ON CONFLICT(qq_id,platform,action) DO UPDATE SET last_at=excluded.last_at,attempts=binding_rate_limits.attempts+1
+                    WHERE binding_rate_limits.last_at<=?""",
+                    (now, now, qq, candidate["account_epoch"], candidate["luogu_id"], candidate["luogu_binding_version"], now-60))
+                await db.commit()
+                claimed = claim.rowcount > 0
+            if claimed:
+                task = await self.submit_account_sync(qq, ["luogu"], expected_epoch=candidate["account_epoch"])
+                submitted += bool(task)
+        return submitted
+
+    async def _training_task_sync_loop(self):
+        while True:
+            try:
+                await self.schedule_training_snapshots()
+            except (OSError, aiosqlite.Error):
+                emit("training_sync.schedule_failed", "训练任务快照暂无法安排，稍后重试", "warning")
+            await asyncio.sleep(30)
+
     def snapshots(self):
         keys = (
             "id", "kind", "qq_id", "platform", "days", "status",
@@ -469,6 +538,10 @@ class WebTaskManager:
         return True
 
     async def close(self):
+        if self._training_sync_task is not None:
+            self._training_sync_task.cancel()
+            await asyncio.gather(self._training_sync_task, return_exceptions=True)
+            self._training_sync_task = None
         if self._member_sync_task is not None:
             self._member_sync_task.cancel()
             await asyncio.gather(self._member_sync_task, return_exceptions=True)

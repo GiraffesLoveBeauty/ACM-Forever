@@ -227,7 +227,8 @@ class TrainingProgressTests(unittest.IsolatedAsyncioTestCase):
         url = f'/api/me/training-tasks/{task["id"]}/refresh'
         self.assertEqual((await self.client.post(url, headers=headers,json={})).status_code,202)
         self.assertEqual((await self.client.post(url, headers=headers,json={})).status_code,429)
-        config['_task_provider'] = lambda: [{'id':'local-sync','qq_id':'22345678','account_epoch':1,'platform':'codeforces','status':'running'}]
+        version = (await self.sql("SELECT cf_binding_version FROM users WHERE qq_id='22345678'"))[0]['cf_binding_version']
+        config['_task_provider'] = lambda: [{'id':'local-sync','qq_id':'22345678','account_epoch':1,'platform':'codeforces','status':'running','bindings':{'codeforces':{'account':'FirstHandle','version':version}}}]
         self.assertEqual((await self.client.post(url, headers=headers,json={})).status_code,202)
         config['_account_sync_submitter'].assert_awaited_once()
         self.assertEqual((await self.client.post(url, headers=headers,json={'qq_id':'12345678'})).status_code,400)
@@ -347,8 +348,12 @@ class TrainingProgressTests(unittest.IsolatedAsyncioTestCase):
         # A locally stored Luogu attempt must not become CF-style training evidence.
         await self.sql("UPDATE users SET luogu_id='12345' WHERE qq_id='22345678'")
         await self.sql("INSERT INTO submission_attempts(owner_qq_id,platform,external_submission_id,problem_id,verdict,submitted_at,created_at) VALUES('22345678','luogu','local-luogu','P1001','OK',?,?)", (self.now - 10, self.now))
-        task = await self.create(problems=[{'platform': 'luogu', 'problem_id': 'P1001'}, {'platform': 'codeforces', 'problem_id': '1A'}])
+        task = await self.create(luogu_snapshot=True, problems=[{'platform': 'luogu', 'problem_id': 'P1001'}, {'platform': 'codeforces', 'problem_id': '1A'}])
         self.assertEqual((await self.publish(task)).status_code, 200)
+        # Existing mixed period tasks retain CF-only verification until explicitly replaced.
+        await self.sql("UPDATE training_tasks SET luogu_snapshot=0 WHERE id=?", (task['id'],))
+        await self.sql("UPDATE training_task_recipients SET bindings_json=json_remove(bindings_json,'$.luogu') WHERE task_id=?", (task['id'],))
+        await self.sql("UPDATE training_task_progress SET binding_key=NULL,binding_version=0,checked_at=0,sync_success_at=0,evidence_version=0 WHERE problem_id IN (SELECT id FROM training_task_problems WHERE task_id=? AND platform='luogu')", (task['id'],))
         recipient = (await self.info(task['id']))['items'][0]
         self.assertEqual((recipient['completed_problems'], recipient['problem_count'], recipient['unsupported_problems']), (1, 2, 1))
         self.assertEqual(recipient['completion'], 'incomplete')

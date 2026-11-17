@@ -13,6 +13,7 @@ export const completions = {
   history_ac: '历史已做',
   pending: '尚无有效 AC 证据',
   unverified: '暂不核验 AC',
+  timing_unknown: '已 AC，完成时段待确认',
 };
 export const verifications = {
   verified: '已核验',
@@ -20,7 +21,9 @@ export const verifications = {
   pending: '待核验',
   pending_sync: '等待更新证据',
   coverage_missing: '历史覆盖不足，待同步',
-  unbound: '待绑定 Codeforces',
+  unbound: '待绑定 OJ 账号',
+  baseline_missing: '尚无有效快照，待同步核验',
+  snapshot_conflict: '平台快照与已有 AC 证据不一致，待核验',
   binding_changed: '绑定已变化，待核验',
   sync_failed: '同步失败，已有证据保留',
   sync_paused: '平台暂停同步',
@@ -34,7 +37,12 @@ export const exclusions = {
   account_closed: '账号已注销',
   account_unavailable: '账号不可用或临时密码已过期',
 };
-export const ruleName = (rule) => (rule === 'historical_ac' ? '历史 AC 可计入' : '周期内 AC');
+export const ruleName = (rule, luoguSnapshot = false) =>
+  rule === 'historical_ac'
+    ? '历史 AC 可计入'
+    : luoguSnapshot
+      ? '周期内 AC · 洛谷按新增快照核验'
+      : '周期内 AC';
 export const platformName = (platform) =>
   ({
     codeforces: 'Codeforces',
@@ -60,6 +68,7 @@ export function newDraft() {
     starts_at: localTime(now),
     due_at: localTime(now + 7 * 86400),
     rule: 'period_ac',
+    luogu_snapshot: false,
     problems: [],
   };
 }
@@ -71,6 +80,7 @@ export function taskForm(task) {
     starts_at: localTime(task.starts_at),
     due_at: localTime(task.due_at),
     rule: task.rule,
+    luogu_snapshot: Boolean(task.luogu_snapshot),
     problems: [...task.problems],
   };
 }

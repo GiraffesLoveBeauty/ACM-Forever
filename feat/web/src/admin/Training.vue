@@ -14,6 +14,7 @@ import {
   utcTime,
 } from '../lib/training-tasks.js';
 import TaskProblemList from '../components/TaskProblemList.vue';
+import TaskProgressReview from '../components/TaskProgressReview.vue';
 import Pager from '../components/Pager.vue';
 import ProblemDifficulty from '../components/ProblemDifficulty.vue';
 import ProblemTags from '../components/ProblemTags.vue';
@@ -62,6 +63,7 @@ const publishPlatforms = computed(() =>
 const batchPlaceholder = computed(() =>
   batchPlatform.value === 'luogu' ? 'P1001 P1002 P1003' : '706B 702C 1201C',
 );
+const formHasLuogu = computed(() => form.value.problems.some((p) => p.platform === 'luogu'));
 let revision = 0,
   loadedKey = '',
   editorInitialized = false,
@@ -308,6 +310,8 @@ function nextStep() {
       utcTime(form.value.starts_at) >= utcTime(form.value.due_at)
     )
       throw Error('请设置开始早于截止的周期，时区为 Asia/Shanghai。');
+    if (formHasLuogu.value && form.value.rule === 'period_ac' && !form.value.luogu_snapshot)
+      throw Error('请确认洛谷周期内新增 AC 的快照核验口径。');
     const data = await saveDraft();
     const checked = !dirty.value
       ? await request(
@@ -420,6 +424,17 @@ function addBatch() {
     .filter(Boolean);
   if (ids.length)
     return addProblems(ids.map((problem_id) => ({ platform: batchPlatform.value, problem_id })));
+}
+function reviewProblem(payload) {
+  return action(async () => {
+    await request(
+      base + '/' + task.value.id + '/progress/' + recipient.value.recipient.id + '/review',
+      { method: 'POST', body: payload },
+      'review',
+    );
+    await load();
+    notify('核验结果已保存，原始快照和操作记录已保留。');
+  });
 }
 function lifecycle(kind) {
   return action(async () => {
@@ -695,7 +710,7 @@ function lifecycle(kind) {
           <label class="tt-check tt-rule"
             ><input v-model="form.rule" type="radio" value="period_ac" /><span
               >周期内 AC<small
-                >默认规则。开始前的 AC 只显示历史已做；需要在周期内再次通过。</small
+                >CF 按真实提交时间核验；洛谷需另行确认周期内新增 AC 的快照口径。</small
               ></span
             ></label
           ><label class="tt-check tt-rule"
@@ -703,9 +718,17 @@ function lifecycle(kind) {
               >历史 AC 可计入<small>截止前实际 AC 可计入；尚未开始的任务仍显示未开始。</small></span
             ></label
           >
+          <label v-if="formHasLuogu && form.rule === 'period_ac'" class="tt-check">
+            <input v-model="form.luogu_snapshot" type="checkbox" />
+            <span
+              >使用洛谷周期内新增 AC（快照核验）<small
+                >开始后确认未通过，截止前确认已通过才计入；快照时间不是实际 AC 时间。</small
+              ></span
+            >
+          </label>
           <p class="tt-note">
-            支持发布 Codeforces 和洛谷 P 题目。以上 AC 规则仅用于
-            Codeforces；洛谷题目可查看和练习，暂不核验 AC，也不要求绑定洛谷账号。
+            Codeforces 按真实提交时间核验；洛谷仅支持公开 P 题，按已通过集合核验。
+            洛谷无法证明已做题的重复 AC，截止后首次发现且缺少边界证据时，保留完成时段待确认。
           </p>
         </section>
       </template>
@@ -717,7 +740,7 @@ function lifecycle(kind) {
             {{ date(utcTime(form.starts_at)) }} → {{ date(utcTime(form.due_at)) }} · Asia/Shanghai
           </p>
           <div class="tt-row">
-            <span class="tt-tag">{{ ruleName(form.rule) }}</span
+            <span class="tt-tag">{{ ruleName(form.rule, form.luogu_snapshot) }}</span
             ><span v-for="s in form.statuses" :key="s" class="tt-tag">{{ s }}</span>
           </div>
           <p class="tt-note">
@@ -835,7 +858,9 @@ function lifecycle(kind) {
           </div>
           <div>
             <dt>冻结身份 / 完成规则</dt>
-            <dd>{{ task.statuses.join(' / ') }} · {{ ruleName(task.rule) }}</dd>
+            <dd>
+              {{ task.statuses.join(' / ') }} · {{ ruleName(task.rule, task.luogu_snapshot) }}
+            </dd>
           </div>
         </dl>
         <p v-if="task.cancel_reason" class="tt-note">取消原因：{{ task.cancel_reason }}</p>
@@ -864,6 +889,7 @@ function lifecycle(kind) {
               on_time_count: '按时完成人数',
               late_count: '逾期完成人数',
               pending_count: '待核验人数',
+              uncertain_count: '完成时段待确认',
             }"
             :key="key"
             class="tt-stat"
@@ -876,7 +902,9 @@ function lifecycle(kind) {
           已完成 {{ progress.summary.completed_problem_count }} /
           {{ progress.summary.total_problem_count }} 道成员题目；账号异常
           {{ progress.summary.abnormal_count }}
-          人。任务需全部必做题完成，账号异常保留在固定分母中。完成与核验状态独立。
+          人。时段待确认
+          {{ progress.summary.uncertain_problem_count || 0 }} 题，此类记录不直接判逾期。
+          任务需全部必做题完成，账号异常保留在固定分母中。完成与核验状态独立。
         </p>
         <form
           class="tt-filter"
@@ -902,6 +930,7 @@ function lifecycle(kind) {
               <option value="on_time">按时完成</option>
               <option value="late">逾期完成</option>
               <option value="incomplete">待完成</option>
+              <option value="timing_unknown">完成时段待确认</option>
               <option value="pending">待核验</option>
               <option value="abnormal">账号异常</option>
             </select></label
@@ -925,7 +954,11 @@ function lifecycle(kind) {
                 <td class="tt-member-progress-cell">
                   <div class="tt-member-progress-line">
                     <span class="tt-member-progress-count"
-                      >{{ m.completed_problems }} / {{ m.problem_count }} 题</span
+                      >{{ m.completed_problems }} / {{ m.problem_count }} 题<span
+                        v-if="m.uncertain_problems"
+                      >
+                        · 时段待确认 {{ m.uncertain_problems }} 题</span
+                      ></span
                     >
                     <div
                       class="tt-member-progress"
@@ -971,6 +1004,14 @@ function lifecycle(kind) {
             <button class="btn" @click="address({ recipient_id: null })">收起证据</button>
           </div>
           <TaskProblemList :problems="recipient.problems" :from="route.fullPath" />
+          <TaskProgressReview
+            v-for="problem in recipient.problems.filter((p) => p.can_review || p.can_reset_binding)"
+            :key="problem.id"
+            :problem="problem"
+            :task-version="task.version"
+            :disabled="busy"
+            @review="reviewProblem"
+          />
         </section>
       </template>
       <template v-else
@@ -1014,6 +1055,7 @@ function lifecycle(kind) {
                 published: '发布任务',
                 extended: '延期',
                 cancelled: '取消任务',
+                progress_reviewed: '审核成员进度',
               }[entry.action] || entry.action
             }}
             {{ entry.reason }}<span v-if="auditText(entry)"> · {{ auditText(entry) }}</span>

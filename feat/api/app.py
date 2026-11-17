@@ -241,6 +241,8 @@ def create_app(*, daily_problem_sync=False, member_sync=False):
             task_manager.start_daily_problem_sync()
         if member_sync:
             task_manager.start_member_sync(member_sync_minutes * 60)
+            if app.config["TRAINING_TASKS_ENABLED"]:
+                task_manager.start_training_task_sync()
 
     @app.after_serving
     async def close_service():
