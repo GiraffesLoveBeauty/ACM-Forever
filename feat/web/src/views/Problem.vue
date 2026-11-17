@@ -20,6 +20,12 @@ const detail = ref(null),
 const back = computed(() => problemReturn(route.query.from, ['admin', 'root'].includes(auth.role)));
 const original = computed(() => originalProblemUrl(detail.value?.problem_url));
 const samples = computed(() => (Array.isArray(detail.value?.samples) ? detail.value.samples : []));
+const statementLanguage = computed(() => {
+  const locale = detail.value?.statement_language;
+  if (typeof locale !== 'string' || !locale) return '';
+  const language = locale.split('-')[0].toLowerCase();
+  return { zh: '中文题面', ja: '日文题面', en: '英文题面' }[language] || `${locale} 题面`;
+});
 const sampleFiles = computed(() =>
   samples.value.map((sample) => {
     if (!Array.isArray(sample?.attachments)) return [];
@@ -138,13 +144,7 @@ watch(() => [route.query.platform, route.query.problem_id], load, { immediate: t
         <ProblemDifficulty :problem="detail" />
         <LuoguBadges v-if="detail.platform === 'luogu'" :problem="detail" :difficulty="false" />
         <ProblemTags v-else :tags="detail.tags" />
-        <span v-if="detail.statement_language" class="chip">{{
-          detail.statement_language === 'zh-CN'
-            ? '中文题面'
-            : detail.statement_language === 'ja'
-              ? '日文题面'
-              : '英文题面'
-        }}</span>
+        <span v-if="statementLanguage" class="chip">{{ statementLanguage }}</span>
       </div>
       <a
         v-if="original"

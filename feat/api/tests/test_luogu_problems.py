@@ -1,6 +1,7 @@
 """Offline Luogu public catalog contracts, failure safety and local API integration."""
 
 import asyncio
+import hashlib
 import json
 import os
 import tempfile
@@ -50,6 +51,12 @@ def problem(pid="P1001", difficulty=1, tags=None, description="计算 $a+b$。")
 
 def body(pid="P1001", **kwargs):
     return page("problem.show", {"problem": problem(pid, **kwargs)})
+
+
+def localized_statement(locale, description):
+    return {"locale": locale, "description": description,
+            "formatI": description + " input", "formatO": description + " output",
+            "background": None, "hint": description + " hint"}
 
 
 def listing(items, total=None, size=2):
@@ -129,6 +136,103 @@ class PayloadTests(unittest.TestCase):
         no_samples = problem()
         no_samples["samples"] = []
         self.assertEqual(parse_problem(page("problem.show", {"problem": no_samples}), "P1001", TAXONOMY)[1]["samples"], [])
+
+    def test_translated_contenu_is_selected_as_a_whole_with_original_samples_and_hash(self):
+        value = problem("P17823")
+        value["content"] = localized_statement("en", "Original description")
+        value["contenu"] = localized_statement("zh-CN", "中文翻译 $a+b$。")
+        value["contenu"]["hint"] = None
+        value["samples"] = [[" 1 2\n", "3\n"], ["4 5\n", " 9\n"], ["0 0", "0"]]
+        value["limits"] = {"time": [1000, 2000], "memory": [524288, 1048576]}
+        raw = page("problem.show", {"problem": value})
+        item, content = parse_problem(raw, "P17823", TAXONOMY)
+        self.assertEqual(item["luogu"]["sections"], {
+            "background": "", "description": "中文翻译 $a+b$。", "formatI": "中文翻译 $a+b$。 input",
+            "formatO": "中文翻译 $a+b$。 output", "hint": ""})
+        self.assertNotIn("Original", content["statement_html"])
+        self.assertEqual(item["luogu"]["locale"], "zh-CN")
+        self.assertEqual(content["statement_language"], "zh-CN")
+        self.assertEqual(content["requested_language"], "zh-CN")
+        self.assertEqual(content["sha256"], hashlib.sha256(raw).hexdigest())
+        self.assertEqual(item["luogu"]["limits"], value["limits"])
+        self.assertEqual(content["samples"], [
+            {"index": index, "input": pair[0], "output": pair[1]}
+            for index, pair in enumerate(value["samples"], 1)])
+
+    def test_chinese_priority_is_independent_of_field_and_prefers_simplified_chinese(self):
+        for translated_locale, original_locale, expected_locale in (
+            ("en", "zh-CN", "zh-CN"), ("zh-TW", "zh-CN", "zh-CN"),
+            ("zh-CN", "zh-TW", "zh-CN"), ("en", "zh-TW", "zh-TW"),
+        ):
+            with self.subTest(contenu=translated_locale, content=original_locale):
+                value = problem()
+                value["contenu"] = localized_statement(translated_locale, "Translated candidate")
+                value["content"] = localized_statement(original_locale, "Original candidate")
+                expected = value["contenu"] if translated_locale == expected_locale else value["content"]
+                item, content = parse_problem(page("problem.show", {"problem": value}), "P1001", TAXONOMY)
+                self.assertEqual(item["luogu"]["sections"]["description"], expected["description"])
+                self.assertEqual(item["luogu"]["sections"]["formatI"], expected["formatI"])
+                self.assertEqual(item["luogu"]["locale"], expected_locale)
+                self.assertEqual(content["statement_language"], expected_locale)
+
+    def test_original_language_fallback_is_preserved_without_chinese_mislabeling(self):
+        for locale in ("en", "de", "ja"):
+            with self.subTest(locale=locale):
+                value = problem()
+                value["content"] = localized_statement(locale, "Source description")
+                value["contenu"] = None
+                item, content = parse_problem(page("problem.show", {"problem": value}), "P1001", TAXONOMY)
+                self.assertEqual(item["luogu"]["locale"], locale)
+                self.assertEqual(content["statement_language"], locale)
+                self.assertEqual(content["requested_language"], "zh-CN")
+                self.assertEqual(item["luogu"]["sections"]["description"], "Source description")
+
+    def test_incomplete_or_malformed_candidate_falls_back_without_mixing_sections(self):
+        for bad in (None, [], "not a body", {},
+                    {"locale": "zh-CN", "description": " \n"},
+                    {"locale": "zh-CN", "description": "Incomplete", "formatI": []},
+                    {"locale": True, "description": "Invalid language"}):
+            with self.subTest(candidate=bad):
+                value = problem()
+                value["contenu"] = bad
+                value["content"] = localized_statement("en", "Complete original")
+                item, content = parse_problem(page("problem.show", {"problem": value}), "P1001", TAXONOMY)
+                self.assertEqual(item["luogu"]["sections"]["description"], "Complete original")
+                self.assertEqual(item["luogu"]["sections"]["formatI"], "Complete original input")
+                self.assertEqual(content["statement_language"], "en")
+        value = problem()
+        value["content"] = None
+        value["contenu"] = localized_statement("zh-CN", "Only translated body")
+        item, content = parse_problem(page("problem.show", {"problem": value}), "P1001", TAXONOMY)
+        self.assertEqual(item["luogu"]["sections"]["description"], "Only translated body")
+        self.assertEqual(content["statement_language"], "zh-CN")
+
+    def test_absent_locale_is_legacy_chinese_but_invalid_locales_are_not_guessed(self):
+        for locale in (None, "missing"):
+            value = problem()
+            if locale == "missing":
+                value["content"].pop("locale")
+            else:
+                value["content"]["locale"] = locale
+            item, content = parse_problem(page("problem.show", {"problem": value}), "P1001", TAXONOMY)
+            self.assertEqual(item["luogu"]["locale"], "zh-CN")
+            self.assertEqual(content["statement_language"], "zh-CN")
+        for locale in (True, 1, [], {}, "", "zh CN", "zh_CN", "../../en", "a" * 64):
+            value = problem()
+            value["content"]["locale"] = locale
+            with self.subTest(locale=locale), self.assertRaises(ValueError):
+                parse_problem(page("problem.show", {"problem": value}), "P1001", TAXONOMY)
+
+    def test_no_usable_language_candidate_is_rejected(self):
+        for translated, original in ((None, None), ([], {}),
+                                     ({"locale": "zh-CN", "description": ""},
+                                      {"locale": "en", "description": None}),
+                                     ({"locale": "zh-CN", "description": "Chinese", "hint": []},
+                                      {"locale": "en", "description": "English", "formatO": {}})):
+            value = problem()
+            value["contenu"], value["content"] = translated, original
+            with self.subTest(contenu=translated, content=original), self.assertRaises(ValueError):
+                parse_problem(page("problem.show", {"problem": value}), "P1001", TAXONOMY)
 
     def test_absent_difficulty_and_limits_are_unknown_instead_of_unrated(self):
         value = problem()
@@ -247,6 +351,51 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
         refreshed = await self.run_sync({**data, "refresh": True})
         self.assertEqual(refreshed["result"]["success_count"], 2)
         self.assertEqual(len(await self.rows()), 2)
+
+    async def test_multilingual_collection_continues_and_saves_actual_languages(self):
+        values = {}
+        for pid in ("P1001", "P1002", "P1003", "P1004"):
+            value = problem(pid)
+            value["content"] = localized_statement("en", "Original " + pid)
+            if pid == "P1004":
+                value["contenu"] = localized_statement("zh-CN", "翻译 " + pid)
+            elif pid == "P1003":
+                value["content"]["locale"] = "de"
+            values[pid] = page("problem.show", {"problem": value})
+        async def download(http, path):
+            return values[path.rsplit("/", 1)[-1]]
+        task = await self.run_sync({"problem_ids": list(values)}, download)
+        self.assertEqual(task["status"], "completed")
+        self.assertEqual(task["result"]["success_count"], 4)
+        self.assertEqual(task["result"]["failure_count"], 0)
+        self.assertEqual(task["result"]["sample_count"], 4)
+        rows = {row["problem_id"]: row for row in await self.rows()}
+        for pid, language in (("P1001", "en"), ("P1002", "en"), ("P1003", "de"), ("P1004", "zh-CN")):
+            with self.subTest(pid=pid):
+                row = rows[pid]
+                self.assertEqual(row["statement_language"], language)
+                self.assertEqual(row["requested_language"], "zh-CN")
+                self.assertEqual(row["last_fetch_status"], "ok")
+                self.assertEqual(row["statement_sha256"], hashlib.sha256(values[pid]).hexdigest())
+                self.assertEqual(json.loads(row["metadata_json"])["luogu"]["locale"], language)
+                self.assertEqual(json.loads(row["samples"]), [{"index": 1, "input": "20 30\n", "output": "50\n"}])
+        self.assertIn("翻译 P1004", rows["P1004"]["statement_text"])
+        self.assertNotIn("Original P1004", rows["P1004"]["statement_text"])
+
+    async def test_unusable_language_candidates_on_refresh_preserve_previous_body_and_samples(self):
+        await self.run_sync({"problem_ids": ["P1001"]})
+        before = (await self.rows())[0]
+        value = problem()
+        value["contenu"] = {"locale": "zh-CN", "description": ""}
+        value["content"] = {"locale": "en", "description": "Original", "formatO": []}
+        task = await self.run_sync({"problem_ids": ["P1001"], "refresh": True},
+                                   AsyncMock(return_value=page("problem.show", {"problem": value})))
+        after = (await self.rows())[0]
+        self.assertEqual(task["status"], "partial")
+        self.assertEqual(task["result"]["failure_count"], 1)
+        for key in ("statement_html", "statement_text", "samples", "metadata_json", "statement_sha256", "statement_language"):
+            self.assertEqual(after[key], before[key], key)
+        self.assertEqual(after["last_fetch_status"], "failed")
 
     async def test_failed_refresh_retains_statement_and_samples(self):
         await self.run_sync({"problem_ids": ["P1001"]})

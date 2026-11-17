@@ -748,6 +748,36 @@ test('Luogu details use native classification and Chinese language without CF ra
     false,
   );
 });
+for (const [locale, label] of [
+  ['en', '英文题面'],
+  ['en-US', '英文题面'],
+  ['ja', '日文题面'],
+  ['ja-JP', '日文题面'],
+  ['zh-TW', '中文题面'],
+  ['de', 'de 题面'],
+]) {
+  test(`Luogu details label the actual source locale ${locale} after Chinese fallback`, async () => {
+    responseData = saved({
+      platform: 'luogu',
+      problem_id: 'P17823',
+      problem_url: 'https://www.luogu.com.cn/problem/P17823',
+      requested_language: 'zh-CN',
+      statement_language: locale,
+    });
+    await page(Problem, '/problem.html?platform=luogu&problem_id=P17823');
+    const labels = find(
+      mounted.root,
+      (node) => node.type === 'span' && node.props.class === 'chip',
+    ).map((node) => textOf(node));
+    assert.ok(labels.includes(label), labels.join(', '));
+    if (!locale.startsWith('en')) assert.ok(!labels.includes('英文题面'));
+    if (locale === 'en' || locale === 'de') assert.ok(!labels.includes('中文题面'));
+    assert.equal(
+      calls.some((call) => String(call.url || call).includes('/secondary')),
+      false,
+    );
+  });
+}
 test('Luogu images survive sanitization only on approved source hosts', () => {
   for (const host of ['www.luogu.com.cn', 'cdn.luogu.com.cn']) {
     const content = parsed(

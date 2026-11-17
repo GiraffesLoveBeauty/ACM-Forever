@@ -160,28 +160,56 @@ def render_markdown(source, source_url=ORIGIN + "/"):
     return md(source)
 
 
+def _statement_sections(value):
+    """Choose one complete localized body; never combine different translations."""
+    candidates, errors = [], []
+    for order, field in enumerate(("contenu", "content")):
+        body = value.get(field)
+        if body is None:
+            continue
+        try:
+            if not isinstance(body, dict):
+                raise ValueError("洛谷页面缺少 Markdown 题面")
+            declared = body.get("locale")
+            language = "zh-CN" if declared is None else declared
+            if (not isinstance(language, str) or len(language) > 63
+                    or not re.fullmatch(r"[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*", language)):
+                raise ValueError("洛谷题面语言字段格式异常")
+            sections = {}
+            for key, _ in SECTIONS:
+                text = body.get(key, "")
+                if text is None:
+                    text = ""
+                if not isinstance(text, str):
+                    raise ValueError("洛谷 Markdown 段落格式异常")
+                sections[key] = text
+            if not sections["description"].strip():
+                raise ValueError("洛谷题目描述为空，保留已有题面")
+            if declared is None:
+                preference = 2  # Preserve legacy payloads without a locale.
+            elif language.casefold() == "zh-cn":
+                preference = 0
+            elif language.split("-", 1)[0].casefold() == "zh":
+                preference = 1
+            else:
+                preference = 3
+            candidates.append((preference, order, language, sections))
+        except ValueError as error:
+            errors.append(error)
+    if not candidates:
+        raise errors[0] if errors else ValueError("洛谷页面缺少 Markdown 题面")
+    _, _, language, sections = min(candidates, key=lambda candidate: candidate[:2])
+    return language, sections
+
+
 def parse_problem(raw, expected_id, taxonomy):
     value = page_context(raw, template="problem.show")["data"].get("problem")
     item = metadata(value, taxonomy)
     if item["problem_id"] != problem_id(expected_id):
         raise ValueError("洛谷返回的题号与请求不一致")
-    body = value.get("content")
-    if not isinstance(body, dict):
-        raise ValueError("洛谷页面缺少 Markdown 题面")
-    if body.get("locale") not in (None, "zh-CN"):
-        raise ValueError("洛谷题面语言异常")
-    parts, sections = [], {}
-    for key, title in SECTIONS:
-        text = body.get(key, "")
-        if text is None:
-            text = ""
-        if not isinstance(text, str):
-            raise ValueError("洛谷 Markdown 段落格式异常")
-        sections[key] = text
-        if text.strip():
-            parts.append("## " + title + "\n\n" + text)
-    if not sections["description"].strip():
-        raise ValueError("洛谷题目描述为空，保留已有题面")
+    language, sections = _statement_sections(value)
+    parts = ["## " + title + "\n\n" + sections[key]
+             for key, title in SECTIONS if sections[key].strip()]
     if not isinstance(value.get("samples"), list):
         raise ValueError("洛谷样例字段缺失或格式异常")
     samples = []
@@ -201,9 +229,9 @@ def parse_problem(raw, expected_id, taxonomy):
     rendered = render_markdown(markdown, item["problem_url"])
     parser = TreeParser()
     parser.feed(rendered)
-    item["luogu"].update(markdown=markdown, sections=sections, limits=limits, locale="zh-CN")
+    item["luogu"].update(markdown=markdown, sections=sections, limits=limits, locale=language)
     content = {"statement_html": rendered, "statement_text": parser.root.text(blocks=True).strip(),
-               "statement_language": "zh-CN", "requested_language": "zh-CN", "samples": samples,
+               "statement_language": language, "requested_language": "zh-CN", "samples": samples,
                "source_url": item["problem_url"], "sha256": hashlib.sha256(raw if isinstance(raw, bytes) else raw.encode()).hexdigest()}
     return item, content
 
