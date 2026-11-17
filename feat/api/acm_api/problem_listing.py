@@ -38,7 +38,7 @@ _SCHEMA = (
         platform TEXT NOT NULL,tag_key TEXT NOT NULL,tag TEXT NOT NULL,uses INTEGER NOT NULL,
         PRIMARY KEY(platform,tag_key))""",
     """CREATE TABLE IF NOT EXISTS problem_listing_native_tags (
-        platform TEXT NOT NULL,id_key TEXT NOT NULL,tag_id INTEGER NOT NULL,
+        platform TEXT NOT NULL,id_key TEXT NOT NULL,tag_id INTEGER NOT NULL,position INTEGER NOT NULL,
         PRIMARY KEY(platform,id_key,tag_id))""",
     "CREATE INDEX IF NOT EXISTS idx_listing_native_tag ON problem_listing_native_tags(tag_id,platform,id_key)",
     """CREATE TABLE IF NOT EXISTS member_problem_index (
@@ -68,6 +68,11 @@ async def initialize_listing(db):
         initialized = bool(await cursor.fetchone())
     for statement in _SCHEMA:
         await db.execute(statement)
+    async with db.execute("PRAGMA table_info(problem_listing_native_tags)") as cursor:
+        native_columns = {row["name"] for row in await cursor.fetchall()}
+    if "position" not in native_columns:
+        await db.execute("ALTER TABLE problem_listing_native_tags ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
+        await db.execute("INSERT OR IGNORE INTO problem_listing_dirty SELECT platform,problem_id FROM crawler_problems WHERE platform='luogu'")
     for table, owner in (("crawler_problems", None), ("recommendations", None),
                          ("submissions", "user_qq_id"), ("user_problem_state", "owner_qq_id")):
         for event, refs in (("INSERT", ("NEW",)), ("DELETE", ("OLD",)), ("UPDATE", ("OLD", "NEW"))):
@@ -171,8 +176,8 @@ def _refresh_catalog(db, platform, key, now):
               int(numeric) if re.fullmatch(r"[0-9]{1,6}", numeric) and platform != "luogu" else None,
               source_time, first_seen, int(source_time is None), -(source_time if source_time is not None else first_seen),
               native.get("difficulty"), public)
-    native_ids = {tag for tag in native.get("tag_ids", []) if type(tag) is int}
-    old_native = {row[0] for row in db.execute("SELECT tag_id FROM problem_listing_native_tags WHERE platform=? AND id_key=?", (platform, key))} if platform == "luogu" else set()
+    native_ids = list(dict.fromkeys(tag for tag in native.get("tag_ids", []) if type(tag) is int))
+    old_native = [row[0] for row in db.execute("SELECT tag_id FROM problem_listing_native_tags WHERE platform=? AND id_key=? ORDER BY position,tag_id", (platform, key))] if platform == "luogu" else []
     if old and tuple(old) == values and old_native == native_ids:
         return False
     columns = ("platform", "id_key", "problem_id", "problem_name", "problem_rating", "problem_url", "tags", "rating_number",
@@ -182,7 +187,7 @@ def _refresh_catalog(db, platform, key, now):
     if not old or old["tags"] != tags or old["is_public"] != public:
         _replace_tags(db, "problem_listing_tags", ("platform", "id_key"), (platform, key), tags if public else "")
     db.execute("DELETE FROM problem_listing_native_tags WHERE platform=? AND id_key=?", (platform, key))
-    db.executemany("INSERT INTO problem_listing_native_tags VALUES(?,?,?)", [(platform, key, tag) for tag in native_ids])
+    db.executemany("INSERT INTO problem_listing_native_tags VALUES(?,?,?,?)", [(platform, key, tag, pos) for pos, tag in enumerate(native_ids)])
     return True
 
 

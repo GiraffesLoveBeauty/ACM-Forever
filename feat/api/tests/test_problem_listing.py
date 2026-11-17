@@ -227,3 +227,27 @@ class ProblemListingTests(unittest.IsolatedAsyncioTestCase):
         for table in ("recommendations", "problem_listing", "problem_listing_dirty"):
             async with self.db.execute("SELECT COUNT(*) FROM " + table) as cursor:
                 self.assertEqual((await cursor.fetchone())[0], 0, table)
+
+    async def test_luogu_list_classification_uses_ids_without_reading_markdown_metadata(self):
+        from feat.api.acm_api.luogu_problem import attach_classifications
+        metadata = json.dumps({"luogu": {"difficulty": 3, "tag_ids": [12, 2], "markdown": "synthetic body " * 10000}})
+        await self.db.execute("INSERT INTO crawler_problems(platform,problem_id,contest_id,problem_name,problem_url,metadata_json,created_at,updated_at) VALUES('luogu','P1001','','Synthetic','https://example.test',?,'2026-01-01','2026-01-01')", (metadata,))
+        await self.db.commit()
+        # Older draft read models did not retain the native tag display order.
+        await self.db.close()
+        external = sqlite3.connect(self.path)
+        try:
+            external.execute("ALTER TABLE problem_listing_native_tags DROP COLUMN position")
+            external.commit()
+        finally:
+            external.close()
+        self.db = await connect_db(self.path)
+        trace = []
+        await self.db.set_trace_callback(trace.append)
+        result = await listing_page(self.db, "member", {"platform": "luogu", "page_size": "20"})
+        await attach_classifications(self.db, result["items"], indexed=True)
+        self.assertEqual(result["items"][0]["native_difficulty"]["id"], 3)
+        self.assertEqual([tag["id"] for tag in result["items"][0]["native_tags"]], [12, 2])
+        statements = "\n".join(trace).lower()
+        for field in ("crawler_problems", "metadata_json", "statement_html", "statement_text", "statement_pdf"):
+            self.assertNotIn(field, statements)

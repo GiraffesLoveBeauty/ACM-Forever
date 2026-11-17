@@ -216,7 +216,7 @@ def _classification_metadata_sql(problem_id):
             "WHEN lg.problem_id GLOB 'p*' THEN 1 ELSE 2 END,lg.updated_at DESC,lg.problem_id LIMIT 1)")
 
 
-async def attach_classifications(db, items):
+async def attach_classifications(db, items, *, indexed=False):
     luogu = [item for item in items if item.get("platform") == "luogu"]
     if not luogu:
         return
@@ -230,11 +230,23 @@ async def attach_classifications(db, items):
     taxonomy = await load_taxonomy(db)
     ids = list({item["problem_id"] for item in luogu})
     marks = ",".join("(?)" for _ in ids)
-    source = _classification_metadata_sql("ids.problem_id")
-    async with db.execute(f"WITH ids(problem_id) AS (VALUES {marks}) "
-                          f"SELECT problem_id,{source} AS metadata_json FROM ids", ids) as cursor:
-        natives = {row["problem_id"]: json.loads(row["metadata_json"] or "{}").get("luogu", {})
-                   for row in await cursor.fetchall()}
+    if indexed:
+        natives = {}
+        async with db.execute(f"WITH ids(problem_id) AS (VALUES {marks}) "
+                              "SELECT p.id_key,p.native_difficulty,t.tag_id FROM ids "
+                              "JOIN problem_listing p ON p.platform='luogu' AND p.id_key=ids.problem_id "
+                              "LEFT JOIN problem_listing_native_tags t ON t.platform=p.platform AND t.id_key=p.id_key "
+                              "ORDER BY p.id_key,t.position,t.tag_id", ids) as cursor:
+            for row in await cursor.fetchall():
+                native = natives.setdefault(row["id_key"], {"difficulty": row["native_difficulty"], "tag_ids": []})
+                if row["tag_id"] is not None:
+                    native["tag_ids"].append(row["tag_id"])
+    else:
+        source = _classification_metadata_sql("ids.problem_id")
+        async with db.execute(f"WITH ids(problem_id) AS (VALUES {marks}) "
+                              f"SELECT problem_id,{source} AS metadata_json FROM ids", ids) as cursor:
+            natives = {row["problem_id"]: json.loads(row["metadata_json"] or "{}").get("luogu", {})
+                       for row in await cursor.fetchall()}
     for item in luogu:
         native = natives.get(item["problem_id"], {})
         item["native_difficulty"], item["native_tags"] = classifications(native, taxonomy)

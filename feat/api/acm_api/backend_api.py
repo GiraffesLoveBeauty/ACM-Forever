@@ -1574,7 +1574,7 @@ async def api_problems():
     db = await get_db()
     try:
         result = await listing_page(db, _field(request.args, "owner_qq_id", 32), {**request.args, "scope": "all"})
-        await attach_classifications(db, result["items"])
+        await attach_classifications(db, result["items"], indexed=True)
         await attach_difficulty_metadata(db, result["items"])
         return jsonify(result)
     except ValueError as error:
@@ -1801,7 +1801,7 @@ async def api_database_problems():
             except (TypeError, ValueError):
                 item["tags"] = []
             item["content_available"] = bool(item["content_available"])
-        await attach_classifications(db, items)
+        await attach_classifications(db, items, indexed=True)
         await attach_difficulty_metadata(db, items)
         return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": page_size})
     except ValueError as error:
@@ -2276,7 +2276,7 @@ async def api_me_problems():
     db = await get_db()
     try:
         result = await listing_page(db, _me_qq_id(), request.args)
-        await attach_classifications(db, result["items"])
+        await attach_classifications(db, result["items"], indexed=True)
         await attach_difficulty_metadata(db, result["items"])
         return jsonify(result)
     except ValueError as error:
