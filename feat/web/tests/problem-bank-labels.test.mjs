@@ -40,6 +40,8 @@ beforeEach(() => {
   mounted = null;
   globalThis.fetch = async (url, options = {}) => {
     calls.push({ url, options });
+    if (/^\/api\/(?:me\/)?problems\/taxonomy\?/.test(url))
+      return new Response(JSON.stringify({ difficulties: [], tags: [], tag_types: [] }));
     if (url.startsWith('/api/me/problems/tags?')) return new Response(JSON.stringify({ tags: [] }));
     if (url.startsWith('/api/me/problems?'))
       return new Response(JSON.stringify({ items, total: 1, tag_facets: facets }));
@@ -57,7 +59,7 @@ afterEach(() => {
 });
 after(cleanupCompiled);
 const View = { render: () => h(Bank) };
-async function page(path = '/my-problems.html') {
+async function page(path = '/my-problems.html?platform=all') {
   mounted = await mount(
     View,
     [
@@ -68,9 +70,50 @@ async function page(path = '/my-problems.html') {
   );
 }
 
-test('list defaults to all platforms but tracker preserves its old platform rule', () => {
-  assert.equal(memberFilters({}).platform, 'all');
+test('list defaults to Luogu while explicit all and tracker platforms remain available', () => {
+  assert.equal(memberFilters({}).platform, 'luogu');
+  assert.equal(memberFilters({ platform: 'all' }).platform, 'all');
   assert.equal(memberFilters({ view: 'tracker' }).platform, 'codeforces');
+  assert.equal(memberFilters({ scope: 'solved' }).platform, 'all');
+  assert.equal(memberFilters({ problem_tag: 'Math' }).platform, 'all');
+  assert.equal(memberFilters({ labels: 'dp' }).platform, 'all');
+  assert.equal(memberFilters({ platform: 'unknown' }).platform, 'all');
+});
+test('unqualified entry renders Luogu filters and queries that same platform exactly once', async () => {
+  await page('/my-problems.html');
+  const select = find(
+    mounted.root,
+    (node) => node.type === 'label' && textOf(node).startsWith('平台'),
+  ).flatMap((label) => find(label, (node) => node.type === 'select'))[0];
+  assert.equal(select.options[select.selectedIndex]?.props.value, 'luogu');
+  assert.ok(textOf(mounted.root).includes('洛谷题库'));
+  assert.ok(textOf(mounted.root).includes('浏览洛谷公开 P 题'));
+  assert.equal(textOf(mounted.root).includes('人工修正后的有效标签'), false);
+  assert.ok(textOf(mounted.root).includes('洛谷难度下限'));
+  assert.equal(find(mounted.root, (node) => node.props.class === 'bank-label-filter').length, 0);
+  const requests = calls.filter((call) => call.url.startsWith('/api/me/problems?'));
+  assert.equal(requests.length, 1);
+  assert.equal(
+    new URL(requests[0].url, 'https://local.invalid').searchParams.get('platform'),
+    'luogu',
+  );
+  assert.equal(calls.filter((call) => call.url.startsWith('/api/me/problems/tags?')).length, 0);
+  assert.equal(
+    calls.filter((call) => /^\/api\/(?:me\/)?problems\/taxonomy\?/.test(call.url)).length,
+    1,
+  );
+});
+test('default platform normalization preserves native filters and the detail return route', () => {
+  const filters = memberFilters({ native_difficulty: '0', native_tags: '1,-2', page: 2 });
+  assert.equal(filters.platform, 'luogu');
+  assert.equal(filters.native_difficulty, '0');
+  assert.equal(filters.native_tags, '1,-2');
+  const returned = new URL(
+    problemReturn('/my-problems.html?native_tags=1,-2'),
+    'https://local.invalid',
+  );
+  assert.equal(returned.searchParams.get('platform'), 'luogu');
+  assert.equal(returned.searchParams.get('native_tags'), '1,-2');
 });
 test('algorithm filters survive query normalization and detail return', () => {
   const query = memberQuery({

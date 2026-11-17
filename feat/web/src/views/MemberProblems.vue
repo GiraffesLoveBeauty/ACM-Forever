@@ -186,7 +186,10 @@ watch(
   <main class="community-main member-problems" :class="{ 'member-problems-tracker': isTracker }">
     <RouterLink class="forum-back-link" to="/home.html">← 返回个人中心</RouterLink>
     <h1>题库</h1>
-    <p>按算法标签寻找练习题，或查看本人已 AC 的题目。人工修正后的有效标签会立即用于筛选。</p>
+    <p v-if="current.platform === 'luogu' && !isTracker">
+      浏览洛谷公开 P 题，按原生难度与算法标签寻找练习题，或查看本人已 AC 的题目。
+    </p>
+    <p v-else>按算法标签寻找练习题，或查看本人已 AC 的题目。人工修正后的有效标签会立即用于筛选。</p>
     <div class="chips member-problem-views" aria-label="题库视图">
       <button
         class="btn"
@@ -424,7 +427,7 @@ watch(
                   <small class="muted">算法标签待接入</small>
                 </div>
               </div>
-              <span class="chips"
+              <span class="chips bank-problem-actions"
                 ><RouterLink
                   v-if="canManage && row.has_secondary"
                   class="btn bank-edit-tags"
@@ -575,6 +578,7 @@ watch(
 }
 .bank-problem-info {
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 .bank-result-tags {
   display: flex;
@@ -601,11 +605,15 @@ watch(
   border-color: #93b3a3;
   color: #176c60;
 }
-.member-problems .list-item {
+.member-problems #problem-list > .list-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   gap: 16px;
 }
-.member-problems .list-item > .chips {
-  flex-wrap: wrap;
+.bank-problem-actions {
+  flex-wrap: nowrap;
+  align-items: center;
   justify-content: flex-end;
 }
 .bank-tag-option:focus-visible,
@@ -628,11 +636,12 @@ watch(
   .bank-tag-search input {
     width: 100%;
   }
-  .member-problems .list-item {
-    align-items: flex-start;
-    flex-direction: column;
+  .member-problems #problem-list > .list-item {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
   }
-  .member-problems .list-item > .chips {
+  .bank-problem-actions {
+    flex-wrap: wrap;
     justify-content: flex-start;
   }
   .bank-label-filter {

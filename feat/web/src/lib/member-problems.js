@@ -5,18 +5,28 @@ const platforms = ['codeforces', 'luogu', 'atcoder', 'nowcoder', 'cjlu'];
 export function memberFilters(query = {}) {
   const number = Number(query.page);
   const view = query.view === 'tracker' ? 'tracker' : 'list';
-  const native = query.platform === 'luogu' && view !== 'tracker';
   const allowedPlatforms = view === 'tracker' ? ['codeforces', 'atcoder'] : ['all', ...platforms];
+  // Keep existing all-OJ AC views and generic-filter bookmarks intact.
+  const genericFilters = ['problem_tag', 'labels', 'rating_min', 'rating_max'].some(
+    (key) => typeof query[key] === 'string' && query[key].trim(),
+  );
+  const listDefault =
+    query.scope === 'solved' || genericFilters || (query.platform != null && query.platform !== '')
+      ? 'all'
+      : 'luogu';
+  const platform = allowedPlatforms.includes(query.platform)
+    ? query.platform
+    : view === 'tracker'
+      ? 'codeforces'
+      : listDefault;
+  const native = platform === 'luogu' && view !== 'tracker';
+  const normalized = { ...query, platform, view };
   return {
-    ...nativeFilters({ ...query, view }),
-    ...rangeFilters({ ...query, view }),
+    ...nativeFilters(normalized),
+    ...rangeFilters(normalized),
     view,
     scope: query.scope === 'solved' ? 'solved' : 'all',
-    platform: allowedPlatforms.includes(query.platform)
-      ? query.platform
-      : view === 'tracker'
-        ? 'codeforces'
-        : 'all',
+    platform,
     tag: typeof query.tag === 'string' ? query.tag.slice(0, 100) : '',
     problem_tag:
       !native && typeof query.problem_tag === 'string'
