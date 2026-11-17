@@ -56,6 +56,12 @@ const step = computed(() =>
 const page = computed(() => Math.max(1, Number(route.query.page) || 1));
 const dirty = computed(() => editing.value && JSON.stringify(form.value) !== saved.value);
 const enabled = computed(() => options.value.enabled === true);
+const publishPlatforms = computed(() =>
+  options.value.capabilities.filter((p) => p.can_publish !== false),
+);
+const batchPlaceholder = computed(() =>
+  batchPlatform.value === 'luogu' ? 'P1001 P1002 P1003' : '706B 702C 1201C',
+);
 let revision = 0,
   loadedKey = '',
   editorInitialized = false,
@@ -594,7 +600,7 @@ function lifecycle(kind) {
           <form class="tt-filter" @submit.prevent="catalogLoad(1)">
             <label
               >题目平台<select v-model="catalogPlatform">
-                <option v-for="p in options.capabilities" :key="p.platform" :value="p.platform">
+                <option v-for="p in publishPlatforms" :key="p.platform" :value="p.platform">
                   {{ p.label }}
                 </option>
               </select></label
@@ -644,13 +650,13 @@ function lifecycle(kind) {
           <label class="tt-field"
             ><span>批量输入平台</span
             ><select v-model="batchPlatform">
-              <option v-for="p in options.capabilities" :key="p.platform" :value="p.platform">
+              <option v-for="p in publishPlatforms" :key="p.platform" :value="p.platform">
                 {{ p.label }}
               </option>
             </select></label
           ><label class="tt-field"
             ><span>标准题号</span
-            ><textarea v-model="batch" placeholder="706B 702C 1201C"></textarea>
+            ><textarea v-model="batch" :placeholder="batchPlaceholder"></textarea>
           </label>
           <p class="tt-caption">空格、换行或逗号分隔，自动去重。服务端逐项校验，最多 50 题。</p>
           <div>
@@ -698,7 +704,8 @@ function lifecycle(kind) {
             ></label
           >
           <p class="tt-note">
-            首期支持 Codeforces。同步晚于截止时，仍按实际 OJ 提交时间判定；截止后 AC 为逾期。
+            支持发布 Codeforces 和洛谷 P 题目。以上 AC 规则仅用于
+            Codeforces；洛谷题目可查看和练习，暂不核验 AC，也不要求绑定洛谷账号。
           </p>
         </section>
       </template>
@@ -724,7 +731,7 @@ function lifecycle(kind) {
                 total: '匹配成员',
                 recipient_count: '有效接收',
                 excluded_count: '排除成员',
-                unbound_count: '接收人中未绑定',
+                unbound_count: '接收人中未绑定 CF',
               }"
               :key="key"
               class="tt-stat"

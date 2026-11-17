@@ -17,6 +17,8 @@ def first_evidence(values):
 
 def live_state(row, now):
     """Derive current verification from local data without mutating frozen evidence."""
+    if row["platform"] != "codeforces":
+        return None, 0, False, "unsupported"
     original = json.loads(row["bindings_json"]).get(row["platform"], {})
     anchor = row["binding_key"] or (f'{original["account"]}:{original["version"]}' if original.get("account") else None)
     generation = row.get("binding_version", 0) if row["binding_key"] else original.get("version", 0)
@@ -50,7 +52,7 @@ def live_state(row, now):
 async def reconcile(db, *, qq_id=None, task_id=None, now=None):
     """Caller holds the write transaction; never join evidence across a binding fence."""
     now = int(time.time()) if now is None else now
-    clauses, params = ["t.state='published'"], []
+    clauses, params = ["t.state='published'", "p.platform='codeforces'"], []
     if qq_id is not None:
         clauses.append("r.qq_id=?")
         params.append(str(qq_id))
@@ -132,8 +134,8 @@ async def recipient_summaries(db, task_ids, *, qq_id=None, epoch=None, now=None,
         u.cf_handle,u.cf_binding_version,a.is_active,p.platform,x.binding_key,MAX(x.binding_version) AS binding_version,
         s.binding_key AS sync_binding,s.full_history_at,s.coverage_through_at,s.last_status AS sync_status,
         COUNT(x.problem_id) AS problem_count,
-        SUM(CASE WHEN x.on_time_json IS NOT NULL OR (t.rule='historical_ac' AND x.history_json IS NOT NULL) THEN 1 ELSE 0 END) AS on_time_problems,
-        SUM(CASE WHEN x.on_time_json IS NULL AND NOT(t.rule='historical_ac' AND x.history_json IS NOT NULL) AND x.late_json IS NOT NULL THEN 1 ELSE 0 END) AS late_problems,
+        SUM(CASE WHEN p.platform='codeforces' AND (x.on_time_json IS NOT NULL OR (t.rule='historical_ac' AND x.history_json IS NOT NULL)) THEN 1 ELSE 0 END) AS on_time_problems,
+        SUM(CASE WHEN p.platform='codeforces' AND x.on_time_json IS NULL AND NOT(t.rule='historical_ac' AND x.history_json IS NOT NULL) AND x.late_json IS NOT NULL THEN 1 ELSE 0 END) AS late_problems,
         MIN(x.checked_at) AS checked_at,MIN(x.sync_success_at) AS last_success_at
         FROM training_task_recipients r JOIN training_tasks t ON t.id=r.task_id
         LEFT JOIN users u ON u.qq_id=r.qq_id LEFT JOIN web_accounts a ON a.qq_id=r.qq_id
@@ -144,16 +146,19 @@ async def recipient_summaries(db, task_ids, *, qq_id=None, epoch=None, now=None,
     grouped = {}
     for row in result:
         _, _, valid, verification = live_state(row, now)
-        row["pending_problems"] = row["problem_count"] if verification != "verified" else 0
-        row["binding_warnings"] = row["problem_count"] if not valid else 0
+        row["unsupported_problems"] = row["problem_count"] if verification == "unsupported" else 0
+        row["pending_problems"] = row["problem_count"] if verification not in {"verified", "unsupported"} else 0
+        row["binding_warnings"] = row["problem_count"] if not valid and verification != "unsupported" else 0
         previous = grouped.get(row["id"])
         if previous is None:
             grouped[row["id"]] = row
         else:
-            for key in ("problem_count", "on_time_problems", "late_problems", "pending_problems", "binding_warnings"):
+            had_supported = previous["problem_count"] > previous["unsupported_problems"]
+            for key in ("problem_count", "on_time_problems", "late_problems", "pending_problems", "binding_warnings", "unsupported_problems"):
                 previous[key] += row[key]
             for key in ("checked_at", "last_success_at"):
-                previous[key] = min(previous[key], row[key])
+                if verification != "unsupported":
+                    previous[key] = min(previous[key], row[key]) if had_supported else row[key]
     return [recipient_state(row, now) for row in grouped.values()]
 
 
@@ -206,11 +211,15 @@ async def problem_progress(db, recipient, *, now=None):
       WHERE p.task_id=? ORDER BY p.position""", (recipient["id"], recipient["task_id"]))
     for row in records:
         _, _, _, row["verification"] = live_state(row, now)
+        row["supported"] = row["platform"] == "codeforces"
         row["tags"] = json.loads(row.pop("tags_json"))
         historical, timely, late = [evidence(row.pop(key)) for key in ("history_json", "on_time_json", "late_json")]
+        if not row["supported"]:
+            historical = timely = late = None
         accepted = timely or (historical if recipient["rule"] == "historical_ac" else None)
-        row["status"] = "not_started" if recipient["phase"] == "upcoming" else "on_time" if accepted else "late" if late else "history_ac" if historical else "pending"
+        row["status"] = "unverified" if not row["supported"] else "not_started" if recipient["phase"] == "upcoming" else "on_time" if accepted else "late" if late else "history_ac" if historical else "pending"
         row["evidence"] = accepted or late or historical
         for key in ("cf_handle", "cf_binding_version", "binding_key", "binding_version", "bindings_json", "account_epoch", "closed", "due_at", "account_state", "current_epoch", "is_active", "sync_binding", "full_history_at"):
             row.pop(key, None)
+    await tasks.attach_problem_state(db, records)
     return records

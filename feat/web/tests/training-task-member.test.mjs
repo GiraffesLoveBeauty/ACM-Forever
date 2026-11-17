@@ -153,3 +153,56 @@ test('personal-center summary uses own nearest task and direct continuation targ
   const link = find(mounted.root, (n) => n.type === 'a' && textOf(n).includes('继续训练'))[0];
   assert(link.props.href.includes('task_id=17'));
 });
+
+const luoguProblem = () => ({
+  platform: 'luogu',
+  problem_id: 'P1001',
+  problem_name: '合成洛谷题目',
+  content_available: true,
+  supported: false,
+  can_publish: true,
+  status: 'unverified',
+  verification: 'unsupported',
+  problem_url: 'https://www.luogu.com.cn/problem/P1001',
+  tags: [],
+  evidence: null,
+});
+test('Luogu-only member tasks open problem links without CF binding or refresh controls', async () => {
+  const data = task();
+  data.problems = [luoguProblem()];
+  Object.assign(data.recipient, {
+    problem_count: 1,
+    completed_problems: 0,
+    unsupported_problems: 1,
+  });
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = (url, options) =>
+    url === '/api/me/training-tasks/17' ? json(data) : previousFetch(url, options);
+  mounted = await mount(Root, routes, '/training-tasks.html?task_id=17');
+  const copy = textOf(mounted.root);
+  assert(copy.includes('合成洛谷题目'));
+  assert(copy.includes('暂不核验 AC'));
+  assert(!copy.includes('绑定 Codeforces'));
+  assert(!copy.includes('刷新进度'));
+  assert(!copy.includes('已同步 Codeforces 实际提交记录'));
+  assert(!copy.includes('发布前需要更换'));
+  const statement = find(mounted.root, (n) => n.type === 'a' && textOf(n) === '查看题目')[0];
+  assert(statement.props.href.includes('platform=luogu'));
+  assert(statement.props.href.includes('problem_id=P1001'));
+  const original = find(mounted.root, (n) => n.type === 'a' && textOf(n).includes('原题'))[0];
+  assert.equal(original.props.href, 'https://www.luogu.com.cn/problem/P1001');
+});
+test('mixed CF and Luogu member tasks retain the CF refresh action', async () => {
+  const data = task();
+  data.problems[1] = luoguProblem();
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = (url, options) =>
+    url === '/api/me/training-tasks/17' ? json(data) : previousFetch(url, options);
+  mounted = await mount(Root, routes, '/training-tasks.html?task_id=17');
+  const copy = textOf(mounted.root);
+  assert(copy.includes('洛谷题目的完成进度不会自动更新'));
+  assert(copy.includes('实际 AC'));
+  assert(copy.includes('已同步 Codeforces 实际提交记录'));
+  await click('刷新进度');
+  assert(calls.some((call) => call.url.endsWith('/refresh')));
+});

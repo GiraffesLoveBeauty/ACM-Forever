@@ -60,6 +60,8 @@ async def run(port):
             await db.execute("INSERT INTO submission_attempts(owner_qq_id,platform,external_submission_id,problem_id,verdict,submitted_at,created_at) VALUES('10000118','codeforces','fixture:801','cf_1A','OK',?,?)", (now-3600, now))
             for pid, name in [('cf_1A', '合成训练题一'), ('cf_2A', '合成训练题二')]:
                 await db.execute("INSERT INTO recommendations(platform,problem_id,problem_name,problem_rating,problem_url,tags) VALUES('codeforces',?,?, '1000',?,'implementation')", (pid, name, 'https://codeforces.com/contest/' + pid[3:-1] + '/problem/A'))
+            await db.execute("INSERT INTO recommendations(platform,problem_id,problem_name,problem_url,tags) VALUES('luogu','P1001','合成洛谷训练题','https://www.luogu.com.cn/problem/P1001','[]')")
+            await db.execute("INSERT INTO crawler_problems(platform,problem_id,contest_id,problem_name,problem_url,metadata_json,statement_html,samples,sample_count,statement_language,requested_language,last_fetch_status,created_at,updated_at) VALUES('luogu','P1001','','合成洛谷训练题','https://www.luogu.com.cn/problem/P1001',?, '<h2>题目描述</h2><p>计算两个整数的和，仅用于训练任务自动化测试。</p>',?,1,'zh','zh','ok','2026-11-17','2026-11-17')", ('{"luogu":{"difficulty":1,"tag_ids":[]}}', '[{"input":"1 2\\n","output":"3\\n"}]'))
             for number in range(26):
                 await db.execute(
                     "INSERT INTO users(qq_id,name,real_name,school,status,cf_handle,atcoder_handle,luogu_id,nowcoder_id,cjlu_username) VALUES(?,?,?,?,?,?,?,?,?,?)",
