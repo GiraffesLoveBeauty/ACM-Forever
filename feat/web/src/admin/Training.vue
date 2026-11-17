@@ -15,6 +15,9 @@ import {
 } from '../lib/training-tasks.js';
 import TaskProblemList from '../components/TaskProblemList.vue';
 import Pager from '../components/Pager.vue';
+import ProblemDifficulty from '../components/ProblemDifficulty.vue';
+import ProblemTags from '../components/ProblemTags.vue';
+import LuoguBadges from '../components/LuoguBadges.vue';
 const route = useRoute(),
   router = useRouter(),
   request = useRequests();
@@ -605,9 +608,12 @@ function lifecycle(kind) {
             <div v-for="p in catalog.items" :key="p.platform + p.problem_id" class="tt-catalog-row">
               <div>
                 <strong>{{ p.problem_name || p.problem_id }}</strong>
-                <p class="tt-caption">
-                  {{ p.problem_id }} · {{ p.problem_rating || '暂无难度' }} · {{ p.tags }}
-                </p>
+                <p class="tt-caption">{{ p.problem_id }}</p>
+                <div class="tt-row">
+                  <ProblemDifficulty :problem="p" />
+                  <LuoguBadges v-if="p.platform === 'luogu'" :problem="p" :difficulty="false" />
+                  <ProblemTags v-else-if="p.tags != null" :tags="p.tags" />
+                </div>
               </div>
               <button
                 class="btn"

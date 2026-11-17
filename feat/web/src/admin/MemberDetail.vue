@@ -3,6 +3,9 @@ import { ref, reactive, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useRequests, external, showError, notify } from '../lib/api.js';
 import { useParams } from '../lib/admin.js';
+import ProblemDifficulty from '../components/ProblemDifficulty.vue';
+import ProblemTags from '../components/ProblemTags.vue';
+import LuoguBadges from '../components/LuoguBadges.vue';
 
 const route = useRoute(),
   update = useParams(),
@@ -116,7 +119,9 @@ watch(() => route.query, load, { immediate: true });
       <article v-for="(row, i) in detail.recent_ac" :key="i" class="list-item">
         <span
           ><b>{{ row.problem_name || row.problem_id }}</b
-          ><br />{{ row.platform }} · {{ row.problem_rating || '未知' }}</span
+          ><br />{{ row.platform }} · <ProblemDifficulty :problem="row" />
+          <LuoguBadges v-if="row.platform === 'luogu'" :problem="row" :difficulty="false" />
+          <ProblemTags v-else-if="row.tags != null" :tags="row.tags" /></span
         ><a
           v-if="row.problem_url"
           class="btn"

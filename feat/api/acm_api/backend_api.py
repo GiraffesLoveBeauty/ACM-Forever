@@ -36,6 +36,7 @@ from .luogu_problem import attach_classifications, canonical_problem_id as luogu
 from .problem_sync import sync_options
 from .problem_bank import problem_bank_status
 from .problem_listing import listing_query, NEWEST_ORDER
+from .atcoder_difficulty import attach_difficulty_metadata, difficulty_metadata
 from . import problem_schedule
 from .problem_tracker import attempt_problem_metadata, contest_tracker, problem_id_aliases, problem_id_key, tracker_options
 from .problem_tags import has_problem_tag, problem_tags
@@ -1189,6 +1190,7 @@ async def api_member_detail(qq_id):
             platform_counts = {row["platform"]: row["count"] for row in await cursor.fetchall()}
         async with db.execute("SELECT platform, problem_id, problem_name, problem_rating, problem_url, tags, submit_time FROM submissions WHERE user_qq_id=? ORDER BY submit_time DESC, id DESC LIMIT 20", (qq_id,)) as cursor:
             recent_ac = [dict(row) for row in await cursor.fetchall()]
+        await attach_difficulty_metadata(db, recent_ac)
         async with db.execute("SELECT platform, problem_rating, COUNT(*) AS count FROM submissions WHERE user_qq_id=? GROUP BY platform, problem_rating ORDER BY platform, problem_rating", (qq_id,)) as cursor:
             difficulty = [dict(row) for row in await cursor.fetchall()]
         async with db.execute("SELECT role FROM web_accounts WHERE qq_id=?", (qq_id,)) as cursor:
@@ -1270,6 +1272,22 @@ async def api_stats():
         await db.close()
 
 
+async def _attach_challenge_difficulty(result):
+    """Describe the returned score using confirmed local metadata, without changing selection."""
+    if not (result.get("success") and result.get("platform") == "atcoder"
+            and isinstance(result.get("problem_id"), str) and result["problem_id"]):
+        return
+    # Providers may reuse result dictionaries. Never carry an old score's source
+    # into a new recommendation that no longer matches the local model.
+    for field in ("difficulty_source", "difficulty_raw", "difficulty_is_experimental"):
+        result.pop(field, None)
+    db = await get_db()
+    try:
+        await attach_difficulty_metadata(db, [result])
+    finally:
+        await db.close()
+
+
 @api.route("/challenge/start", methods=["POST"])
 @admin_required
 async def api_challenge_start():
@@ -1300,6 +1318,7 @@ async def api_challenge_start():
         result = await provider(platform, tag, difficulty)
     result.setdefault("source", "weak_tag" if weak_tag and tag else "random")
     result.setdefault("weak_tag", tag if weak_tag else "")
+    await _attach_challenge_difficulty(result)
     return jsonify(result), (200 if result.get("success") else 400)
 
 
@@ -1315,6 +1334,7 @@ async def api_challenge_list():
             query += " WHERE qq_id=?"; params = (qq_id,)
         query += " ORDER BY id DESC LIMIT 100"
         async with db.execute(query, params) as cursor: rows = [dict(row) for row in await cursor.fetchall()]
+        await attach_difficulty_metadata(db, rows)
         return jsonify(rows)
     finally:
         await db.close()
@@ -1646,6 +1666,7 @@ async def api_problems():
         async with db.execute(query, tuple(params + [size, (page - 1) * size])) as cursor:
             items = [dict(row) for row in await cursor.fetchall()]
         await attach_classifications(db, items)
+        await attach_difficulty_metadata(db, items)
         return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": size})
     finally:
         await db.close()
@@ -1711,10 +1732,16 @@ async def _problem_detail(platform, problem_id):
                 "statement_html": None, "statement_text": None, "statement_language": None,
                 "samples": [], "statement_fetched_at": None, "last_fetch_status": "never",
             }
-        native = json.loads(detail.pop("metadata_json", "{}"))
+        try:
+            native = json.loads(detail.pop("metadata_json", "{}"))
+        except (ValueError, TypeError):
+            native = {}
+        if not isinstance(native, dict):
+            native = {}
         if platform == "atcoder":
+            provenance = difficulty_metadata(native)
             for key in ("difficulty_source", "difficulty_raw", "difficulty_is_experimental"):
-                detail[key] = native.get(key)
+                detail[key] = provenance.get(key)
         if platform == "luogu":
             await attach_classifications(db, [detail])
             detail["statement_markdown"] = native.get("luogu", {}).get("markdown")
@@ -1864,6 +1891,7 @@ async def api_database_problems():
                 item["tags"] = []
             item["content_available"] = bool(item["content_available"])
         await attach_classifications(db, items)
+        await attach_difficulty_metadata(db, items)
         return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": page_size})
     except ValueError as error:
         return jsonify({"success": False, "message": str(error)}), 400
@@ -2143,6 +2171,7 @@ async def api_me_profile():
             "FROM submissions WHERE user_qq_id=? ORDER BY submit_time DESC,id DESC LIMIT 20", (qq_id,)
         ) as cursor:
             recent_ac = [dict(item) for item in await cursor.fetchall()]
+        await attach_difficulty_metadata(db, recent_ac)
         async with db.execute("SELECT COUNT(*) AS count FROM submissions WHERE user_qq_id=?", (qq_id,)) as cursor:
             total = (await cursor.fetchone())["count"]
         return jsonify({
@@ -2244,7 +2273,9 @@ async def api_me_training_challenges():
             "SELECT id,platform,problem_id,problem_name,problem_rating,problem_url,tags,challenge_rating,time_limit_minutes,status,created_at,expires_at,completed_at "
             "FROM random_challenges WHERE qq_id=? ORDER BY id DESC LIMIT 100", (qq_id,)
         ) as cursor:
-            return jsonify([dict(row) for row in await cursor.fetchall()])
+            rows = [dict(row) for row in await cursor.fetchall()]
+        await attach_difficulty_metadata(db, rows)
+        return jsonify(rows)
     finally:
         await db.close()
 
@@ -2284,6 +2315,7 @@ async def api_me_challenge_start():
         result = await provider(platform, tag, difficulty)
     result.setdefault("source", "weak_tag" if weak_tag and tag else "random")
     result.setdefault("weak_tag", tag if weak_tag else "")
+    await _attach_challenge_difficulty(result)
     return jsonify(result), (200 if result.get("success") else 400)
 
 
@@ -2390,6 +2422,7 @@ async def api_me_problems():
         async with db.execute(query, tuple(params + [size, (page - 1) * size])) as cursor:
             items = [dict(row) for row in await cursor.fetchall()]
         await attach_classifications(db, items)
+        await attach_difficulty_metadata(db, items)
         return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": size})
     finally:
         await db.close()

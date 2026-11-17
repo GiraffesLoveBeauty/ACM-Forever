@@ -3,6 +3,7 @@ import { ref, reactive, onMounted, onBeforeUnmount } from 'vue';
 import { useRoute } from 'vue-router';
 import { auth, useRequests, notify } from '../lib/api.js';
 import { adminFilters } from '../lib/admin.js';
+import ProblemDifficulty from './ProblemDifficulty.vue';
 const props = defineProps({ personal: { type: Boolean, default: false } });
 const route = useRoute(),
   request = useRequests(),
@@ -124,7 +125,11 @@ onBeforeUnmount(() => {
       <article v-for="row in rows" :key="row.problem_id" class="list-item contest-review-row">
         <span
           ><b>{{ row.problem_id }}</b
-          ><br />{{ row.verdict || '未记录结果' }} · 难度 {{ row.rating ?? '未知' }}</span
+          ><br />{{ row.verdict || '未记录结果' }} ·
+          <ProblemDifficulty
+            :problem="row"
+            :platform="/^cf_\d+[a-z]\d*$/i.test(row.problem_id || '') ? 'codeforces' : ''"
+          /></span
         ><label
           >逐题状态<select :value="row.status" :disabled="saving" @change="save(row, $event)">
             <option v-for="(label, key) in states" :key="key" :value="key">{{ label }}</option>

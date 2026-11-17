@@ -5,6 +5,8 @@ import { auth, date, useRequests } from '../lib/api.js';
 import { originalProblemUrl, renderProblemContent } from '../lib/problem-content.js';
 import PdfPreview from '../components/PdfPreview.vue';
 import LuoguBadges from '../components/LuoguBadges.vue';
+import ProblemDifficulty from '../components/ProblemDifficulty.vue';
+import ProblemTags from '../components/ProblemTags.vue';
 import SecondaryProcessingPanel from '../components/SecondaryProcessingPanel.vue';
 import { problemReturn } from '../lib/member-problems.js';
 import { copyStatementSample } from '../lib/statement-samples.js';
@@ -133,11 +135,9 @@ watch(() => [route.query.platform, route.query.problem_id], load, { immediate: t
           detail.platform
         }}</span>
         <span class="chip">{{ detail.problem_id }}</span>
-        <LuoguBadges v-if="detail.platform === 'luogu'" :problem="detail" />
-        <template v-else
-          ><span class="chip">难度 {{ detail.problem_rating ?? '未知' }}</span>
-          <span v-for="tag in detail.tags" :key="tag" class="chip">{{ tag }}</span></template
-        >
+        <ProblemDifficulty :problem="detail" />
+        <LuoguBadges v-if="detail.platform === 'luogu'" :problem="detail" :difficulty="false" />
+        <ProblemTags v-else :tags="detail.tags" />
         <span v-if="detail.statement_language" class="chip">{{
           detail.statement_language === 'zh-CN'
             ? '中文题面'

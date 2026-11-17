@@ -2,6 +2,9 @@
 import { computed } from 'vue';
 import { date } from '../lib/api.js';
 import { problemLink } from '../lib/member-problems.js';
+import { difficultyPresentation } from '../lib/problem-presentation.js';
+import ProblemDifficulty from './ProblemDifficulty.vue';
+import ProblemTags from './ProblemTags.vue';
 
 const props = defineProps({
   contests: { type: Array, default: () => [] },
@@ -21,40 +24,6 @@ function contestName(contest) {
       ? `Codeforces #${contest.contest_id}`
       : `AtCoder ${contest.contest_id}`)
   );
-}
-function ratingColor(problem) {
-  const rating = problem.problem_rating;
-  if (rating == null) return 'var(--muted)';
-  if (problem.platform === 'atcoder') {
-    return rating < 400
-      ? '#808080'
-      : rating < 800
-        ? '#a16d45'
-        : rating < 1200
-          ? '#479b31'
-          : rating < 1600
-            ? '#00a5a5'
-            : rating < 2000
-              ? '#6767ee'
-              : rating < 2400
-                ? '#c09a00'
-                : rating < 2800
-                  ? '#f08c19'
-                  : '#ef5050';
-  }
-  return rating < 1200
-    ? '#808080'
-    : rating < 1400
-      ? '#479b31'
-      : rating < 1600
-        ? '#00a5a5'
-        : rating < 1900
-          ? '#6767ee'
-          : rating < 2100
-            ? '#c345d7'
-            : rating < 2400
-              ? '#f08c19'
-              : '#ef5050';
 }
 function description(problem) {
   return [
@@ -132,12 +101,11 @@ function description(problem) {
               >
                 <span
                   class="tracker-problem-name"
-                  :style="{ '--tracker-rating': ratingColor(problem) }"
+                  :style="{ '--tracker-rating': difficultyPresentation(problem).color }"
                   >{{ problem.problem_index }}. {{ problem.problem_name || '未命名题目' }}</span
                 >
-                <span class="tracker-rating">{{
-                  problem.problem_rating == null ? '难度未知' : `(${problem.problem_rating})`
-                }}</span>
+                <ProblemDifficulty :problem="problem" class="tracker-rating" />
+                <ProblemTags :tags="problem.tags" class="tracker-tags" />
                 <span class="tracker-state-label"
                   >{{
                     problem.status === 'solved' ? '✓' : problem.status === 'attempted' ? '◐' : '—'
@@ -310,8 +278,10 @@ progress {
   color: color-mix(in srgb, var(--tracker-rating) 80%, var(--text));
 }
 .tracker-rating {
-  color: var(--muted);
-  font-size: 13px;
+  align-self: flex-start;
+}
+.tracker-tags {
+  font-size: 11px;
 }
 .tracker-state-label {
   font-size: 12px;

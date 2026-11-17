@@ -40,8 +40,7 @@ beforeEach(() => {
   mounted = null;
   globalThis.fetch = async (url, options = {}) => {
     calls.push({ url, options });
-    if (url.startsWith('/api/me/problems/tags?'))
-      return new Response(JSON.stringify({ tags: [] }));
+    if (url.startsWith('/api/me/problems/tags?')) return new Response(JSON.stringify({ tags: [] }));
     if (url.startsWith('/api/me/problems?'))
       return new Response(JSON.stringify({ items, total: 1, tag_facets: facets }));
     throw Error('Unexpected request ' + url);
@@ -91,6 +90,25 @@ test('tracker does not inherit algorithm-only filters', () => {
   const query = memberQuery({ view: 'tracker', labels: 'enumeration', match: 'any' });
   assert.equal(query.labels, undefined);
   assert.equal(query.match, undefined);
+});
+
+test('member algorithm labels share category colours without losing filter IDs or source hints', async () => {
+  await page();
+  const result = find(
+    mounted.root,
+    (n) => n.type === 'button' && String(n.props.class).includes('bank-result-tag'),
+  )[0];
+  const option = find(
+    mounted.root,
+    (n) => n.type === 'button' && n.props['data-tag-id'] === 'difference_array',
+  )[0];
+  assert.match(String(result.props.class), /problem-tone-orange/);
+  assert.match(String(option.props.class), /problem-tone-orange/);
+  assert.match(result.props.title, /difference_array.*点击筛选/);
+  assert.equal(result.props['data-tag-category'], 'strategy');
+  await result.props.onClick();
+  await settle();
+  assert.equal(mounted.router.currentRoute.value.query.labels, 'difference_array');
 });
 test('clicking taxonomy label changes URL and sends server-side filter', async () => {
   await page('/my-problems.html?platform=atcoder&page=3');

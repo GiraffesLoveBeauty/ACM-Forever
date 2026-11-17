@@ -4,6 +4,8 @@ import { useRoute } from 'vue-router';
 import { api, useRequests, showError, notify, date, external } from '../lib/api.js';
 import { cfMemory, adminSessionVersion, useParams } from '../lib/admin.js';
 import Pager from '../components/Pager.vue';
+import ProblemDifficulty from '../components/ProblemDifficulty.vue';
+import ProblemTags from '../components/ProblemTags.vue';
 const route = useRoute(),
   update = useParams(),
   request = useRequests();
@@ -603,7 +605,9 @@ onBeforeUnmount(() => {
                 ><a :href="external(problem.url)" target="_blank" rel="noopener"
                   >{{ problem.display_id }} · {{ problem.name }}</a
                 >
-                · Rating {{ problem.rating ?? '未知' }}<br />{{ date(problem.ac_at) }}</span
+                <ProblemDifficulty :problem="problem" platform="codeforces" />
+                <ProblemTags v-if="problem.tags" :tags="problem.tags" />
+                <br />{{ date(problem.ac_at) }}</span
               ><span
                 ><a
                   v-if="problem.submission_url"
@@ -640,7 +644,8 @@ onBeforeUnmount(() => {
               >
             </td>
             <td>
-              {{ row.rating ?? '未知' }}<small>{{ row.tags.join(' · ') }}</small>
+              <ProblemDifficulty :problem="row" platform="codeforces" />
+              <ProblemTags :tags="row.tags" />
             </td>
             <td>{{ row.recent_ac_count }} 人</td>
             <td>{{ row.history_ac_count }} 人</td>
@@ -740,7 +745,7 @@ onBeforeUnmount(() => {
               ><b v-else>{{ row.display_id }}</b
               ><small>{{ row.name }}</small>
             </td>
-            <td>{{ row.rating ?? '未知' }}</td>
+            <td><ProblemDifficulty :problem="row" platform="codeforces" /></td>
             <td>{{ row.ac_count }}</td>
             <td>{{ row.attempt_count }}</td>
             <td>

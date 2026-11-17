@@ -4,6 +4,8 @@ import { useRoute, useRouter } from 'vue-router';
 import { date, useRequests } from '../lib/api.js';
 import Pager from './Pager.vue';
 import LuoguBadges from './LuoguBadges.vue';
+import ProblemDifficulty from './ProblemDifficulty.vue';
+import ProblemTags from './ProblemTags.vue';
 import LuoguFilters from './LuoguFilters.vue';
 import { nativeParams, nativeFilters } from '../lib/luogu-problems.js';
 import { rangeFilters, rangeParams, timeLabel } from '../lib/problem-filters.js';
@@ -69,9 +71,6 @@ function statusName(row) {
 function statusClass(row) {
   if (row.last_fetch_status === 'failed') return 'failed';
   return row.content_available ? 'ready' : 'pending';
-}
-function tagsText(tags) {
-  return Array.isArray(tags) && tags.length ? tags.join(' · ') : '—';
 }
 async function load(nextPage = 1, fromRoute = false) {
   if (!fromRoute) {
@@ -324,16 +323,12 @@ onMounted(() => {
                 >
               </td>
               <td>
-                <LuoguBadges
-                  v-if="row.platform === 'luogu'"
-                  :problem="row"
-                  :tags="false"
-                /><template v-else>{{ row.problem_rating ?? '—' }}</template>
+                <ProblemDifficulty :problem="row" />
               </td>
               <td class="problem-database-tags">
                 <LuoguBadges v-if="row.platform === 'luogu'" :problem="row" :difficulty="false" />
-                <span v-else>{{ tagsText(row.tags) }}</span
-                ><small>{{
+                <ProblemTags v-else :tags="row.tags" />
+                <small>{{
                   row.platform === 'luogu'
                     ? '洛谷原生标签 · 随源站同步'
                     : row.has_secondary
