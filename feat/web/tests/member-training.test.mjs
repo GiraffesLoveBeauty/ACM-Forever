@@ -212,8 +212,9 @@ test('member filters and return sources exclude owner/admin state and external U
   assert.equal(normalized.scope, 'solved');
   assert(!('owner_qq_id' in normalized));
   assert.equal(memberFilters({ page: ['2'], scope: 'unsafe' }).page, 2);
-  for (const platform of [undefined, '', 'unknown'])
-    assert.equal(memberFilters({ platform }).platform, 'all');
+  for (const platform of [undefined, ''])
+    assert.equal(memberFilters({ platform }).platform, 'luogu');
+  assert.equal(memberFilters({ platform: 'unknown' }).platform, 'all');
   assert.equal(memberFilters({ platform: 'atcoder' }).platform, 'atcoder');
   assert.equal(problemReturn('/home.html'), '/home.html');
   assert.equal(
@@ -458,9 +459,12 @@ for (const scope of ['all', 'solved']) {
       const records = [
         { platform: 'codeforces', problem_id: 'cf_1A', problem_name: 'CF 合成题', ac_at: 100 },
         { platform: 'atcoder', problem_id: 'demo_a', problem_name: 'ATC 合成题', ac_at: 200 },
+        { platform: 'luogu', problem_id: 'P1001', problem_name: '洛谷合成题', ac_at: 300 },
       ];
       globalThis.fetch = async (url) => {
         const parsed = new URL(url, 'https://local.invalid');
+        if (parsed.pathname === '/api/me/problems/taxonomy')
+          return response({ difficulties: [], tags: [], tag_types: [] });
         if (parsed.pathname === '/api/me/problems/tags') {
           assert.notEqual(parsed.searchParams.get('platform'), 'all');
           return response({ tags: [] });
@@ -476,18 +480,17 @@ for (const scope of ['all', 'solved']) {
       mounted = await mount(Problems, routes, '/problem-bank.html?' + query);
       const params = new URL(calls[0].url, 'https://local.invalid').searchParams;
       assert.equal(params.get('scope'), scope);
-      if (!platform || platform === 'all') {
+      const expectedPlatform = platform || (scope === 'solved' ? 'all' : 'luogu');
+      if (expectedPlatform === 'all') {
         assert.equal(params.has('platform'), false);
-        assert(textOf(mounted.root).includes('CF 合成题'));
-        assert(textOf(mounted.root).includes('ATC 合成题'));
+        for (const row of records) assert(textOf(mounted.root).includes(row.problem_name));
       } else {
-        assert.equal(params.get('platform'), platform);
-        assert(
-          textOf(mounted.root).includes(platform === 'codeforces' ? 'CF 合成题' : 'ATC 合成题'),
-        );
-        assert(
-          !textOf(mounted.root).includes(platform === 'codeforces' ? 'ATC 合成题' : 'CF 合成题'),
-        );
+        assert.equal(params.get('platform'), expectedPlatform);
+        for (const row of records)
+          assert.equal(
+            textOf(mounted.root).includes(row.problem_name),
+            row.platform === expectedPlatform,
+          );
       }
     });
   }
@@ -760,17 +763,17 @@ for (const role of ['member', 'admin', 'root']) {
     assert.equal(mounted.router.currentRoute.value.fullPath, '/my-problems.html');
     assert(calls.some(({ url }) => url.startsWith('/api/me/problems?')));
     const list = calls.find(({ url }) => url.startsWith('/api/me/problems?'));
-    assert.equal(new URL(list.url, 'https://acm.test').searchParams.has('platform'), false);
-    assert(textOf(mounted.root).includes('全部平台'));
+    assert.equal(new URL(list.url, 'https://acm.test').searchParams.get('platform'), 'luogu');
+    assert(textOf(mounted.root).includes('洛谷题库'));
     assert(
       !calls.some(({ url }) => url.startsWith('/api/admin/') || url.startsWith('/api/problems?')),
     );
     await click(links('查看题面')[0]);
     const back = links('返回题库')[0];
     await realRouter.push(back.props.href);
-    assert.equal(realRouter.currentRoute.value.fullPath, '/my-problems.html?platform=all');
+    assert.equal(realRouter.currentRoute.value.fullPath, '/my-problems.html?platform=luogu');
     await click(back);
-    assert.equal(mounted.router.currentRoute.value.fullPath, '/my-problems.html?platform=all');
+    assert.equal(mounted.router.currentRoute.value.fullPath, '/my-problems.html?platform=luogu');
   });
 
   test(`${role} Home complete AC link stays in personal problems during filtering and statement round trips`, async () => {
