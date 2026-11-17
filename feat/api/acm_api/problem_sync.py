@@ -9,6 +9,8 @@ import time
 import aiohttp
 import aiosqlite
 
+from .problem_listing import ListingConnection
+
 from .problem_bank import record_problem_failure, save_problem, save_metadata_batch
 from .problem_content import parse_atcoder, parse_atcoder_tasks, parse_codeforces
 from .problem_tracker import problem_id_key
@@ -238,7 +240,7 @@ class ProblemSync:
         task["progress"] = {"done": 0, "total": 0, "phase": "catalog"}
         db = None
         try:
-            db = await aiosqlite.connect(self.db_path)
+            db = await aiosqlite.connect(self.db_path, factory=ListingConnection)
             db.row_factory = aiosqlite.Row
             await db.execute("PRAGMA busy_timeout=5000")
             async with aiohttp.ClientSession(

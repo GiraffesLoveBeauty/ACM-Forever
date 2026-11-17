@@ -10,6 +10,12 @@ export function rangeFilters(query = {}) {
       result[key] = String(Number(query[key]));
   for (const key of ['start_at', 'end_at'])
     if (/^[0-9]{1,12}$/.test(String(query[key] ?? ''))) result[key] = String(Number(query[key]));
+  if (query.time_basis === 'unknown') {
+    result.start_at = '';
+    result.end_at = '';
+    result.time_basis = 'unknown';
+    return result;
+  }
   if (result.start_at || result.end_at)
     result.time_basis =
       ['auto', 'contest', 'first_seen'].includes(query.time_basis) &&

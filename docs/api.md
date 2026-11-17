@@ -217,9 +217,18 @@ response.raise_for_status()
 
 成员题库将 Codeforces 的 `100A`、`cf_100A` 及大小写别名视为同一题。标签选项、列表和比赛进度按同一优先级取非空标签；本人 AC 与收藏也跨这些别名合并。AtCoder 仍按原题号精确区分。
 
-`GET /api/me/problems?scope=solved` 从会话读取 QQ，客户端的 `qq_id/owner_qq_id` 不改变归属。以平台和题号去重，返回 `ac_at`（Unix 秒），按最近 AC 时间倒序，再按平台、题号稳定排序。`platform/tag/problem_tag/state=favorite/page/page_size` 与总数使用相同条件；`tag` 同时匹配题名、题号和标签，独立的 `problem_tag` 按完整标签忽略大小写匹配（最长 100 字符，超长返回 400），兼容逗号等分隔的旧标签及 JSON 标签数组，不把 `math` 匹配为 `mathematics`，`%`、`_` 不作为通配符。标签与搜索、收藏、本人 AC 范围共同生效，先筛选再统计与分页。本人范围默认每页 20、上限 100，默认全站目录仍为 500、上限 500。返回 `items/total/returned/page/page_size`；无效 `scope` 或非整数分页参数返回 400。
+`GET /api/me/problems?scope=solved` 从会话读取 QQ，客户端的 `qq_id/owner_qq_id` 不改变归属。以平台和题号去重，返回 `ac_at`（Unix 秒），按最近 AC 时间倒序，再按平台、题号稳定排序。`platform/tag/problem_tag/state=favorite/page/page_size` 与总数使用相同条件；`tag` 同时匹配题名、题号和标签，独立的 `problem_tag` 按完整标签忽略大小写匹配（最长 100 字符，超长返回 400），兼容逗号等分隔的旧标签及 JSON 标签数组，不把 `math` 匹配为 `mathematics`，`%`、`_` 不作为通配符。标签与搜索、收藏、本人 AC 范围共同生效，先筛选再统计与分页。本人范围默认每页 20、上限 100，默认全站目录仍为 500、上限 500。返回 `items/total/returned/page/page_size/next_cursor/tags_version`；无效 `scope` 或非整数分页参数返回 400。
 
-`GET /api/me/problems/tags?platform=codeforces` 返回 `tags: string[]`，供题库标签下拉框使用，沿用成员登录和首次改密限制。下拉选项、列表展示及标签筛选使用同一份有效标签：按已采集目录 → 推荐目录 → 会话本人的 AC 元数据取第一份非空标签，空字符串和 JSON 空数组均允许回退；不读取其他成员独有的提交标签，也不混入被优先来源替代的旧标签。比赛进度采用相同优先顺序。平台可为空或 `codeforces/atcoder/luogu/nowcoder/cjlu`，无效平台返回 400。按完整标签忽略大小写去重并排序，排除空白和超过 100 字符的标签；列表不受当前题目页码、搜索或收藏筛选限制，不联网或触发采集。
+`GET /api/me/problems/tags?platform=codeforces` 返回 `tags: string[]` 与不透明字符串 `tags_version`，供题库标签下拉框使用，沿用成员登录和首次改密限制。下拉选项、列表展示及标签筛选使用同一份有效标签：按已采集目录 → 推荐目录 → 会话本人的 AC 元数据取第一份非空标签，空字符串和 JSON 空数组均允许回退；不读取其他成员独有的提交标签，也不混入被优先来源替代的旧标签。比赛进度采用相同优先顺序。平台可为空或 `codeforces/atcoder/luogu/nowcoder/cjlu`，无效平台返回 400。按完整标签忽略大小写去重并排序，排除空白和超过 100 字符的标签；列表不受当前题目页码、搜索或收藏筛选限制，不联网或触发采集。
+
+
+题目列表分页兼容原有 page/page_size，并增加可选 cursor：首屏不传；连续下一页将上一响应的 next_cursor 原样传入，同时递增 page。游标绑定当前会话成员、全部筛选参数和每页数量；改条件后从第一页重取，参数不匹配或格式错误返回 400，最后一页返回 next_cursor=null。跳页与旧客户端继续使用原来的页码分页。游标保证按排序键继续读取，不是数据库快照；同步改动题目时间或大量删除记录后，重新加载第一页。比赛进度接口保留原分页规则。
+
+GET /api/problems 和 GET /api/me/problems 的公共列表读取同步时维护的轻量摘要，筛选和精确总数共用条件，页面只批量关联当前成员的当页状态；不读取题面大字段，不在请求时合并全站 submissions。本人 AC 按成员/OJ 的有序索引查找。洛谷多标签筛选及列表分类补充使用预建原生标签关系，补充分类时不读取包含 Markdown 正文的元数据；其它原始算法标签继续使用 problem_tag。题面仍通过原有详情接口按需读取。
+
+tags_version 由公共目录版本与本人私人回退版本组成，客户端应整体比较，不能解析为时间。网页按平台复用标签，切换平台时使用 60 秒有效期，并在列表返回版本变化时刷新；另一成员仅修改自己的标签不会使本人的标签缓存失效。标签缓存仅存在于当前页面实例，不跨账号共享。GET /api/problems 同样返回 next_cursor/tags_version，并保持管理员目录忽略 scope 的既有行为；管理员数据维护列表 GET /api/admin/database/problems 保留原返回结构。
+
+迁移、外部写入恢复、索引成本及合成性能测试见 [issue-155-problem-bank-performance.md（题库读取优化与维护）](issue-155-problem-bank-performance.md)。
 
 `GET /api/me/problems/tracker` 为个人题库的比赛进度矩阵提供数据，member / admin / root 均只读取会话本人，客户端身份参数不改变归属。支持 `platform`（空、`codeforces`、`atcoder`）、`tag`（比赛 ID / 题号 / 题名 / 标签）、`problem_tag`（完整标签，规则同题目列表）、`scope=all|solved`、`state=favorite`、`page` 和 `page_size`（默认 20、上限 50）。组合筛选须由同一道题满足，选中比赛后仍保留该场全部已收录题目。无效参数返回 400；未登录或未完成首次改密沿用本人接口权限。
 
@@ -267,7 +276,7 @@ Web 归属验证当前实现 Codeforces：账号存在性使用已有验证器�
 
 采集使用公开来源的分类，不调用 AI 打标或翻译。洛谷只接入公开 P 题，在同一任务中保存原生标签、难度、题面及全部结构化样例；成员 AC 同步沿用独立流程。
 
-三处列表 `GET /api/problems`、`GET /api/me/problems`、`GET /api/admin/database/problems` 共用以下筛选，先筛选再统计、分页。除成员“本人 AC”范围继续按 AC 时间倒序外，题库默认按题目时间从新到旧，同时间按平台和规范题号稳定排序，未知时间排最后。
+三处列表 `GET /api/problems`、`GET /api/me/problems`、`GET /api/admin/database/problems` 共用以下筛选，先筛选再统计、分页。除成员“本人 AC”范围继续按 AC 时间倒序外，题库默认先按已知原站时间从新到旧排列，再展示原站时间未知的题目；未知区按首次收录倒序，同时间按平台和规范题号稳定排序。
 
 | 参数或字段 | 契约 |
 | --- | --- |
@@ -275,9 +284,9 @@ Web 归属验证当前实现 Codeforces：账号存在性使用已有验证器�
 | `native_difficulty_min/native_difficulty_max` | 仅 `platform=luogu`；按已同步字典的原生等级顺序，包含两端，允许单边；暂无评定 0 使用 `native_difficulty=0` 单独筛选，不能与区间混用 |
 | `native_tags` | 仅洛谷；逗号分隔、最多 20 个整数原生标签 ID，必须同时满足全部所选标签。兼容旧的单值 `native_tag`，两者合计不得超过 20 个不同标签，超限返回 400 |
 | `start_at/end_at` | Unix 秒或带时区的 ISO 8601；允许单边，范围为 `[start_at,end_at)`，结束时间必须晚于开始时间 |
-| `time_basis` | 列表为 `auto/contest/first_seen`；有时间边界时默认 CF/AtCoder 为 contest、洛谷为 first_seen；auto 使用有比赛时间则比赛时间、否则首次收录。洛谷拒绝 contest；仅填显式依据、没有时间边界返回 400 |
+| `time_basis` | 列表为 `auto/contest/first_seen/unknown`；有时间边界时默认 CF/AtCoder 为 contest、洛谷为 first_seen；auto 使用有比赛时间则比赛时间、否则首次收录。unknown 单独选择原站时间未知的题目，不接受日期边界。洛谷拒绝 contest；其它显式依据没有边界时返回 400 |
 | `source_time` | CF/AtCoder 比赛开始时间（Unix 秒），未知为 null；洛谷不伪造发布时间 |
-| `first_seen_at` | 本站首次收录时间（Unix 秒），刷新不会改变；来自目录记录的 created_at |
+| `first_seen_at` | 本站首次收录时间（Unix 秒），刷新不会改变；迁移优先使用目录 created_at，无目录历史时间时从首次建立查询摘要起计，不冒充原站发布时间 |
 | `problem_time/time_basis` | 本行实际排序时间及其依据 contest/first_seen/unknown；最近抓取时间另行返回，不参与“新题”排序 |
 
 网页时间输入明确采用北京时间，结束时间不含。全部平台视图不比较各平台的数值难度；切换平台清除不适用参数。管理员数据库列表以 `bank_` 前缀保存页面筛选和页码，成员列表保留既有返回链接与地址参数。

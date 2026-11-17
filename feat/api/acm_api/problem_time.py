@@ -26,6 +26,10 @@ def timestamp(value, name):
 def time_options(data, platform, *, collection=False):
     keys = {key for key in ("start_at", "end_at") if data.get(key) not in (None, "")}
     basis = data.get("time_basis")
+    if basis == "unknown" and not collection:
+        if keys:
+            raise ValueError("未知发布时间筛选不能同时指定时间边界")
+        return {"time_basis": "unknown"}
     if not keys:
         if basis not in (None, "", "auto"):
             raise ValueError("选择时间依据时至少提供一个时间边界")

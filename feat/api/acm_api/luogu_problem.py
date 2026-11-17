@@ -216,7 +216,7 @@ def _classification_metadata_sql(problem_id):
             "WHEN lg.problem_id GLOB 'p*' THEN 1 ELSE 2 END,lg.updated_at DESC,lg.problem_id LIMIT 1)")
 
 
-async def attach_classifications(db, items):
+async def attach_classifications(db, items, *, indexed=False):
     luogu = [item for item in items if item.get("platform") == "luogu"]
     if not luogu:
         return
@@ -230,11 +230,23 @@ async def attach_classifications(db, items):
     taxonomy = await load_taxonomy(db)
     ids = list({item["problem_id"] for item in luogu})
     marks = ",".join("(?)" for _ in ids)
-    source = _classification_metadata_sql("ids.problem_id")
-    async with db.execute(f"WITH ids(problem_id) AS (VALUES {marks}) "
-                          f"SELECT problem_id,{source} AS metadata_json FROM ids", ids) as cursor:
-        natives = {row["problem_id"]: json.loads(row["metadata_json"] or "{}").get("luogu", {})
-                   for row in await cursor.fetchall()}
+    if indexed:
+        natives = {}
+        async with db.execute(f"WITH ids(problem_id) AS (VALUES {marks}) "
+                              "SELECT p.id_key,p.native_difficulty,t.tag_id FROM ids "
+                              "JOIN problem_listing p ON p.platform='luogu' AND p.id_key=ids.problem_id "
+                              "LEFT JOIN problem_listing_native_tags t ON t.platform=p.platform AND t.id_key=p.id_key "
+                              "ORDER BY p.id_key,t.position,t.tag_id", ids) as cursor:
+            for row in await cursor.fetchall():
+                native = natives.setdefault(row["id_key"], {"difficulty": row["native_difficulty"], "tag_ids": []})
+                if row["tag_id"] is not None:
+                    native["tag_ids"].append(row["tag_id"])
+    else:
+        source = _classification_metadata_sql("ids.problem_id")
+        async with db.execute(f"WITH ids(problem_id) AS (VALUES {marks}) "
+                              f"SELECT problem_id,{source} AS metadata_json FROM ids", ids) as cursor:
+            natives = {row["problem_id"]: json.loads(row["metadata_json"] or "{}").get("luogu", {})
+                       for row in await cursor.fetchall()}
     for item in luogu:
         native = natives.get(item["problem_id"], {})
         item["native_difficulty"], item["native_tags"] = classifications(native, taxonomy)
@@ -242,7 +254,7 @@ async def attach_classifications(db, items):
         item["problem_rating"] = None
 
 
-async def native_filter(db, args, platform):
+async def native_filter(db, args, platform, *, indexed=False):
     """Native IDs/ranges and tag intersections, before counting or pagination."""
     names = ("native_difficulty", "native_difficulty_min", "native_difficulty_max", "native_tag", "native_tags")
     supplied = {key: args.get(key) for key in names if args.get(key) is not None}
@@ -279,14 +291,19 @@ async def native_filter(db, args, platform):
         tags.update(ident(value) for value in values)
     if len(tags) > 20:
         raise ValueError("最多选择 20 个洛谷原生标签")
-    def match(raw):
-        try:
-            native = json.loads(raw).get("luogu", {})
-            return int((levels is None or native.get("difficulty") in levels) and tags <= set(native.get("tag_ids", [])))
-        except (ValueError, TypeError):
-            return 0
-    await db.create_function("luogu_native_matches", 1, match, deterministic=True)
+    params = []
+    alias = "p" if indexed else "ln"
+    filters = []
+    if levels is not None:
+        filters.append(alias + ".native_difficulty IN (" + ",".join("?" for _ in levels) + ")")
+        params.extend(sorted(levels))
+    for tag in sorted(tags):
+        filters.append(f"EXISTS(SELECT 1 FROM problem_listing_native_tags nt WHERE nt.platform={alias}.platform AND nt.id_key={alias}.id_key AND nt.tag_id=?)")
+        params.append(tag)
+    condition = " AND ".join(filters) or "1=1"
+    if indexed:
+        return " AND " + condition, params
     from .problem_tracker import problem_id_key
     await db.create_function("problem_id_key", 2, problem_id_key, deterministic=True)
-    source = _classification_metadata_sql("problem_id_key(p.platform,p.problem_id)")
-    return (f" AND luogu_native_matches({source})=1", [])
+    return (" AND EXISTS(SELECT 1 FROM problem_listing ln WHERE ln.platform=p.platform "
+            "AND ln.id_key=problem_id_key(p.platform,p.problem_id) AND " + condition + ")", params)

@@ -8,6 +8,8 @@ import time
 import aiohttp
 import aiosqlite
 
+from .problem_listing import ListingConnection
+
 from .luogu_client import ORIGIN, LuoguUnavailable, luogu_get
 from .luogu_problem import (catalog_page, load_taxonomy,
                             normalize_taxonomy, parse_problem, problem_id, save_taxonomy)
@@ -111,7 +113,7 @@ class LuoguSync:
         task["progress"] = {"phase": "taxonomy", "done": 0, "total": 0}
         db = None
         try:
-            db = await aiosqlite.connect(self.db_path)
+            db = await aiosqlite.connect(self.db_path, factory=ListingConnection)
             db.row_factory = aiosqlite.Row
             await db.execute("PRAGMA busy_timeout=5000")
             # This collector never sends browser cookies or follows login redirects.

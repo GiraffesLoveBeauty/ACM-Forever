@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 
 import aiosqlite
 
+from .problem_listing import ListingConnection, initialize_listing
+
 from .problem_bank import initialize_problem_bank
 from .mobile_profiles import initialize_mobile_profiles
 from .account_lifecycle_service import migrate_account_lifecycle
@@ -19,7 +21,7 @@ async def isolated_connection(connection):
     path = next((row[2] for row in databases if row[1] == "main"), "")
     if not path:
         raise ValueError("独立事务需要文件数据库")
-    db = await aiosqlite.connect(path)
+    db = await aiosqlite.connect(path, factory=ListingConnection)
     try:
         db.row_factory = aiosqlite.Row
         await db.execute("PRAGMA busy_timeout=5000")
@@ -33,7 +35,7 @@ async def isolated_connection(connection):
 async def connect_db(db_path):
     """打开（或创建）数据库并初始化表结构，返回连接。"""
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    db = await aiosqlite.connect(db_path)
+    db = await aiosqlite.connect(db_path, factory=ListingConnection)
     db.row_factory = aiosqlite.Row
     await db.execute("PRAGMA journal_mode=WAL")
     await db.execute("PRAGMA synchronous=NORMAL")
@@ -386,6 +388,7 @@ async def connect_db(db_path):
         columns = {row["name"] for row in await cursor.fetchall()}
     if "privacy_revision" not in columns:
         await db.execute("ALTER TABLE cf_practice_jobs ADD COLUMN privacy_revision INTEGER NOT NULL DEFAULT 0")
+    await initialize_listing(db)
     await db.commit()
     return db
 

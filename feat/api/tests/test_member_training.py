@@ -10,6 +10,7 @@ import test_api_contract as contract
 from feat.api.acm_api import binding_service
 from feat.api.acm_api.binding_guard import BindingGuard, BindingChanged
 from feat.api.acm_api.database import connect_db
+from feat.api.acm_api.problem_listing import ListingConnection
 from feat.api.service_runtime import SyncEngine
 
 
@@ -19,12 +20,13 @@ class MemberTrainingTests(unittest.IsolatedAsyncioTestCase):
     account_login = contract.ApiContractTests.account_login
 
     async def sql(self, sql, args=()):
-        db = await aiosqlite.connect(self.db_path)
+        # Live writers maintain the same transactional index as the API.
+        db = await aiosqlite.connect(self.db_path, factory=ListingConnection)
         try:
             cursor = await db.execute(sql, args)
             rows = await cursor.fetchall()
             await db.commit()
-            return rows
+            return [tuple(row) for row in rows]
         finally:
             await db.close()
 

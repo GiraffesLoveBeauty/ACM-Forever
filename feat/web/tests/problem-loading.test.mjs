@@ -342,3 +342,77 @@ for (const owner of ['member', 'admin']) {
     assert.doesNotMatch(textOf(mounted.root), /已达 20 个标签上限/);
   });
 }
+
+test('continuous pages use the returned cursor and changing filters discards it', async () => {
+  await open();
+  lists()[0].resolve({
+    ...data('list', 'first page'),
+    total: 60,
+    page: 1,
+    next_cursor: 'page-two-cursor',
+  });
+  await settle();
+  await mounted.router.push({
+    path: '/my-problems.html',
+    query: { platform: 'codeforces', page: 2 },
+  });
+  await settle();
+  assert.equal(query(lists().at(-1).url).get('cursor'), 'page-two-cursor');
+  lists()
+    .at(-1)
+    .resolve({
+      ...data('list', 'second page'),
+      total: 60,
+      page: 2,
+      next_cursor: 'page-three-cursor',
+    });
+  await settle();
+  await platform('atcoder');
+  assert.equal(query(lists().at(-1).url).get('cursor'), null);
+});
+test('tag options are reused while versions match and refreshed after a data change', async () => {
+  holdTags = true;
+  await open();
+  const tagCalls = () => calls.filter((call) => call.url.startsWith('/api/me/problems/tags?'));
+  tagCalls()[0].resolve({ tags: ['math'], tags_version: '1:0' });
+  lists()[0].resolve({ ...data('list', 'first page'), total: 60, page: 1, tags_version: '1:0' });
+  await settle();
+  await mounted.router.push({
+    path: '/my-problems.html',
+    query: { platform: 'codeforces', page: 2 },
+  });
+  await settle();
+  lists()
+    .at(-1)
+    .resolve({ ...data('list', 'same data'), total: 60, page: 2, tags_version: '1:0' });
+  await settle();
+  assert.equal(tagCalls().length, 1);
+  await mounted.router.push({
+    path: '/my-problems.html',
+    query: { platform: 'codeforces', page: 3 },
+  });
+  await settle();
+  lists()
+    .at(-1)
+    .resolve({ ...data('list', 'updated data'), total: 60, page: 3, tags_version: '2:0' });
+  await settle();
+  assert.equal(tagCalls().length, 2);
+  tagCalls()[1].resolve({ tags: ['new tag'], tags_version: '2:0' });
+  await settle();
+  assert(textOf(mounted.root).includes('new tag'));
+});
+
+test('a late outdated tag response refreshes against the latest list version', async () => {
+  holdTags = true;
+  await open();
+  const tagCalls = () => calls.filter((call) => call.url.startsWith('/api/me/problems/tags?'));
+  lists()[0].resolve({ ...data('list', 'new directory'), tags_version: '2:0' });
+  await settle();
+  tagCalls()[0].resolve({ tags: ['old'], tags_version: '1:0' });
+  await settle();
+  assert.equal(tagCalls().length, 2);
+  tagCalls()[1].resolve({ tags: ['latest'], tags_version: '2:0' });
+  await settle();
+  assert(textOf(mounted.root).includes('latest'));
+  assert.equal(tagCalls().length, 2);
+});

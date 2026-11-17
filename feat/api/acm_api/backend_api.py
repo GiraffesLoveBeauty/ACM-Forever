@@ -16,6 +16,7 @@ from pathlib import Path
 
 import aiohttp
 import aiosqlite
+
 from quart import Blueprint, Response, current_app, jsonify, request, session
 
 import logging
@@ -35,11 +36,10 @@ from .cf_client import cf_request
 from .luogu_problem import attach_classifications, canonical_problem_id as luogu_problem_id, load_taxonomy, native_filter
 from .problem_sync import sync_options
 from .problem_bank import problem_bank_status
-from .problem_listing import listing_query, NEWEST_ORDER
+from .problem_listing import ListingConnection, listing_query, NEWEST_ORDER, listing_page, listing_tags, listing_version
 from .atcoder_difficulty import attach_difficulty_metadata, difficulty_metadata
 from . import problem_schedule
-from .problem_tracker import attempt_problem_metadata, contest_tracker, problem_id_aliases, problem_id_key, tracker_options
-from .problem_tags import has_problem_tag, problem_tags
+from .problem_tracker import attempt_problem_metadata, contest_tracker, problem_id_aliases, tracker_options
 from .database import connect_db
 from .account_lifecycle_service import (
     AccountLifecycleError, require_active_user, require_web_actor,
@@ -244,7 +244,7 @@ async def get_db():
     db_path = current_app.config.get("DB_PATH")
     if not db_path:
         raise ConnectionError("DB path not configured.")
-    db = await aiosqlite.connect(db_path)
+    db = await aiosqlite.connect(db_path, factory=ListingConnection)
     db.row_factory = aiosqlite.Row
     await db.execute("PRAGMA journal_mode=WAL")
     await db.execute("PRAGMA synchronous=NORMAL")
@@ -1568,106 +1568,17 @@ async def _save_contest_state(owner, data):
         await db.close()
 
 
-# Prefer the catalog metadata and collapse repeated submission rows to one problem.
-_PROBLEM_QUERY = """SELECT p.platform,p.problem_id,p.problem_name,p.problem_rating,p.problem_url,p.tags,
-    COALESCE(s.is_favorite,0) AS is_favorite FROM (
-      SELECT *,ROW_NUMBER() OVER(PARTITION BY platform,problem_id ORDER BY source,submit_time DESC) AS position
-      FROM (
-        SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags,0 AS source,0 AS submit_time FROM recommendations
-        UNION ALL
-        SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags,1 AS source,submit_time FROM submissions
-      ) catalog
-    ) p LEFT JOIN user_problem_state s ON s.owner_qq_id=? AND s.platform=p.platform AND s.problem_id=p.problem_id
-    WHERE p.position=1"""
-# Group aliases before choosing the displayed row and the first nonempty tag source.
-# Other members' submissions may supply catalog metadata, never personal tags or AC state.
-_MEMBER_PROBLEM_QUERY = """
-    WITH sources AS (
-        SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags,
-               0 AS source,0 AS submit_time,NULL AS own_ac FROM crawler_problems
-        UNION ALL
-        SELECT platform,problem_id,problem_name,problem_rating,problem_url,tags,
-               1,0,NULL FROM recommendations
-        UNION ALL
-        SELECT platform,problem_id,problem_name,problem_rating,problem_url,
-               CASE WHEN user_qq_id=owner THEN tags ELSE '' END,2,submit_time,
-               CASE WHEN user_qq_id=owner THEN submit_time END
-        FROM submissions CROSS JOIN (SELECT ? AS owner)
-    ), keyed AS (
-        SELECT *,problem_id_key(platform,problem_id) AS id_key FROM sources
-    ), ranked AS (
-        SELECT *,
-            ROW_NUMBER() OVER (
-                PARTITION BY platform,id_key
-                ORDER BY CASE source WHEN 1 THEN 0 WHEN 0 THEN 1 ELSE 2 END,
-                         submit_time DESC,problem_id
-            ) AS position,
-            FIRST_VALUE(tags) OVER (
-                PARTITION BY platform,id_key
-                ORDER BY problem_has_tags(tags) DESC,source,submit_time DESC,problem_id
-            ) AS effective_tags,
-            MAX(own_ac) OVER (PARTITION BY platform,id_key) AS ac_at
-        FROM keyed
-    ), personal AS (
-        SELECT platform,problem_id_key(platform,problem_id) AS id_key,
-               MAX(is_favorite) AS is_favorite,
-               MAX(COALESCE(state,'inbox')<>'inbox') AS outside_inbox
-        FROM user_problem_state WHERE owner_qq_id=?
-        GROUP BY platform,id_key
-    )
-    SELECT p.platform,CASE WHEN p.platform='luogu' THEN p.id_key ELSE p.problem_id END AS problem_id,
-           p.problem_name,p.problem_rating,p.problem_url,p.id_key,p.ac_at,
-           CASE WHEN problem_has_tags(p.effective_tags) THEN p.effective_tags ELSE '' END AS tags,
-           COALESCE(s.is_favorite,0) AS is_favorite,COALESCE(s.outside_inbox,0) AS outside_inbox
-    FROM ranked p LEFT JOIN personal s ON s.platform=p.platform AND s.id_key=p.id_key
-    WHERE p.position=1
-"""
-
-
-async def _register_member_problem_functions(db):
-    await db.create_function("problem_id_key", 2, problem_id_key, deterministic=True)
-    await db.create_function("problem_has_tags", 1, lambda value: bool(problem_tags(value)), deterministic=True)
-
-
 @api.route("/problems", methods=["GET"])
 @admin_required
 async def api_problems():
     db = await get_db()
     try:
-        owner = _field(request.args, "owner_qq_id", 32)
-        platform = _field(request.args, "platform", 24)
-        tag = _field(request.args, "tag", 100)
-        state = _field(request.args, "state", 20)
-        query = _PROBLEM_QUERY
-        params = [owner]
-        if platform: query += " AND p.platform=?"; params.append(platform)
-        if tag: query += " AND (p.problem_name LIKE ? OR p.problem_id LIKE ? OR COALESCE(p.tags,'') LIKE ?)"; params.extend([f"%{tag}%", f"%{tag}%", f"%{tag}%"])
-        if state == "favorite": query += " AND COALESCE(s.is_favorite,0)=1"
-        elif state == "inbox": query += " AND COALESCE(s.state,'inbox')='inbox'"
-        try:
-            extra, native_params = await native_filter(db, request.args, platform)
-        except ValueError as error:
-            return jsonify({"success": False, "message": str(error)}), 400
-        query += extra
-        params.extend(native_params)
-        try:
-            query, params = await listing_query(db, query, params, request.args, platform)
-        except ValueError as error:
-            return jsonify({"success": False, "message": str(error)}), 400
-        count_query = "SELECT COUNT(*) FROM (" + query + ") filtered"
-        async with db.execute(count_query, tuple(params)) as cursor:
-            total = int((await cursor.fetchone())[0])
-        try:
-            page = max(1, int(request.args.get("page", 1)))
-            size = max(1, min(500, int(request.args.get("page_size", 500))))
-        except (TypeError, ValueError):
-            return jsonify({"success": False, "message": "分页参数必须为整数。"}), 400
-        query += NEWEST_ORDER + " LIMIT ? OFFSET ?"
-        async with db.execute(query, tuple(params + [size, (page - 1) * size])) as cursor:
-            items = [dict(row) for row in await cursor.fetchall()]
-        await attach_classifications(db, items)
-        await attach_difficulty_metadata(db, items)
-        return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": size})
+        result = await listing_page(db, _field(request.args, "owner_qq_id", 32), {**request.args, "scope": "all"})
+        await attach_classifications(db, result["items"], indexed=True)
+        await attach_difficulty_metadata(db, result["items"])
+        return jsonify(result)
+    except ValueError as error:
+        return jsonify({"success": False, "message": str(error)}), 400
     finally:
         await db.close()
 
@@ -1890,7 +1801,7 @@ async def api_database_problems():
             except (TypeError, ValueError):
                 item["tags"] = []
             item["content_available"] = bool(item["content_available"])
-        await attach_classifications(db, items)
+        await attach_classifications(db, items, indexed=True)
         await attach_difficulty_metadata(db, items)
         return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": page_size})
     except ValueError as error:
@@ -2362,68 +2273,14 @@ async def api_me_training_summary():
 @api.route("/me/problems", methods=["GET"])
 @member_required
 async def api_me_problems():
-    qq_id = _me_qq_id()
-    platform = _field(request.args, "platform", 24)
-    tag = _field(request.args, "tag", 100)
-    problem_tag = request.args.get("problem_tag", "").strip()
-    if len(problem_tag) > 100:
-        return jsonify({"success": False, "message": "题目标签最多 100 个字符。"}), 400
-    state = _field(request.args, "state", 20)
     db = await get_db()
     try:
-        await _register_member_problem_functions(db)
-        scope = request.args.get("scope", "all")
-        if scope not in {"all", "solved"}:
-            return jsonify({"success": False, "message": "无效的题目范围。"}), 400
-        fields = "p.platform,p.problem_id,p.problem_name,p.problem_rating,p.problem_url,p.tags,p.is_favorite"
-        if scope == "solved":
-            fields += ",p.ac_at"
-        query = "SELECT " + fields + " FROM (" + _MEMBER_PROBLEM_QUERY + ") p WHERE 1=1"
-        params = [qq_id, qq_id]
-        if scope == "solved":
-            query += " AND p.ac_at IS NOT NULL"
-        if platform:
-            query += " AND p.platform=?"
-            params.append(platform)
-        if tag:
-            query += (
-                " AND (p.problem_name LIKE ? OR p.problem_id LIKE ? OR p.id_key LIKE ? OR p.tags LIKE ?"
-                " OR (p.platform='codeforces' AND p.id_key=?) OR (p.platform='luogu' AND p.id_key=?))"
-            )
-            params.extend([f"%{tag}%"] * 4)
-            params.extend([problem_id_key("codeforces", tag), problem_id_key("luogu", tag)])
-        if problem_tag:
-            await db.create_function("problem_has_tag", 2, has_problem_tag, deterministic=True)
-            query += " AND problem_has_tag(p.tags,?)=1"
-            params.append(problem_tag)
-        if state == "favorite":
-            query += " AND p.is_favorite=1"
-        elif state == "inbox":
-            query += " AND p.outside_inbox=0"
-        try:
-            extra, native_params = await native_filter(db, request.args, platform)
-        except ValueError as error:
-            return jsonify({"success": False, "message": str(error)}), 400
-        query += extra
-        params.extend(native_params)
-        try:
-            query, params = await listing_query(db, query, params, request.args, platform)
-        except ValueError as error:
-            return jsonify({"success": False, "message": str(error)}), 400
-        count_query = "SELECT COUNT(*) FROM (" + query + ") filtered"
-        async with db.execute(count_query, tuple(params)) as cursor:
-            total = int((await cursor.fetchone())[0])
-        try:
-            page = max(1, int(request.args.get("page", 1)))
-            size = max(1, min(100 if scope == "solved" else 500, int(request.args.get("page_size", 20 if scope == "solved" else 500))))
-        except (TypeError, ValueError):
-            return jsonify({"success": False, "message": "分页参数必须为整数。"}), 400
-        query += (" ORDER BY ac_at DESC,p.platform,p.problem_id" if scope == "solved" else NEWEST_ORDER) + " LIMIT ? OFFSET ?"
-        async with db.execute(query, tuple(params + [size, (page - 1) * size])) as cursor:
-            items = [dict(row) for row in await cursor.fetchall()]
-        await attach_classifications(db, items)
-        await attach_difficulty_metadata(db, items)
-        return jsonify({"items": items, "total": total, "returned": len(items), "page": page, "page_size": size})
+        result = await listing_page(db, _me_qq_id(), request.args)
+        await attach_classifications(db, result["items"], indexed=True)
+        await attach_difficulty_metadata(db, result["items"])
+        return jsonify(result)
+    except ValueError as error:
+        return jsonify({"success": False, "message": str(error)}), 400
     finally:
         await db.close()
 
@@ -2434,23 +2291,9 @@ async def api_me_problem_tags():
     platform = _field(request.args, "platform", 24)
     if platform and platform not in {"codeforces", "atcoder", "luogu", "nowcoder", "cjlu"}:
         return jsonify({"success": False, "message": "无效的题目平台。"}), 400
-    query = "SELECT DISTINCT tags FROM (" + _MEMBER_PROBLEM_QUERY + ") WHERE tags<>''"
-    params = [_me_qq_id(), _me_qq_id()]
-    if platform:
-        query += " AND platform=?"
-        params.append(platform)
     db = await get_db()
     try:
-        await _register_member_problem_functions(db)
-        async with db.execute(query, params) as cursor:
-            values = await cursor.fetchall()
-        tags = {}
-        for row in values:
-            for value in problem_tags(row["tags"]):
-                if len(value) <= 100:
-                    key = value.casefold()
-                    tags[key] = min(tags.get(key, value), value)
-        return jsonify({"tags": [tags[key] for key in sorted(tags)]})
+        return jsonify({"tags": await listing_tags(db, _me_qq_id(), platform), "tags_version": await listing_version(db, _me_qq_id())})
     finally:
         await db.close()
 

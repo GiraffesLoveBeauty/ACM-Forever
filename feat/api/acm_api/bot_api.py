@@ -7,6 +7,8 @@ from functools import wraps
 import aiosqlite
 from quart import Blueprint, current_app, jsonify, request
 
+from .problem_listing import ListingConnection
+
 from .backend_api import _clear_platform_records, _fetch_leaderboard, _leaderboard_options
 from .cf_client import cf_request
 from .database import validate_submission_data
@@ -61,7 +63,7 @@ async def _db():
     path = current_app.config.get("DB_PATH")
     if not path:
         raise ConnectionError("Database path is not configured.")
-    db = await aiosqlite.connect(path)
+    db = await aiosqlite.connect(path, factory=ListingConnection)
     db.row_factory = aiosqlite.Row
     await db.execute("PRAGMA busy_timeout=5000")
     await db.execute("PRAGMA foreign_keys=ON")
@@ -1205,14 +1207,13 @@ async def add_submissions():
         await db.execute("BEGIN IMMEDIATE")
         for qq_id in qq_ids:
             await require_active_user(db, qq_id)
-        before = db.total_changes
-        await db.executemany(
+        cursor = await db.executemany(
             "INSERT OR IGNORE INTO submissions"
             "(user_qq_id,platform,problem_id,problem_name,problem_rating,problem_url,tags,submit_time) "
             "VALUES(?,?,?,?,?,?,?,?)",
             rows,
         )
-        inserted = db.total_changes - before
+        inserted = cursor.rowcount
         await db.commit()
         return jsonify({"success": True, "inserted": inserted})
     finally:
