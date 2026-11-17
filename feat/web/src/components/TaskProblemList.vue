@@ -29,13 +29,18 @@ defineEmits(['move', 'remove']);
           >
           <ProblemDifficulty :problem="problem" />
           <LuoguBadges
-            v-if="problem.platform === 'luogu' && problem.native_tags != null"
+            v-if="
+              problem.platform === 'luogu' &&
+              Array.isArray(problem.native_tags) &&
+              problem.native_tags.length
+            "
             :problem="problem"
             :difficulty="false"
           />
           <ProblemTags
-            v-else-if="problem.platform !== 'luogu' && problem.tags != null"
+            v-else-if="problem.tags != null"
             :tags="problem.tags"
+            :neutral="problem.platform === 'luogu'"
           />
         </div>
         <p v-if="!problem.content_available" class="tt-caption">

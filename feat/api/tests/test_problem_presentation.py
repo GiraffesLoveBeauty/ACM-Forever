@@ -193,6 +193,85 @@ class ProblemDifficultyApiTests(unittest.IsolatedAsyncioTestCase):
             for field in FIELDS:
                 self.assertIsNone(item.get(field), (field, item))
 
+    async def test_profile_and_member_detail_recent_ac_keep_confirmed_model_source(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            await self.account_login(client, role="admin")
+            await self.catalog([
+                problem("A", 1450, difficulty_source="atcoder_problems", difficulty_raw=1450,
+                        difficulty_is_experimental=True, private_payload="do-not-publish"),
+                problem("B", 0, difficulty_source="atcoder_problems", difficulty_raw=-10000,
+                        difficulty_is_experimental=False),
+            ])
+            await self.execute(
+                "INSERT INTO submissions(user_qq_id,platform,problem_id,problem_name,problem_rating,submit_time) "
+                "VALUES('12345678','atcoder',?,?,?,?)",
+                [("abc200_a", "Model problem", 1450, 20), ("abc200_b", "Zero model", 0, 10)],
+            )
+            for path in ("/api/me/profile", "/api/member/12345678"):
+                with self.subTest(path=path):
+                    data = await self.get(client, path)
+                    recent = {item["problem_id"]: item for item in data["recent_ac"]}
+                    for pid, expected in (
+                        ("abc200_a", {"difficulty_source": "atcoder_problems", "difficulty_raw": 1450,
+                                      "difficulty_is_experimental": True}),
+                        ("abc200_b", {"difficulty_source": "atcoder_problems", "difficulty_raw": -10000,
+                                      "difficulty_is_experimental": False}),
+                    ):
+                        self.assertEqual({key: recent[pid].get(key) for key in FIELDS}, expected)
+                    self.assertEqual(int(recent["abc200_a"]["problem_rating"]), 1450)
+                    self.assertEqual(int(recent["abc200_b"]["problem_rating"]), 0)
+                    if "atcoder" in data:
+                        self.assertEqual(data["atcoder"], {"rating": None, "contests": []})
+                    self.no_private_metadata(data)
+
+    async def test_profile_recent_ac_does_not_borrow_unknown_or_mismatched_model_source(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            await self.account_login(client, role="admin")
+            await self.catalog([
+                problem("A", 1450, difficulty_source="atcoder_problems", difficulty_raw=1450),
+                problem("B", 800),
+                problem("C", 900),
+            ])
+            await self.execute("UPDATE crawler_problems SET metadata_json='{broken' WHERE problem_id=?",
+                               [("abc200_c",)])
+            await self.execute(
+                "INSERT INTO submissions(user_qq_id,platform,problem_id,problem_rating,submit_time) "
+                "VALUES('12345678',?,?,?,?)",
+                [("atcoder", "abc200_a", 400, 50),
+                 ("atcoder", "abc200_b", 800, 40),
+                 ("atcoder", "abc200_c", 900, 30),
+                 ("atcoder", "abc200_d", 1450, 20),
+                 ("codeforces", "abc200_a", 1450, 10)],
+            )
+            for path in ("/api/me/profile", "/api/member/12345678"):
+                with self.subTest(path=path):
+                    data = await self.get(client, path)
+                    for item in data["recent_ac"]:
+                        self.assertTrue(all(item.get(key) is None for key in FIELDS), item)
+                    item = next(row for row in data["recent_ac"] if row["platform"] == "atcoder"
+                                and row["problem_id"] == "abc200_a")
+                    self.assertEqual(int(item["problem_rating"]), 400)
+                    self.no_private_metadata(data)
+
+    async def test_profile_difficulty_metadata_does_not_expand_member_access(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            await self.account_login(client, role="member")
+            await self.catalog([problem(difficulty_source="atcoder_problems", difficulty_raw=1450)])
+            await self.execute("INSERT INTO users(qq_id,name,status) VALUES(?,'Other member','现役')",
+                               [("87654321",)])
+            await self.execute(
+                "INSERT INTO submissions(user_qq_id,platform,problem_id,problem_rating,submit_time) "
+                "VALUES(?,'atcoder',?,1450,10)",
+                [("12345678", "abc200_a"), ("87654321", "abc200_b")],
+            )
+            data = await self.get(client, "/api/me/profile?qq_id=87654321&owner_qq_id=87654321")
+            self.assertEqual([row["problem_id"] for row in data["recent_ac"]], ["abc200_a"])
+            self.assertEqual(data["recent_ac"][0].get("difficulty_source"), "atcoder_problems")
+            self.assertEqual((await client.get("/api/member/87654321")).status_code, 403)
+
 
 if __name__ == "__main__":
     unittest.main()

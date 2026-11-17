@@ -1190,6 +1190,7 @@ async def api_member_detail(qq_id):
             platform_counts = {row["platform"]: row["count"] for row in await cursor.fetchall()}
         async with db.execute("SELECT platform, problem_id, problem_name, problem_rating, problem_url, tags, submit_time FROM submissions WHERE user_qq_id=? ORDER BY submit_time DESC, id DESC LIMIT 20", (qq_id,)) as cursor:
             recent_ac = [dict(row) for row in await cursor.fetchall()]
+        await attach_difficulty_metadata(db, recent_ac)
         async with db.execute("SELECT platform, problem_rating, COUNT(*) AS count FROM submissions WHERE user_qq_id=? GROUP BY platform, problem_rating ORDER BY platform, problem_rating", (qq_id,)) as cursor:
             difficulty = [dict(row) for row in await cursor.fetchall()]
         async with db.execute("SELECT role FROM web_accounts WHERE qq_id=?", (qq_id,)) as cursor:
@@ -2152,6 +2153,7 @@ async def api_me_profile():
             "FROM submissions WHERE user_qq_id=? ORDER BY submit_time DESC,id DESC LIMIT 20", (qq_id,)
         ) as cursor:
             recent_ac = [dict(item) for item in await cursor.fetchall()]
+        await attach_difficulty_metadata(db, recent_ac)
         async with db.execute("SELECT COUNT(*) AS count FROM submissions WHERE user_qq_id=?", (qq_id,)) as cursor:
             total = (await cursor.fetchone())["count"]
         return jsonify({

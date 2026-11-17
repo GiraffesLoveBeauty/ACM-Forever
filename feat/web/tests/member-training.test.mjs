@@ -9,6 +9,7 @@ import { adminFilters } from '../src/lib/admin.js';
 import { memberFilters, memberQuery, problemReturn } from '../src/lib/member-problems.js';
 import { cleanupCompiled, find, loadSfc, mount, settle, textOf } from './helpers/vue-harness.mjs';
 const Home = (await import(await loadSfc('src/views/Home.vue'))).default;
+const MemberDetail = (await import(await loadSfc('src/admin/MemberDetail.vue'))).default;
 const Header = (await import(await loadSfc('src/components/Header.vue'))).default;
 const Problems = (await import(await loadSfc('src/views/MemberProblems.vue'))).default;
 const Problem = (await import(await loadSfc('src/views/Problem.vue'))).default;
@@ -146,7 +147,59 @@ const routes = [
   { path: '/problem-bank.html', component: Problems },
   { path: '/my-problems.html', component: Problems },
   { path: '/problem.html', component: Problem },
+  { path: '/admin.html', component: MemberDetail },
 ];
+
+test('personal and administrator summaries render confirmed AtCoder model colours without guessing unknown sources', async () => {
+  const originalFetch = globalThis.fetch;
+  const recent = [
+    {
+      platform: 'atcoder',
+      problem_id: 'abc200_a',
+      problem_name: 'Confirmed model',
+      problem_rating: 1450,
+      difficulty_source: 'atcoder_problems',
+      difficulty_raw: 1450,
+      tags: [],
+    },
+    {
+      platform: 'atcoder',
+      problem_id: 'abc200_b',
+      problem_name: 'Legacy points',
+      problem_rating: 1450,
+      tags: [],
+    },
+  ];
+  const data = {
+    ...profile,
+    recent_ac: recent,
+    cf: { rating: 1900 },
+    atcoder: { rating: 1600 },
+    challenge_rating: 1200,
+  };
+  globalThis.fetch = async (url, options) =>
+    ['/api/me/profile', '/api/member/12345678'].includes(url)
+      ? response(data)
+      : originalFetch(url, options);
+  setAuth({ authenticated: true, role: 'admin', qq_id: '12345678' }, true);
+  for (const [View, path] of [
+    [Home, '/home.html'],
+    [MemberDetail, '/admin.html?qq_id=12345678'],
+  ]) {
+    mounted = await mount(View, routes, path);
+    const badges = find(mounted.root, (node) =>
+      String(node.props.class).includes('problem-difficulty'),
+    );
+    assert.equal(badges.length, 2, path);
+    assert.match(String(badges[0].props.class), /problem-tone-cyan/);
+    assert.match(badges[0].props.title, /AtCoder Problems 估计难度/);
+    assert.match(String(badges[1].props.class), /problem-tone-neutral/);
+    assert.match(badges[1].props.title, /来源未标注/);
+    if (View === MemberDetail) assert.match(textOf(mounted.root), /AtCoder Rating 1600/);
+    mounted.unmount();
+    mounted = null;
+  }
+});
 
 test('member filters and return sources exclude owner/admin state and external URLs', () => {
   const normalized = memberFilters({
