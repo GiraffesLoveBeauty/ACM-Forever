@@ -79,6 +79,12 @@ function apply() {
   close();
   emit('update:modelValue', values);
 }
+function confirmOnEnter(event) {
+  // Let the IME confirm its candidate before applying the filter.
+  if (event.isComposing || event.keyCode === 229 || event.target?.composing) return;
+  event.preventDefault();
+  apply();
+}
 function activate(value) {
   active.value = value;
   query.value = '';
@@ -162,141 +168,143 @@ onBeforeUnmount(() => close(false));
       @click.self="close()"
     >
       <div class="luogu-picker-layout">
-        <header class="luogu-picker-heading">
-          <div>
-            <h2 :id="id + '-title'">选择标签</h2>
-            <p :id="id + '-hint'">
-              洛谷原生分类 · 多个标签同时满足，最多选择 {{ MAX_NATIVE_TAGS }} 个
+        <div class="luogu-picker-content">
+          <header class="luogu-picker-heading">
+            <div>
+              <h2 :id="id + '-title'">选择标签</h2>
+              <p :id="id + '-hint'">
+                洛谷原生分类 · 多个标签同时满足，最多选择 {{ MAX_NATIVE_TAGS }} 个
+              </p>
+            </div>
+            <button
+              type="button"
+              class="luogu-picker-close"
+              aria-label="关闭标签筛选"
+              @click="close()"
+            >
+              ×
+            </button>
+          </header>
+          <div class="luogu-picker-tools">
+            <div class="luogu-picker-tabs" role="tablist" aria-label="标签分类">
+              <button
+                v-for="(item, index) in categories"
+                :id="id + '-tab-' + item.id"
+                :key="item.id"
+                type="button"
+                role="tab"
+                :aria-selected="category?.id === item.id"
+                :aria-controls="id + '-results'"
+                :tabindex="category?.id === item.id ? 0 : -1"
+                :class="{ 'is-searching': query.trim() }"
+                @click="activate(item.id)"
+                @keydown="moveTab($event, index)"
+              >
+                {{ item.name }}
+              </button>
+            </div>
+            <label class="luogu-picker-search"
+              ><span class="luogu-picker-sr-only">搜索全部标签</span
+              ><svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
+                <circle
+                  cx="8.5"
+                  cy="8.5"
+                  r="5.5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                />
+                <path d="m13 13 4 4" stroke="currentColor" stroke-width="1.5" /></svg
+              ><input
+                ref="search"
+                v-model="query"
+                type="search"
+                placeholder="搜索全部标签"
+                @keydown.enter="confirmOnEnter"
+            /></label>
+          </div>
+          <section class="luogu-picker-selected" aria-label="已选标签">
+            <div class="luogu-picker-selected-heading">
+              <strong
+                >已选标签
+                <span aria-live="polite">（{{ draft.length }}/{{ MAX_NATIVE_TAGS }}）</span></strong
+              ><button
+                v-if="draft.length"
+                type="button"
+                class="luogu-picker-text-button"
+                @click="draft = []"
+              >
+                清空已选
+              </button>
+            </div>
+            <div v-if="draft.length" class="luogu-picker-selected-chips">
+              <button
+                v-for="value in draft"
+                :key="value"
+                type="button"
+                class="luogu-picker-chip is-selected"
+                :aria-label="'移除标签：' + tagName(value)"
+                @click="toggle(value)"
+              >
+                {{ tagName(value) }}<span aria-hidden="true">×</span>
+              </button>
+            </div>
+            <p v-else class="luogu-picker-empty-selection">暂未选择，点击下方标签添加</p>
+          </section>
+          <div
+            :id="id + '-results'"
+            class="luogu-picker-body"
+            :role="query.trim() ? 'region' : 'tabpanel'"
+            :aria-label="query.trim() ? '全部分类的搜索结果' : undefined"
+            :aria-labelledby="!query.trim() && category ? id + '-tab-' + category.id : undefined"
+            :aria-busy="loading"
+            tabindex="0"
+          >
+            <p v-if="loading" class="luogu-picker-state" role="status">正在加载洛谷原生标签…</p>
+            <p v-if="error" class="luogu-picker-state" role="alert">
+              {{ error }}
+              <button type="button" class="btn" :disabled="loading" @click="emit('retry')">
+                重试分类
+              </button>
             </p>
-          </div>
-          <button
-            type="button"
-            class="luogu-picker-close"
-            aria-label="关闭标签筛选"
-            @click="close()"
-          >
-            ×
-          </button>
-        </header>
-        <div class="luogu-picker-tools">
-          <div class="luogu-picker-tabs" role="tablist" aria-label="标签分类">
-            <button
-              v-for="(item, index) in categories"
-              :id="id + '-tab-' + item.id"
-              :key="item.id"
-              type="button"
-              role="tab"
-              :aria-selected="category?.id === item.id"
-              :aria-controls="id + '-results'"
-              :tabindex="category?.id === item.id ? 0 : -1"
-              :class="{ 'is-searching': query.trim() }"
-              @click="activate(item.id)"
-              @keydown="moveTab($event, index)"
+            <p v-if="!loading && !categories.length && !error" class="luogu-picker-state">
+              原生标签尚未同步，已选条件仍然保留。
+            </p>
+            <p
+              v-else-if="!loading && categories.length && !results.length"
+              class="luogu-picker-state"
+              role="status"
             >
-              {{ item.name }}
-            </button>
+              没有找到匹配的标签，试试其他关键词。
+            </p>
+            <p v-if="query.trim() && results.length" class="luogu-picker-search-note" role="status">
+              全部分类中找到 {{ resultCount }} 个标签
+            </p>
+            <template v-for="item in results" :key="item.id">
+              <section v-for="group in item.groups" :key="group.id" class="luogu-picker-group">
+                <h3>
+                  <span v-if="query.trim()" class="luogu-picker-group-category"
+                    >{{ item.name }} / </span
+                  >{{ group.name }}
+                </h3>
+                <div class="luogu-picker-chips">
+                  <button
+                    v-for="tag in group.items"
+                    :key="tag.id"
+                    type="button"
+                    class="luogu-picker-chip"
+                    :class="{ 'is-selected': draft.includes(tag.id) }"
+                    :aria-label="tag.name"
+                    :aria-pressed="draft.includes(tag.id)"
+                    :disabled="draft.length >= MAX_NATIVE_TAGS && !draft.includes(tag.id)"
+                    @click="toggle(tag.id)"
+                  >
+                    <span v-if="draft.includes(tag.id)" aria-hidden="true">✓</span>{{ tag.name }}
+                  </button>
+                </div>
+              </section>
+            </template>
           </div>
-          <label class="luogu-picker-search"
-            ><span class="luogu-picker-sr-only">搜索全部标签</span
-            ><svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
-              <circle
-                cx="8.5"
-                cy="8.5"
-                r="5.5"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-              />
-              <path d="m13 13 4 4" stroke="currentColor" stroke-width="1.5" /></svg
-            ><input
-              ref="search"
-              v-model="query"
-              type="search"
-              placeholder="搜索全部标签"
-              @keydown.enter.prevent="apply"
-          /></label>
-        </div>
-        <section class="luogu-picker-selected" aria-label="已选标签">
-          <div class="luogu-picker-selected-heading">
-            <strong
-              >已选标签
-              <span aria-live="polite">（{{ draft.length }}/{{ MAX_NATIVE_TAGS }}）</span></strong
-            ><button
-              v-if="draft.length"
-              type="button"
-              class="luogu-picker-text-button"
-              @click="draft = []"
-            >
-              清空已选
-            </button>
-          </div>
-          <div v-if="draft.length" class="luogu-picker-selected-chips">
-            <button
-              v-for="value in draft"
-              :key="value"
-              type="button"
-              class="luogu-picker-chip is-selected"
-              :aria-label="'移除标签：' + tagName(value)"
-              @click="toggle(value)"
-            >
-              {{ tagName(value) }}<span aria-hidden="true">×</span>
-            </button>
-          </div>
-          <p v-else class="luogu-picker-empty-selection">暂未选择，点击下方标签添加</p>
-        </section>
-        <div
-          :id="id + '-results'"
-          class="luogu-picker-body"
-          :role="query.trim() ? 'region' : 'tabpanel'"
-          :aria-label="query.trim() ? '全部分类的搜索结果' : undefined"
-          :aria-labelledby="!query.trim() && category ? id + '-tab-' + category.id : undefined"
-          :aria-busy="loading"
-          tabindex="0"
-        >
-          <p v-if="loading" class="luogu-picker-state" role="status">正在加载洛谷原生标签…</p>
-          <p v-if="error" class="luogu-picker-state" role="alert">
-            {{ error }}
-            <button type="button" class="btn" :disabled="loading" @click="emit('retry')">
-              重试分类
-            </button>
-          </p>
-          <p v-if="!loading && !categories.length && !error" class="luogu-picker-state">
-            原生标签尚未同步，已选条件仍然保留。
-          </p>
-          <p
-            v-else-if="!loading && categories.length && !results.length"
-            class="luogu-picker-state"
-            role="status"
-          >
-            没有找到匹配的标签，试试其他关键词。
-          </p>
-          <p v-if="query.trim() && results.length" class="luogu-picker-search-note" role="status">
-            全部分类中找到 {{ resultCount }} 个标签
-          </p>
-          <template v-for="item in results" :key="item.id">
-            <section v-for="group in item.groups" :key="group.id" class="luogu-picker-group">
-              <h3>
-                <span v-if="query.trim()" class="luogu-picker-group-category"
-                  >{{ item.name }} / </span
-                >{{ group.name }}
-              </h3>
-              <div class="luogu-picker-chips">
-                <button
-                  v-for="tag in group.items"
-                  :key="tag.id"
-                  type="button"
-                  class="luogu-picker-chip"
-                  :class="{ 'is-selected': draft.includes(tag.id) }"
-                  :aria-label="tag.name"
-                  :aria-pressed="draft.includes(tag.id)"
-                  :disabled="draft.length >= MAX_NATIVE_TAGS && !draft.includes(tag.id)"
-                  @click="toggle(tag.id)"
-                >
-                  <span v-if="draft.includes(tag.id)" aria-hidden="true">✓</span>{{ tag.name }}
-                </button>
-              </div>
-            </section>
-          </template>
         </div>
         <footer class="luogu-picker-footer">
           <p aria-live="polite">
@@ -376,6 +384,12 @@ onBeforeUnmount(() => close(false));
   flex-direction: column;
   min-height: min(620px, calc(100dvh - 50px));
   max-height: min(840px, calc(100dvh - 50px));
+}
+.luogu-picker-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
 }
 .luogu-picker-heading {
   display: flex;
@@ -686,6 +700,15 @@ onBeforeUnmount(() => close(false));
 @media (max-height: 540px) {
   .luogu-picker-layout {
     min-height: 0;
+  }
+  .luogu-picker-content {
+    display: block;
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+  .luogu-picker-body {
+    overflow: visible;
   }
   .luogu-picker-heading {
     padding-top: 10px;
