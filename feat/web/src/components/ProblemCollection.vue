@@ -188,7 +188,7 @@ async function submit() {
             >
             <label
               >题面语言<select id="sync-language" v-model="form.language" :disabled="cf || luogu">
-                <option v-if="luogu" value="zh-CN">中文</option>
+                <option v-if="luogu" value="zh-CN">中文优先</option>
                 <template v-else
                   ><option value="en">英文</option>
                   <option value="ja">日文</option></template

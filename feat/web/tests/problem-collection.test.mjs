@@ -460,6 +460,7 @@ test('Luogu collection submits normalized P IDs without contest fields', async (
   await page();
   await model('sync-platform', 'luogu');
   assert.equal(element('sync-language').props.disabled, true);
+  assert.equal(textOf(element('sync-language')).trim(), '中文优先');
   assert.equal(find(mounted.root, (n) => n.props.id === 'sync-contest').length, 0);
   await model('sync-problems', 'p1001，P1002 P1001');
   await submit();

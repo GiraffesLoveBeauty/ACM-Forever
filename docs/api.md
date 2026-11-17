@@ -450,7 +450,7 @@ print(task["status"], task["progress"], task["result"])
 | `contest_id` | 洛谷不接受此参数 |
 | `limit` | 手动 platform 默认不传，持续处理全部候选；为兼容旧调用允许显式预算 1–1000。达到预算仍有剩余时为 partial，不能视作全量完成；每日预算独立 |
 | `batch_size` | 入库/题面进度批次大小 1–100，默认 50；不改变原站分页大小 |
-| `language` | 仅 `zh-CN`，默认同此值 |
+| `language` | 仅 `zh-CN`，默认同此值，表示中文优先；没有完整中文时回退原文并如实返回实际语言 |
 | `refresh` | 布尔，默认 false；已有非空题面时跳过，true 允许重新采集 |
 
 ```json
@@ -490,6 +490,8 @@ print(task["status"], task["progress"], task["result"])
 ```
 
 难度和标签保留原生整数 ID（标签可为负数），颜色为洛谷原始令牌；不换算为 CF Rating。未知 ID 的名称/颜色可为 null，前端应显示 ID 作为兜底；难度字段缺失时 id=null，与原生 id=0（暂无评定）区分。原 `tags` 字段仍保存标签名供旧接口兼容，新前端以 native_tags 为准。详情另返回 `statement_markdown`（原始题面段落拼接）和 `native_limits`（原始 time/memory 数组及原单位，不猜测语言对应关系，缺失限制如实返回 null）；样例使用已有 `samples` 数组。题目背景等可选 Markdown 段落为 null 时按空段落处理，正文仍必须非空；这与源站合法空字段兼容，不将缺失正文当成功。HTML 由项目已有 Mistune 渲染，转义原始 HTML，限制链接协议，并保留数学公式、表格和代码块。
+
+题面在 `problem.contenu` 和 `problem.content` 中整体选择，先使用完整的 `zh-CN`，再使用其他中文版本；旧页面缺省语言继续兼容为中文，没有可用中文时回退完整原文。不会把一种语言的正文与另一种语言的输入输出格式混合。`statement_language` 与 `metadata_json.luogu.locale` 保存所选语言（例如 `en`），`requested_language` 保持中文优先请求的 `zh-CN`；样例、限制和原始响应 SHA256 不因语言回退而改变。候选语言字段非法、正文空或段落损坏时可尝试另一份完整题面；全部候选无效仍失败，刷新失败保留已有正文与样例。
 
 上述三个题目列表可组合原生难度区间及多标签，例如 `native_difficulty_min=3&native_difficulty_max=5&native_tags=1,-2`；等级按字典顺序、含两端，标签取交集。兼容 `native_difficulty=0` 和 `native_tag=-2` 单值筛选；必须显式指定 `platform=luogu`，无效组合或 ID 格式返回 400。原生筛选在总数和分页之前生效，可和已有搜索/标签/收藏/本人记录范围组合。上述 GET 均只读 SQLite，不触发远程采集；字典返回 `difficulties/tags/tag_types/versions/updated_at/stale`，首次采集前为空数组、updated_at=null、stale=true。字典缓存 24 小时，开启采集时才刷新。分类表初始化兼容旧数据库。初始化额外建立 `(platform, problem_id COLLATE NOCASE)` 身份查询索引以兼容旧别名，不改写历史题号或首次收录时间。
 
