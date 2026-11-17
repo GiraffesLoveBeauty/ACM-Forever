@@ -67,6 +67,73 @@ class ProblemListingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.page(problem_tag="secret"))["total"], 0)
         self.assertEqual((await self.page(problem_tag="mine"))["total"], 1)
 
+    async def test_keyword_fallback_tags_share_filters_counts_and_both_pagination_modes(self):
+        for pid, tags in (("cf_100A", ""), ("cf_101A", "[]"), ("cf_102A", "math"),
+                          ("cf_103A", "")):
+            await self.recommend(pid, tags)
+        await self.db.executemany(
+            "INSERT INTO submissions(user_qq_id,platform,problem_id,tags,submit_time) "
+            "VALUES(?,'codeforces',?,?,?)",
+            [("member", "100-a", "dp,graphs", 10),
+             ("member", "CF_101-A", '["DP","math"]', 20),
+             ("member", "cf_102A", "dp", 30),
+             ("member", "cf_103A", "greedy", 40),
+             ("other", "103A", "dp", 50)],
+        )
+        await self.db.executemany(
+            "INSERT INTO user_problem_state VALUES('member','codeforces',?,1,'inbox','',1)",
+            [("cf_100-A",), ("101a",)],
+        )
+        await self.db.commit()
+        expected = {"cf_100A", "cf_101A"}
+        for scope in ("all", "solved"):
+            for state in ("", "favorite", "inbox"):
+                for selected in ("", "dP"):
+                    with self.subTest(scope=scope, state=state, problem_tag=selected):
+                        args = {"scope": scope, "state": state, "tag": "dP",
+                                "problem_tag": selected, "page_size": "1"}
+                        first = await self.page(**args)
+                        second = await self.page(**args, page="2")
+                        self.assertEqual(first["total"], 2)
+                        self.assertEqual(second["total"], 2)
+                        self.assertEqual(first["returned"], 1)
+                        self.assertEqual(second["returned"], 1)
+                        self.assertEqual({p["problem_id"] for p in first["items"] + second["items"]},
+                                         expected)
+                        self.assertIsNotNone(first["next_cursor"])
+                        continued = await self.page(**args, page="2", cursor=first["next_cursor"])
+                        self.assertEqual(continued["total"], 2)
+                        self.assertEqual(continued["items"], second["items"])
+                        self.assertIsNone(continued["next_cursor"])
+        alias = await self.page(tag="cf_100-A", problem_tag="dp", scope="solved", state="favorite")
+        self.assertEqual([p["problem_id"] for p in alias["items"]], ["cf_100A"])
+        query, params = await indexed_query(self.db, "member", {"platform": "codeforces", "tag": "dp"})
+        async with self.db.execute("EXPLAIN QUERY PLAN " + query, params) as cursor:
+            plan = " ".join(str(row[3]) for row in await cursor.fetchall())
+        self.assertIn("SEARCH", plan)
+        self.assertIn("owner=? AND platform=? AND id_key=?", plan)
+
+    async def test_keyword_fallback_only_searches_the_current_members_visible_tags(self):
+        await self.recommend("cf_100A", "math")
+        await self.recommend("cf_101A", "")
+        await self.db.executemany(
+            "INSERT INTO submissions(user_qq_id,platform,problem_id,tags,submit_time) "
+            "VALUES(?,'codeforces',?,?,1)",
+            [("member", "100-A", "hidden-tag"), ("member", "cf_101A", "mine"),
+             ("other", "101A", "secret-tag")],
+        )
+        await self.db.commit()
+        self.assertEqual((await self.page(tag="hidden-tag"))["total"], 0)
+        self.assertEqual((await self.page(tag="secret-tag", owner_qq_id="other"))["total"], 0)
+        self.assertEqual((await self.page(tag="mine"))["total"], 1)
+        await self.recommend("cf_100A", "")
+        await self.db.commit()
+        visible = await self.page(tag="hidden-tag")
+        self.assertEqual(visible["total"], 1)
+        self.assertEqual(visible["items"][0]["problem_id"], "cf_100A")
+        other = await listing_page(self.db, "other", {"platform": "codeforces", "tag": "hidden-tag"})
+        self.assertEqual(other["total"], 0)
+
     async def test_known_times_precede_unknown_and_corrections_do_not_change_identity(self):
         for contest, created in (("100", "2026-01-01T00:00:00Z"), ("101", "2026-02-01T00:00:00Z"), ("102", "2026-03-01T00:00:00Z")):
             await self.db.execute("INSERT INTO crawler_problems(platform,problem_id,contest_id,problem_name,problem_url,metadata_json,created_at,updated_at) "

@@ -285,8 +285,10 @@ async def indexed_query(db, owner, args):
     tag = str(args.get("tag", "")).strip()[:100]
     if tag:
         conditions.append("(p.problem_name LIKE ? OR p.problem_id LIKE ? OR p.id_key LIKE ? OR p.tags LIKE ? OR "
-                          "(p.platform='codeforces' AND p.id_key=?) OR (p.platform='luogu' AND p.id_key=?))")
-        params.extend([f"%{tag}%"] * 4 + [problem_id_key("codeforces", tag), problem_id_key("luogu", tag)])
+                          "(p.platform='codeforces' AND p.id_key=?) OR (p.platform='luogu' AND p.id_key=?) OR "
+                          "(p.tags='' AND EXISTS(SELECT 1 FROM member_problem_index s WHERE s.owner=? "
+                          "AND s.platform=p.platform AND s.id_key=p.id_key AND s.own_tags LIKE ?)))")
+        params.extend([f"%{tag}%"] * 4 + [problem_id_key("codeforces", tag), problem_id_key("luogu", tag), owner, f"%{tag}%"])
     selected = str(args.get("problem_tag", "")).strip()
     if len(selected) > 100:
         raise ValueError("题目标签最多 100 个字符。")
