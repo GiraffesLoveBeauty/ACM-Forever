@@ -193,3 +193,49 @@ test('long native tags wrap within the information column and all actions stay a
   expect(target.searchParams.get('from')).toBe('/my-problems.html?platform=all');
   expect(errors).toEqual([]);
 });
+
+test('cursor pages reuse tags and unknown-time filtering resets pagination', async ({ page }) => {
+  const requests = [];
+  let tagRequests = 0;
+  await page.route('**/api/me/problems/tags?*', (route) => {
+    tagRequests++;
+    return route.fulfill({ json: { tags: ['implementation'], tags_version: '1:0' } });
+  });
+  await page.route('**/api/me/problems?*', (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    requests.push(query);
+    const number = Number(query.get('page') || 1);
+    return route.fulfill({
+      json: {
+        items: [{ ...problems[2], problem_name: 'Cursor page ' + number }],
+        total: 60,
+        page: number,
+        page_size: 20,
+        tags_version: '1:0',
+        next_cursor: number < 3 ? 'cursor-' + (number + 1) : null,
+      },
+    });
+  });
+  await page.goto('/my-problems.html?platform=codeforces');
+  await expect(
+    page.locator('#problem-list article').filter({ hasText: 'Cursor page 1' }),
+  ).toBeVisible();
+  await expect(page.getByRole('combobox', { name: '标签', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: '下一页', exact: true }).click();
+  await expect(
+    page.locator('#problem-list article').filter({ hasText: 'Cursor page 2' }),
+  ).toBeVisible();
+  expect(requests.at(-1).get('cursor')).toBe('cursor-2');
+  expect(tagRequests).toBe(1);
+  await page.getByRole('combobox', { name: '时间依据', exact: true }).selectOption('unknown');
+  await expect(page.getByLabel('开始时间（北京时间）', { exact: true })).toBeDisabled();
+  await expect(page.getByLabel('结束时间（不含，北京时间）', { exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: '查询', exact: true }).click();
+  await expect(
+    page.locator('#problem-list article').filter({ hasText: 'Cursor page 1' }),
+  ).toBeVisible();
+  expect(requests.at(-1).get('time_basis')).toBe('unknown');
+  expect(requests.at(-1).get('cursor')).toBeNull();
+  expect(requests.at(-1).get('start_at')).toBeNull();
+  expect(tagRequests).toBe(1);
+});

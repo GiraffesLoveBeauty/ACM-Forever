@@ -8,6 +8,8 @@ from pathlib import Path
 import aiohttp
 import aiosqlite
 
+from .acm_api.problem_listing import ListingConnection
+
 from .acm_api.constants import PLATFORM_SYNC_CONCURRENCY
 from .acm_api.database import connect_db, isolated_connection
 from .acm_api.binding_service import platform_spec
@@ -38,7 +40,7 @@ class SyncEngine(SyncMixin):
         }
 
     async def start(self):
-        self.db = await aiosqlite.connect(str(self.db_path))
+        self.db = await aiosqlite.connect(str(self.db_path), factory=ListingConnection)
         self.db.row_factory = aiosqlite.Row
         await self.db.execute("PRAGMA journal_mode=WAL")
         await self.db.execute("PRAGMA synchronous=NORMAL")
@@ -226,7 +228,7 @@ class WebTaskManager:
         self._problem_schedule_changed.set()
 
     async def _claim_daily_problem_sync(self, platform, day):
-        async with aiosqlite.connect(str(self.sync_engine.db_path)) as db:
+        async with aiosqlite.connect(str(self.sync_engine.db_path), factory=ListingConnection) as db:
             await db.execute("PRAGMA busy_timeout=5000")
             return await problem_schedule.claim(db, platform, day, getattr(self.sync_engine, "crawler_config", {}))
 
@@ -262,7 +264,7 @@ class WebTaskManager:
                 # Shutdown cancels the child before gather finishes; persist its
                 # final status as well so a restart does not hide the interruption.
                 try:
-                    async with aiosqlite.connect(str(self.sync_engine.db_path)) as db:
+                    async with aiosqlite.connect(str(self.sync_engine.db_path), factory=ListingConnection) as db:
                         await problem_schedule.remember_result(db, self.tasks[task_id])
                 except (OSError, aiosqlite.Error):
                     emit("problem_sync.result_save_failed", "每日题库更新结果暂未保存", "warning")
@@ -310,7 +312,7 @@ class WebTaskManager:
         except (TypeError, ValueError):
             days = 0
 
-        async with aiosqlite.connect(str(self.sync_engine.db_path)) as db:
+        async with aiosqlite.connect(str(self.sync_engine.db_path), factory=ListingConnection) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT * FROM users WHERE qq_id=? AND account_state='active'", (str(qq_id),)) as cursor:
                 user = await cursor.fetchone()
@@ -350,7 +352,7 @@ class WebTaskManager:
             days = 0
         self._claiming_all_accounts_sync = True
         try:
-            async with aiosqlite.connect(str(self.sync_engine.db_path)) as db:
+            async with aiosqlite.connect(str(self.sync_engine.db_path), factory=ListingConnection) as db:
                 db.row_factory = aiosqlite.Row
                 if scheduled:
                     now = int(time.time())
@@ -432,7 +434,7 @@ class WebTaskManager:
     async def public_snapshots(self):
         # Compare generations, including already re-registered QQs. A callback
         # can cancel only this process; other workers must consult durable state.
-        async with aiosqlite.connect(str(self.sync_engine.db_path)) as db:
+        async with aiosqlite.connect(str(self.sync_engine.db_path), factory=ListingConnection) as db:
             async with db.execute("SELECT qq_id,account_state,account_epoch FROM users") as cursor:
                 active = {row[0]: row[2] for row in await cursor.fetchall() if row[1] == "active"}
         snapshots = self.snapshots()
@@ -541,7 +543,7 @@ async def create_web_challenge(db_path, platform="", tag="", difficulty=None, ow
         params.extend([f"%{tag}%"] * 3)
     sql += " ORDER BY RANDOM() LIMIT 20"
 
-    db = await aiosqlite.connect(str(db_path))
+    db = await aiosqlite.connect(str(db_path), factory=ListingConnection)
     db.row_factory = aiosqlite.Row
     await db.execute("PRAGMA busy_timeout=5000")
     try:

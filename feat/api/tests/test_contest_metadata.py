@@ -97,6 +97,8 @@ class ContestMetadataStorageTests(unittest.IsolatedAsyncioTestCase):
                 "'[{\"input\":\"1\",\"output\":\"2\"}]',1,'ok','old-created','old-updated')",
                 (b"%PDF-saved-fixture",),
             )
+            # Publish the fixture before removing the old optional schema.
+            await db.commit()
             # Reproduce an existing problem bank from before the additive table.
             await db.execute("DROP TABLE crawler_contests")
             await db.commit()
@@ -111,6 +113,8 @@ class ContestMetadataStorageTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(dict(await cursor.fetchone()), original)
                 async with db.execute("SELECT COUNT(*) FROM crawler_contests") as cursor:
                     self.assertEqual((await cursor.fetchone())[0], 0)
+                async with db.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='listing_contests_insert'") as cursor:
+                    self.assertEqual((await cursor.fetchone())[0], 1)
                 async with db.execute("PRAGMA table_info(crawler_contests)") as cursor:
                     self.assertEqual({row["name"] for row in await cursor.fetchall()},
                                      {"platform", "contest_id", "contest_name", "start_time", "updated_at"})

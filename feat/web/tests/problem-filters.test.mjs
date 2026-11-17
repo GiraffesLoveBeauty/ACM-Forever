@@ -57,3 +57,14 @@ test('numeric ranges use only CF or AtCoder scales and cannot leak to tracker', 
   assert.deepEqual(rangeParams({ platform: 'atcoder', view: 'tracker', rating_min: '1200' }), {});
   assert.equal(timeLabel({ time_basis: 'first_seen' }), '首次收录');
 });
+
+test('unknown source time survives URLs and clears incompatible date bounds', () => {
+  assert.deepEqual(
+    rangeParams({ platform: 'codeforces', time_basis: 'unknown', start_at: '100', end_at: '200' }),
+    { time_basis: 'unknown' },
+  );
+  assert.equal(
+    memberQuery({ platform: 'codeforces', time_basis: 'unknown' }).time_basis,
+    'unknown',
+  );
+});

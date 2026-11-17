@@ -403,6 +403,10 @@ class ClosureTests(unittest.IsolatedAsyncioTestCase):
         for table, _, _ in fixtures:
             owner = service.PRIVATE_TABLES[table]
             self.assertEqual(await self.sql(f"SELECT {owner} owner FROM {table}"), [{"owner": OTHER}], table)
+        for table in ("member_problem_index", "member_problem_tags", "member_problem_dirty"):
+            self.assertEqual(await self.sql(f"SELECT * FROM {table} WHERE owner=?", (QQ,)), [], table)
+        self.assertEqual(await self.sql("SELECT * FROM settings WHERE key=?", ("problem_listing_member:" + QQ,)), [])
+        self.assertEqual(len(await self.sql("SELECT * FROM member_problem_index WHERE owner=?", (OTHER,))), 1)
 
     async def test_no_target_or_unknown_fields_can_redirect_closure(self):
         preview = await self.preview()

@@ -7,13 +7,15 @@ from pathlib import Path
 
 import aiosqlite
 
+from .problem_listing import ListingConnection
+
 from .account_lifecycle_service import require_web_actor
 from .cf_client import CFUnavailable, binding_key, cf_request
 from .cf_practice import PracticeError, iso, metadata, normalize_problem, resolve_scope
 
 
 async def open_db(path):
-    db = await aiosqlite.connect(str(path))
+    db = await aiosqlite.connect(str(path), factory=ListingConnection)
     db.row_factory = aiosqlite.Row
     await db.execute("PRAGMA busy_timeout=5000")
     await db.execute("PRAGMA foreign_keys=ON")

@@ -56,10 +56,24 @@ const platforms = computed(() => ({
 }));
 let revision = 0;
 let tagsRevision = 0;
-async function loadTags(platform = form.platform) {
+const tagCache = new Map();
+const pageCursors = new Map();
+let cursorQuery = '';
+let tagsAfterPending = null;
+async function loadTags(platform = form.platform, expectedVersion = '') {
   const version = ++tagsRevision;
+  tagsAfterPending = null;
   tags.value = [];
   tagsError.value = '';
+  const cached = tagCache.get(platform);
+  if (
+    cached &&
+    (expectedVersion ? cached.version === expectedVersion : Date.now() < cached.expires)
+  ) {
+    tags.value = cached.tags;
+    tagsBusy.value = false;
+    return;
+  }
   tagsBusy.value = true;
   try {
     const data = await request(
@@ -69,10 +83,21 @@ async function loadTags(platform = form.platform) {
     );
     if (version !== tagsRevision) return;
     tags.value = data.tags;
+    tagCache.set(platform, {
+      tags: data.tags,
+      version: data.tags_version,
+      expires: Date.now() + 60000,
+    });
   } catch (e) {
     if (version === tagsRevision && e.name !== 'AbortError') tagsError.value = e.message;
   } finally {
-    if (version === tagsRevision) tagsBusy.value = false;
+    if (version === tagsRevision) {
+      tagsBusy.value = false;
+      const pending = tagsAfterPending;
+      tagsAfterPending = null;
+      if (pending && tagCache.get(pending.platform)?.version !== pending.version)
+        loadTags(pending.platform, pending.version);
+    }
   }
 }
 async function load() {
@@ -97,13 +122,35 @@ async function load() {
       delete filters.labels;
       delete filters.match;
     }
+    const pageQuery = { ...filters, page_size: 20 };
+    const { page, ...withoutPage } = pageQuery;
+    const queryKey = new URLSearchParams(withoutPage).toString();
+    if (queryKey !== cursorQuery) {
+      pageCursors.clear();
+      cursorQuery = queryKey;
+    }
+    if (view !== 'tracker' && pageCursors.has(Number(page)))
+      pageQuery.cursor = pageCursors.get(Number(page));
     const data = await request(
       (view === 'tracker' ? '/me/problems/tracker?' : '/me/problems?') +
-        new URLSearchParams({ ...filters, page_size: 20 }),
+        new URLSearchParams(pageQuery),
       {},
       'member-problems',
     );
     if (version !== revision) return;
+    if (view !== 'tracker') {
+      for (const key of pageCursors.keys()) if (key > Number(data.page)) pageCursors.delete(key);
+      if (data.next_cursor) pageCursors.set(Number(data.page) + 1, data.next_cursor);
+      const platform = current.value.platform;
+      if (
+        platform !== 'luogu' &&
+        data.tags_version &&
+        tagCache.get(platform)?.version !== data.tags_version
+      ) {
+        if (tagsBusy.value) tagsAfterPending = { platform, version: data.tags_version };
+        else loadTags(platform, data.tags_version);
+      }
+    }
     rows.value = data.items;
     total.value = data.total;
     facets.value = data.tag_facets || [];
