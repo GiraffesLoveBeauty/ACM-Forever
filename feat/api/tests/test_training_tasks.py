@@ -3,7 +3,7 @@ import json
 import os
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import test_api_contract as contract
 from feat.api.acm_api.database import connect_db
@@ -183,6 +183,66 @@ class TrainingTaskTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.post('/api/admin/training-tasks/resolve-problems', headers=self.headers,json={'problems':[{'problem_id':'1A'}]*51})
         result = await response.get_json()
         self.assertEqual((response.status_code,len(result['items']),result['duplicates']),(200,1,50))
+
+
+    async def test_luogu_resolution_dedup_metadata_and_publish_capability(self):
+        await self.sql("INSERT INTO recommendations(platform,problem_id,problem_name,problem_url,tags) VALUES('luogu','P1001','合成 A+B 题','https://www.luogu.com.cn/problem/P1001','[]')")
+        await self.sql("INSERT INTO crawler_problems(platform,problem_id,contest_id,problem_name,problem_url,metadata_json,statement_html,created_at,updated_at) VALUES('luogu','P1001','','合成 A+B 题','https://www.luogu.com.cn/problem/P1001',?, '<p>合成题面</p>','2026-11-17','2026-11-17')", (json.dumps({'luogu': {'difficulty': 1, 'tag_ids': []}}),))
+        options = await (await self.client.get('/api/admin/training-tasks/options')).get_json()
+        luogu = next(p for p in options['capabilities'] if p['platform'] == 'luogu')
+        self.assertTrue(luogu['can_publish'])
+        self.assertFalse(luogu['period_ac'])
+        self.assertFalse(luogu['historical_ac'])
+        response = await self.client.post('/api/admin/training-tasks/resolve-problems', headers=self.headers,
+            json={'problems': [{'platform': 'luogu', 'problem_id': pid} for pid in ['p1001', 'P1001', 'P1002', 'B1001', 'T1', 'P0', 'https://www.luogu.com.cn/problem/P1001']]})
+        result = await response.get_json()
+        self.assertEqual((response.status_code, result['duplicates'], len(result['errors'])), (200, 1, 4))
+        self.assertEqual([p['problem_id'] for p in result['items']], ['P1001', 'P1002'])
+        first, missing = result['items']
+        self.assertEqual(first['problem_name'], '合成 A+B 题')
+        self.assertTrue(first['content_available'])
+        self.assertEqual(first['native_difficulty']['id'], 1)
+        self.assertTrue(first['can_publish'])
+        self.assertFalse(first['supported'])
+        self.assertFalse(missing['content_available'])
+        self.assertEqual(missing['problem_url'], 'https://www.luogu.com.cn/problem/P1002')
+        task = await self.create(problems=[{'platform': 'luogu', 'problem_id': 'p1001'}])
+        checked = await self.preview(task)
+        self.assertEqual((checked['recipient_count'], checked['unbound_count']), (1, 0))
+        first_publish, retry = await self.publish(task, checked), await self.publish(task, checked)
+        self.assertEqual((first_publish.status_code, retry.status_code), (200, 200))
+        published = await first_publish.get_json()
+        self.assertEqual((published['state'], published['problems'][0]['problem_name']), ('published', '合成 A+B 题'))
+        self.assertEqual(len(await self.sql('SELECT * FROM training_task_recipients')), 1)
+
+    async def test_luogu_task_is_visible_only_to_recipient_without_oj_binding(self):
+        task = await self.create(problems=[{'platform': 'luogu', 'problem_id': 'P1001'}])
+        self.assertEqual((await self.publish(task)).status_code, 200)
+        member = self.app.test_client()
+        login = await member.post('/api/auth/login', json={'qq_id': '22345678', 'password': 'Test-Password-123!'})
+        headers = {'X-CSRF-Token': (await login.get_json())['csrf_token']}
+        result = await (await member.get(f'/api/me/training-tasks/{task["id"]}')).get_json()
+        problem = result['problems'][0]
+        self.assertEqual((problem['platform'], problem['problem_id'], problem['verification'], problem['status']), ('luogu', 'P1001', 'unsupported', 'unverified'))
+        self.assertIsNone(problem['evidence'])
+        self.assertEqual((result['recipient']['completed_problems'], result['recipient']['binding_warnings'], result['recipient']['unsupported_problems']), (0, 0, 1))
+        listing = await (await member.get('/api/me/training-tasks?tab=all')).get_json()
+        self.assertEqual([t['id'] for t in listing['items']], [task['id']])
+        submitter = self.app.config['PLUGIN_CONFIG']['_account_sync_submitter'] = AsyncMock()
+        response = await member.post(f'/api/me/training-tasks/{task["id"]}/refresh', headers=headers, json={})
+        self.assertEqual((response.status_code, (await response.get_json())['code']), (409, 'unsupported_verification'))
+        submitter.assert_not_called()
+        self.assertEqual((await member.get(f'/api/admin/training-tasks/{task["id"]}')).status_code, 403)
+        await self.seed('32345678', status='其他组')
+        stranger = self.app.test_client()
+        await stranger.post('/api/auth/login', json={'qq_id': '32345678', 'password': 'Test-Password-123!'})
+        self.assertEqual((await stranger.get(f'/api/me/training-tasks/{task["id"]}')).status_code, 404)
+
+    async def test_luogu_historical_catalog_alias_keeps_its_name(self):
+        await self.sql("INSERT INTO recommendations(platform,problem_id,problem_name,problem_url,tags) VALUES('luogu','luogu_P1003','合成历史洛谷题','https://www.luogu.com.cn/problem/P1003','[]')")
+        task = await self.create(problems=[{'platform': 'luogu', 'problem_id': 'P1003'}])
+        self.assertEqual(task['problems'][0]['problem_name'], '合成历史洛谷题')
+        self.assertEqual(task['problems'][0]['problem_id'], 'P1003')
 
 
 if __name__ == '__main__':

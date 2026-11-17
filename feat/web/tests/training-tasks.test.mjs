@@ -47,7 +47,11 @@ beforeEach(() => {
       return response({
         enabled: true,
         statuses: ['动态实验组'],
-        capabilities: [{ platform: 'codeforces', label: 'Codeforces' }],
+        capabilities: [
+          { platform: 'codeforces', label: 'Codeforces', can_publish: true },
+          { platform: 'luogu', label: '洛谷', can_publish: true },
+          { platform: 'atcoder', label: 'AtCoder', can_publish: false },
+        ],
         max_problems: 50,
       });
     if (url.includes('/resolve-problems'))
@@ -55,9 +59,15 @@ beforeEach(() => {
         items: body.problems.map((p, i) => ({
           ...p,
           problem_name: '合成题' + i,
-          problem_id: p.problem_id.startsWith('cf_') ? p.problem_id : 'cf_' + p.problem_id,
+          problem_id:
+            p.platform === 'luogu'
+              ? p.problem_id.toUpperCase()
+              : p.problem_id.startsWith('cf_')
+                ? p.problem_id
+                : 'cf_' + p.problem_id,
           tags: [],
-          supported: true,
+          supported: p.platform !== 'luogu',
+          can_publish: true,
         })),
         errors: [],
         duplicates: 0,
@@ -477,4 +487,30 @@ test('completion rows use real names and proportional progress without QQ or sta
         new URL(c.url, location.origin).searchParams.get('search') === '合成实名乙',
     ),
   );
+});
+
+test('admin can add and publish Luogu P problems without an AC capability warning', async () => {
+  await setupEditor();
+  const platformSelect = control('批量输入平台', 'select');
+  assert.deepEqual(find(platformSelect, (n) => n.type === 'option').map(textOf), [
+    'Codeforces',
+    '洛谷',
+  ]);
+  await set('批量输入平台', 'luogu', 'select');
+  assert.equal(control('标准题号', 'textarea').props.placeholder, 'P1001 P1002 P1003');
+  await set('标准题号', 'P1001', 'textarea');
+  await click('校验并添加');
+  assert(textOf(mounted.root).includes('洛谷 P1001'));
+  assert(textOf(mounted.root).includes('暂不核验 AC'));
+  assert(!textOf(mounted.root).includes('发布前需要更换'));
+  await click('下一步');
+  await set('动态实验组', ['动态实验组']);
+  assert(textOf(mounted.root).includes('以上 AC 规则仅用于 Codeforces'));
+  await click('保存并预览');
+  assert.equal(stored.problems.at(-1).platform, 'luogu');
+  assert.equal(stored.problems.at(-1).problem_id, 'P1001');
+  await set('我已确认以上排除原因', true);
+  await click('确认发布');
+  assert(calls.some((call) => call.url.endsWith('/publish')));
+  assert(textOf(mounted.root).includes('洛谷 P1001'));
 });

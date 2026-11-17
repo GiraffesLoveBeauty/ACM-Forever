@@ -340,3 +340,37 @@ class TrainingProgressTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(detail['problems'][0]['verification'], expected)
                 self.assertTrue(detail['recipient']['pending'])
         self.assertEqual(await self.sql('SELECT * FROM training_task_progress'), stored)
+
+    async def test_mixed_luogu_task_preserves_cf_evidence_and_refresh_scope(self):
+        await self.bind()
+        await self.ac(self.now - 10)
+        # A locally stored Luogu attempt must not become CF-style training evidence.
+        await self.sql("UPDATE users SET luogu_id='12345' WHERE qq_id='22345678'")
+        await self.sql("INSERT INTO submission_attempts(owner_qq_id,platform,external_submission_id,problem_id,verdict,submitted_at,created_at) VALUES('22345678','luogu','local-luogu','P1001','OK',?,?)", (self.now - 10, self.now))
+        task = await self.create(problems=[{'platform': 'luogu', 'problem_id': 'P1001'}, {'platform': 'codeforces', 'problem_id': '1A'}])
+        self.assertEqual((await self.publish(task)).status_code, 200)
+        recipient = (await self.info(task['id']))['items'][0]
+        self.assertEqual((recipient['completed_problems'], recipient['problem_count'], recipient['unsupported_problems']), (1, 2, 1))
+        self.assertEqual(recipient['completion'], 'incomplete')
+        self.assertEqual(recipient['binding_warnings'], 0)
+        self.assertGreater(recipient['checked_at'], 0)
+        self.assertEqual(recipient['last_success_at'], self.now)
+        member = self.app.test_client()
+        login = await member.post('/api/auth/login', json={'qq_id': '22345678', 'password': 'Test-Password-123!'})
+        headers = {'X-CSRF-Token': (await login.get_json())['csrf_token']}
+        personal = f'/api/me/training-tasks/{task["id"]}'
+        detail = await (await member.get(personal)).get_json()
+        luogu, cf = detail['problems']
+        self.assertEqual((luogu['verification'], luogu['status'], luogu['evidence']), ('unsupported', 'unverified', None))
+        self.assertEqual((cf['verification'], cf['status']), ('verified', 'on_time'))
+        self.assertEqual(cf['evidence']['source'], 'codeforces_user_status')
+        config = self.app.config['PLUGIN_CONFIG']
+        config['_account_sync_submitter'] = AsyncMock(return_value={'id': 'mixed-cf-sync'})
+        config['_task_provider'] = lambda: []
+        response = await member.post(personal + '/refresh', headers=headers, json={})
+        self.assertEqual(response.status_code, 202, await response.get_json())
+        config['_account_sync_submitter'].assert_awaited_once_with('22345678', ['codeforces'], 0, expected_epoch=1)
+        await self.reconcile(task['id'])
+        rows = await self.sql("SELECT x.* FROM training_task_progress x JOIN training_task_problems p ON p.id=x.problem_id WHERE p.platform='luogu'")
+        self.assertIsNone(rows[0]['on_time_json'])
+        self.assertEqual(rows[0]['checked_at'], 0)

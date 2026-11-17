@@ -10,12 +10,14 @@ from .account_lifecycle_service import web_account_available
 from .binding_service import LABELS, platform_spec
 from .cf_client import problem_url
 from .cf_practice import PracticeError, normalize_problem
+from .luogu_problem import attach_classifications
 
 MAX_PROBLEMS = 50
 PREVIEW_TTL = 600
+PUBLISH_PLATFORMS = {"codeforces", "luogu"}
 CAPABILITIES = [
-    {"platform": platform, "label": label, "period_ac": platform == "codeforces", "historical_ac": platform == "codeforces",
-     "reason": "实际提交时间、重复 AC 与完整历史覆盖" if platform == "codeforces" else "尚未验证完整提交证据，首期不能发布"}
+    {"platform": platform, "label": label, "can_publish": platform in PUBLISH_PLATFORMS, "period_ac": platform == "codeforces", "historical_ac": platform == "codeforces",
+     "reason": "实际提交时间、重复 AC 与完整历史覆盖" if platform == "codeforces" else "支持发布与查看题目，暂不核验 AC" if platform == "luogu" else "暂不支持发布"}
     for platform, label in LABELS.items()
 ]
 
@@ -98,6 +100,8 @@ async def detail(db, task_id):
     for problem in task["problems"]:
         problem["tags"] = json.loads(problem.pop("tags_json"))
         problem["supported"] = problem["platform"] == "codeforces"
+        problem["can_publish"] = problem["platform"] in PUBLISH_PLATFORMS
+    await attach_classifications(db, task["problems"])
     task["recipient_count"] = (await one(db, "SELECT COUNT(*) AS n FROM training_task_recipients WHERE task_id=?", (task_id,)))["n"]
     task["audit"] = await rows(db, "SELECT action,reason,before_json,after_json,created_at FROM training_task_audit WHERE task_id=? ORDER BY id DESC LIMIT 50", (task_id,))
     return task
@@ -138,8 +142,8 @@ def canonical_problem(value):
         url = f"https://atcoder.jp/contests/{pid.split('_')[0]}/tasks/{pid}"
     elif platform == "luogu":
         pid = pid.upper()
-        if not re.fullmatch(r"(?:P|B|T|U)[1-9][0-9]{0,8}", pid):
-            raise TaskError("洛谷题号格式应类似 P1001。")
+        if not re.fullmatch(r"P[1-9][0-9]{0,8}", pid):
+            raise TaskError("当前训练任务仅支持洛谷 P 题号，例如 P1001。")
         url = "https://www.luogu.com.cn/problem/" + pid
     elif not re.fullmatch(r"[A-Za-z0-9_-]{1,60}", pid):
         raise TaskError("标准题号格式错误。")
@@ -158,7 +162,7 @@ async def resolve_problems(db, inputs):
                 duplicates += 1
                 continue
             seen.add(key)
-            aliases = [item["problem_id"], re.sub(r"^cf_", "", item["problem_id"])]
+            aliases = [item["problem_id"], "luogu_" + item["problem_id"] if item["platform"] == "luogu" else re.sub(r"^cf_", "", item["problem_id"])]
             entry = await one(db, "SELECT problem_name,problem_rating,tags FROM recommendations WHERE platform=? AND problem_id IN (?,?) ORDER BY id LIMIT 1", (item["platform"], *aliases))
             if item["platform"] == "codeforces" and not entry:
                 norm = normalize_problem(item["problem_id"])
@@ -170,12 +174,13 @@ async def resolve_problems(db, inputs):
             except (ValueError, TypeError):
                 tags = str(tags).split(",")
             item.update(problem_name=(entry or {}).get("problem_name") or item["problem_id"], problem_rating=(entry or {}).get("problem_rating"),
-                        tags=[str(t) for t in tags if t] if isinstance(tags, list) else [], content_available=bool(content), supported=item["platform"] == "codeforces")
+                        tags=[str(t) for t in tags if t] if isinstance(tags, list) else [], content_available=bool(content), supported=item["platform"] == "codeforces", can_publish=item["platform"] in PUBLISH_PLATFORMS)
             items.append(item)
         except TaskError as error:
             errors.append({"index": index, "message": str(error)})
     if len(items) > MAX_PROBLEMS:
         raise TaskError(f"去重后的题单最多 {MAX_PROBLEMS} 题。")
+    await attach_classifications(db, items)
     return {"items": items, "errors": errors, "duplicates": duplicates}
 
 
@@ -228,7 +233,7 @@ async def audience(db, task):
         raise TaskError("请至少选择一种成员身份。")
     members = await rows(db, "SELECT u.*,a.password_hash,a.is_active,a.must_change_password,a.temporary_password_expires_at,a.credential_version FROM users u LEFT JOIN web_accounts a ON a.qq_id=u.qq_id WHERE u.status IN (" + ",".join("?" for _ in statuses) + ") ORDER BY u.qq_id", statuses)
     result = []
-    platforms = {p["platform"] for p in task["problems"]}
+    platforms = {p["platform"] for p in task["problems"] if p["platform"] == "codeforces"}
     for member in members:
         reason = "account_closed" if member["account_state"] != "active" else "no_web_account" if member["is_active"] is None else "account_disabled" if not member["is_active"] else "account_unavailable" if not web_account_available(member) else None
         bindings = {}
@@ -246,8 +251,8 @@ def publishable(task):
         raise TaskError("请设置有效的开始与截止时间。")
     if not task["problems"]:
         raise TaskError("题单至少需要一道题。")
-    if any(p["platform"] != "codeforces" for p in task["problems"]):
-        raise TaskError("题单存在当前不能可靠核验的平台，请更换题目。", "unsupported_capability")
+    if any(p["platform"] not in PUBLISH_PLATFORMS for p in task["problems"]):
+        raise TaskError("当前训练任务仅支持发布 Codeforces 和洛谷 P 题目，请更换其他平台题目。", "unsupported_capability")
 
 
 async def preview(db, task_id, data):

@@ -218,6 +218,8 @@ async def refresh(db, identity, task_id):
     detail = await progress.personal_detail(db, task_id, identity)
     if detail["state"] != "published":
         raise service.TaskError("任务已取消，不能发起同步。", "task_cancelled", 409)
+    if not any(p["platform"] == "codeforces" for p in detail["problems"]):
+        raise service.TaskError("当前任务的洛谷题目暂不核验 AC，无需刷新进度。", "unsupported_verification", 409)
     user = await service.one(db, "SELECT * FROM users WHERE qq_id=?", (identity["qq_id"],))
     if not user["cf_handle"]:
         raise service.TaskError("请先在个人中心绑定 Codeforces 账号，再返回当前任务。", "binding_required", 409)

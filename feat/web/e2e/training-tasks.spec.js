@@ -352,3 +352,68 @@ test('completion real names, search and long progress bars remain usable across 
   await expect(table).toContainText('没有符合筛选条件的成员。');
   await expect(table.getByRole('progressbar')).toHaveCount(0);
 });
+
+test('Luogu training task publishes from the catalog and opens for an unbound member', async ({
+  page,
+  context,
+}, testInfo) => {
+  await login(context, '10000003');
+  await page.goto('/admin.html?section=training&task_id=new&tab=edit');
+  const title = '洛谷发布验收 ' + testInfo.project.name + ' ' + Date.now();
+  await page.getByLabel('任务标题', { exact: true }).fill(title);
+  await page.getByRole('combobox', { name: '题目平台', exact: true }).selectOption('luogu');
+  await page.getByRole('button', { name: '搜索题库', exact: true }).click();
+  const catalog = page.locator('.tt-catalog-row').filter({ hasText: '合成洛谷训练题' });
+  await expect(catalog).toBeVisible();
+  await catalog.getByRole('button', { name: '添加', exact: true }).click();
+  await expect(page.locator('.tt-problems')).toContainText('洛谷 P1001');
+  await expect(page.locator('.tt-problems')).toContainText('暂不核验 AC');
+  await page.getByRole('combobox', { name: '批量输入平台', exact: true }).selectOption('luogu');
+  await expect(page.getByLabel('标准题号', { exact: true })).toHaveAttribute(
+    'placeholder',
+    'P1001 P1002 P1003',
+  );
+  // P1002 has no locally saved statement; its trusted original link still permits practice.
+  await page.getByLabel('标准题号', { exact: true }).fill('P1001 p1002');
+  await page.getByRole('button', { name: '校验并添加题号', exact: true }).click();
+  await expect(page.locator('.tt-problem')).toHaveCount(2);
+  await page.getByRole('button', { name: '下一步', exact: true }).click();
+  await page.getByLabel('训练任务测试组', { exact: true }).check();
+  await page.getByLabel('开始时间', { exact: true }).fill(local(Date.now() - 86400000));
+  await page.getByRole('button', { name: '保存并预览发放', exact: true }).click();
+  await page.getByLabel('我已确认以上排除原因，仍向有效成员发放。', { exact: true }).check();
+  await page.screenshot({ path: testInfo.outputPath('luogu-publish-preview.png'), fullPage: true });
+  await page.getByRole('button', { name: '确认发布任务', exact: true }).click();
+  await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
+  const taskId = new URL(page.url()).searchParams.get('task_id');
+  await login(context, '10000119');
+  await page.goto('/training-tasks.html');
+  const card = page
+    .locator('article')
+    .filter({ has: page.getByRole('heading', { name: title, exact: true }) });
+  await expect(card).toContainText('含暂不核验 AC 的洛谷题目');
+  await card.getByRole('link', { name: '查看任务 ↗', exact: true }).click();
+  await expect(page.getByRole('button', { name: '绑定 Codeforces', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '刷新进度', exact: true })).toHaveCount(0);
+  await expect(page.locator('.tt-problem')).toHaveCount(2);
+  await expect(page.locator('.tt-problem').first()).toContainText('暂不核验 AC');
+  await expect(
+    page.locator('.tt-problem').last().getByRole('link', { name: '原题 ↗', exact: true }),
+  ).toHaveAttribute('href', 'https://www.luogu.com.cn/problem/P1002');
+  await page.screenshot({ path: testInfo.outputPath('luogu-member-task.png'), fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  await page
+    .locator('.tt-problem')
+    .first()
+    .getByRole('link', { name: '查看题目', exact: true })
+    .click();
+  await expect(
+    page.getByText('计算两个整数的和，仅用于训练任务自动化测试。', { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: '样例 1 · 输入', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: '← 返回训练任务', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp('training-tasks.html.*task_id=' + taskId));
+  expect((await context.request.get('/api/admin/training-tasks')).status()).toBe(403);
+});

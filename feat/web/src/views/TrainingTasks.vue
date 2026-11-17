@@ -22,6 +22,10 @@ const tab = computed(() =>
   ['active', 'upcoming', 'history'].includes(route.query.tab) ? route.query.tab : 'active',
 );
 const page = computed(() => Math.max(1, Number(route.query.page) || 1));
+const hasVerifiableProblems = computed(() =>
+  task.value?.problems.some((p) => p.platform === 'codeforces'),
+);
+const hasLuoguProblems = computed(() => task.value?.problems.some((p) => p.platform === 'luogu'));
 const needsBinding = computed(() => task.value?.problems.some((p) => p.verification === 'unbound'));
 const base = '/me/training-tasks';
 let timer,
@@ -83,7 +87,7 @@ onBeforeUnmount(() => {
   clearTimeout(timer);
 });
 async function refresh() {
-  if (refreshing.value) return;
+  if (refreshing.value || !hasVerifiableProblems.value) return;
   refreshing.value = true;
   error.value = '';
   const operation = revision;
@@ -207,7 +211,8 @@ function refreshText(item) {
           </div>
           <p class="tt-caption">
             {{ ruleName(item.rule) }} · {{ item.creator_name
-            }}<span v-if="item.recipient.pending"> · 有待核验的记录</span>
+            }}<span v-if="item.recipient.pending"> · 有待核验的记录</span
+            ><span v-if="item.recipient.unsupported_problems"> · 含暂不核验 AC 的洛谷题目</span>
           </p>
           <RouterLink
             class="btn primary"
@@ -262,6 +267,7 @@ function refreshText(item) {
             >
               绑定 Codeforces</button
             ><button
+              v-if="hasVerifiableProblems"
               class="btn"
               :disabled="
                 refreshing ||
@@ -283,12 +289,16 @@ function refreshText(item) {
             }"
           ></span>
         </div>
-        <p class="tt-caption">
+        <p v-if="hasVerifiableProblems" class="tt-caption">
           上次核验 {{ date(task.recipient.checked_at) }} · 最近成功同步
           {{ date(task.recipient.last_success_at) }}
         </p>
         <p v-if="task.refresh" class="tt-note" role="status">{{ refreshText(task.refresh) }}</p>
-        <p class="tt-note">
+        <p v-if="hasLuoguProblems" class="tt-note">
+          洛谷题目已发布，可查看站内题面或前往原题练习；暂不核验
+          AC，洛谷题目的完成进度不会自动更新，也无需绑定账号。
+        </p>
+        <p v-if="hasVerifiableProblems" class="tt-note">
           {{
             task.rule === 'historical_ac'
               ? '历史 AC 可计入；任务未开始时仍显示未开始。'
@@ -311,7 +321,7 @@ function refreshText(item) {
       <section class="tt-stack">
         <div class="tt-between">
           <h2>必做题单</h2>
-          <span class="tt-tag">全部 {{ task.problems.length }} 题通过</span>
+          <span class="tt-tag">共 {{ task.problems.length }} 题</span>
         </div>
         <TaskProblemList :problems="task.problems" :from="route.fullPath" />
       </section>
@@ -336,11 +346,19 @@ function refreshText(item) {
           </div>
           <div>
             <dt>完成规则</dt>
-            <dd>{{ ruleName(task.rule) }} · 全部必做题通过</dd>
+            <dd>
+              {{
+                hasVerifiableProblems
+                  ? ruleName(task.rule) + '（仅 Codeforces）'
+                  : '洛谷题目暂不核验 AC'
+              }}
+            </dd>
           </div>
           <div>
             <dt>核验来源</dt>
-            <dd>已同步 Codeforces 实际提交记录</dd>
+            <dd>
+              {{ hasVerifiableProblems ? '已同步 Codeforces 实际提交记录' : '本次不进行 AC 核验' }}
+            </dd>
           </div>
         </dl>
         <p v-if="task.original_due_at !== task.due_at" class="tt-caption">

@@ -12,9 +12,11 @@ export const completions = {
   not_started: '未开始',
   history_ac: '历史已做',
   pending: '尚无有效 AC 证据',
+  unverified: '暂不核验 AC',
 };
 export const verifications = {
   verified: '已核验',
+  unsupported: '该平台暂不核验 AC',
   pending: '待核验',
   pending_sync: '等待更新证据',
   coverage_missing: '历史覆盖不足，待同步',

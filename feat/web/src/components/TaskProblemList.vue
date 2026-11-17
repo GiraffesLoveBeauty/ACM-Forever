@@ -46,8 +46,11 @@ defineEmits(['move', 'remove']);
         <p v-if="!problem.content_available" class="tt-caption">
           站内题面尚未采集，可从可信原题入口练习。
         </p>
-        <p v-if="problem.supported === false" class="tt-caption">
-          该平台暂不支持自动核验，发布前需要更换。
+        <p v-if="problem.can_publish === false" class="tt-caption">
+          该平台暂不支持发布，请更换题目。
+        </p>
+        <p v-else-if="problem.supported === false" class="tt-caption">
+          可查看和练习，暂不核验 AC，完成进度不会自动更新。
         </p>
         <template v-if="problem.status">
           <div class="tt-row">
@@ -60,13 +63,18 @@ defineEmits(['move', 'remove']);
               · 提交 #{{ problem.evidence.external_submission_id }}</span
             >
           </p>
-          <p class="tt-caption">
+          <p v-if="problem.supported !== false" class="tt-caption">
             最后核验 {{ date(problem.checked_at) }} · 同步成功 {{ date(problem.sync_success_at) }}
           </p>
         </template>
       </div>
       <div class="tt-problem-actions">
-        <RouterLink class="btn" :to="problemLink(problem, from)">查看题目</RouterLink>
+        <RouterLink
+          v-if="problem.platform !== 'luogu' || problem.content_available"
+          class="btn"
+          :to="problemLink(problem, from)"
+          >查看题目</RouterLink
+        >
         <a
           v-if="problem.problem_url"
           class="btn"
