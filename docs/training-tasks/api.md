@@ -10,7 +10,9 @@
 
 `ACM_TRAINING_TASKS_ENABLED` 默认 `true`，未配置时个人中心显示训练任务入口，管理员可按正常流程发布。显式设置为 `false` 并重启服务后隐藏个人中心入口，发布返回 `feature_disabled`，历史查询及证据仍保留。管理员接口要求 admin/root 会话，成员接口使用会话 QQ 和 `account_epoch`，不能指定他人；所有变更要求 CSRF，写事务内重新核验操作者。响应使用 `Cache-Control: no-store`。
 
-首期仅支持 Codeforces 的 `period_ac`（默认周期内 AC）和 `historical_ac`（历史 AC 可计入）。其他平台可保存草稿，在证据能力验收前禁止发布。GET 仅读站内数据，刷新复用异步同步队列。
+训练任务支持发布 Codeforces 和洛谷公开 P 题目，可混合编排。Codeforces 继续使用 `period_ac`（默认周期内 AC）和 `historical_ac`（历史 AC 可计入）；洛谷本轮仅实现选题、发布、成员查看和练习，暂不核验 AC，不要求 OJ 绑定。其他平台可保存草稿，但禁止发布。GET 仅读站内数据，刷新复用异步同步队列，不因发布请求原站。
+
+`options.capabilities[].can_publish` 和题目 `can_publish` 表示可否发布；既有 `period_ac/historical_ac`、题目 `supported` 仍表示 AC 核验能力。洛谷返回 `can_publish:true`、`supported:false`，避免将允许发布误认为可核验。洛谷题号接受不区分大小写的 `P` 加正整数，规范化为大写、按平台和题号去重；拒绝 B/T/U 题号和任意链接。题名来自本地题库，未采集题面也可发布，并提供标准洛谷原题入口；站内已采集题面、样例和原生难度/标签继续复用题库能力。
 
 ## 草稿与冻结字段
 
@@ -61,9 +63,11 @@ PATCH 只更新提供的白名单字段；省略字段保留，修改后版本�
 | --- | --- |
 | `GET /api/me/training-tasks` | tab=active（默认）/upcoming/history/all 及分页；仅本人当前账号代际的任务，含本人 recipient 进度 |
 | `GET /api/me/training-tasks/{task_id}` | 本人详情、固定题单、逐题证据与 refresh 状态；他人或旧代际任务返回 404 |
-| `POST /api/me/training-tasks/{task_id}/refresh` | 正文必须为 `{}`；202 返回排队任务；重复运行任务复用，持久化 60 秒冷却，离开页面不取消后台同步 |
+| `POST /api/me/training-tasks/{task_id}/refresh` | 正文必须为 `{}`；含 CF 题目时 202 返回 CF 排队任务；重复运行任务复用，持久化 60 秒冷却，离开页面不取消后台同步；纯洛谷任务返回 409 `unsupported_verification`，不入队 |
 
-周期包含开始和截止两端，以 OJ 实际提交时间核验。开始前 AC 默认仅标历史已做，截止后 AC 标逾期；截止后才同步到的周期内 AC 可以回补。“历史 AC 可计入”也要等任务开始才计完成。核验、个人完成状态和任务时间阶段分别返回；无绑定、覆盖不足、同步暂停/失败及绑定变化不能被表述为确定未做。已确认的证据在同步失败后保留。
+洛谷逐题返回 `verification:unsupported`、`status:unverified` 和 `evidence:null`；接收人新增 `unsupported_problems` 表示暂不核验的题数，不计为绑定异常或等待同步，不从现有洛谷 AC/提交数据推断完成。题单总数仍包含洛谷题；本轮洛谷不会自动增加完成数，混合任务也不会因 CF 部分完成而判定整任务完成。混合任务的核验/成功同步时间只汇总 CF，页面明确提示进度限制。
+
+以下 AC 规则仅适用于 Codeforces。周期包含开始和截止两端，以 OJ 实际提交时间核验。开始前 AC 默认仅标历史已做，截止后 AC 标逾期；截止后才同步到的周期内 AC 可以回补。“历史 AC 可计入”也要等任务开始才计完成。核验、个人完成状态和任务时间阶段分别返回；无绑定、覆盖不足、同步暂停/失败及绑定变化不能被表述为确定未做。已确认的证据在同步失败后保留。
 
 新增证据必须同时匹配账号 epoch、冻结绑定和同步覆盖绑定。发布时未绑定者只可接纳第一次绑定代际，改绑不能继承他人成绩。队列不可用或失败不清空进度；服务重启后丢失的刷新任务显示 interrupted，可重新发起。详见 [progress.md（证据核验与同步）](progress.md)。
 

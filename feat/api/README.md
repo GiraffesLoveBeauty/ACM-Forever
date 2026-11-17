@@ -168,7 +168,7 @@ CF 的全平台题库接口可能只返回 Div.1 / Div.2 共用题的一份入�
 | `ACM_LUOGU_USER_SYNC_ENABLED` | 是否匿名同步洛谷公开 P 题 AC 题号，默认 `true`；设为 `false` 并重启可暂停 |
 | `ACM_LUOGU_COOKIE` / `ACM_LUOGU_CSRF_TOKEN` | 旧账号验证的可选兼容凭据；公开 AC 同步与题库采集不需要 |
 | `ACM_CF_API_KEY` / `ACM_CF_API_SECRET` | 需要签名访问 Codeforces API 时使用 |
-| `ACM_TRAINING_TASKS_ENABLED` | 管理员训练任务的新发放与个人中心入口开关，默认 `true`；显式设置 `false` 可暂停新发放并隐藏入口，历史查询保留，首期只开放 Codeforces 核验 |
+| `ACM_TRAINING_TASKS_ENABLED` | 管理员训练任务的新发放与个人中心入口开关，默认 `true`；显式设置 `false` 可暂停新发放并隐藏入口，历史查询保留，支持发布 CF 与洛谷 P 题，AC 核验仅开放 Codeforces |
 | `ACM_CF_DATA_TTL_HOURS` | CF 练习赛选题的成员数据有效期，默认 24 小时；整数 1–720 |
 | `ACM_CF_PROBLEM_TTL_HOURS` | CF 题目和比赛列表核实有效期，默认 6 小时；整数 1–720 |
 | `ACM_CJLU_USERNAME` / `ACM_CJLU_PASSWORD` | 需要访问校 OJ 时使用 |
@@ -193,7 +193,7 @@ WebUI API 以原 WebUI 路由为兼容基线。常用路由包括：
 - `/api/problems`、`/api/me/problems`：题库查询和收藏；各自的 `/<platform>/<problem_id>` GET 接口读取已采集题面与样例。列表的“打开题目”进入 `/problem.html` 站内详情页，支持公式与样例复制；仅有目录时显示等待采集提示。图片仍由原站 HTTPS 加载。
 - `GET /api/me/problems/tracker`：本地比赛进度；指定 `platform=codeforces` 或 `platform=atcoder` 时，比赛、题目和本人 AC / 尝试 / 收藏在读取阶段即限定到所选平台。不传平台时仍包含这两个平台；筛选选择比赛行、每行保留完整已收录题目，响应字段和分页语义不变，不请求原站。
 - `/api/training/*`、`/api/me/training/*`、`/api/contest/reviews`、`/api/me/contest/reviews`
-- `/api/admin/training-tasks/*`：动态身份选人、草稿、发放确认、冻结名单、延期/取消及成员进度；`/api/me/training-tasks/*`：本人任务、逐题证据与异步刷新。首期 CF 的周期内 / 历史 AC 规则，GET 只读本地证据；详见 [api.md（训练任务契约）](../../docs/training-tasks/api.md)
+- `/api/admin/training-tasks/*`：动态身份选人、草稿、发放确认、冻结名单、延期/取消及成员进度；`/api/me/training-tasks/*`：本人任务、逐题证据与异步刷新。支持发布 CF 与洛谷 P 题；CF 保留周期内 / 历史 AC 规则，洛谷暂不核验，GET 只读本地证据；详见 [api.md（训练任务契约）](../../docs/training-tasks/api.md)
 - `/api/stats`、`/api/leaderboard`、`/api/me/leaderboard`
 - `/api/admin/cf/*`：管理员近期 AC 汇总、全量历史候选查重与持久化刷新任务
 
