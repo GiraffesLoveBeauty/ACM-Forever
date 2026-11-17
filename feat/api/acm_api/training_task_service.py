@@ -10,7 +10,7 @@ from .account_lifecycle_service import web_account_available
 from .binding_service import LABELS, platform_spec
 from .cf_client import problem_url
 from .cf_practice import PracticeError, normalize_problem
-from .luogu_problem import attach_classifications
+from .luogu_problem import attach_classifications, canonical_problem_id as luogu_problem_id
 
 MAX_PROBLEMS = 50
 PREVIEW_TTL = 600
@@ -99,9 +99,7 @@ async def detail(db, task_id):
     task["problems"] = await rows(db, "SELECT * FROM training_task_problems WHERE task_id=? ORDER BY position", (task_id,))
     for problem in task["problems"]:
         problem["tags"] = json.loads(problem.pop("tags_json"))
-        problem["supported"] = problem["platform"] == "codeforces"
-        problem["can_publish"] = problem["platform"] in PUBLISH_PLATFORMS
-    await attach_classifications(db, task["problems"])
+    await attach_problem_state(db, task["problems"])
     task["recipient_count"] = (await one(db, "SELECT COUNT(*) AS n FROM training_task_recipients WHERE task_id=?", (task_id,)))["n"]
     task["audit"] = await rows(db, "SELECT action,reason,before_json,after_json,created_at FROM training_task_audit WHERE task_id=? ORDER BY id DESC LIMIT 50", (task_id,))
     return task
@@ -150,6 +148,37 @@ def canonical_problem(value):
     return {"platform": platform, "problem_id": pid, "problem_url": url}
 
 
+def can_publish(problem):
+    if problem["platform"] == "luogu":
+        try:
+            luogu_problem_id(problem["problem_id"])
+        except ValueError:
+            return False
+        return True
+    return problem["platform"] == "codeforces"
+
+
+async def attach_problem_state(db, items):
+    """Keep frozen task metadata; derive capability and current local statement availability."""
+    for item in items:
+        item["supported"] = item["platform"] == "codeforces"
+        item["can_publish"] = can_publish(item)
+    await attach_classifications(db, items)
+    luogu = [item for item in items if item["platform"] == "luogu" and item["can_publish"]]
+    if not luogu:
+        return
+    ids = dict.fromkeys(item["problem_id"] for item in luogu)
+    aliases = [alias for pid in ids for alias in (pid, "luogu_" + pid)]
+    # One local query for the entire list, including historical case/prefix aliases.
+    available = await rows(db, "SELECT problem_id FROM crawler_problems WHERE platform='luogu' "
+                           "AND problem_id COLLATE NOCASE IN (" + ",".join("?" for _ in aliases) + ") "
+                           "AND (COALESCE(statement_html,'')<>'' OR COALESCE(statement_text,'')<>'' "
+                           "OR COALESCE(length(statement_pdf),0)>0)", aliases)
+    available_ids = {luogu_problem_id(row["problem_id"]) for row in available}
+    for item in luogu:
+        item["content_available"] = item["problem_id"] in available_ids
+
+
 async def resolve_problems(db, inputs):
     if not isinstance(inputs, list) or len(inputs) > 500:
         raise TaskError("单次最多校验 500 条输入，去重后题单最多 50 题。")
@@ -163,24 +192,25 @@ async def resolve_problems(db, inputs):
                 continue
             seen.add(key)
             aliases = [item["problem_id"], "luogu_" + item["problem_id"] if item["platform"] == "luogu" else re.sub(r"^cf_", "", item["problem_id"])]
-            entry = await one(db, "SELECT problem_name,problem_rating,tags FROM recommendations WHERE platform=? AND problem_id IN (?,?) ORDER BY id LIMIT 1", (item["platform"], *aliases))
+            comparison = "problem_id COLLATE NOCASE" if item["platform"] == "luogu" else "problem_id"
+            entry = await one(db, "SELECT problem_name,problem_rating,tags FROM recommendations WHERE platform=? AND " + comparison + " IN (?,?) ORDER BY id LIMIT 1", (item["platform"], *aliases))
             if item["platform"] == "codeforces" and not entry:
                 norm = normalize_problem(item["problem_id"])
                 entry = await one(db, "SELECT name AS problem_name,rating AS problem_rating,tags FROM cf_problem_cache WHERE contest_id=? AND problem_index=?", (norm["contest_id"], norm["index"]))
-            content = await one(db, "SELECT 1 AS ok FROM crawler_problems WHERE platform=? AND problem_id IN (?,?) AND (statement_html IS NOT NULL OR statement_pdf IS NOT NULL) LIMIT 1", (item["platform"], *aliases))
+            content = None if item["platform"] == "luogu" else await one(db, "SELECT 1 AS ok FROM crawler_problems WHERE platform=? AND problem_id IN (?,?) AND (statement_html IS NOT NULL OR statement_pdf IS NOT NULL) LIMIT 1", (item["platform"], *aliases))
             tags = (entry or {}).get("tags") or ""
             try:
                 tags = json.loads(tags)
             except (ValueError, TypeError):
                 tags = str(tags).split(",")
             item.update(problem_name=(entry or {}).get("problem_name") or item["problem_id"], problem_rating=(entry or {}).get("problem_rating"),
-                        tags=[str(t) for t in tags if t] if isinstance(tags, list) else [], content_available=bool(content), supported=item["platform"] == "codeforces", can_publish=item["platform"] in PUBLISH_PLATFORMS)
+                        tags=[str(t) for t in tags if t] if isinstance(tags, list) else [], content_available=bool(content))
             items.append(item)
         except TaskError as error:
             errors.append({"index": index, "message": str(error)})
     if len(items) > MAX_PROBLEMS:
         raise TaskError(f"去重后的题单最多 {MAX_PROBLEMS} 题。")
-    await attach_classifications(db, items)
+    await attach_problem_state(db, items)
     return {"items": items, "errors": errors, "duplicates": duplicates}
 
 
@@ -251,7 +281,7 @@ def publishable(task):
         raise TaskError("请设置有效的开始与截止时间。")
     if not task["problems"]:
         raise TaskError("题单至少需要一道题。")
-    if any(p["platform"] not in PUBLISH_PLATFORMS for p in task["problems"]):
+    if any(not can_publish(p) for p in task["problems"]):
         raise TaskError("当前训练任务仅支持发布 Codeforces 和洛谷 P 题目，请更换其他平台题目。", "unsupported_capability")
 
 

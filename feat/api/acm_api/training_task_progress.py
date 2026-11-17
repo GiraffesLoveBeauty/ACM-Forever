@@ -212,7 +212,6 @@ async def problem_progress(db, recipient, *, now=None):
     for row in records:
         _, _, _, row["verification"] = live_state(row, now)
         row["supported"] = row["platform"] == "codeforces"
-        row["can_publish"] = row["platform"] in tasks.PUBLISH_PLATFORMS
         row["tags"] = json.loads(row.pop("tags_json"))
         historical, timely, late = [evidence(row.pop(key)) for key in ("history_json", "on_time_json", "late_json")]
         if not row["supported"]:
@@ -222,5 +221,5 @@ async def problem_progress(db, recipient, *, now=None):
         row["evidence"] = accepted or late or historical
         for key in ("cf_handle", "cf_binding_version", "binding_key", "binding_version", "bindings_json", "account_epoch", "closed", "due_at", "account_state", "current_epoch", "is_active", "sync_binding", "full_history_at"):
             row.pop(key, None)
-    await tasks.attach_classifications(db, records)
+    await tasks.attach_problem_state(db, records)
     return records

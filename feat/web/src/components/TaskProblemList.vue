@@ -47,7 +47,7 @@ defineEmits(['move', 'remove']);
           站内题面尚未采集，可从可信原题入口练习。
         </p>
         <p v-if="problem.can_publish === false" class="tt-caption">
-          该平台暂不支持发布，请更换题目。
+          该题目暂不支持发布，请使用 Codeforces 或洛谷 P 题号。
         </p>
         <p v-else-if="problem.supported === false" class="tt-caption">
           可查看和练习，暂不核验 AC，完成进度不会自动更新。

@@ -2,8 +2,13 @@ import { test, expect } from '@playwright/test';
 const password = 'Browser-fixture-only!2026';
 const local = (stamp) => new Date(stamp + 8 * 3600000).toISOString().slice(0, 16);
 async function login(context, qq) {
+  // Stop the previous account's page requests before replacing its session cookie.
+  await Promise.all(context.pages().map((page) => page.goto('about:blank')));
   const response = await context.request.post('/api/auth/login', { data: { qq_id: qq, password } });
   expect(response.status()).toBe(200);
+  const identity = await context.request.get('/api/auth/me');
+  expect(identity.status()).toBe(200);
+  expect((await identity.json()).qq_id).toBe(qq);
   return (await response.json()).csrf_token;
 }
 
@@ -357,7 +362,8 @@ test('Luogu training task publishes from the catalog and opens for an unbound me
   page,
   context,
 }, testInfo) => {
-  await login(context, '10000003');
+  const csrf = await login(context, '10000003');
+  await setBoundaryBinding(context, csrf, '');
   await page.goto('/admin.html?section=training&task_id=new&tab=edit');
   const title = '洛谷发布验收 ' + testInfo.project.name + ' ' + Date.now();
   await page.getByLabel('任务标题', { exact: true }).fill(title);
