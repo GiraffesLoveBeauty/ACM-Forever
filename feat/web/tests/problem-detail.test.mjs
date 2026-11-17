@@ -948,12 +948,26 @@ test('admin Luogu records use native filters and ignore secondary processing dee
     find(mounted.root, (n) => n.type === 'select' && textOf(n).includes(label))[0];
   const unrated = find(mounted.root, (n) => n.type === 'input' && n.props.type === 'checkbox')[0];
   unrated.props.onChange({ target: { checked: true } });
+  await find(
+    mounted.root,
+    (n) =>
+      n.type === 'button' &&
+      n.props['aria-haspopup'] === 'dialog' &&
+      textOf(n).includes('按算法筛选'),
+  )[0].props.onClick();
+  await settle();
   find(
     mounted.root,
-    (n) => n.type === 'select' && Object.hasOwn(n.props, 'multiple'),
-  )[0].props.onChange({ target: { selectedOptions: [{ value: '-2' }] } });
+    (n) =>
+      n.type === 'button' &&
+      Object.hasOwn(n.props, 'aria-pressed') &&
+      n.props['aria-label'] === '特殊题',
+  )[0].props.onClick();
   await settle();
-  await find(mounted.root, (n) => n.type === 'form')[0].props.onSubmit({ preventDefault() {} });
+  find(
+    mounted.root,
+    (n) => n.type === 'button' && textOf(n).trim() === '确认筛选',
+  )[0].props.onClick();
   await settle();
   const params = new URL(requests.at(-1), 'https://example.invalid').searchParams;
   assert.equal(params.get('native_difficulty'), '0');
