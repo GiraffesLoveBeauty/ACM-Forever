@@ -385,7 +385,6 @@ test('Luogu training task publishes from the catalog and opens for an unbound me
   await expect(page.locator('.tt-problem')).toHaveCount(2);
   await page.getByRole('button', { name: '下一步', exact: true }).click();
   await page.getByLabel('训练任务测试组', { exact: true }).check();
-  await page.getByLabel('使用洛谷周期内新增 AC', { exact: false }).check();
   await page.getByLabel('开始时间', { exact: true }).fill(local(Date.now() - 86400000));
   await page.getByRole('button', { name: '保存并预览发放', exact: true }).click();
   await page.getByLabel('我已确认以上排除原因，仍向有效成员发放。', { exact: true }).check();
@@ -431,7 +430,7 @@ test('Luogu training task publishes from the catalog and opens for an unbound me
   expect((await context.request.get('/api/admin/training-tasks')).status()).toBe(403);
 });
 
-test('Luogu uncertain AC is reviewed with a reason and visible to the member without fake AC time', async ({
+test('Luogu historical AC is already credited and visible to the member without a date review', async ({
   page,
   context,
 }, testInfo) => {
@@ -441,8 +440,8 @@ test('Luogu uncertain AC is reviewed with a reason and visible to the member wit
   const created = await context.request.post('/api/admin/training-tasks', {
     headers,
     data: {
-      title: '洛谷快照验收 ' + testInfo.project.name + ' ' + now,
-      description: '快照与人工核验边界',
+      title: '洛谷历史AC验收 ' + testInfo.project.name + ' ' + now,
+      description: '历史AC直接完成，实际AC时间未知',
       statuses: ['训练任务测试组'],
       starts_at: now - 86400,
       due_at: now + 86400,
@@ -472,22 +471,20 @@ test('Luogu uncertain AC is reviewed with a reason and visible to the member wit
     .getByRole('table', { name: '成员完成情况' })
     .getByRole('row')
     .filter({ hasText: '训练测试姓名甲' });
-  await expect(member).toContainText('时段待确认 1 题');
+  await expect(member).toContainText('1 / 1 题');
   await member.getByRole('button', { name: '逐题证据', exact: true }).click();
   await expect(
     page.locator('.tt-problems').getByText('AC 时间未知', { exact: false }),
   ).toBeVisible();
-  await page.getByLabel('公开审核原因', { exact: true }).fill('核对现场训练验收记录');
-  await page.getByRole('button', { name: '保存 P1001 核验结果', exact: true }).click();
-  await expect(member).toContainText('1 / 1 题');
-  await expect(page.getByText('管理员确认', { exact: false })).toBeVisible();
+  await expect(page.getByLabel('公开审核原因', { exact: true })).toHaveCount(0);
+  await expect(page.locator('.tt-problems')).toContainText('已完成 · 历史 AC');
   await page.screenshot({ path: testInfo.outputPath('luogu-admin-review.png'), fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
   await login(context, '10000118');
   await page.goto(`/training-tasks.html?task_id=${task.id}`);
-  await expect(page.getByText('核对现场训练验收记录', { exact: false })).toBeVisible();
+  await expect(page.locator('.tt-problems')).toContainText('已完成 · 历史 AC');
   await expect(
     page.locator('.tt-problems').getByText('AC 时间未知', { exact: false }),
   ).toBeVisible();
@@ -499,17 +496,5 @@ test('Luogu uncertain AC is reviewed with a reason and visible to the member wit
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
-  await login(context, '10000003');
-  await page.goto(`/admin.html?section=training&task_id=${task.id}&tab=progress`);
-  await member.getByRole('button', { name: '逐题证据', exact: true }).click();
-  await page.getByRole('combobox', { name: '处理方式', exact: true }).selectOption('clear');
-  await page.getByLabel('公开审核原因', { exact: true }).fill('撤销人工决定，恢复快照核验');
-  await page.getByRole('button', { name: '保存 P1001 核验结果', exact: true }).click();
-  await expect(member).toContainText('时段待确认 1 题');
-  await expect(page.getByText('管理员确认', { exact: false })).toHaveCount(0);
-  await login(context, '10000118');
-  await page.goto(`/training-tasks.html?task_id=${task.id}`);
-  await expect(page.locator('.tt-problems')).toContainText('已 AC，完成时段待确认');
-  await expect(page.getByText('核对现场训练验收记录', { exact: false })).toHaveCount(0);
-  await expect(page.getByText('实际 AC：', { exact: false })).toHaveCount(0);
+  await expect(page.getByText('已 AC，完成时段待确认', { exact: true })).toHaveCount(0);
 });

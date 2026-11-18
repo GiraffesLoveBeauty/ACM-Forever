@@ -91,7 +91,7 @@ async def _write_admins(db_path, root_ids, admins, identity):
         await db.close()
 
 
-def create_app(*, daily_problem_sync=False, member_sync=False):
+def create_app(*, daily_problem_sync=False, member_sync=False, training_sync=False):
     app = Quart(__name__, static_folder=None)
 
     @app.errorhandler(AccountLifecycleError)
@@ -230,6 +230,11 @@ def create_app(*, daily_problem_sync=False, member_sync=False):
                     now = int(__import__("time").time())
                     bootstrap_hash = hash_password(bootstrap_password)
                     await bootstrap_root(db, bootstrap_qq, bootstrap_hash, now)
+            if app.config["TRAINING_TASKS_ENABLED"]:
+                from .acm_api.training_task_progress import reconcile
+                await db.execute("BEGIN IMMEDIATE")
+                await reconcile(db, platform="luogu")
+                await db.commit()
         finally:
             await db.close()
         await sync_engine.start()
@@ -241,8 +246,8 @@ def create_app(*, daily_problem_sync=False, member_sync=False):
             task_manager.start_daily_problem_sync()
         if member_sync:
             task_manager.start_member_sync(member_sync_minutes * 60)
-            if app.config["TRAINING_TASKS_ENABLED"]:
-                task_manager.start_training_task_sync()
+        if app.config["TRAINING_TASKS_ENABLED"] and training_sync:
+            task_manager.start_training_task_sync()
 
     @app.after_serving
     async def close_service():
@@ -433,4 +438,5 @@ _LEGACY_ADMIN_PAGES = {"member.html": "members", "problem-bank.html": "problems"
 app = create_app(
     daily_problem_sync=_bool_env("ACM_DAILY_PROBLEM_SYNC_ENABLED", True),
     member_sync=_bool_env("ACM_MEMBER_SYNC_ENABLED", True),
+    training_sync=_bool_env("ACM_TRAINING_TASK_SYNC_ENABLED", True),
 )

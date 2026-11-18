@@ -206,7 +206,7 @@ response.raise_for_status()
 
 周期判断含开始/截止两端，使用 OJ 实际提交时间，UTC 保存、Asia/Shanghai 展示。晚同步到的周期内 AC 可回补；开始前默认仅标历史已做，截止后为逾期。只有全部必做题完成才算任务完成，历史 AC 规则也需等开始。绑定/账号代际变化不能继承新账号证据，注销保留匿名最小成绩和冻结分母。
 
-洛谷题目仍使用 `rule=period_ac|historical_ac`；周期模式发布需显式 `luogu_snapshot:true`，不勾选返回 `snapshot_policy_required`。`options.capabilities` 中洛谷 `period_ac=false`、`historical_ac=true`、`snapshot_ac=true`，其中 period_ac 仅表示精确提交时间能力。历史模式在截止前确认已 AC 即计入；周期新增模式要求开始后的有效未通过快照和截止前的已通过快照。开始前已 AC 标记 `history_ac`；缺少开始边界、截止后首见且缺少截止边界时标记 `timing_unknown`，不直接判逾期。详情新增 `is_ac/progress_version/review/can_review/can_reset_binding`，快照证据 `accepted_at:null`、`observed_at`、`last_not_accepted_at`、`evidence_type:snapshot`；管理员确认使用 `evidence_type:manual`。摘要新增 `uncertain_count/uncertain_problem_count/ac_problem_count`，成员进度新增 `uncertain_problems/ac_problems`，支持 `status=timing_unknown`。GET 不补造基线或访问外部平台。
+洛谷公开 P 题统一按历史 AC 核验，不限制完成时间，也不要求周期内重新通过。`luogu_snapshot` 为兼容旧客户端的弃用布尔字段，返回 false；capabilities 中 historical_ac=true、period_ac=false、snapshot_ac=false。洛谷历史 AC 计入完成题数，实际 AC 时间保持未知；证据使用 accepted_at:null、observed_at 和 evidence_type:historical_ac，不再产生时段待确认或逾期判断。GET 只读本地进度；发布、启动补算及成功同步会更新结果。绑定更正接口仅接受 reset_binding，旧时间审核请求返回 historical_ac_only。契约见 [api.md（训练任务历史 AC 核验）](training-tasks/api.md#洛谷历史-ac-核验与绑定更正)。
 
 审核正文为 `{problem_id,decision,reason,version,task_version}`：problem_id 是任务题目行 ID，version 是 progress_version；decision 为 `on_time/late/clear/reset_binding`，原因 1–500 字并对成员可见。`on_time/late` 仅接受当前任务绑定下已确认的 AC；`reset_binding` 仅用于绑定变化且尚未计入完成的题目，清除该题旧的待核验证据并建立当前 UID 的新起点，不转移已有成绩。证据或任务版本冲突返回 409；取消任务不能审核。原始快照保留，`clear` 撤销已有人工决定并按当前周期重算。同一有效账号代际内，改绑或解绑后仍可撤销，逐题 `can_clear_review` 与 `can_review` 分开表示能力；撤销保留原绑定锚点，不采纳新 UID 的成绩。无人工决定时返回 409/review_unavailable；注销或账号代际变化仍禁止撤销。
 

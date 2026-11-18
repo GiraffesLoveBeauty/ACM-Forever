@@ -33,31 +33,16 @@ def local_positive(now):
             "source": "local_luogu_ac_set", "last_checked_at": 0, "last_request_at": 0}
 
 
-def classify(snapshot, *, starts_at, due_at, rule, problem_id, review=None):
-    """Return (historical, on_time, late, timing_unknown) using the stored policy."""
+def classify(snapshot, *, starts_at=None, due_at=None, rule=None, problem_id, review=None):
+    """Luogu completion depends only on historical AC, never on task dates.
+
+    Legacy policy/review arguments remain accepted while stored evidence is
+    reclassified. An observation time is never exposed as a submission time.
+    """
     if not snapshot or not snapshot.get("first_seen_at"):
         return None, None, None, None
-    seen, absent = snapshot["first_seen_at"], snapshot.get("last_absent_at")
-    public_positive = snapshot.get("source") == "luogu_public_practice"
     proof = {"platform": "luogu", "problem_id": problem_id, "accepted_at": None,
-             "observed_at": seen, "last_not_accepted_at": absent,
-             "source": snapshot.get("source", "luogu_public_practice"), "evidence_type": "snapshot"}
-    if review:
-        manual = {**proof, "source": "admin_review", "evidence_type": "manual",
-                  "reviewed_at": review["reviewed_at"], "reason": review["reason"]}
-        if review["decision"] == "on_time":
-            return None, manual, None, None
-        if due_at == review.get("due_at", due_at):
-            return None, None, manual, None
-        # A late decision used an older deadline. Existence by the review time
-        # proves completion before an extended deadline; otherwise re-use the
-        # original observations instead of asserting it is still late.
-        if review["reviewed_at"] <= due_at:
-            return None, manual, None, None
-    if seen < starts_at:
-        return proof, None, None, None
-    if seen <= due_at and (rule == "historical_ac" or public_positive and absent is not None and starts_at <= absent <= seen):
-        return None, proof, None, None
-    if public_positive and seen > due_at and absent is not None and due_at <= absent <= seen:
-        return None, None, proof, None
-    return None, None, None, proof
+             "observed_at": snapshot["first_seen_at"],
+             "source": snapshot.get("source", "luogu_public_practice"),
+             "evidence_type": "historical_ac"}
+    return proof, None, None, None

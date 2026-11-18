@@ -193,7 +193,7 @@ class TrainingTaskTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(luogu['can_publish'])
         self.assertFalse(luogu['period_ac'])
         self.assertTrue(luogu['historical_ac'])
-        self.assertTrue(luogu['snapshot_ac'])
+        self.assertFalse(luogu['snapshot_ac'])
         response = await self.client.post('/api/admin/training-tasks/resolve-problems', headers=self.headers,
             json={'problems': [{'platform': 'luogu', 'problem_id': pid} for pid in ['p1001', 'P1001', 'P1002', 'B1001', 'T1', 'P0', 'https://www.luogu.com.cn/problem/P1001']]})
         result = await response.get_json()
@@ -219,7 +219,7 @@ class TrainingTaskTests(unittest.IsolatedAsyncioTestCase):
     async def test_luogu_task_is_visible_only_to_recipient_without_oj_binding(self):
         task = await self.create(luogu_snapshot=True, problems=[{'platform': 'luogu', 'problem_id': 'P1001'}])
         self.assertEqual((await self.publish(task)).status_code, 200)
-        # Preserve the pre-upgrade publication policy: old period tasks did not opt in.
+        # Old published period tasks now use historical Luogu AC without opting in.
         await self.sql("UPDATE training_tasks SET luogu_snapshot=0 WHERE id=?", (task['id'],))
         await self.sql("UPDATE training_task_recipients SET bindings_json='{}' WHERE task_id=?", (task['id'],))
         member = self.app.test_client()
@@ -227,14 +227,14 @@ class TrainingTaskTests(unittest.IsolatedAsyncioTestCase):
         headers = {'X-CSRF-Token': (await login.get_json())['csrf_token']}
         result = await (await member.get(f'/api/me/training-tasks/{task["id"]}')).get_json()
         problem = result['problems'][0]
-        self.assertEqual((problem['platform'], problem['problem_id'], problem['verification'], problem['status']), ('luogu', 'P1001', 'unsupported', 'unverified'))
+        self.assertEqual((problem['platform'], problem['problem_id'], problem['verification'], problem['status']), ('luogu', 'P1001', 'unbound', 'pending'))
         self.assertIsNone(problem['evidence'])
-        self.assertEqual((result['recipient']['completed_problems'], result['recipient']['binding_warnings'], result['recipient']['unsupported_problems']), (0, 0, 1))
+        self.assertEqual((result['recipient']['completed_problems'], result['recipient']['binding_warnings'], result['recipient']['unsupported_problems']), (0, 1, 0))
         listing = await (await member.get('/api/me/training-tasks?tab=all')).get_json()
         self.assertEqual([t['id'] for t in listing['items']], [task['id']])
         submitter = self.app.config['PLUGIN_CONFIG']['_account_sync_submitter'] = AsyncMock()
         response = await member.post(f'/api/me/training-tasks/{task["id"]}/refresh', headers=headers, json={})
-        self.assertEqual((response.status_code, (await response.get_json())['code']), (409, 'unsupported_verification'))
+        self.assertEqual((response.status_code, (await response.get_json())['code']), (409, 'binding_required'))
         submitter.assert_not_called()
         self.assertEqual((await member.get(f'/api/admin/training-tasks/{task["id"]}')).status_code, 403)
         await self.seed('32345678', status='其他组')

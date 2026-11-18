@@ -513,8 +513,8 @@ test('admin can add and publish Luogu P problems without an AC capability warnin
   assert(!textOf(mounted.root).includes('发布前需要更换'));
   await click('下一步');
   await set('动态实验组', ['动态实验组']);
-  assert(textOf(mounted.root).includes('洛谷无法证明已做题的重复 AC'));
-  await set('使用洛谷周期内新增 AC', true);
+  assert(textOf(mounted.root).includes('历史上已 AC 就计入完成'));
+  assert(!textOf(mounted.root).includes('使用洛谷周期内新增 AC'));
   await click('保存并预览');
   assert.equal(stored.problems.at(-1).platform, 'luogu');
   assert.equal(stored.problems.at(-1).problem_id, 'P1001');
@@ -524,7 +524,7 @@ test('admin can add and publish Luogu P problems without an AC capability warnin
   assert(textOf(mounted.root).includes('洛谷 P1001'));
 });
 
-test('publishing a period task with Luogu requires explicit snapshot consent', async () => {
+test('publishing Luogu uses historical AC without a snapshot checkbox', async () => {
   stored = {
     id: 17,
     version: 1,
@@ -546,18 +546,15 @@ test('publishing a period task with Luogu requires explicit snapshot consent', a
     [{ path: '/admin.html', component: Training }],
     '/admin.html?section=training&task_id=17&tab=edit&step=2',
   );
-  assert(textOf(mounted.root).includes('使用洛谷周期内新增 AC（快照核验）'));
-  await click('保存并预览');
-  assert(textOf(mounted.root).includes('请确认洛谷周期内新增 AC'));
-  assert(!calls.some((c) => c.url.endsWith('/audience-preview')));
-  await set('使用洛谷周期内新增 AC', true);
+  assert(!textOf(mounted.root).includes('使用洛谷周期内新增 AC'));
+  assert(textOf(mounted.root).includes('历史上已 AC 就计入完成'));
   await click('保存并预览');
   const save = calls.find((c) => c.options.method === 'PATCH');
-  assert.equal(save.body.luogu_snapshot, true);
+  assert(!Object.hasOwn(save.body, 'luogu_snapshot'));
   assert(calls.some((c) => c.url.endsWith('/audience-preview')));
 });
 
-test('admin keeps the review panel visible when a changed binding permits only clearing', async () => {
+test('historical Luogu credit has no date review panel after rebinding', async () => {
   stored = {
     id: 17,
     title: '改绑后撤销人工决定',
@@ -590,7 +587,7 @@ test('admin keeps the review panel visible when a changed binding permits only c
       verification: 'binding_changed',
       progress_version: 7,
       can_review: false,
-      can_clear_review: true,
+      can_clear_review: false,
       can_reset_binding: false,
       review: { decision: 'on_time', reason: '原人工决定' },
     },
@@ -601,10 +598,6 @@ test('admin keeps the review panel visible when a changed binding permits only c
     '/admin.html?section=training&task_id=17&tab=progress&recipient_id=1',
   );
   await settle();
-  assert(textOf(mounted.root).includes('P1001 · 管理员核验'));
-  const select = control('处理方式', 'select');
-  assert.deepEqual(
-    find(select, (n) => n.type === 'option').map((n) => n.props.value),
-    ['clear'],
-  );
+  assert(!textOf(mounted.root).includes('P1001 · 管理员核验'));
+  assert(textOf(mounted.root).includes('已完成 · 历史 AC'));
 });

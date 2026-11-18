@@ -63,7 +63,6 @@ const publishPlatforms = computed(() =>
 const batchPlaceholder = computed(() =>
   batchPlatform.value === 'luogu' ? 'P1001 P1002 P1003' : '706B 702C 1201C',
 );
-const formHasLuogu = computed(() => form.value.problems.some((p) => p.platform === 'luogu'));
 let revision = 0,
   loadedKey = '',
   editorInitialized = false,
@@ -310,8 +309,6 @@ function nextStep() {
       utcTime(form.value.starts_at) >= utcTime(form.value.due_at)
     )
       throw Error('请设置开始早于截止的周期，时区为 Asia/Shanghai。');
-    if (formHasLuogu.value && form.value.rule === 'period_ac' && !form.value.luogu_snapshot)
-      throw Error('请确认洛谷周期内新增 AC 的快照核验口径。');
     const data = await saveDraft();
     const checked = !dirty.value
       ? await request(
@@ -513,7 +510,7 @@ function lifecycle(kind) {
               <th>任务 / 身份范围</th>
               <th>周期（北京时间）</th>
               <th>阶段</th>
-              <th>按时完成 / 固定人数</th>
+              <th>达标 / 固定人数</th>
               <th>待核验</th>
               <th>操作</th>
             </tr>
@@ -710,25 +707,17 @@ function lifecycle(kind) {
           <label class="tt-check tt-rule"
             ><input v-model="form.rule" type="radio" value="period_ac" /><span
               >周期内 AC<small
-                >CF 按真实提交时间核验；洛谷需另行确认周期内新增 AC 的快照口径。</small
+                >此选项用于 CF；洛谷始终按历史 AC 核验，不要求周期内重新通过。</small
               ></span
             ></label
           ><label class="tt-check tt-rule"
             ><input v-model="form.rule" type="radio" value="historical_ac" /><span
-              >历史 AC 可计入<small>截止前实际 AC 可计入；尚未开始的任务仍显示未开始。</small></span
+              >历史 AC 可计入<small>CF 截止前的历史 AC 可计入；洛谷不限制完成时间。</small></span
             ></label
           >
-          <label v-if="formHasLuogu && form.rule === 'period_ac'" class="tt-check">
-            <input v-model="form.luogu_snapshot" type="checkbox" />
-            <span
-              >使用洛谷周期内新增 AC（快照核验）<small
-                >开始后确认未通过，截止前确认已通过才计入；快照时间不是实际 AC 时间。</small
-              ></span
-            >
-          </label>
           <p class="tt-note">
-            Codeforces 按真实提交时间核验；洛谷仅支持公开 P 题，按已通过集合核验。
-            洛谷无法证明已做题的重复 AC，截止后首次发现且缺少边界证据时，保留完成时段待确认。
+            Codeforces 按真实提交时间核验；洛谷仅支持公开 P 题，按已通过集合核验。 洛谷只要历史上已
+            AC 就计入完成，不检查开始或截止时间；实际 AC 时间保持未知。
           </p>
         </section>
       </template>
@@ -886,10 +875,11 @@ function lifecycle(kind) {
           <div
             v-for="(label, key) in {
               recipient_count: '固定接收人数',
-              on_time_count: '按时完成人数',
+              on_time_count: task.problems.every((p) => p.platform === 'luogu')
+                ? '已完成人数'
+                : '按时完成人数',
               late_count: '逾期完成人数',
               pending_count: '待核验人数',
-              uncertain_count: '完成时段待确认',
             }"
             :key="key"
             class="tt-stat"
@@ -902,8 +892,7 @@ function lifecycle(kind) {
           已完成 {{ progress.summary.completed_problem_count }} /
           {{ progress.summary.total_problem_count }} 道成员题目；账号异常
           {{ progress.summary.abnormal_count }}
-          人。时段待确认
-          {{ progress.summary.uncertain_problem_count || 0 }} 题，此类记录不直接判逾期。
+          人。洛谷按历史 AC 计入，不判断完成时段。
           任务需全部必做题完成，账号异常保留在固定分母中。完成与核验状态独立。
         </p>
         <form
@@ -927,10 +916,13 @@ function lifecycle(kind) {
           ><label
             >完成状态<select v-model="memberStatus">
               <option value="">全部状态</option>
-              <option value="on_time">按时完成</option>
-              <option value="late">逾期完成</option>
+              <option value="on_time">
+                {{ task.problems.every((p) => p.platform === 'luogu') ? '已完成' : '按时完成' }}
+              </option>
+              <option v-if="task.problems.some((p) => p.platform === 'codeforces')" value="late">
+                逾期完成
+              </option>
               <option value="incomplete">待完成</option>
-              <option value="timing_unknown">完成时段待确认</option>
               <option value="pending">待核验</option>
               <option value="abnormal">账号异常</option>
             </select></label
@@ -954,11 +946,7 @@ function lifecycle(kind) {
                 <td class="tt-member-progress-cell">
                   <div class="tt-member-progress-line">
                     <span class="tt-member-progress-count"
-                      >{{ m.completed_problems }} / {{ m.problem_count }} 题<span
-                        v-if="m.uncertain_problems"
-                      >
-                        · 时段待确认 {{ m.uncertain_problems }} 题</span
-                      ></span
+                      >{{ m.completed_problems }} / {{ m.problem_count }} 题</span
                     >
                     <div
                       class="tt-member-progress"
@@ -1005,9 +993,7 @@ function lifecycle(kind) {
           </div>
           <TaskProblemList :problems="recipient.problems" :from="route.fullPath" />
           <TaskProgressReview
-            v-for="problem in recipient.problems.filter(
-              (p) => p.can_review || p.can_clear_review || p.can_reset_binding,
-            )"
+            v-for="problem in recipient.problems.filter((p) => p.can_reset_binding)"
             :key="problem.id"
             :problem="problem"
             :task-version="task.version"
