@@ -86,7 +86,7 @@ CF 周期包含开始和截止两端，以 OJ 实际提交时间核验。开始�
 
 周期模式以开始后发起的有效未通过观察为下界，随后在截止前收到的有效已通过快照为按期完成依据。开始前已通过为 history_ac；首次采集晚于开始且题目已通过、或截止后首见而上次未通过观察早于截止，均为 timing_unknown。截止时或之后仍观察未通过、随后出现通过，按快照口径记逾期。请求跨越边界采用保守口径，采样时间不是实际 AC 时间。历史模式允许截止前已确认的过题，截止后首次发现同样不自动算按期。
 
-返回的快照 evidence 包含 `accepted_at:null`、`observed_at`、`last_not_accepted_at`、`source` 和 `evidence_type:snapshot`。逐题返回 `is_ac/progress_version/review/can_review/can_reset_binding`；时段不明的题计入 ac_problems 与 uncertain_problems，不计入 completed_problems。summary 增加 uncertain_count（人数）、uncertain_problem_count 与 ac_problem_count。已有本地 AC 可作为当前时点的阳性证据，不能倒填旧任务开始或截止前的证据；不允许从本地记录缺失推断未 AC。
+返回的快照 evidence 包含 `accepted_at:null`、`observed_at`、`last_not_accepted_at`、`source` 和 `evidence_type:snapshot`。逐题返回 `is_ac/progress_version/review/can_review/can_clear_review/can_reset_binding`；时段不明的题计入 ac_problems 与 uncertain_problems，不计入 completed_problems。summary 增加 uncertain_count（人数）、uncertain_problem_count 与 ac_problem_count。已有本地 AC 可作为当前时点的阳性证据，不能倒填旧任务开始或截止前的证据；不允许从本地记录缺失推断未 AC。
 
 新增 `POST /api/admin/training-tasks/{task_id}/progress/{recipient_id}/review`。正文必须包含：
 
@@ -94,7 +94,7 @@ CF 周期包含开始和截止两端，以 OJ 实际提交时间核验。开始�
 {"problem_id": 31, "version": 4, "task_version": 2, "decision": "on_time", "reason": "核对现场验收记录"}
 ```
 
-problem_id 是训练题目行 ID，version 对应逐题 progress_version；task_version 对应任务 version。decision 为 on_time、late、clear 或 reset_binding。前两者需要冻结绑定下已有 AC 证据，原因 1–500 字并公开给成员，保留原始快照和 progress_reviewed 审计；clear 撤销人工决定，恢复快照派生结果。证据版本变化返回 evidence_conflict，任务版本变化返回 version_conflict。人工证据的 accepted_at 仍为 null，evidence_type=manual。
+problem_id 是训练题目行 ID，version 对应逐题 progress_version；task_version 对应任务 version。decision 为 on_time、late、clear 或 reset_binding。前两者需要冻结绑定下已有 AC 证据，原因 1–500 字并公开给成员，保留原始快照和 progress_reviewed 审计；clear 撤销已有人工决定，按原快照恢复派生结果；即使随后改绑或解绑，同一有效账号代际内仍可由管理员撤销，`can_clear_review` 单独表示该能力。没有人工决定时返回 409/review_unavailable。撤销保留原快照、绑定锚点和审计，不采纳新绑定成绩；新增完成判断仍需绑定匹配。证据版本变化返回 evidence_conflict，任务版本变化返回 version_conflict。人工证据的 accepted_at 仍为 null，evidence_type=manual。
 
 reset_binding 仅允许管理员确认绑定变化、且本题尚未计入完成时使用。它清除该题的旧待核验证据，锚定当前 UID/绑定版本；之后需要重新同步，首次就已通过仍不能自动证明周期新增。已计入完成的旧绑定成绩保留。注销、账号代际变化、取消任务和非洛谷题不能使用该入口。
 
