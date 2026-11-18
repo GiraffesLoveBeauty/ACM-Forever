@@ -499,4 +499,17 @@ test('Luogu uncertain AC is reviewed with a reason and visible to the member wit
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
+  await login(context, '10000003');
+  await page.goto(`/admin.html?section=training&task_id=${task.id}&tab=progress`);
+  await member.getByRole('button', { name: '逐题证据', exact: true }).click();
+  await page.getByRole('combobox', { name: '处理方式', exact: true }).selectOption('clear');
+  await page.getByLabel('公开审核原因', { exact: true }).fill('撤销人工决定，恢复快照核验');
+  await page.getByRole('button', { name: '保存 P1001 核验结果', exact: true }).click();
+  await expect(member).toContainText('时段待确认 1 题');
+  await expect(page.getByText('管理员确认', { exact: false })).toHaveCount(0);
+  await login(context, '10000118');
+  await page.goto(`/training-tasks.html?task_id=${task.id}`);
+  await expect(page.locator('.tt-problems')).toContainText('已 AC，完成时段待确认');
+  await expect(page.getByText('核对现场训练验收记录', { exact: false })).toHaveCount(0);
+  await expect(page.getByText('实际 AC：', { exact: false })).toHaveCount(0);
 });

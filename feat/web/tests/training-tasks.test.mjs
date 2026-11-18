@@ -21,7 +21,7 @@ const keys = [
   'fetch',
 ];
 const originals = new Map(keys.map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
-let dom, mounted, calls, guard, stored, conflict, progressItems;
+let dom, mounted, calls, guard, stored, conflict, progressItems, progressProblems;
 const response = (data, status = 200) => new Response(JSON.stringify(data), { status });
 beforeEach(() => {
   dom = new JSDOM('<!doctype html><body></body>', {
@@ -39,6 +39,7 @@ beforeEach(() => {
   stored = null;
   conflict = false;
   progressItems = [];
+  progressProblems = [];
   dom.window.confirm = () => false;
   globalThis.fetch = async (url, options = {}) => {
     const body = options.body ? JSON.parse(options.body) : null;
@@ -120,7 +121,7 @@ beforeEach(() => {
     if (url.startsWith('/api/admin/training-tasks/17/progress/'))
       return response({
         recipient: progressItems.find((m) => m.id === Number(url.split('/').at(-1))),
-        problems: [],
+        problems: progressProblems,
       });
     if (url === '/api/admin/training-tasks/17')
       return response({ ...stored, phase: stored.state === 'draft' ? 'draft' : 'active' });
@@ -554,4 +555,56 @@ test('publishing a period task with Luogu requires explicit snapshot consent', a
   const save = calls.find((c) => c.options.method === 'PATCH');
   assert.equal(save.body.luogu_snapshot, true);
   assert(calls.some((c) => c.url.endsWith('/audience-preview')));
+});
+
+test('admin keeps the review panel visible when a changed binding permits only clearing', async () => {
+  stored = {
+    id: 17,
+    title: '改绑后撤销人工决定',
+    version: 2,
+    state: 'published',
+    statuses: ['动态实验组'],
+    audit: [],
+    problems: [],
+  };
+  progressItems = [
+    {
+      id: 1,
+      name: '合成成员',
+      status_snapshot: '动态实验组',
+      problem_count: 1,
+      completed_problems: 1,
+      account_status: 'active',
+    },
+  ];
+  progressProblems = [
+    {
+      id: 9,
+      platform: 'luogu',
+      problem_id: 'P1001',
+      problem_name: '合成题',
+      tags: [],
+      supported: true,
+      is_ac: true,
+      status: 'on_time',
+      verification: 'binding_changed',
+      progress_version: 7,
+      can_review: false,
+      can_clear_review: true,
+      can_reset_binding: false,
+      review: { decision: 'on_time', reason: '原人工决定' },
+    },
+  ];
+  mounted = await mount(
+    Root,
+    [{ path: '/admin.html', component: Training }],
+    '/admin.html?section=training&task_id=17&tab=progress&recipient_id=1',
+  );
+  await settle();
+  assert(textOf(mounted.root).includes('P1001 · 管理员核验'));
+  const select = control('处理方式', 'select');
+  assert.deepEqual(
+    find(select, (n) => n.type === 'option').map((n) => n.props.value),
+    ['clear'],
+  );
 });

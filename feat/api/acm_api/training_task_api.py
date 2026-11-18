@@ -295,7 +295,10 @@ async def review_progress(db, identity, task_id, recipient_id):
         if decision != "clear" and (now < task["starts_at"] or decision == "late" and now <= task["due_at"]):
             raise service.TaskError("任务未开始时不能确认完成，尚未截止时不能确认逾期。", "review_period_invalid", 409)
         snapshot = progress.evidence(row["snapshot_json"])
-        if not valid or not snapshot or not snapshot.get("first_seen_at"):
+        if decision == "clear":
+            if not row["review_json"]:
+                raise service.TaskError("当前题目没有可撤销的人工决定。", "review_unavailable", 409)
+        elif not valid or not snapshot or not snapshot.get("first_seen_at"):
             raise service.TaskError("请先取得当前任务绑定下的 AC 证据，再进行审核。", "ac_evidence_required", 409)
         review = None if decision == "clear" else {"decision": decision, "reason": reason.strip(), "reviewed_at": now, "due_at": task["due_at"]}
         row["review_json"] = service.dump(review) if review else None

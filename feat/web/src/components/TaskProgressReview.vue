@@ -5,9 +5,14 @@ const emit = defineEmits(['review']);
 const decision = ref('on_time');
 const reason = ref('');
 watch(
-  () => props.problem.can_reset_binding,
-  (reset) => {
-    decision.value = reset ? 'reset_binding' : 'on_time';
+  () =>
+    props.problem.can_review
+      ? 'on_time'
+      : props.problem.can_clear_review
+        ? 'clear'
+        : 'reset_binding',
+  (available) => {
+    decision.value = available;
     reason.value = '';
   },
   { immediate: true },
@@ -29,14 +34,12 @@ function submit() {
     <label class="tt-field"
       ><span>处理方式</span>
       <select v-model="decision" :disabled="disabled">
-        <template v-if="problem.can_reset_binding"
-          ><option value="reset_binding">使用当前绑定重新建立核验起点</option></template
-        >
-        <template v-else>
-          <option value="on_time">确认按期完成</option>
-          <option value="late">确认逾期完成</option>
-          <option v-if="problem.review" value="clear">撤销人工决定，恢复快照判定</option>
-        </template>
+        <option v-if="problem.can_review" value="on_time">确认按期完成</option>
+        <option v-if="problem.can_review" value="late">确认逾期完成</option>
+        <option v-if="problem.can_clear_review" value="clear">撤销人工决定，恢复快照判定</option>
+        <option v-if="problem.can_reset_binding" value="reset_binding">
+          使用当前绑定重新建立核验起点
+        </option>
       </select>
     </label>
     <label class="tt-field"

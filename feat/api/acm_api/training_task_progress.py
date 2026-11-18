@@ -305,6 +305,8 @@ async def problem_progress(db, recipient, *, now=None):
         row["is_ac"] = bool(row["evidence"])
         row["review"] = evidence(row.pop("review_json"))
         row["can_review"] = row["platform"] == "luogu" and row["is_ac"] and valid and row["state"] == "published"
+        row["can_clear_review"] = bool(row["platform"] == "luogu" and row["review"] and row["state"] == "published"
+            and not row["closed"] and row["account_state"] == "active" and row["account_epoch"] == row["current_epoch"])
         row["can_reset_binding"] = row["platform"] == "luogu" and row["state"] == "published" and row["verification"] == "binding_changed" and bool(row["luogu_id"]) and not (accepted or late)
         row.pop("snapshot_json", None)
         for key in ("cf_handle", "cf_binding_version", "luogu_id", "luogu_binding_version", "rule", "state", "starts_at", "binding_key", "binding_version", "bindings_json", "account_epoch", "closed", "due_at", "account_state", "current_epoch", "is_active", "sync_binding", "full_history_at"):

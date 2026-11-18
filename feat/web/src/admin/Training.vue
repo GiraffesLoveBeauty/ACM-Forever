@@ -1005,7 +1005,9 @@ function lifecycle(kind) {
           </div>
           <TaskProblemList :problems="recipient.problems" :from="route.fullPath" />
           <TaskProgressReview
-            v-for="problem in recipient.problems.filter((p) => p.can_review || p.can_reset_binding)"
+            v-for="problem in recipient.problems.filter(
+              (p) => p.can_review || p.can_clear_review || p.can_reset_binding,
+            )"
             :key="problem.id"
             :problem="problem"
             :task-version="task.version"

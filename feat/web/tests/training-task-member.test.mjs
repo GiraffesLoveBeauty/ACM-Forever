@@ -300,3 +300,73 @@ test('administrator review submits the server progress version and a public reas
     reason: '核对现场验收记录',
   });
 });
+
+test('a changed binding exposes only revocation and submits clear with the original evidence version', async () => {
+  let payload;
+  const ReviewPage = {
+    render: () =>
+      h(Review, {
+        problem: {
+          id: 9,
+          problem_id: 'P1001',
+          progress_version: 7,
+          can_review: false,
+          can_clear_review: true,
+          can_reset_binding: false,
+          review: { decision: 'on_time', reason: '原人工决定' },
+        },
+        taskVersion: 2,
+        onReview: (value) => {
+          payload = value;
+        },
+      }),
+  };
+  mounted = await mount(Root, [{ path: '/review.html', component: ReviewPage }], '/review.html');
+  const select = find(mounted.root, (n) => n.type === 'select')[0];
+  assert.deepEqual(
+    find(select, (n) => n.type === 'option').map((n) => n.props.value),
+    ['clear'],
+  );
+  find(mounted.root, (n) => n.type === 'textarea')[0].props['onUpdate:modelValue'](
+    '撤销错误人工决定',
+  );
+  await settle();
+  find(mounted.root, (n) => n.type === 'form')[0].props.onSubmit({ preventDefault() {} });
+  assert.deepEqual(payload, {
+    problem_id: 9,
+    version: 7,
+    task_version: 2,
+    decision: 'clear',
+    reason: '撤销错误人工决定',
+  });
+});
+test('a pending changed binding still offers an explicit reset without completion decisions', async () => {
+  let payload;
+  const ReviewPage = {
+    render: () =>
+      h(Review, {
+        problem: {
+          id: 9,
+          problem_id: 'P1001',
+          progress_version: 8,
+          can_review: false,
+          can_clear_review: false,
+          can_reset_binding: true,
+        },
+        taskVersion: 2,
+        onReview: (value) => {
+          payload = value;
+        },
+      }),
+  };
+  mounted = await mount(Root, [{ path: '/review.html', component: ReviewPage }], '/review.html');
+  const select = find(mounted.root, (n) => n.type === 'select')[0];
+  assert.deepEqual(
+    find(select, (n) => n.type === 'option').map((n) => n.props.value),
+    ['reset_binding'],
+  );
+  find(mounted.root, (n) => n.type === 'textarea')[0].props['onUpdate:modelValue']('核对新 UID');
+  await settle();
+  find(mounted.root, (n) => n.type === 'form')[0].props.onSubmit({ preventDefault() {} });
+  assert.equal(payload.decision, 'reset_binding');
+});

@@ -437,6 +437,8 @@ class WebTaskManager:
         async with isolated_connection(self.sync_engine.db) as db:
             candidates = await db.execute("""
                 SELECT r.qq_id,r.account_epoch,u.luogu_id,u.luogu_binding_version,
+                  s.last_status AS sync_status,COALESCE(s.last_attempt_at,0) AS last_attempt_at,
+                  COALESCE(s.consecutive_failures,0) AS consecutive_failures,
                   MIN(CASE WHEN t.starts_at>? THEN t.starts_at ELSE t.due_at END) AS priority,
                   MAX(CASE
                     WHEN t.starts_at>? THEN COALESCE(json_extract(x.snapshot_json,'$.last_checked_at'),0)=0
@@ -449,21 +451,30 @@ class WebTaskManager:
                 JOIN users u ON u.qq_id=r.qq_id AND u.account_state='active' AND u.account_epoch=r.account_epoch
                 JOIN web_accounts a ON a.qq_id=u.qq_id AND a.is_active=1
                 LEFT JOIN user_platform_sync_state s ON s.user_qq_id=u.qq_id AND s.platform='luogu'
+                LEFT JOIN binding_rate_limits b ON b.qq_id=u.qq_id AND b.platform='luogu' AND b.action='training_task_auto'
                 WHERE t.state='published' AND (t.rule='historical_ac' OR t.luogu_snapshot=1)
                   AND r.closed=0 AND t.starts_at<=?+300 AND t.due_at>=?-600
                   AND u.luogu_id IS NOT NULL AND TRIM(u.luogu_id)<>''
                   AND COALESCE(s.next_retry_at,0)<=? AND COALESCE(s.last_status,'')<>'paused'
+                  AND COALESCE(b.last_at,0)<=?-60
                   AND x.on_time_json IS NULL AND x.late_json IS NULL AND x.uncertain_json IS NULL AND x.history_json IS NULL
                   AND (COALESCE(x.binding_key,CASE WHEN COALESCE(json_extract(r.bindings_json,'$.luogu.account'),'')<>''
                        THEN json_extract(r.bindings_json,'$.luogu.account')||':'||json_extract(r.bindings_json,'$.luogu.version') END)
                        =u.luogu_id||':'||u.luogu_binding_version
                     OR (x.binding_key IS NULL AND COALESCE(json_extract(r.bindings_json,'$.luogu.account'),'')=''
                         AND u.luogu_binding_version=COALESCE(json_extract(r.bindings_json,'$.luogu.version'),0)+1))
-                GROUP BY r.qq_id,r.account_epoch HAVING needed=1 ORDER BY priority,r.qq_id LIMIT 20
-                """, (now, now, now, now, now, now, now))
+                GROUP BY r.qq_id,r.account_epoch HAVING needed=1 ORDER BY priority,COALESCE(b.last_at,0),r.qq_id
+                """, (now, now, now, now, now, now, now, now))
             candidates = [dict(r) for r in await candidates.fetchall()]
         submitted = 0
         for candidate in candidates:
+            # Limit dispatched work, so busy/cooling accounts cannot consume the batch.
+            if submitted >= 20:
+                break
+            if candidate["sync_status"] in {"failed", "error"}:
+                retry_delay = min(900, 60 * 2 ** min(4, max(0, candidate["consecutive_failures"] - 1)))
+                if candidate["last_attempt_at"] + retry_delay > now:
+                    continue
             qq = candidate["qq_id"]
             if any(t.get("qq_id") == qq and t.get("status") in {"queued", "running"} for t in self.tasks.values()):
                 continue
