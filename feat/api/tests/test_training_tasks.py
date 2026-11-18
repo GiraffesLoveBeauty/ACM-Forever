@@ -192,7 +192,8 @@ class TrainingTaskTests(unittest.IsolatedAsyncioTestCase):
         luogu = next(p for p in options['capabilities'] if p['platform'] == 'luogu')
         self.assertTrue(luogu['can_publish'])
         self.assertFalse(luogu['period_ac'])
-        self.assertFalse(luogu['historical_ac'])
+        self.assertTrue(luogu['historical_ac'])
+        self.assertTrue(luogu['snapshot_ac'])
         response = await self.client.post('/api/admin/training-tasks/resolve-problems', headers=self.headers,
             json={'problems': [{'platform': 'luogu', 'problem_id': pid} for pid in ['p1001', 'P1001', 'P1002', 'B1001', 'T1', 'P0', 'https://www.luogu.com.cn/problem/P1001']]})
         result = await response.get_json()
@@ -203,12 +204,12 @@ class TrainingTaskTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(first['content_available'])
         self.assertEqual(first['native_difficulty']['id'], 1)
         self.assertTrue(first['can_publish'])
-        self.assertFalse(first['supported'])
+        self.assertTrue(first['supported'])
         self.assertFalse(missing['content_available'])
         self.assertEqual(missing['problem_url'], 'https://www.luogu.com.cn/problem/P1002')
-        task = await self.create(problems=[{'platform': 'luogu', 'problem_id': 'p1001'}])
+        task = await self.create(luogu_snapshot=True, problems=[{'platform': 'luogu', 'problem_id': 'p1001'}])
         checked = await self.preview(task)
-        self.assertEqual((checked['recipient_count'], checked['unbound_count']), (1, 0))
+        self.assertEqual((checked['recipient_count'], checked['unbound_count']), (1, 1))
         first_publish, retry = await self.publish(task, checked), await self.publish(task, checked)
         self.assertEqual((first_publish.status_code, retry.status_code), (200, 200))
         published = await first_publish.get_json()
@@ -216,8 +217,11 @@ class TrainingTaskTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(await self.sql('SELECT * FROM training_task_recipients')), 1)
 
     async def test_luogu_task_is_visible_only_to_recipient_without_oj_binding(self):
-        task = await self.create(problems=[{'platform': 'luogu', 'problem_id': 'P1001'}])
+        task = await self.create(luogu_snapshot=True, problems=[{'platform': 'luogu', 'problem_id': 'P1001'}])
         self.assertEqual((await self.publish(task)).status_code, 200)
+        # Preserve the pre-upgrade publication policy: old period tasks did not opt in.
+        await self.sql("UPDATE training_tasks SET luogu_snapshot=0 WHERE id=?", (task['id'],))
+        await self.sql("UPDATE training_task_recipients SET bindings_json='{}' WHERE task_id=?", (task['id'],))
         member = self.app.test_client()
         login = await member.post('/api/auth/login', json={'qq_id': '22345678', 'password': 'Test-Password-123!'})
         headers = {'X-CSRF-Token': (await login.get_json())['csrf_token']}
@@ -240,7 +244,7 @@ class TrainingTaskTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_luogu_historical_catalog_alias_keeps_its_name(self):
         await self.sql("INSERT INTO recommendations(platform,problem_id,problem_name,problem_url,tags) VALUES('luogu','luogu_P1003','合成历史洛谷题','https://www.luogu.com.cn/problem/P1003','[]')")
-        task = await self.create(problems=[{'platform': 'luogu', 'problem_id': 'P1003'}])
+        task = await self.create(luogu_snapshot=True, problems=[{'platform': 'luogu', 'problem_id': 'P1003'}])
         self.assertEqual(task['problems'][0]['problem_name'], '合成历史洛谷题')
         self.assertEqual(task['problems'][0]['problem_id'], 'P1003')
 
@@ -263,18 +267,18 @@ class TrainingTaskTests(unittest.IsolatedAsyncioTestCase):
                                           json={'problems': inputs})
         self.assertEqual(response.status_code, 200)
         resolved = (await response.get_json())['items']
-        task = await self.create(problems=inputs)
+        task = await self.create(luogu_snapshot=True, problems=inputs)
         for items in (resolved, task['problems']):
             self.assertEqual([p['problem_id'] for p in items], [f'P{n}' for n in range(1001, 1007)])
             self.assertEqual([p['problem_name'] for p in items], [f'历史题名 {n}' for n in range(1001, 1007)])
             self.assertEqual([p['content_available'] for p in items], [True] * 5 + [False])
             self.assertTrue(all(p['can_publish'] for p in items))
-            self.assertTrue(all(not p['supported'] for p in items))
+            self.assertTrue(all(p['supported'] for p in items))
 
     async def test_legacy_non_p_drafts_are_rechecked_at_preview_and_publish(self):
         for pid in ['B1001', 'T1', 'U1', 'P0']:
             with self.subTest(problem_id=pid):
-                task = await self.create(problems=[{'platform': 'luogu', 'problem_id': 'P1001'}])
+                task = await self.create(luogu_snapshot=True, problems=[{'platform': 'luogu', 'problem_id': 'P1001'}])
                 checked = await self.preview(task)
                 # Simulate a persisted pre-upgrade draft, including an existing preview token.
                 await self.sql("UPDATE training_task_problems SET problem_id=? WHERE task_id=?", (pid, task['id']))
@@ -291,7 +295,7 @@ class TrainingTaskTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.sql("SELECT * FROM training_task_audit WHERE action='published'"), [])
 
     async def test_legacy_p_alias_is_still_publishable(self):
-        task = await self.create(problems=[{'platform': 'luogu', 'problem_id': 'P1001'}])
+        task = await self.create(luogu_snapshot=True, problems=[{'platform': 'luogu', 'problem_id': 'P1001'}])
         await self.sql("UPDATE training_task_problems SET problem_id='luogu_p1001' WHERE task_id=?", (task['id'],))
         checked = await self.preview(task)
         response = await self.publish(task, checked)
@@ -301,7 +305,7 @@ class TrainingTaskTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(problem['can_publish'])
 
     async def test_statement_availability_is_live_without_rewriting_frozen_task(self):
-        task = await self.create(problems=[{'platform': 'luogu', 'problem_id': pid} for pid in ['P1004', 'P1005']])
+        task = await self.create(luogu_snapshot=True, problems=[{'platform': 'luogu', 'problem_id': pid} for pid in ['P1004', 'P1005']])
         self.assertEqual([p['content_available'] for p in task['problems']], [False, False])
         # Collection before publication must already be reflected in the draft/preview.
         await self.add_luogu_statement('p1004')

@@ -373,7 +373,7 @@ test('Luogu training task publishes from the catalog and opens for an unbound me
   await expect(catalog).toBeVisible();
   await catalog.getByRole('button', { name: '添加', exact: true }).click();
   await expect(page.locator('.tt-problems')).toContainText('洛谷 P1001');
-  await expect(page.locator('.tt-problems')).toContainText('暂不核验 AC');
+  await expect(page.locator('.tt-problems')).not.toContainText('完成进度不会自动更新');
   await page.getByRole('combobox', { name: '批量输入平台', exact: true }).selectOption('luogu');
   await expect(page.getByLabel('标准题号', { exact: true })).toHaveAttribute(
     'placeholder',
@@ -385,11 +385,17 @@ test('Luogu training task publishes from the catalog and opens for an unbound me
   await expect(page.locator('.tt-problem')).toHaveCount(2);
   await page.getByRole('button', { name: '下一步', exact: true }).click();
   await page.getByLabel('训练任务测试组', { exact: true }).check();
+  await page.getByLabel('使用洛谷周期内新增 AC', { exact: false }).check();
   await page.getByLabel('开始时间', { exact: true }).fill(local(Date.now() - 86400000));
   await page.getByRole('button', { name: '保存并预览发放', exact: true }).click();
   await page.getByLabel('我已确认以上排除原因，仍向有效成员发放。', { exact: true }).check();
   await page.screenshot({ path: testInfo.outputPath('luogu-publish-preview.png'), fullPage: true });
+  const publication = page.waitForResponse(
+    (response) => response.url().endsWith('/publish') && response.request().method() === 'POST',
+  );
   await page.getByRole('button', { name: '确认发布任务', exact: true }).click();
+  expect((await publication).status()).toBe(200);
+  await expect(page).toHaveURL(/tab=overview/);
   await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
   const taskId = new URL(page.url()).searchParams.get('task_id');
   await login(context, '10000119');
@@ -397,12 +403,13 @@ test('Luogu training task publishes from the catalog and opens for an unbound me
   const card = page
     .locator('article')
     .filter({ has: page.getByRole('heading', { name: title, exact: true }) });
-  await expect(card).toContainText('含暂不核验 AC 的洛谷题目');
+  await expect(card).toContainText('有待核验的记录');
   await card.getByRole('link', { name: '查看任务 ↗', exact: true }).click();
   await expect(page.getByRole('button', { name: '绑定 Codeforces', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: '刷新进度', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '刷新进度', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '查看账号绑定', exact: true })).toBeVisible();
   await expect(page.locator('.tt-problem')).toHaveCount(2);
-  await expect(page.locator('.tt-problem').first()).toContainText('暂不核验 AC');
+  await expect(page.locator('.tt-problem').first()).toContainText('待绑定 洛谷');
   await expect(
     page.locator('.tt-problem').last().getByRole('link', { name: '原题 ↗', exact: true }),
   ).toHaveAttribute('href', 'https://www.luogu.com.cn/problem/P1002');
@@ -422,4 +429,87 @@ test('Luogu training task publishes from the catalog and opens for an unbound me
   await page.getByRole('link', { name: '← 返回训练任务', exact: true }).click();
   await expect(page).toHaveURL(new RegExp('training-tasks.html.*task_id=' + taskId));
   expect((await context.request.get('/api/admin/training-tasks')).status()).toBe(403);
+});
+
+test('Luogu uncertain AC is reviewed with a reason and visible to the member without fake AC time', async ({
+  page,
+  context,
+}, testInfo) => {
+  const csrf = await login(context, '10000003');
+  const headers = { 'X-CSRF-Token': csrf };
+  const now = Math.floor(Date.now() / 1000);
+  const created = await context.request.post('/api/admin/training-tasks', {
+    headers,
+    data: {
+      title: '洛谷快照验收 ' + testInfo.project.name + ' ' + now,
+      description: '快照与人工核验边界',
+      statuses: ['训练任务测试组'],
+      starts_at: now - 86400,
+      due_at: now + 86400,
+      rule: 'period_ac',
+      luogu_snapshot: true,
+      problems: [{ platform: 'luogu', problem_id: 'P1001' }],
+    },
+  });
+  expect(created.status()).toBe(201);
+  const task = await created.json();
+  const preview = await context.request.post(
+    `/api/admin/training-tasks/${task.id}/audience-preview`,
+    { headers, data: { version: task.version } },
+  );
+  expect(preview.status()).toBe(200);
+  const token = (await preview.json()).preview_token;
+  const published = await context.request.post(`/api/admin/training-tasks/${task.id}/publish`, {
+    headers: {
+      ...headers,
+      'Idempotency-Key': 'luogu-browser-' + testInfo.project.name + '-' + now,
+    },
+    data: { version: task.version, preview_token: token, confirm_exclusions: true },
+  });
+  expect(published.status()).toBe(200);
+  await page.goto(`/admin.html?section=training&task_id=${task.id}&tab=progress`);
+  const member = page
+    .getByRole('table', { name: '成员完成情况' })
+    .getByRole('row')
+    .filter({ hasText: '训练测试姓名甲' });
+  await expect(member).toContainText('时段待确认 1 题');
+  await member.getByRole('button', { name: '逐题证据', exact: true }).click();
+  await expect(
+    page.locator('.tt-problems').getByText('AC 时间未知', { exact: false }),
+  ).toBeVisible();
+  await page.getByLabel('公开审核原因', { exact: true }).fill('核对现场训练验收记录');
+  await page.getByRole('button', { name: '保存 P1001 核验结果', exact: true }).click();
+  await expect(member).toContainText('1 / 1 题');
+  await expect(page.getByText('管理员确认', { exact: false })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('luogu-admin-review.png'), fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  await login(context, '10000118');
+  await page.goto(`/training-tasks.html?task_id=${task.id}`);
+  await expect(page.getByText('核对现场训练验收记录', { exact: false })).toBeVisible();
+  await expect(
+    page.locator('.tt-problems').getByText('AC 时间未知', { exact: false }),
+  ).toBeVisible();
+  await expect(page.getByText('实际 AC：', { exact: false })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '保存 P1001 核验结果', exact: true })).toHaveCount(
+    0,
+  );
+  await page.screenshot({ path: testInfo.outputPath('luogu-member-evidence.png'), fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  await login(context, '10000003');
+  await page.goto(`/admin.html?section=training&task_id=${task.id}&tab=progress`);
+  await member.getByRole('button', { name: '逐题证据', exact: true }).click();
+  await page.getByRole('combobox', { name: '处理方式', exact: true }).selectOption('clear');
+  await page.getByLabel('公开审核原因', { exact: true }).fill('撤销人工决定，恢复快照核验');
+  await page.getByRole('button', { name: '保存 P1001 核验结果', exact: true }).click();
+  await expect(member).toContainText('时段待确认 1 题');
+  await expect(page.getByText('管理员确认', { exact: false })).toHaveCount(0);
+  await login(context, '10000118');
+  await page.goto(`/training-tasks.html?task_id=${task.id}`);
+  await expect(page.locator('.tt-problems')).toContainText('已 AC，完成时段待确认');
+  await expect(page.getByText('核对现场训练验收记录', { exact: false })).toHaveCount(0);
+  await expect(page.getByText('实际 AC：', { exact: false })).toHaveCount(0);
 });

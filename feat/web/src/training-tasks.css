@@ -121,7 +121,8 @@
 }
 .tt-tag.late,
 .tt-tag.draft,
-.tt-tag.history_ac {
+.tt-tag.history_ac,
+.tt-tag.timing_unknown {
   color: light-dark(#855518, #f0c179);
   background: light-dark(#f5ebd7, #493c28);
 }

@@ -23,10 +23,29 @@ const tab = computed(() =>
 );
 const page = computed(() => Math.max(1, Number(route.query.page) || 1));
 const hasVerifiableProblems = computed(() =>
-  task.value?.problems.some((p) => p.platform === 'codeforces'),
+  task.value?.problems.some((p) => p.supported !== false),
 );
-const hasLuoguProblems = computed(() => task.value?.problems.some((p) => p.platform === 'luogu'));
+const hasUnverifiedLuogu = computed(() =>
+  task.value?.problems.some((p) => p.platform === 'luogu' && p.supported === false),
+);
 const needsBinding = computed(() => task.value?.problems.some((p) => p.verification === 'unbound'));
+const hasLuogu = computed(() =>
+  task.value?.problems.some((p) => p.platform === 'luogu' && p.supported !== false),
+);
+const verificationSource = computed(
+  () =>
+    [
+      task.value?.problems.some((p) => p.platform === 'codeforces') && 'Codeforces 实际提交记录',
+      hasLuogu.value && '洛谷 AC 集合快照（实际 AC 时间未知）',
+    ]
+      .filter(Boolean)
+      .join('；') || '本次不进行 AC 核验',
+);
+const allUnbound = computed(() =>
+  task.value?.problems
+    .filter((p) => p.supported !== false)
+    .every((p) => p.verification === 'unbound'),
+);
 const base = '/me/training-tasks';
 let timer,
   revision = 0,
@@ -113,7 +132,11 @@ async function openBinding() {
   try {
     const profile = await request('/me/profile', {}, 'bindings');
     if (operation === revision) {
-      bindings.value = profile.bindings.filter((b) => ['cf', 'codeforces'].includes(b.platform));
+      bindings.value = profile.bindings.filter((b) =>
+        task.value.problems.some(
+          (p) => p.platform === (b.platform === 'cf' ? 'codeforces' : b.platform),
+        ),
+      );
       bindingOpen.value = true;
     }
   } catch (e) {
@@ -128,13 +151,18 @@ async function afterBinding() {
 }
 function refreshText(item) {
   if (!item) return '';
-  if (item.result?.codeforces < 0 || item.result?.error)
+  if (
+    item.result?.error ||
+    Object.values(item.result || {}).some((value) => typeof value === 'number' && value < 0)
+  )
     return '同步失败，已有进度保留，可稍后重试。';
   return (
     {
       queued: '同步请求已排队，正在等待执行…',
-      running: '正在同步 Codeforces 提交记录…',
-      completed: '同步已完成，进度按实际提交时间核验。',
+      running: hasLuogu.value ? '正在同步任务涉及平台的 AC 证据…' : '正在同步 Codeforces 提交记录…',
+      completed: hasLuogu.value
+        ? '同步已完成；洛谷按快照核验，完成时段不明的记录保留待确认。'
+        : '同步已完成，进度按实际提交时间核验。',
       failed: '同步失败，已有进度保留，可稍后重试。',
       cancelled: '同步任务已取消，可稍后重试。',
       interrupted: '同步中断，可重新刷新。',
@@ -210,7 +238,7 @@ function refreshText(item) {
             </div>
           </div>
           <p class="tt-caption">
-            {{ ruleName(item.rule) }} · {{ item.creator_name
+            {{ ruleName(item.rule, item.luogu_snapshot) }} · {{ item.creator_name
             }}<span v-if="item.recipient.pending"> · 有待核验的记录</span
             ><span v-if="item.recipient.unsupported_problems"> · 含暂不核验 AC 的洛谷题目</span>
           </p>
@@ -252,7 +280,9 @@ function refreshText(item) {
             <h2>我的题目进度</h2>
             <p class="tt-caption">
               按时 {{ task.recipient.on_time_problems }} 题 · 逾期
-              {{ task.recipient.late_problems }} 题 · {{ completions[task.recipient.completion] }}
+              {{ task.recipient.late_problems }} 题 · 时段待确认
+              {{ task.recipient.uncertain_problems || 0 }} 题 ·
+              {{ completions[task.recipient.completion] }}
             </p>
           </div>
           <div class="tt-row">
@@ -265,14 +295,14 @@ function refreshText(item) {
               :disabled="bindingBusy"
               @click="openBinding"
             >
-              绑定 Codeforces</button
+              {{ hasLuogu ? '查看账号绑定' : '绑定 Codeforces' }}</button
             ><button
               v-if="hasVerifiableProblems"
               class="btn"
               :disabled="
                 refreshing ||
                 task.state !== 'published' ||
-                needsBinding ||
+                allUnbound ||
                 ['queued', 'running'].includes(task.refresh?.status)
               "
               @click="refresh"
@@ -294,18 +324,27 @@ function refreshText(item) {
           {{ date(task.recipient.last_success_at) }}
         </p>
         <p v-if="task.refresh" class="tt-note" role="status">{{ refreshText(task.refresh) }}</p>
-        <p v-if="hasLuoguProblems" class="tt-note">
-          洛谷题目已发布，可查看站内题面或前往原题练习；暂不核验
+        <p v-if="hasUnverifiedLuogu" class="tt-note">
+          本任务的洛谷题目未启用快照核验，可查看站内题面或前往原题练习；暂不核验
           AC，洛谷题目的完成进度不会自动更新，也无需绑定账号。
         </p>
         <p v-if="hasVerifiableProblems" class="tt-note">
           {{
             task.rule === 'historical_ac'
               ? '历史 AC 可计入；任务未开始时仍显示未开始。'
-              : '仅周期内 AC 计入按时完成；开始前的历史 AC 单独标记。'
+              : '开始前的历史 AC 单独标记。'
           }}
-          截止后 AC 为逾期，以 OJ
-          实际提交时间为准。缺少证据时显示待核验，完成全部必做题才算完成整份任务。
+          <template v-if="hasLuogu">
+            洛谷仅支持公开 P
+            题：历史模式按已通过集合核验；周期模式需要开始后确认未通过、截止前确认已通过。
+            快照时间不是实际 AC 时间，无法核验已做题的重复
+            AC。截止后首次发现且缺少边界证据时，显示完成时段待确认，可联系管理员审核。
+          </template>
+          <template v-else>截止后 AC 为逾期，以 OJ 实际提交时间为准。</template>
+          完成全部必做题才算完成整份任务。
+        </p>
+        <p v-if="hasLuogu && needsBinding" class="tt-caption">
+          洛谷 UID 请联系管理员在成员资料中填写，填写后回到本任务刷新进度。
         </p>
       </section>
       <section v-if="bindingOpen" class="tt-panel tt-stack">
@@ -349,16 +388,14 @@ function refreshText(item) {
             <dd>
               {{
                 hasVerifiableProblems
-                  ? ruleName(task.rule) + '（仅 Codeforces）'
+                  ? ruleName(task.rule, task.luogu_snapshot) + ' · 全部必做题通过'
                   : '洛谷题目暂不核验 AC'
               }}
             </dd>
           </div>
           <div>
             <dt>核验来源</dt>
-            <dd>
-              {{ hasVerifiableProblems ? '已同步 Codeforces 实际提交记录' : '本次不进行 AC 核验' }}
-            </dd>
+            <dd>{{ verificationSource }}</dd>
           </div>
         </dl>
         <p v-if="task.original_due_at !== task.due_at" class="tt-caption">

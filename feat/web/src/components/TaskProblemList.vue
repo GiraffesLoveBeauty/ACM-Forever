@@ -54,12 +54,27 @@ defineEmits(['move', 'remove']);
         </p>
         <template v-if="problem.status">
           <div class="tt-row">
+            <span v-if="problem.is_ac" class="tt-tag on_time">已 AC</span>
             <span class="tt-tag" :class="problem.status">{{ completions[problem.status] }}</span
-            ><span class="tt-caption">{{ verifications[problem.verification] || '待核验' }}</span>
+            ><span class="tt-caption">{{
+              problem.verification === 'unbound'
+                ? '待绑定 ' + platformName(problem.platform)
+                : verifications[problem.verification] || '待核验'
+            }}</span>
           </div>
           <p v-if="problem.evidence" class="tt-caption">
-            实际 AC：{{ date(problem.evidence.accepted_at)
-            }}<span v-if="problem.evidence.external_submission_id">
+            <template v-if="problem.evidence.accepted_at"
+              >实际 AC：{{ date(problem.evidence.accepted_at) }}</template
+            >
+            <template v-else>
+              AC 时间未知 · 首次核验 {{ date(problem.evidence.observed_at) }}
+              <span v-if="problem.evidence.evidence_type === 'snapshot'"> · 洛谷快照核验</span>
+              <span v-if="problem.evidence.evidence_type === 'manual'">
+                · 管理员确认 {{ date(problem.evidence.reviewed_at) }}：{{
+                  problem.evidence.reason
+                }}</span
+              > </template
+            ><span v-if="problem.evidence.external_submission_id">
               · 提交 #{{ problem.evidence.external_submission_id }}</span
             >
           </p>

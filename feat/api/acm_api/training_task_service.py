@@ -16,8 +16,11 @@ MAX_PROBLEMS = 50
 PREVIEW_TTL = 600
 PUBLISH_PLATFORMS = {"codeforces", "luogu"}
 CAPABILITIES = [
-    {"platform": platform, "label": label, "can_publish": platform in PUBLISH_PLATFORMS, "period_ac": platform == "codeforces", "historical_ac": platform == "codeforces",
-     "reason": "实际提交时间、重复 AC 与完整历史覆盖" if platform == "codeforces" else "支持发布与查看题目，暂不核验 AC" if platform == "luogu" else "暂不支持发布"}
+    {"platform": platform, "label": label, "can_publish": platform in PUBLISH_PLATFORMS, "period_ac": platform == "codeforces",
+     "historical_ac": platform in {"codeforces", "luogu"}, "snapshot_ac": platform == "luogu",
+     "reason": "实际提交时间、重复 AC 与完整历史覆盖" if platform == "codeforces" else
+               "公开 P 题过题集合；支持历史 AC 或明确选择周期新增快照核验，不能证明重复 AC" if platform == "luogu" else
+               "尚未验证完整提交证据，不能发布"}
     for platform, label in LABELS.items()
 ]
 
@@ -88,6 +91,7 @@ async def get_task(db, task_id):
 
 def public_task(task):
     task["statuses"] = json.loads(task.pop("statuses_json"))
+    task["luogu_snapshot"] = bool(task["luogu_snapshot"])
     task["phase"] = phase(task)
     for field in ("preview_hash", "audience_hash", "preview_expires_at", "publish_key", "publish_version"):
         task.pop(field, None)
@@ -99,7 +103,7 @@ async def detail(db, task_id):
     task["problems"] = await rows(db, "SELECT * FROM training_task_problems WHERE task_id=? ORDER BY position", (task_id,))
     for problem in task["problems"]:
         problem["tags"] = json.loads(problem.pop("tags_json"))
-    await attach_problem_state(db, task["problems"])
+    await attach_problem_state(db, task["problems"], task)
     task["recipient_count"] = (await one(db, "SELECT COUNT(*) AS n FROM training_task_recipients WHERE task_id=?", (task_id,)))["n"]
     task["audit"] = await rows(db, "SELECT action,reason,before_json,after_json,created_at FROM training_task_audit WHERE task_id=? ORDER BY id DESC LIMIT 50", (task_id,))
     return task
@@ -139,9 +143,10 @@ def canonical_problem(value):
             raise TaskError("AtCoder 题号格式应类似 abc300_a。")
         url = f"https://atcoder.jp/contests/{pid.split('_')[0]}/tasks/{pid}"
     elif platform == "luogu":
-        pid = pid.upper()
-        if not re.fullmatch(r"P[1-9][0-9]{0,8}", pid):
-            raise TaskError("当前训练任务仅支持洛谷 P 题号，例如 P1001。")
+        try:
+            pid = luogu_problem_id(pid)
+        except ValueError:
+            raise TaskError("当前训练任务仅支持洛谷 P 题号，例如 P1001。") from None
         url = "https://www.luogu.com.cn/problem/" + pid
     elif not re.fullmatch(r"[A-Za-z0-9_-]{1,60}", pid):
         raise TaskError("标准题号格式错误。")
@@ -158,11 +163,18 @@ def can_publish(problem):
     return problem["platform"] == "codeforces"
 
 
-async def attach_problem_state(db, items):
+def supports_ac(problem, task=None):
+    if problem["platform"] == "codeforces":
+        return True
+    return problem["platform"] == "luogu" and (
+        task is None or task.get("rule") == "historical_ac" or bool(task.get("luogu_snapshot")))
+
+
+async def attach_problem_state(db, items, task=None):
     """Keep frozen task metadata; derive capability and current local statement availability."""
     for item in items:
-        item["supported"] = item["platform"] == "codeforces"
         item["can_publish"] = can_publish(item)
+        item["supported"] = item["can_publish"] and supports_ac(item, task)
     await attach_classifications(db, items)
     luogu = [item for item in items if item["platform"] == "luogu" and item["can_publish"]]
     if not luogu:
@@ -198,6 +210,8 @@ async def resolve_problems(db, inputs):
                 norm = normalize_problem(item["problem_id"])
                 entry = await one(db, "SELECT name AS problem_name,rating AS problem_rating,tags FROM cf_problem_cache WHERE contest_id=? AND problem_index=?", (norm["contest_id"], norm["index"]))
             content = None if item["platform"] == "luogu" else await one(db, "SELECT 1 AS ok FROM crawler_problems WHERE platform=? AND problem_id IN (?,?) AND (statement_html IS NOT NULL OR statement_pdf IS NOT NULL) LIMIT 1", (item["platform"], *aliases))
+            if not entry:
+                entry = await one(db, "SELECT problem_name,problem_rating,tags FROM crawler_problems WHERE platform=? AND " + comparison + " IN (?,?) LIMIT 1", (item["platform"], *aliases))
             tags = (entry or {}).get("tags") or ""
             try:
                 tags = json.loads(tags)
@@ -215,7 +229,7 @@ async def resolve_problems(db, inputs):
 
 
 async def save_draft(db, identity, data, task_id=None):
-    allowed = {"version", "title", "description", "statuses", "starts_at", "due_at", "rule", "problems"}
+    allowed = {"version", "title", "description", "statuses", "starts_at", "due_at", "rule", "luogu_snapshot", "problems"}
     if set(data) - allowed:
         raise TaskError("草稿中包含不能修改的字段。")
     old = await get_task(db, task_id) if task_id else None
@@ -236,6 +250,9 @@ async def save_draft(db, identity, data, task_id=None):
     rule = data.get("rule", "period_ac")
     if rule not in {"period_ac", "historical_ac"}:
         raise TaskError("完成规则无效。")
+    snapshot_policy = data.get("luogu_snapshot", False)
+    if type(snapshot_policy) is not bool:
+        raise TaskError("洛谷快照核验选项须为布尔值。")
     start, due = timestamp(data.get("starts_at")), timestamp(data.get("due_at"))
     if start and due and start >= due:
         raise TaskError("开始时间必须早于截止时间。")
@@ -243,13 +260,13 @@ async def save_draft(db, identity, data, task_id=None):
     if problems["errors"]:
         raise TaskError("题单包含无效题号，请逐项修正。", errors=problems["errors"])
     now = int(time.time())
-    values = (title.strip(), description.strip(), dump(statuses), rule, start, due, now)
+    values = (title.strip(), description.strip(), dump(statuses), rule, int(snapshot_policy), start, due, now)
     if old:
-        await db.execute("UPDATE training_tasks SET title=?,description=?,statuses_json=?,rule=?,starts_at=?,due_at=?,updated_at=?,version=version+1,preview_hash=NULL WHERE id=?", (*values, task_id))
+        await db.execute("UPDATE training_tasks SET title=?,description=?,statuses_json=?,rule=?,luogu_snapshot=?,starts_at=?,due_at=?,updated_at=?,version=version+1,preview_hash=NULL WHERE id=?", (*values, task_id))
         await db.execute("DELETE FROM training_task_problems WHERE task_id=?", (task_id,))
     else:
         actor = await one(db, "SELECT name FROM users WHERE qq_id=?", (identity.get("qq_id"),))
-        cursor = await db.execute("INSERT INTO training_tasks(title,description,statuses_json,rule,starts_at,due_at,updated_at,created_at,creator_qq_id,creator_name) VALUES(?,?,?,?,?,?,?,?,?,?)", (*values, now, identity.get("qq_id"), (actor or {}).get("name") or "管理员"))
+        cursor = await db.execute("INSERT INTO training_tasks(title,description,statuses_json,rule,luogu_snapshot,starts_at,due_at,updated_at,created_at,creator_qq_id,creator_name) VALUES(?,?,?,?,?,?,?,?,?,?,?)", (*values, now, identity.get("qq_id"), (actor or {}).get("name") or "管理员"))
         task_id = cursor.lastrowid
     await db.executemany("INSERT INTO training_task_problems(task_id,position,platform,problem_id,problem_name,problem_rating,tags_json,problem_url,content_available) VALUES(?,?,?,?,?,?,?,?,?)",
                          [(task_id, i + 1, p["platform"], p["problem_id"], p["problem_name"], p["problem_rating"], dump(p["tags"]), p["problem_url"], p["content_available"]) for i, p in enumerate(problems["items"])])
@@ -263,7 +280,7 @@ async def audience(db, task):
         raise TaskError("请至少选择一种成员身份。")
     members = await rows(db, "SELECT u.*,a.password_hash,a.is_active,a.must_change_password,a.temporary_password_expires_at,a.credential_version FROM users u LEFT JOIN web_accounts a ON a.qq_id=u.qq_id WHERE u.status IN (" + ",".join("?" for _ in statuses) + ") ORDER BY u.qq_id", statuses)
     result = []
-    platforms = {p["platform"] for p in task["problems"] if p["platform"] == "codeforces"}
+    platforms = {p["platform"] for p in task["problems"] if supports_ac(p, task)}
     for member in members:
         reason = "account_closed" if member["account_state"] != "active" else "no_web_account" if member["is_active"] is None else "account_disabled" if not member["is_active"] else "account_unavailable" if not web_account_available(member) else None
         bindings = {}
@@ -282,7 +299,9 @@ def publishable(task):
     if not task["problems"]:
         raise TaskError("题单至少需要一道题。")
     if any(not can_publish(p) for p in task["problems"]):
-        raise TaskError("当前训练任务仅支持发布 Codeforces 和洛谷 P 题目，请更换其他平台题目。", "unsupported_capability")
+        raise TaskError("题单存在当前不能可靠核验的平台或题型；洛谷目前仅支持公开 P 题。", "unsupported_capability")
+    if task["rule"] == "period_ac" and any(p["platform"] == "luogu" for p in task["problems"]) and not task["luogu_snapshot"]:
+        raise TaskError("洛谷无法取得可靠提交时间，请明确选择周期内新增 AC 的快照核验口径。", "snapshot_policy_required")
 
 
 async def preview(db, task_id, data):
@@ -319,7 +338,7 @@ async def publish(db, identity, task_id, data, key):
     await db.execute("INSERT INTO training_task_progress(recipient_id,problem_id) SELECT r.id,p.id FROM training_task_recipients r JOIN training_task_problems p ON p.task_id=r.task_id WHERE r.task_id=?", (task_id,))
     from .training_task_progress import reconcile
     await reconcile(db, task_id=task_id)
-    await audit(db, task_id, identity, "published", after={"recipients": len(selected), "problems": len(task["problems"]), "rule": task["rule"], "starts_at": task["starts_at"], "due_at": task["due_at"]})
+    await audit(db, task_id, identity, "published", after={"recipients": len(selected), "problems": len(task["problems"]), "rule": task["rule"], "starts_at": task["starts_at"], "due_at": task["due_at"], "luogu_snapshot": task["luogu_snapshot"]})
     return await detail(db, task_id)
 
 

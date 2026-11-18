@@ -1,5 +1,6 @@
 """Luogu public AC snapshots; unknown acceptance time is stored as zero, never now."""
 import re
+import time
 
 from .luogu_client import ORIGIN, luogu_get, page_context
 from .luogu_problem import canonical_problem_id as canonical_pid, classifications, load_taxonomy
@@ -58,6 +59,7 @@ async def sync_public_practice(session, user, db, config):
     from .binding_guard import BindingGuard
 
     account = uid(user["luogu_id"])
+    requested_at = time.time()
     raw = await luogu_get(
         session, ORIGIN + "/user/" + account + "/practice",
         interval=config.get("luogu_request_interval", 2.0),
@@ -65,6 +67,7 @@ async def sync_public_practice(session, user, db, config):
         timeout=30,
     )
     passed = practice_snapshot(raw, account)
+    observed_at = int(time.time())
     taxonomy = await load_taxonomy(db)
     async with db.execute("SELECT problem_id FROM submissions WHERE user_qq_id=? AND platform='luogu'", (user["qq_id"],)) as cursor:
         existing = set()
@@ -96,6 +99,9 @@ async def sync_public_practice(session, user, db, config):
             values,
         )
         added = max(0, cursor.rowcount)
+        from .training_task_progress import record_luogu_snapshot
+        await record_luogu_snapshot(writer, user, {item["pid"].casefold() for item in passed}, existing,
+                                    requested_at=requested_at, observed_at=observed_at)
         await writer.commit()
         return added
     except BaseException:

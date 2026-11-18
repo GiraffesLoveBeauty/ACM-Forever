@@ -2,6 +2,7 @@ CREATE TABLE IF NOT EXISTS training_tasks (
  id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
  state TEXT NOT NULL DEFAULT 'draft' CHECK(state IN ('draft','published','cancelled')),
  statuses_json TEXT NOT NULL DEFAULT '[]', rule TEXT NOT NULL DEFAULT 'period_ac' CHECK(rule IN ('period_ac','historical_ac')),
+ luogu_snapshot INTEGER NOT NULL DEFAULT 0 CHECK(luogu_snapshot IN (0,1)),
  starts_at INTEGER, due_at INTEGER, original_due_at INTEGER, version INTEGER NOT NULL DEFAULT 1,
  creator_qq_id TEXT, creator_name TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
  published_at INTEGER, cancelled_at INTEGER, cancel_reason TEXT,
@@ -29,7 +30,8 @@ CREATE TABLE IF NOT EXISTS training_task_progress (
  recipient_id INTEGER NOT NULL REFERENCES training_task_recipients(id) ON DELETE CASCADE,
  problem_id INTEGER NOT NULL REFERENCES training_task_problems(id) ON DELETE CASCADE,
  binding_key TEXT, binding_version INTEGER NOT NULL DEFAULT 0,
- history_json TEXT, on_time_json TEXT, late_json TEXT,
+ history_json TEXT, on_time_json TEXT, late_json TEXT, uncertain_json TEXT,
+ snapshot_json TEXT, review_json TEXT, evidence_version INTEGER NOT NULL DEFAULT 0,
  verification TEXT NOT NULL DEFAULT 'pending', checked_at INTEGER NOT NULL DEFAULT 0,
  sync_success_at INTEGER NOT NULL DEFAULT 0,
  PRIMARY KEY(recipient_id,problem_id)

@@ -21,7 +21,7 @@ const keys = [
   'fetch',
 ];
 const originals = new Map(keys.map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
-let dom, mounted, calls, guard, stored, conflict, progressItems;
+let dom, mounted, calls, guard, stored, conflict, progressItems, progressProblems;
 const response = (data, status = 200) => new Response(JSON.stringify(data), { status });
 beforeEach(() => {
   dom = new JSDOM('<!doctype html><body></body>', {
@@ -39,6 +39,7 @@ beforeEach(() => {
   stored = null;
   conflict = false;
   progressItems = [];
+  progressProblems = [];
   dom.window.confirm = () => false;
   globalThis.fetch = async (url, options = {}) => {
     const body = options.body ? JSON.parse(options.body) : null;
@@ -49,7 +50,14 @@ beforeEach(() => {
         statuses: ['动态实验组'],
         capabilities: [
           { platform: 'codeforces', label: 'Codeforces', can_publish: true },
-          { platform: 'luogu', label: '洛谷', can_publish: true },
+          {
+            platform: 'luogu',
+            label: '洛谷',
+            can_publish: true,
+            period_ac: false,
+            historical_ac: true,
+            snapshot_ac: true,
+          },
           { platform: 'atcoder', label: 'AtCoder', can_publish: false },
         ],
         max_problems: 50,
@@ -66,7 +74,7 @@ beforeEach(() => {
                 ? p.problem_id
                 : 'cf_' + p.problem_id,
           tags: [],
-          supported: p.platform !== 'luogu',
+          supported: true,
           can_publish: true,
         })),
         errors: [],
@@ -113,7 +121,7 @@ beforeEach(() => {
     if (url.startsWith('/api/admin/training-tasks/17/progress/'))
       return response({
         recipient: progressItems.find((m) => m.id === Number(url.split('/').at(-1))),
-        problems: [],
+        problems: progressProblems,
       });
     if (url === '/api/admin/training-tasks/17')
       return response({ ...stored, phase: stored.state === 'draft' ? 'draft' : 'active' });
@@ -501,11 +509,12 @@ test('admin can add and publish Luogu P problems without an AC capability warnin
   await set('标准题号', 'P1001', 'textarea');
   await click('校验并添加');
   assert(textOf(mounted.root).includes('洛谷 P1001'));
-  assert(textOf(mounted.root).includes('暂不核验 AC'));
+  assert(!textOf(mounted.root).includes('完成进度不会自动更新'));
   assert(!textOf(mounted.root).includes('发布前需要更换'));
   await click('下一步');
   await set('动态实验组', ['动态实验组']);
-  assert(textOf(mounted.root).includes('以上 AC 规则仅用于 Codeforces'));
+  assert(textOf(mounted.root).includes('洛谷无法证明已做题的重复 AC'));
+  await set('使用洛谷周期内新增 AC', true);
   await click('保存并预览');
   assert.equal(stored.problems.at(-1).platform, 'luogu');
   assert.equal(stored.problems.at(-1).problem_id, 'P1001');
@@ -513,4 +522,89 @@ test('admin can add and publish Luogu P problems without an AC capability warnin
   await click('确认发布');
   assert(calls.some((call) => call.url.endsWith('/publish')));
   assert(textOf(mounted.root).includes('洛谷 P1001'));
+});
+
+test('publishing a period task with Luogu requires explicit snapshot consent', async () => {
+  stored = {
+    id: 17,
+    version: 1,
+    state: 'draft',
+    title: '洛谷周训练',
+    description: '',
+    statuses: ['动态实验组'],
+    starts_at: 1700000000,
+    due_at: 1900000000,
+    rule: 'period_ac',
+    luogu_snapshot: false,
+    problems: [
+      { platform: 'luogu', problem_id: 'P1001', problem_name: '洛谷合成题', supported: true },
+    ],
+    audit: [],
+  };
+  mounted = await mount(
+    Root,
+    [{ path: '/admin.html', component: Training }],
+    '/admin.html?section=training&task_id=17&tab=edit&step=2',
+  );
+  assert(textOf(mounted.root).includes('使用洛谷周期内新增 AC（快照核验）'));
+  await click('保存并预览');
+  assert(textOf(mounted.root).includes('请确认洛谷周期内新增 AC'));
+  assert(!calls.some((c) => c.url.endsWith('/audience-preview')));
+  await set('使用洛谷周期内新增 AC', true);
+  await click('保存并预览');
+  const save = calls.find((c) => c.options.method === 'PATCH');
+  assert.equal(save.body.luogu_snapshot, true);
+  assert(calls.some((c) => c.url.endsWith('/audience-preview')));
+});
+
+test('admin keeps the review panel visible when a changed binding permits only clearing', async () => {
+  stored = {
+    id: 17,
+    title: '改绑后撤销人工决定',
+    version: 2,
+    state: 'published',
+    statuses: ['动态实验组'],
+    audit: [],
+    problems: [],
+  };
+  progressItems = [
+    {
+      id: 1,
+      name: '合成成员',
+      status_snapshot: '动态实验组',
+      problem_count: 1,
+      completed_problems: 1,
+      account_status: 'active',
+    },
+  ];
+  progressProblems = [
+    {
+      id: 9,
+      platform: 'luogu',
+      problem_id: 'P1001',
+      problem_name: '合成题',
+      tags: [],
+      supported: true,
+      is_ac: true,
+      status: 'on_time',
+      verification: 'binding_changed',
+      progress_version: 7,
+      can_review: false,
+      can_clear_review: true,
+      can_reset_binding: false,
+      review: { decision: 'on_time', reason: '原人工决定' },
+    },
+  ];
+  mounted = await mount(
+    Root,
+    [{ path: '/admin.html', component: Training }],
+    '/admin.html?section=training&task_id=17&tab=progress&recipient_id=1',
+  );
+  await settle();
+  assert(textOf(mounted.root).includes('P1001 · 管理员核验'));
+  const select = control('处理方式', 'select');
+  assert.deepEqual(
+    find(select, (n) => n.type === 'option').map((n) => n.props.value),
+    ['clear'],
+  );
 });

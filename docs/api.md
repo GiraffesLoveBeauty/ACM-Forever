@@ -183,7 +183,7 @@ response.raise_for_status()
 
 此模块对应 #118，管理员从 `/admin.html?section=training` 发放固定题单，成员从 `/training-tasks.html` 查看本人任务。原今日训练、自主选题及 Bot / 移动端随机挑战接口继续保留。业务身份使用动态 `users.status`，与 Web 管理权限独立。
 
-`ACM_TRAINING_TASKS_ENABLED` 默认 `false`，控制新发放与个人中心入口；关闭后历史任务及证据仍可查询。首期仅支持 Codeforces 的周期内 AC / 历史 AC 两规则，其他平台可存草稿，不能发布。
+`ACM_TRAINING_TASKS_ENABLED` 默认 `true`，控制新发放与个人中心入口；关闭后历史任务及证据仍可查询。Codeforces 按真实提交时间核验。洛谷公开 P 题支持历史 AC 与明确选择的周期新增快照核验；其他平台可存草稿，不能发布。
 
 | 方法与路径 | 权限 / 契约 |
 | --- | --- |
@@ -197,6 +197,7 @@ response.raise_for_status()
 | `POST /api/admin/training-tasks/<id>/cancel` | admin/root + CSRF；version/reason，保留题单、证据与审计 |
 | `GET /api/admin/training-tasks/<id>/progress` | admin/root；identity/status/search 和分页；固定分母、人数完成率、题目进度、待核验与异常分开 |
 | `GET /api/admin/training-tasks/<id>/progress/<recipient_id>` | admin/root；接收人快照与逐题最小证据 |
+| `POST /api/admin/training-tasks/<id>/progress/<recipient_id>/review` | admin/root + CSRF；洛谷逐题审核，需进度版本、任务版本与公开原因，保留审计 |
 | `GET /api/me/training-tasks` | 当前会话本人；tab=active/upcoming/history/all 及分页，按账号 epoch 隔离 |
 | `GET /api/me/training-tasks/<id>` | 当前会话本人；固定题单、核验、覆盖和刷新队列；他人任务返回 404 |
 | `POST /api/me/training-tasks/<id>/refresh` | 当前会话本人 + CSRF，正文 `{}`；异步队列，202，运行任务去重和持久化 60 秒冷却 |
@@ -204,6 +205,10 @@ response.raise_for_status()
 分页默认 20、上限 100。所有 GET 仅读站内证据，不请求外部 OJ；响应 no-store。发布事务重新核对版本、预览有效期与名单指纹，变化返回 409；冻结身份、账号代际、绑定、题单、周期及规则，身份变动不会补发或撤回。有效未绑定成员可以接收，未开户/停用/注销/临时凭据过期成员列入排除清单。
 
 周期判断含开始/截止两端，使用 OJ 实际提交时间，UTC 保存、Asia/Shanghai 展示。晚同步到的周期内 AC 可回补；开始前默认仅标历史已做，截止后为逾期。只有全部必做题完成才算任务完成，历史 AC 规则也需等开始。绑定/账号代际变化不能继承新账号证据，注销保留匿名最小成绩和冻结分母。
+
+洛谷题目仍使用 `rule=period_ac|historical_ac`；周期模式发布需显式 `luogu_snapshot:true`，不勾选返回 `snapshot_policy_required`。`options.capabilities` 中洛谷 `period_ac=false`、`historical_ac=true`、`snapshot_ac=true`，其中 period_ac 仅表示精确提交时间能力。历史模式在截止前确认已 AC 即计入；周期新增模式要求开始后的有效未通过快照和截止前的已通过快照。开始前已 AC 标记 `history_ac`；缺少开始边界、截止后首见且缺少截止边界时标记 `timing_unknown`，不直接判逾期。详情新增 `is_ac/progress_version/review/can_review/can_reset_binding`，快照证据 `accepted_at:null`、`observed_at`、`last_not_accepted_at`、`evidence_type:snapshot`；管理员确认使用 `evidence_type:manual`。摘要新增 `uncertain_count/uncertain_problem_count/ac_problem_count`，成员进度新增 `uncertain_problems/ac_problems`，支持 `status=timing_unknown`。GET 不补造基线或访问外部平台。
+
+审核正文为 `{problem_id,decision,reason,version,task_version}`：problem_id 是任务题目行 ID，version 是 progress_version；decision 为 `on_time/late/clear/reset_binding`，原因 1–500 字并对成员可见。`on_time/late` 仅接受当前任务绑定下已确认的 AC；`reset_binding` 仅用于绑定变化且尚未计入完成的题目，清除该题旧的待核验证据并建立当前 UID 的新起点，不转移已有成绩。证据或任务版本冲突返回 409；取消任务不能审核。原始快照保留，`clear` 撤销已有人工决定并按当前周期重算。同一有效账号代际内，改绑或解绑后仍可撤销，逐题 `can_clear_review` 与 `can_review` 分开表示能力；撤销保留原绑定锚点，不采纳新 UID 的成绩。无人工决定时返回 409/review_unavailable；注销或账号代际变化仍禁止撤销。
 
 刷新失败保留已知进度；无绑定、覆盖不足、暂停或失败分别显示待核验原因；重启丢失队列显示 interrupted。业务错误包含 code/message/request_id，常见 409 version_conflict/audience_changed/immutable_task、429 refresh_rate_limited（retry_after）、503 feature_disabled/sync_unavailable。完整字段、幂等、错误及生命周期契约见 [api.md（训练任务存储与发布契约）](training-tasks/api.md)，实测与发布回退见 [acceptance.md（训练任务联调与验收）](training-tasks/acceptance.md)。
 
@@ -430,7 +435,7 @@ print(task["status"], task["progress"], task["result"])
 
 用户平台同步任务的 `result` 按平台返回新增记录数；`-5` 表示该平台同步已暂停，后台显示“已暂停，保留已有记录”。暂停属于跳过操作，不算抓取失败，也不会推进该平台的同步游标。洛谷默认匿名同步公开练习页中 P 开头的 AC 题号集合，其他题号跳过且不阻断 P 题同步，不依赖 Cookie；可用 `ACM_LUOGU_USER_SYNC_ENABLED=false` 显式暂停。管理员在成员资料 `luogu_id` 字段手填数字 UID，沿用绑定确认与版本参数，保存后排队同步对应平台。
 
-洛谷新 AC 若没有可靠时间，沿用非空数据库时间列中的 `submit_time=0` 表示未知，对应已 AC 题目 `ac_at=0`；记录仍属于已 AC，不得以时间真假判断是否通过。保留已有真实时间，不产生虚构的 `submission_attempts`。无时间记录计入累计过题数，排除日期排行榜和活跃天数，不作训练任务按期完成证据。洛谷的 `days` 参数不筛掉未知时间记录：每次读取公开已通过列表，仅幂等补入 P 题，保留已有非 P 历史记录；同步状态时间是采集时间。历史 `luogu_` 前缀和大小写别名在成员题库聚合、原生难度/标签筛选、题号搜索、详情与收藏中按同一 P 题识别，读取归一化不改写原始记录或 AC 时间。访问受限、解析异常或账号不符时返回失败，不推进成功游标、不删除原记录。配置与验收方式见 [README.md（洛谷公开 AC 记录同步）](../feat/api/README.md#洛谷公开-ac-记录同步)。
+洛谷新 AC 若没有可靠时间，沿用非空数据库时间列中的 `submit_time=0` 表示未知，对应已 AC 题目 `ac_at=0`；记录仍属于已 AC，不得以时间真假判断是否通过。保留已有真实时间，不产生虚构的 `submission_attempts`。无时间记录计入累计过题数，排除日期排行榜和活跃天数，该记录本身不作训练任务按期完成证据；训练任务另外保存经绑定版本校验的快照差分或管理员审核，详见上文训练任务契约。洛谷的 `days` 参数不筛掉未知时间记录：每次读取公开已通过列表，仅幂等补入 P 题，保留已有非 P 历史记录；同步状态时间是采集时间。历史 `luogu_` 前缀和大小写别名在成员题库聚合、原生难度/标签筛选、题号搜索、详情与收藏中按同一 P 题识别，读取归一化不改写原始记录或 AC 时间。访问受限、解析异常或账号不符时返回失败，不推进成功游标、不删除原记录。配置与验收方式见 [README.md（洛谷公开 AC 记录同步）](../feat/api/README.md#洛谷公开-ac-记录同步)。
 
 取消仍使用 `POST /api/tasks/<任务ID>/cancel`，要求同样的管理员 Cookie 与 CSRF。任务记录保存在进程内，服务重启后清空；已入库的数据保留，再次提交时可跳过成功题目。
 
@@ -440,7 +445,7 @@ print(task["status"], task["progress"], task["result"])
 
 ### 洛谷公开 P 题库
 
-洛谷复用 `POST /api/admin/problems/sync` 和 `GET /api/tasks`，沿用管理员鉴权、首次改密限制、CSRF、202/409 与取消机制。本节参数独立于上文的 AtCoder/CF 比赛参数。Web 前端在成员题库和管理员题库展示原生分类，在采集页提供下述三种范围；main 已有的公开 P 题 AC 同步保持独立，训练任务时间核验继续使用其既有证据契约。
+洛谷复用 `POST /api/admin/problems/sync` 和 `GET /api/tasks`，沿用管理员鉴权、首次改密限制、CSRF、202/409 与取消机制。本节参数独立于上文的 AtCoder/CF 比赛参数。Web 前端在成员题库和管理员题库展示原生分类，在采集页提供下述三种范围；main 已有的公开 P 题 AC 同步保持独立，训练任务使用独立的快照证据契约，始终保留真实 AC 时间未知的事实。
 
 | 参数 | 洛谷规则 |
 | --- | --- |
