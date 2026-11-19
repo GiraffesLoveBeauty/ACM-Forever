@@ -46,6 +46,8 @@ def live_state(row, now):
         verification = "binding_changed"
     elif row["sync_status"] == "paused":
         verification = "sync_paused"
+    elif row["sync_status"] == "waiting" and not conclusive:
+        verification = "sync_waiting"
     elif row["sync_status"] in {"failed", "error"}:
         verification = "sync_failed"
     elif platform == "luogu":

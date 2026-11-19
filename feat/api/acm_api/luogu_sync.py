@@ -10,7 +10,7 @@ import aiosqlite
 
 from .problem_listing import ListingConnection
 
-from .luogu_client import ORIGIN, LuoguUnavailable, luogu_get
+from .luogu_client import ORIGIN, LuoguUnavailable, luogu_get, load_request_state, save_request_state
 from .luogu_problem import (catalog_page, load_taxonomy,
                             normalize_taxonomy, parse_problem, problem_id, save_taxonomy)
 from .problem_bank import record_problem_failure, save_metadata_batch, save_problem
@@ -116,9 +116,9 @@ class LuoguSync:
             db = await aiosqlite.connect(self.db_path, factory=ListingConnection)
             db.row_factory = aiosqlite.Row
             await db.execute("PRAGMA busy_timeout=5000")
-            # This collector never sends browser cookies or follows login redirects.
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30),
-                    cookie_jar=aiohttp.DummyCookieJar(), headers={"User-Agent": "ACM-Forever-DataCollector/0.1",
+            await load_request_state(db)
+            # 不携带登录凭据；保留原站正常设置的匿名会话 Cookie，支持同页初始化一次。
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30), headers={"User-Agent": "ACM-Forever-DataCollector/0.1",
                     "Accept": "text/html,application/json"}) as http:
                 taxonomy = await self.taxonomy(db, http, result)
                 if options["scope"] == "problems":
@@ -195,5 +195,8 @@ class LuoguSync:
             task["status"] = "partial" if result["metadata_count"] or result["success_count"] else "failed"
         finally:
             if db:
-                await db.close()
+                try:
+                    await save_request_state(db)
+                finally:
+                    await db.close()
             task["finished_at"] = int(time.time())

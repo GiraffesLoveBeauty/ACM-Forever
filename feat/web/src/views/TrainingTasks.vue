@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { date, useRequests } from '../lib/api.js';
+import { date, useRequests, syncFailureMessage } from '../lib/api.js';
 import { completions, fraction, phases, platformName, ruleName } from '../lib/training-tasks.js';
 import TaskProblemList from '../components/TaskProblemList.vue';
 import OjBindings from '../components/OjBindings.vue';
@@ -183,7 +183,7 @@ function refreshText(item) {
   )
     return (
       Object.entries(item.errors || {})
-        .map(([platform, detail]) => `${platformName(platform)}：${detail.message}`)
+        .map(([platform, detail]) => `${platformName(platform)}：${syncFailureMessage(detail)}`)
         .join('；') || '同步失败，已有进度保留，可稍后重试。'
     );
   return (
@@ -193,6 +193,7 @@ function refreshText(item) {
       completed: hasLuogu.value
         ? '同步已完成；洛谷历史 AC 已计入任务，实际 AC 时间未知。'
         : '同步已完成，进度按实际提交时间核验。',
+      waiting: '正在等待重试，已有进度保留。',
       failed: '同步失败，已有进度保留，可稍后重试。',
       cancelled: '同步任务已取消，可稍后重试。',
       interrupted: '同步中断，可重新刷新。',
