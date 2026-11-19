@@ -326,6 +326,47 @@ class ClosureTests(unittest.IsolatedAsyncioTestCase):
         public = await manager.public_snapshots()
         self.assertNotIn(QQ, json.dumps(public))
 
+    async def test_all_account_task_errors_hide_closed_and_recreated_generations_in_every_status(self):
+        admin, _ = await self.admin_session()
+        manager = self.app.task_manager
+        old_error = {"luogu": {"code": "luogu_http_429", "message": "Old generation error", "next_retry_at": 900}}
+        active_error = {"luogu": {"code": "luogu_http_403", "message": "Active member error", "next_retry_at": 300}}
+        results = {
+            "running": None,
+            "cancelled": None,
+            "partial": {QQ: {"luogu": -1}, OTHER: {"luogu": -1}},
+            "failed": {"error": "Old generation error"},
+        }
+        for status, result in results.items():
+            task_id = "redaction-" + status
+            manager.tasks[task_id] = {
+                "id": task_id, "kind": "全员平台同步", "qq_id": "*", "status": status,
+                "_account_epochs": {QQ: 1, OTHER: 1}, "result": result,
+                "errors": {QQ: old_error, OTHER: active_error},
+            }
+        before = await (await admin.get("/api/tasks")).get_json()
+        self.assertTrue(all(QQ in item["errors"] for item in before if item["id"].startswith("redaction-")))
+        self.assertEqual((await self.close(await self.preview())).status_code, 200)
+        for generation in ("closed", "recreated"):
+            if generation == "recreated":
+                await self.new_account(change_password=False)
+            response = await admin.get("/api/tasks")
+            self.assertEqual(response.status_code, 200)
+            snapshots = {item["id"]: item for item in await response.get_json()}
+            for status in results:
+                with self.subTest(generation=generation, status=status):
+                    item = snapshots["redaction-" + status]
+                    self.assertEqual(item["errors"], {OTHER: active_error})
+                    self.assertNotIn(QQ, json.dumps(item))
+                    self.assertNotIn("Old generation error", json.dumps(item))
+                    if status in {"running", "cancelled"}:
+                        self.assertIsNone(item["result"])
+                    elif status == "partial":
+                        self.assertEqual(item["result"], {OTHER: {"luogu": -1}})
+                    else:
+                        self.assertEqual(item["result"], {"error": "后台同步失败，请重试"})
+                    self.assertIn(QQ, manager.tasks[item["id"]]["errors"])
+
     async def test_active_upsert_preserves_new_generation_but_replace_cannot_reset_it(self):
         self.assertEqual((await self.close(await self.preview())).status_code, 200)
         await self.new_account()

@@ -533,13 +533,15 @@ class WebTaskManager:
             original = self.tasks[item["id"]]
             if qq_id and qq_id != "*" and active.get(qq_id) != original.get("account_epoch", 1):
                 item.update(qq_id=None, bindings={}, result=None, errors={}, status="cancelled")
-            elif qq_id == "*" and isinstance(item.get("result"), dict):
+            elif qq_id == "*":
                 epochs = original.get("_account_epochs", {})
-                filtered = {key: value for key, value in item["result"].items()
-                            if key != "error" and active.get(key) == epochs.get(key, 1)}
-                if "error" in item["result"]:
-                    filtered["error"] = "后台同步失败，请重试"
-                item["result"] = filtered
+                if isinstance(item.get("result"), dict):
+                    filtered = {key: value for key, value in item["result"].items()
+                                if key != "error" and active.get(key) == epochs.get(key, 1)}
+                    if "error" in item["result"]:
+                        filtered["error"] = "后台同步失败，请重试"
+                    item["result"] = filtered
+                # Errors accumulate before results exist, including in cancelled tasks.
                 item["errors"] = {key: value for key, value in (item.get("errors") or {}).items()
                                   if active.get(key) == epochs.get(key, 1)}
         return snapshots

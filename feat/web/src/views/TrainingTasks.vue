@@ -72,7 +72,8 @@ function schedule() {
 }
 async function poll() {
   if (disposed) return;
-  if (!document.hidden && !loading.value && !refreshing.value) await load(true);
+  if (!document.hidden && !loading.value && !refreshing.value && !bindingBusy.value)
+    await load(true);
   else schedule();
 }
 async function load(background = false) {
