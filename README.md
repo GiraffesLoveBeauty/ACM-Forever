@@ -1,90 +1,72 @@
-# ACM-Forever
+<h1 align="center">ACM-Forever</h1>
 
-面向本校 ACM 学习与交流平台的工程代码仓库。
+**面向 CJLU ACM 队伍的算法训练与交流平台。**
 
-算法标签、翻译及本地题库验收的范围、启动与限制见 [题目二次处理交付说明](docs/algorithm-tagging-delivery.md)。
+在这里找题、跟进队内训练、和队友交流题解。**代码在原在线评测平台（OJ）提交，本站同步刷题记录。**
 
-项目讨论、会议纪要和需求文档保存在 [CJLUACM-DLC 文档仓库](https://github.com/GiraffesLoveBeauty/CJLUACM-DLC)。
+[成员入门](#成员入门) · [本地运行](#本地运行) · [下载 Android 客户端](https://github.com/GiraffesLoveBeauty/ACM-Forever/releases/latest) · [开发与运维](#开发与运维)
 
-## 目录与部署
+![ACM-Forever Web 论坛首页，展示算法讨论、社区导航和热门话题](docs/images/readme-community.png)
 
-- `docs/`：工程协作规范与 API 调用说明。
-- `tools/crawlers/`：题目元数据采集、AtCoder 题面与样例采集及 SQLite 入库工具，输出保存在被忽略的 `data/`。
-- `feat/`：平台功能文件。合并到 `main` 后，此目录变更会由 GitHub Actions 镜像同步到服务器的 `/home/WYJ/acm-forever-feat`。
-- `feat/api/` 包含独立 WebUI 与 API 服务，沿用原端口 `8088`。配置 `/home/WYJ/acm-forever-data/.env` 后，部署工作流会安装或更新用户级服务 `acm-forever-webui`。
-- `feat/web/`：Vue 3 + Vite 前端，包含社区、个人中心和管理后台。开发端口 `5173`；生产构建由 API 服务在 `8088` 提供，Actions 部署前自动构建。
-- `Android_APP/`：原生 Android 客户端、测试和历史浏览器原型；版本 Tag 触发 Actions 构建并将 APK 发布到 Release，安装包不提交源码 Git，签名材料仅在受控本机及 Actions Secrets 保管。
-- 接收目录独立于梓喵部署目录，数据库和环境密钥保存在 `/home/WYJ/acm-forever-data`。
-- Actions 需要仓库 Secrets：`TS_AUTHKEY` 和 `ACM_FOREVER_SERVER_SSH_KEY`。
+*Web 论坛首页，使用本地演示数据。*
 
-后续开发使用主题分支，并通过 PR 合并到 `main`。
+## 能做什么
 
-## 文档
+| 功能 | 使用场景 |
+| --- | --- |
+| **题库与过题记录** | 浏览 Codeforces、AtCoder、洛谷等平台的已收录题目，按标签或难度找题，查看已同步的通过记录。 |
+| **训练与复盘** | 按难度安排今日训练，查看队内题单、截止时间与逐题完成情况，赛后记录补题进度。 |
+| **论坛与 Wiki** | 发帖分享题解、提问或交流训练心得；在 Wiki 按知识点阅读讲义、查找关联练习。 |
+| **成员管理与统计** | 成员可查看排行榜；管理员可管理账号、发布训练任务、审核社区内容。 |
 
-- [issue-155-problem-bank-performance.md（题库读取优化、索引迁移与性能验证）](docs/issue-155-problem-bank-performance.md)
+## 成员入门
 
-- [android-v0.2.30-network-training.md（弱网导航、读取合并与可选题单排名 · 待评审）](docs/android-v0.2.30-network-training.md)
+1. 向队内管理员获取站点地址与账号。登录后，在 **个人中心 → OJ 绑定与同步** 检查绑定并同步记录。
+2. 在 **个人中心 → 训练与题目** 打开题库、今日训练或训练任务，选题后前往原 OJ 提交。
+3. 回站同步记录或刷新训练任务进度。赛后可在 **赛事复盘** 标记待补题目。
 
-- [android-v0.2.27-gitee-updates.md（Gitee 优先更新、GitHub 兜底与镜像发布 · 待评审）](docs/android-v0.2.27-gitee-updates.md)
+第一次接到队内题单？参阅 [训练任务使用指南](docs/training-tasks/member.md)。
 
-- [issue-85-member-profile.md（成员资料筛选与可恢复编辑）](docs/issue-85-member-profile.md)
+## 本地运行
 
-- [TCrB-AI项目工程规范.md（AI 项目工程协作规范 · 讨论稿）](docs/TCrB-AI项目工程规范.md)
-- [api.md（API 调用指南）](docs/api.md)
-- [android-v0.2.26-reader-and-theme-return.md（论坛摘要/公式、主题返回与搜索拖动 · 待评审）](docs/android-v0.2.26-reader-and-theme-return.md)
-- [android-v0.2.25-optional-modules.md（可选模块、签名下载与升级保留 · 本地验收）](docs/android-v0.2.25-optional-modules.md)
-- [android-app.md（Android版本、更新渠道、构建与发布）](docs/android-app.md)
-- [android-v1.0.0-release-channels.md（1.0.0恢复实施：正式与管理员测试渠道，附延期归档）](docs/android-v1.0.0-release-channels.md)
-- [android-v1.0.0-verification.md（1.0.0本地检查、署名修正与发布条件）](docs/android-v1.0.0-verification.md)
-- [android-v0.2.24-problem-reading.md（题面排版、难度及算法标签 · 待评审）](docs/android-v0.2.24-problem-reading.md)
-- [android-v0.2.22.md（版本署名、特别鸣谢、维护交接与强制登录 · 待评审）](docs/android-v0.2.22.md)
-- [android-completeness-audit-v0.2.22-2026-11-07.md（App完整度检查 · 不含缺失API）](docs/android-completeness-audit-v0.2.22-2026-11-07.md)
-- [android-v0.2.23.md（图片故障恢复、存储管理与帮助说明 · 待评审）](docs/android-v0.2.23.md)
-- [android-recovery-storage-help-local-2026-11-07.md（图片恢复、存储管理与帮助说明 · 本地修改）](docs/android-recovery-storage-help-local-2026-11-07.md)
-- [android-follow-up-plan-2026-11-07.md（发布稳定性、体验增强与设备验收等后期计划）](docs/android-follow-up-plan-2026-11-07.md)
-- [android-v0.2.21.md（搜索拖动修复、OJ绑定、注销、标签与Wiki导航 · 已发布）](docs/android-v0.2.21.md)
-- [web-app-gap-2026-11-06-v0.2.21.md（网页与App完整功能差距 · 本次比较基线）](docs/web-app-gap-2026-11-06-v0.2.21.md)
-- [web-app-node-2026-11-06-v0.2.21.json（对比节点、源码指纹与本地版本快照）](docs/web-app-node-2026-11-06-v0.2.21.json)
-- [android-oj-bindings-local-2026-11-06.md（本人OJ绑定、改绑与解绑 · 仅本地）](docs/android-oj-bindings-local-2026-11-06.md)
-- [android-account-closure-local-2026-11-06.md（本人账户注销、服务器开关与结果回执 · 仅本地）](docs/android-account-closure-local-2026-11-06.md)
-- [android-problem-tags-local-2026-11-06.md（题目原始标签精确筛选与关键词搜索 · 仅本地）](docs/android-problem-tags-local-2026-11-06.md)
-- [android-wiki-navigation-local-2026-11-06.md（Wiki完整目录、章节与阅读位置导航 · 仅本地）](docs/android-wiki-navigation-local-2026-11-06.md)
-- [web-updates-since-android-v0.2.20.md（网站新增同步、目录补全与App影响 · 只读核对）](docs/web-updates-since-android-v0.2.20.md)
-- [android-v0.2.20.md（搜索首页、软键盘修复、子页面动画与卡片提前避让 · 已发布）](docs/android-v0.2.20.md)
-- [android-v0.2.19.md（搜索拖拽、下拉刷新、便捷成员管理与主题分层 · 待评审）](docs/android-v0.2.19.md)
-- [android-v0.2.18.md（搜索单列、官方主题适配与私人主题系统分享 · 待评审）](docs/android-v0.2.18.md)
-- [android-v0.2.17.md（搜索历史、主题导入导出与独立App PR验收 · 待评审）](docs/android-v0.2.17.md)
-- [android-theme-package-v1.md（本机主题包格式、原图与完整还原）](docs/android-theme-package-v1.md)
-- [android-official-theme-adaptation-v0.2.17.md（官方主题源文件解析与直接采用范围）](docs/android-official-theme-adaptation-v0.2.17.md)
-- [android-v0.2.16.md（原PR #100历史实现与测试记录）](docs/android-v0.2.16.md)
-- [android-modification-standard.md（App修改标准、模块关联与缺失接口）](docs/android-modification-standard.md)
-- [android-maintainer-handover.md（App修改、版本署名、评审发布与维护交接规范）](docs/android-maintainer-handover.md)
-- [android-credits-v0.2.22.md（版本负责人、Review参与者与特别鸣谢来源）](docs/android-credits-v0.2.22.md)
-- [android-tag-release-v0.2.14.md（Android Tag 自动发布、签名配置与 App 更新）](docs/android-tag-release-v0.2.14.md)
-- [android-release-fix-v0.2.15.md（草稿发布修复与重新首发 · 待评审）](docs/android-release-fix-v0.2.15.md)
-- [android-release-api-plan-v0.2.14.md（已被 Tag 发布替代的自有服务器方案）](docs/android-release-api-plan-v0.2.14.md)
-- [command-line-operations.md（网站服务管理、日志和数据库查询）](docs/command-line-operations.md)
-- [backup-and-diagnostics.md（数据库与图片备份、诊断和恢复）](docs/backup-and-diagnostics.md)
-- [forum-post-revisions.md（帖子修改、重投和版本冲突）](docs/forum-post-revisions.md)
-- [markdown-code-blocks.md（代码高亮、字体和复制）](docs/markdown-code-blocks.md)
-- [comment-markdown.md（评论 Markdown、公式和代码）](docs/comment-markdown.md)
-- [README.md（Vue 前端开发与构建）](feat/web/README.md)
-- [theme-development.md（个人主题开发与投稿规范）](docs/theme-development.md)
-- [web-performance.md（Web 性能采样与加载验收）](docs/web-performance.md)
-- [crawler-samples.md（采集命令、JSON 字段与 SQLite 入库）](docs/crawler-samples.md)
-- [issue-52-member-training.md（普通成员训练闭环实施与验收）](docs/issue-52-member-training.md)
-- [admin-account-import.md（Excel 批量开户操作说明）](docs/admin-account-import.md)
-- [issue-84-account-import.md（Excel 批量开户与 OJ 资料导入设计及实施记录）](docs/issue-84-account-import.md)
+以 **Windows PowerShell** 为例。需要 Git、Python 3.12、Node.js ≥ 22.13 和 pnpm 11.25.0。
 
-- [wiki.md（Wiki 知识手册、共享 Markdown、接口与备份恢复）](docs/wiki.md)
-- [issue-83-account-closure.md（账号注销、同 QQ 新建账号与发布验收）](docs/issue-83-account-closure.md)
+```powershell
+git clone https://github.com/GiraffesLoveBeauty/ACM-Forever.git
+cd ACM-Forever
 
-- [api.md（训练任务存储与发布契约）](docs/training-tasks/api.md)
-- [progress.md（训练任务证据核验与同步）](docs/training-tasks/progress.md)
-- [admin.md（后台训练任务操作与路由）](docs/training-tasks/admin.md)
-- [member.md（成员训练任务入口与状态）](docs/training-tasks/member.md)
-- [acceptance.md（训练任务联调、性能与发布回退）](docs/training-tasks/acceptance.md)
+py -3.12 -m venv .venv
+$python = (Resolve-Path .\.venv\Scripts\python.exe).Path
+& $python -m pip install -r feat/api/requirements.txt
+pnpm --dir feat/web install --frozen-lockfile
+pnpm --dir feat/web build
 
-- [android-v0.2.28-practice-recovery.md（练习、正式题单与模块编号/恢复）](docs/android-v0.2.28-practice-recovery.md)
-- [android-v0.2.29-lists-updates.md（题单权限、列表加载、署名与更新诊断）](docs/android-v0.2.29-lists-updates.md)
-- [android-v0.2.29-maintenance-followup.md（密码显隐、内嵌预览、每日检查与模块管理）](docs/android-v0.2.29-maintenance-followup.md)
+$env:ACM_API_HOST = '127.0.0.1'
+$env:ACM_API_PORT = '8088'
+$env:ACM_DATABASE_PATH = 'feat/data/local-dev.sqlite3'
+$env:ACM_WEBUI_SECRET_KEY = & $python -c "import secrets; print(secrets.token_urlsafe(48))"
+& $python -m feat.api
+```
+
+浏览器打开 <http://127.0.0.1:8088>。首次运行会建立本地 SQLite 库，不包含正式站的账号和题目。要测试登录，可按 [API 服务说明](feat/api/README.md#数据库与部署) 初始化本地账号。按 `Ctrl+C` 停止服务。
+
+- **修改前端**：保持 API 运行，另开终端执行 `pnpm --dir feat/web dev`，访问 <http://127.0.0.1:5173>。参见 [前端开发指南](feat/web/README.md)。
+- **验收标签与翻译**：运行 [隔离演示](local_demo/README.md)，按文档生成合成题目，无需连接正式环境。
+
+## 开发与运维
+
+| 目录 | 职责 | 入口 |
+| --- | --- | --- |
+| [`feat/web/`](feat/web/) | Vue 3 + Vite Web 前端 | [前端开发](feat/web/README.md) |
+| [`feat/api/`](feat/api/) | Python / Quart API、SQLite 数据访问与 Web 静态资源服务 | [API 文档](docs/api.md) |
+| [`Android_APP/`](Android_APP/) | 原生 Android 客户端 | [构建与发布](docs/android-app.md) |
+| [`tools/crawlers/`](tools/crawlers/) | 题目元数据、题面与样例采集 | [采集说明](docs/crawler-samples.md) |
+| [`local_demo/`](local_demo/) · [`experiments/`](experiments/) | 算法标签与翻译实验、本地验收 | [交付说明](docs/algorithm-tagging-delivery.md) |
+
+`feat/` 的变更合并到 `main` 后，[部署工作流](.github/workflows/sync-feat-to-server.yml) 会构建前端并同步应用。数据库、上传文件与环境配置应独立于代码部署目录。操作前请阅读 [部署与迁移](docs/public-server-deployment.md) 和 [备份与恢复](docs/backup-and-diagnostics.md)。
+
+更多文档：[训练任务管理](docs/training-tasks/admin.md) · [Wiki 维护](docs/wiki.md) · [浏览器回归测试](docs/browser-regression.md) · [全部工程文档与历史记录](docs/)。
+
+## 参与贡献
+
+欢迎通过 [Issues](https://github.com/GiraffesLoveBeauty/ACM-Forever/issues) 报告问题或讨论需求。开发请使用主题分支，通过 Pull Request 合并到 `main`，并在 PR 中说明变更范围、验证步骤和结果。不要提交业务数据库、环境密钥或签名文件。
