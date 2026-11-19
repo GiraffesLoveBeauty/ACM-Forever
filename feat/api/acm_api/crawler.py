@@ -299,8 +299,13 @@ class Crawler:
         try:
             return await sync_public_practice(session, user_row, db, config)
         except (aiohttp.ClientError, asyncio.TimeoutError, LuoguUnavailable, ValueError) as error:
-            LOG.warning("[同步模块] 洛谷公开练习页同步失败，保留已有记录：%s", error)
-            return -1
+            from .sync_policy import SyncFailure
+            status = getattr(error, "status", None)
+            code = (f"luogu_http_{status}" if status else "luogu_cooldown" if isinstance(error, LuoguUnavailable)
+                    else "luogu_invalid_snapshot" if isinstance(error, ValueError) else "luogu_network_error")
+            message = str(error) or "洛谷请求超时，请稍后重试"
+            LOG.warning("[同步模块] 洛谷公开练习页同步失败，保留已有记录：%s", message)
+            return SyncFailure(message, code=code, retry_after=getattr(error, "retry_after", 0))
 
     # ================= 牛客 Nowcoder =================
 

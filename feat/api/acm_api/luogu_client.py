@@ -5,7 +5,7 @@ import json
 import math
 import time
 import weakref
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from .problem_content import TreeParser
 
@@ -38,34 +38,43 @@ async def luogu_get(session, url, *, interval=2.0, headers=None, timeout=30):
         raise ValueError("洛谷请求间隔不得小于 1.2 秒")
     gate = _gate()
     async with gate["lock"]:
-        now = time.monotonic()
-        if now < gate["cooldown"]:
-            raise LuoguUnavailable("洛谷请求处于冷却期，请稍后重试", retry_after=math.ceil(gate["cooldown"] - now))
-        await asyncio.sleep(max(0, gate["next"] - now))
-        try:
-            async with session.get(url, headers=headers, timeout=timeout, allow_redirects=False) as response:
-                if response.status in (403, 429):
-                    delay = 300 if response.status == 403 else 60
-                    retry = response.headers.get("Retry-After", "")
-                    if retry.isdigit():
-                        delay = max(delay, min(int(retry), 86400))
-                    gate["cooldown"] = time.monotonic() + delay
-                    raise LuoguUnavailable(f"洛谷返回 HTTP {response.status}，本次采集已停止", status=response.status, retry_after=delay)
-                if response.status == 404:
-                    raise LuoguUnavailable("洛谷题目或公开资源不存在（HTTP 404）", status=404)
-                if 300 <= response.status < 400:
-                    gate["cooldown"] = time.monotonic() + 300
-                    raise LuoguUnavailable("洛谷返回跳转，可能要求登录或验证，本次采集已停止", status=response.status, retry_after=300)
-                response.raise_for_status()
-                chunks, size = [], 0
-                async for chunk in response.content.iter_chunked(65536):
-                    size += len(chunk)
-                    if size > MAX_RESPONSE_BYTES:
-                        raise ValueError("洛谷响应超过大小限制")
-                    chunks.append(chunk)
-                return b"".join(chunks)
-        finally:
-            gate["next"] = time.monotonic() + interval
+        # A fresh anonymous session may receive a cookie and a redirect to the
+        # exact same resource. Permit that single HTTP round trip, not login,
+        # verification, cross-origin redirects or an unbounded redirect loop.
+        for attempt in range(2):
+            now = time.monotonic()
+            if now < gate["cooldown"]:
+                raise LuoguUnavailable("洛谷请求处于冷却期，请稍后重试", retry_after=math.ceil(gate["cooldown"] - now))
+            await asyncio.sleep(max(0, gate["next"] - now))
+            try:
+                async with session.get(url, headers=headers, timeout=timeout, allow_redirects=False) as response:
+                    if response.status in (403, 429):
+                        delay = 300 if response.status == 403 else 60
+                        retry = response.headers.get("Retry-After", "")
+                        if retry.isdigit():
+                            delay = max(delay, min(int(retry), 86400))
+                        gate["cooldown"] = time.monotonic() + delay
+                        raise LuoguUnavailable(f"洛谷返回 HTTP {response.status}，本次采集已停止", status=response.status, retry_after=delay)
+                    if response.status == 404:
+                        raise LuoguUnavailable("洛谷题目或公开资源不存在（HTTP 404）", status=404)
+                    if 300 <= response.status < 400:
+                        location = response.headers.get("Location", "")
+                        if (attempt == 0 and response.status in (302, 303, 307)
+                                and location and urljoin(url, location) == url
+                                and getattr(response, "cookies", None)):
+                            continue
+                        gate["cooldown"] = time.monotonic() + 300
+                        raise LuoguUnavailable("洛谷返回登录、验证或异常跳转，本次采集已停止", status=response.status, retry_after=300)
+                    response.raise_for_status()
+                    chunks, size = [], 0
+                    async for chunk in response.content.iter_chunked(65536):
+                        size += len(chunk)
+                        if size > MAX_RESPONSE_BYTES:
+                            raise ValueError("洛谷响应超过大小限制")
+                        chunks.append(chunk)
+                    return b"".join(chunks)
+            finally:
+                gate["next"] = time.monotonic() + interval
 
 
 def page_context(raw, *, template=None):

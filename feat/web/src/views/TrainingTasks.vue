@@ -1,8 +1,8 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { date, useRequests } from '../lib/api.js';
-import { completions, fraction, phases, ruleName } from '../lib/training-tasks.js';
+import { completions, fraction, phases, platformName, ruleName } from '../lib/training-tasks.js';
 import TaskProblemList from '../components/TaskProblemList.vue';
 import OjBindings from '../components/OjBindings.vue';
 import Pager from '../components/Pager.vue';
@@ -64,14 +64,24 @@ function address(changes) {
 }
 function schedule() {
   clearTimeout(timer);
-  if (!disposed && ['queued', 'running'].includes(task.value?.refresh?.status))
-    timer = setTimeout(load, 3000);
+  if (!disposed)
+    timer = setTimeout(
+      poll,
+      ['queued', 'running'].includes(task.value?.refresh?.status) ? 3000 : 30000,
+    );
 }
-async function load() {
+async function poll() {
+  if (disposed) return;
+  if (!document.hidden && !loading.value && !refreshing.value) await load(true);
+  else schedule();
+}
+async function load(background = false) {
   const operation = ++revision;
   clearTimeout(timer);
-  loading.value = true;
-  error.value = '';
+  if (background !== true) {
+    loading.value = true;
+    error.value = '';
+  }
   if (currentId !== taskId.value) {
     task.value = null;
     bindingOpen.value = false;
@@ -95,24 +105,33 @@ async function load() {
     if (operation !== revision) return;
     if (taskId.value) task.value = data;
     else list.value = data;
-    schedule();
   } catch (e) {
-    if (e.name !== 'AbortError' && operation === revision) error.value = e.message;
+    if (background !== true && e.name !== 'AbortError' && operation === revision)
+      error.value = e.message;
   } finally {
-    if (operation === revision) loading.value = false;
+    if (operation === revision) {
+      loading.value = false;
+      schedule();
+    }
   }
 }
-watch(() => route.fullPath, load, { immediate: true });
+watch(
+  () => route.fullPath,
+  () => load(),
+  { immediate: true },
+);
+onMounted(() => document.addEventListener('visibilitychange', poll));
 onBeforeUnmount(() => {
   disposed = true;
   revision++;
   clearTimeout(timer);
+  document.removeEventListener('visibilitychange', poll);
 });
 async function refresh() {
   if (refreshing.value || !hasVerifiableProblems.value) return;
   refreshing.value = true;
   error.value = '';
-  const operation = revision;
+  const operation = ++revision;
   try {
     const result = await request(
       base + '/' + taskId.value + '/refresh',
@@ -125,7 +144,10 @@ async function refresh() {
   } catch (e) {
     if (e.name !== 'AbortError' && operation === revision) error.value = e.message;
   } finally {
-    if (!disposed) refreshing.value = false;
+    if (!disposed) {
+      refreshing.value = false;
+      if (operation === revision) schedule();
+    }
   }
 }
 async function openBinding() {
@@ -158,13 +180,17 @@ function refreshText(item) {
     item.result?.error ||
     Object.values(item.result || {}).some((value) => typeof value === 'number' && value < 0)
   )
-    return '同步失败，已有进度保留，可稍后重试。';
+    return (
+      Object.entries(item.errors || {})
+        .map(([platform, detail]) => `${platformName(platform)}：${detail.message}`)
+        .join('；') || '同步失败，已有进度保留，可稍后重试。'
+    );
   return (
     {
       queued: '同步请求已排队，正在等待执行…',
       running: hasLuogu.value ? '正在同步任务涉及平台的 AC 证据…' : '正在同步 Codeforces 提交记录…',
       completed: hasLuogu.value
-        ? '同步已完成；洛谷按快照核验，完成时段不明的记录保留待确认。'
+        ? '同步已完成；洛谷历史 AC 已计入任务，实际 AC 时间未知。'
         : '同步已完成，进度按实际提交时间核验。',
       failed: '同步失败，已有进度保留，可稍后重试。',
       cancelled: '同步任务已取消，可稍后重试。',

@@ -6,16 +6,20 @@ const request = useRequests(),
   rows = ref([]);
 let timer,
   disposed = false;
-function describe(value) {
+function describe(value, errors) {
+  if (errors?.message)
+    return (
+      errors.message + (errors.next_retry_at ? `（可重试时间：${date(errors.next_retry_at)}）` : '')
+    );
   if (value == null) return '';
   if (typeof value === 'object')
     return Object.entries(value)
-      .map(([key, v]) => `${key}：${describe(v)}`)
+      .map(([key, v]) => `${key}：${describe(v, errors?.[key])}`)
       .join('；');
   if (typeof value === 'number')
     return value >= 0
       ? `新增 ${value} 条`
-      : { '-1': '成员不存在', '-2': '未绑定账号', '-3': '抓取失败', '-5': '已暂停，保留已有记录' }[
+      : { '-1': '同步失败', '-2': '未绑定账号', '-3': '抓取失败', '-5': '已暂停，保留已有记录' }[
           value
         ] || '同步失败';
   return String(value);
@@ -60,7 +64,7 @@ onBeforeUnmount(() => {
           ><br />成员 {{ task.qq_id || '全部' }} · 平台 {{ task.platform || '全部' }} ·
           {{ task.status }}<br /><small v-if="task.progress"
             >已处理 {{ task.progress.done }} / {{ task.progress.total }} 位成员<br /></small
-          ><small>{{ describe(task.result) }}</small></template
+          ><small>{{ describe(task.result, task.errors) }}</small></template
         >
         <br /><small>{{ date(task.finished_at || task.started_at) }}</small></span
       ><button
