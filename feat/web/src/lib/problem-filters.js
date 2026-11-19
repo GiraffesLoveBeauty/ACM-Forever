@@ -1,13 +1,15 @@
-export const rangeKeys = ['rating_min', 'rating_max', 'start_at', 'end_at', 'time_basis'];
+export function ratingFilters(query = {}) {
+  const result = { rating_min: '', rating_max: '' };
+  if (query.view === 'tracker' || !['atcoder', 'codeforces'].includes(query.platform))
+    return result;
+  for (const key of Object.keys(result)) {
+    if (/^[0-9]{1,6}$/.test(String(query[key] ?? ''))) result[key] = String(Number(query[key]));
+  }
+  return result;
+}
 export function rangeFilters(query = {}) {
-  const result = Object.fromEntries(rangeKeys.map((key) => [key, '']));
+  const result = { ...ratingFilters(query), start_at: '', end_at: '', time_basis: '' };
   if (query.view === 'tracker') return result;
-  for (const key of ['rating_min', 'rating_max'])
-    if (
-      ['atcoder', 'codeforces'].includes(query.platform) &&
-      /^[0-9]{1,6}$/.test(String(query[key] ?? ''))
-    )
-      result[key] = String(Number(query[key]));
   for (const key of ['start_at', 'end_at'])
     if (/^[0-9]{1,12}$/.test(String(query[key] ?? ''))) result[key] = String(Number(query[key]));
   if (query.time_basis === 'unknown') {

@@ -143,7 +143,7 @@ watch(() => [route.query.platform, route.query.problem_id], load, { immediate: t
         <span class="chip">{{ detail.problem_id }}</span>
         <ProblemDifficulty :problem="detail" />
         <LuoguBadges v-if="detail.platform === 'luogu'" :problem="detail" :difficulty="false" />
-        <ProblemTags v-else :tags="detail.tags" />
+        <ProblemTags v-else :tags="detail.tags" :platform="detail.platform" />
         <span v-if="statementLanguage" class="chip">{{ statementLanguage }}</span>
       </div>
       <a

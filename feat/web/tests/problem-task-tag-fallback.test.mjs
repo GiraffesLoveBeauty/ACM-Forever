@@ -121,19 +121,19 @@ test('omitted task tags stay hidden without a misleading empty-tag placeholder',
   }
 });
 
-test('CF task tags keep their classified colours', async () => {
+test('CF task tags display Chinese with their classified colours and preserve unknown labels', async () => {
   const mounted = await render({
     platform: 'codeforces',
     problem_id: 'cf_100A',
     problem_url: 'https://codeforces.com/contest/100/problem/A',
-    tags: ['math', 'graphs'],
+    tags: ['math', 'graphs', 'new-source-tag'],
   });
   try {
     const tags = algorithmTags(mounted.root);
-    assert.deepEqual(tags.map(textOf), ['math', 'graphs']);
+    assert.deepEqual(tags.map(textOf), ['数学', '图论', 'new-source-tag']);
     assert.deepEqual(
       tags.map((tag) => tag.props['data-tag-category']),
-      ['math', 'graph'],
+      ['math', 'graph', 'other'],
     );
     assert(includesClass(tags[0], 'problem-tone-yellow'));
     assert(includesClass(tags[1], 'problem-tone-blue'));

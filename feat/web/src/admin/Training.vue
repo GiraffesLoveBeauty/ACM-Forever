@@ -663,7 +663,7 @@ function lifecycle(kind) {
                 <div class="tt-row">
                   <ProblemDifficulty :problem="p" />
                   <LuoguBadges v-if="p.platform === 'luogu'" :problem="p" :difficulty="false" />
-                  <ProblemTags v-else-if="p.tags != null" :tags="p.tags" />
+                  <ProblemTags v-else-if="p.tags != null" :tags="p.tags" :platform="p.platform" />
                 </div>
               </div>
               <button

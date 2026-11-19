@@ -221,3 +221,53 @@ for (const personal of [true, false]) {
     );
   });
 }
+
+test('CF training renders Chinese labels in recommendations and history with source tags in requests', async () => {
+  setAuth({ authenticated: true, role: 'member', qq_id: '12345678', csrf_token: 'test' }, true);
+  const problem = {
+    platform: 'codeforces',
+    problem_id: 'cf_100A',
+    problem_name: 'Synthetic CF problem',
+    problem_rating: 1000,
+    tags: ['greedy', 'graphs'],
+    recommendation_reason:
+      '难度 1000 接近目标 1000；匹配薄弱标签：greedy, graphs；包含到期复习标签：graphs',
+  };
+  globalThis.fetch = async (url, options = {}) => {
+    if (url === '/api/me/training/challenges') return response([problem]);
+    assert.equal(url, '/api/me/challenge/start');
+    assert.equal(options.method, 'POST');
+    calls.push(JSON.parse(options.body));
+    return response(problem);
+  };
+  const App = { render: () => h(TrainingPanel, { personal: true }) };
+  mounted = await mount(
+    App,
+    [
+      { path: '/challenge.html', component: App },
+      { path: '/problem.html', component: { render: () => null } },
+    ],
+    '/challenge.html',
+  );
+  const controls = (caption, type) =>
+    find(
+      find(mounted.root, (node) => node.type === 'label' && textOf(node).startsWith(caption))[0],
+      (node) => node.type === type,
+    )[0].props;
+  controls('平台', 'select')['onUpdate:modelValue']('codeforces');
+  controls('算法标签', 'input')['onUpdate:modelValue']('greedy');
+  await settle();
+  await find(mounted.root, (node) => node.type === 'form')[0].props.onSubmit({
+    preventDefault() {},
+  });
+  await settle();
+
+  assert.deepEqual(
+    calls.map((body) => [body.platform, body.tag]),
+    Array(3).fill(['codeforces', 'greedy']),
+  );
+  const tags = find(mounted.root, (node) => hasClass(node, 'algorithm-tag')).map(textOf);
+  assert.deepEqual(tags, Array(4).fill(['贪心', '图论']).flat());
+  assert.match(textOf(mounted.root), /匹配薄弱标签：贪心、图论；包含到期复习标签：图论/);
+  assert.doesNotMatch(textOf(mounted.root), /greedy|graphs/);
+});

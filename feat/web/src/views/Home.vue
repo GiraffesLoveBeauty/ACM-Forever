@@ -260,7 +260,10 @@ onBeforeUnmount(() => {
               ><small
                 >{{ item.platform }} · <ProblemDifficulty :problem="item" /> ·
                 {{ item.submit_time ? date(item.submit_time) : 'AC 时间未知' }}</small
-              ><ProblemTags v-if="item.platform !== 'luogu' && item.tags" :tags="item.tags" /></span
+              ><ProblemTags
+                v-if="item.platform !== 'luogu' && item.tags"
+                :tags="item.tags"
+                :platform="item.platform" /></span
             ><RouterLink
               class="recent-ac-open"
               :to="problemLink(item, '/home.html')"

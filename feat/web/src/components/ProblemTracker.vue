@@ -105,7 +105,11 @@ function description(problem) {
                   >{{ problem.problem_index }}. {{ problem.problem_name || '未命名题目' }}</span
                 >
                 <ProblemDifficulty :problem="problem" class="tracker-rating" />
-                <ProblemTags :tags="problem.tags" class="tracker-tags" />
+                <ProblemTags
+                  :tags="problem.tags"
+                  :platform="contest.platform"
+                  class="tracker-tags"
+                />
                 <span class="tracker-state-label"
                   >{{
                     problem.status === 'solved' ? '✓' : problem.status === 'attempted' ? '◐' : '—'

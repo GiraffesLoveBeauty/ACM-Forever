@@ -3,6 +3,7 @@ import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router';
 import { auth, useRequests, date, notify } from '../lib/api.js';
 import { adminFilters } from '../lib/admin.js';
+import { codeforcesTagName } from '../lib/codeforces-tags.js';
 import { problemLink } from '../lib/member-problems.js';
 import ProblemDifficulty from './ProblemDifficulty.vue';
 import ProblemTags from './ProblemTags.vue';
@@ -67,6 +68,15 @@ watch(
     form.difficulty = spec.value?.value || '';
   },
 );
+function recommendationReason(row) {
+  const reason = row.recommendation_reason;
+  if (row.platform !== 'codeforces' || typeof reason !== 'string') return reason;
+  return reason.replace(
+    /(^|；)(匹配薄弱标签：|包含到期复习标签：)([^；]+)/g,
+    (_, separator, label, tags) =>
+      separator + label + tags.split(',').map(codeforcesTagName).join('、'),
+  );
+}
 async function history() {
   const revision = ++historyRevision;
   rows.value = [];
@@ -185,8 +195,8 @@ onBeforeUnmount(() => {
         ><b>{{ zones[i].problem_name || zones[i].problem_id }}</b>
         <p>{{ zones[i].platform }} · <ProblemDifficulty :problem="zones[i]" /></p>
         <LuoguBadges v-if="zones[i].platform === 'luogu'" :problem="zones[i]" :difficulty="false" />
-        <ProblemTags v-else :tags="zones[i].tags" />
-        <p class="muted">{{ zones[i].recommendation_reason }}</p>
+        <ProblemTags v-else :tags="zones[i].tags" :platform="zones[i].platform" />
+        <p class="muted">{{ recommendationReason(zones[i]) }}</p>
         <RouterLink class="btn primary" :to="problemLink(zones[i], '/home.html')"
           >打开题目 →</RouterLink
         ></template
@@ -210,7 +220,7 @@ onBeforeUnmount(() => {
             ><b>{{ row.problem_name || row.problem_id }}</b></RouterLink
           ><br />{{ row.platform }} · {{ row.status }} · <ProblemDifficulty :problem="row" />
           <LuoguBadges v-if="row.platform === 'luogu'" :problem="row" :difficulty="false" />
-          <ProblemTags v-else-if="row.tags" :tags="row.tags" /></span
+          <ProblemTags v-else-if="row.tags" :tags="row.tags" :platform="row.platform" /></span
         ><time>{{ date(row.created_at) }}</time>
       </article>
       <p v-if="!rows.length" class="empty">暂无挑战记录。</p>

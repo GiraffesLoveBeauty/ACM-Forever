@@ -44,11 +44,12 @@ const problems = [
     problem_rating: '1000',
     tags: ['implementation'],
     has_secondary: false,
+    time_basis: 'contest',
   },
 ].map((row) => ({
-  ...row,
   problem_time: 1794834815,
   time_basis: 'first_seen',
+  ...row,
   is_favorite: false,
 }));
 
@@ -88,20 +89,31 @@ test('default entry, platform selector and native filters agree across navigatio
     await page.goto(path);
     const platform = page.getByRole('combobox', { name: /^平台/ });
     await expect(platform).toHaveValue('luogu');
-    await expect(page.getByRole('heading', { name: '洛谷题库', exact: true })).toBeVisible();
+    const heading = page.getByRole('heading', { name: '题库', level: 1, exact: true });
+    const description = page.getByText('按题目标签寻找练习题，或查看本人已 AC 的题目。', {
+      exact: true,
+    });
+    await expect(heading).toBeVisible();
+    await expect(description).toBeVisible();
+    await expect(page.getByRole('heading', { name: '洛谷题库', exact: true })).toHaveCount(0);
     await expect(page.getByRole('combobox', { name: /^洛谷难度下限/ })).toBeVisible();
-    await expect(page.getByRole('button', { name: /按算法筛选/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /按标签筛选/ })).toBeVisible();
     await expect(page.getByLabel('算法标签筛选', { exact: true })).toHaveCount(0);
+    await expect(page.getByLabel('时间依据', { exact: true })).toHaveCount(0);
     await expect(page.locator('#problem-list article')).toHaveCount(2);
+    await expect(page.locator('#problem-list')).not.toContainText('首次收录');
     expect(requests).toHaveLength(1);
     expect(new URL(requests[0]).searchParams.get('platform')).toBe('luogu');
     await expect(page.getByText(/人工修正后的有效标签/)).toHaveCount(0);
     if (path === '/my-problems.html')
       await page.screenshot({ path: info.outputPath('default-luogu.png'), fullPage: true });
     await platform.selectOption('all');
-    await expect(page.getByLabel('算法标签筛选', { exact: true })).toBeVisible();
+    await expect(page.getByLabel('算法标签筛选', { exact: true })).toHaveCount(0);
     await expect(page.locator('#problem-list article')).toHaveCount(3);
-    await expect(page.getByRole('heading', { name: '洛谷题库', exact: true })).toHaveCount(0);
+    await expect(page.locator('#problem-list')).not.toContainText('首次收录');
+    await expect(page.locator('#problem-list article').last()).toContainText('比赛时间');
+    await expect(heading).toBeVisible();
+    await expect(description).toBeVisible();
     await page.reload();
     await expect(platform).toHaveValue('all');
     await expect(page.locator('#problem-list article')).toHaveCount(3);
@@ -109,6 +121,83 @@ test('default entry, platform selector and native filters agree across navigatio
     await expect(platform).toHaveValue('luogu');
     await expect(page.getByRole('combobox', { name: /^洛谷难度下限/ })).toBeVisible();
   }
+});
+
+test('member platform filters share the Codeforces desktop rows and stack on mobile', async ({
+  page,
+}) => {
+  const form = page.locator('.member-problem-filters');
+  const platform = form.getByRole('combobox', { name: /^平台/ });
+  const search = form.getByRole('textbox', { name: '搜索', exact: true });
+  const tags = form.getByRole('button', { name: /按标签筛选/ });
+  const favorite = form.getByRole('combobox', { name: /^收藏/ });
+  const query = form.getByRole('button', { name: '查询', exact: true });
+  const clear = form.getByRole('button', { name: '清除筛选', exact: true });
+  const bounds = async (control) => {
+    await expect(control).toBeVisible();
+    return control.boundingBox();
+  };
+  const end = (box) => box.y + box.height;
+  const right = (box) => box.x + box.width;
+
+  await page.setViewportSize({ width: 1280, height: 950 });
+  await page.goto('/problem-bank.html?platform=codeforces');
+  for (const [id, name, role] of [
+    ['codeforces', 'CF rating', 'spinbutton'],
+    ['atcoder', 'AtCoder 难度', 'spinbutton'],
+    ['luogu', '洛谷难度', 'combobox'],
+    ['all', '', ''],
+  ]) {
+    await platform.selectOption(id);
+    await expect(platform).toHaveValue(id);
+    const [platformBox, searchBox, tagsBox, favoriteBox, queryBox, clearBox] = await Promise.all(
+      [platform, search, tags, favorite, query, clear].map(bounds),
+    );
+    expect(searchBox.x - right(platformBox)).toBeGreaterThan(8);
+    expect(tagsBox.x - right(searchBox)).toBeGreaterThan(8);
+    expect(Math.abs(platformBox.y - searchBox.y)).toBeLessThanOrEqual(3);
+    expect(Math.abs(end(platformBox) - end(tagsBox))).toBeLessThanOrEqual(6);
+    expect(favoriteBox.y).toBeGreaterThan(end(tagsBox));
+    expect(Math.abs(favoriteBox.x - platformBox.x)).toBeLessThanOrEqual(1);
+    expect(right(favoriteBox)).toBeGreaterThanOrEqual(right(tagsBox) - 1);
+    expect(Math.abs(queryBox.x - platformBox.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(queryBox.y - clearBox.y)).toBeLessThanOrEqual(1);
+    if (name) {
+      const [lower, upper] = await Promise.all(
+        ['下限', '上限'].map((suffix) =>
+          bounds(form.getByRole(role, { name: new RegExp(`^${name} ?${suffix}`) })),
+        ),
+      );
+      expect(lower.y).toBeGreaterThan(end(favoriteBox));
+      expect(Math.abs(lower.y - upper.y)).toBeLessThanOrEqual(1);
+      expect(upper.x).toBeGreaterThan(right(lower));
+      expect(queryBox.y).toBeGreaterThan(end(upper));
+    } else {
+      expect(queryBox.y).toBeGreaterThan(end(favoriteBox));
+    }
+    await expect(form.getByRole('checkbox', { name: '只看暂无评定' })).toHaveCount(
+      id === 'luogu' ? 1 : 0,
+    );
+  }
+
+  await page.setViewportSize({ width: 390, height: 900 });
+  await platform.selectOption('luogu');
+  const stack = await Promise.all(
+    [
+      platform,
+      search,
+      tags,
+      favorite,
+      form.getByRole('combobox', { name: /^洛谷难度下限/ }),
+      form.getByRole('combobox', { name: /^洛谷难度上限/ }),
+      query,
+    ].map(bounds),
+  );
+  for (let index = 1; index < stack.length; index++) {
+    expect(stack[index].y).toBeGreaterThan(end(stack[index - 1]));
+    expect(Math.abs(stack[index].x - stack[0].x)).toBeLessThanOrEqual(1);
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
 test('long native tags wrap within the information column and all actions stay aligned', async ({
@@ -194,7 +283,9 @@ test('long native tags wrap within the information column and all actions stay a
   expect(errors).toEqual([]);
 });
 
-test('cursor pages reuse tags and unknown-time filtering resets pagination', async ({ page }) => {
+test('member lists ignore old time filters and reuse tags across cursor pages', async ({
+  page,
+}) => {
   const requests = [];
   let tagRequests = 0;
   await page.route('**/api/me/problems/tags?*', (route) => {
@@ -216,26 +307,34 @@ test('cursor pages reuse tags and unknown-time filtering resets pagination', asy
       },
     });
   });
-  await page.goto('/my-problems.html?platform=codeforces');
+  await page.goto(
+    '/my-problems.html?platform=codeforces&time_basis=contest&start_at=100&end_at=200',
+  );
   await expect(
     page.locator('#problem-list article').filter({ hasText: 'Cursor page 1' }),
   ).toBeVisible();
-  await expect(page.getByRole('combobox', { name: '标签', exact: true })).toBeEnabled();
+  await expect(page.getByLabel('时间依据', { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel(/^开始时间/)).toHaveCount(0);
+  await expect(page.getByLabel(/^结束时间/)).toHaveCount(0);
+  await expect(page.getByRole('spinbutton', { name: 'CF rating 下限' })).toBeVisible();
+  await expect(page.locator('#problem-list')).toContainText('比赛时间');
+  await expect(page.getByRole('button', { name: /按标签筛选/ })).toBeEnabled();
   await page.getByRole('button', { name: '下一页', exact: true }).click();
   await expect(
     page.locator('#problem-list article').filter({ hasText: 'Cursor page 2' }),
   ).toBeVisible();
   expect(requests.at(-1).get('cursor')).toBe('cursor-2');
   expect(tagRequests).toBe(1);
-  await page.getByRole('combobox', { name: '时间依据', exact: true }).selectOption('unknown');
-  await expect(page.getByLabel('开始时间（北京时间）', { exact: true })).toBeDisabled();
-  await expect(page.getByLabel('结束时间（不含，北京时间）', { exact: true })).toBeDisabled();
+  await page.getByRole('textbox', { name: '搜索', exact: true }).fill('Cursor');
   await page.getByRole('button', { name: '查询', exact: true }).click();
   await expect(
     page.locator('#problem-list article').filter({ hasText: 'Cursor page 1' }),
   ).toBeVisible();
-  expect(requests.at(-1).get('time_basis')).toBe('unknown');
   expect(requests.at(-1).get('cursor')).toBeNull();
-  expect(requests.at(-1).get('start_at')).toBeNull();
+  for (const request of requests) {
+    expect(request.has('time_basis')).toBe(false);
+    expect(request.has('start_at')).toBe(false);
+    expect(request.has('end_at')).toBe(false);
+  }
   expect(tagRequests).toBe(1);
 });

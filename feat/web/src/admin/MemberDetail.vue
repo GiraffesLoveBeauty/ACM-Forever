@@ -121,7 +121,10 @@ watch(() => route.query, load, { immediate: true });
           ><b>{{ row.problem_name || row.problem_id }}</b
           ><br />{{ row.platform }} · <ProblemDifficulty :problem="row" />
           <LuoguBadges v-if="row.platform === 'luogu'" :problem="row" :difficulty="false" />
-          <ProblemTags v-else-if="row.tags != null" :tags="row.tags" /></span
+          <ProblemTags
+            v-else-if="row.tags != null"
+            :tags="row.tags"
+            :platform="row.platform" /></span
         ><a
           v-if="row.problem_url"
           class="btn"

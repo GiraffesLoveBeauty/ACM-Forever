@@ -3,6 +3,7 @@ import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router';
 import { api, useRequests, showError, notify, date, external } from '../lib/api.js';
 import { cfMemory, adminSessionVersion, useParams } from '../lib/admin.js';
+import { codeforcesTagName } from '../lib/codeforces-tags.js';
 import Pager from '../components/Pager.vue';
 import ProblemDifficulty from '../components/ProblemDifficulty.vue';
 import ProblemTags from '../components/ProblemTags.vue';
@@ -574,7 +575,9 @@ onBeforeUnmount(() => {
       ><label
         >标签<select v-model="filters.tag">
           <option value="">全部标签</option>
-          <option v-for="tag in recent?.available_tags || []" :key="tag">{{ tag }}</option>
+          <option v-for="tag in recent?.available_tags || []" :key="tag" :value="tag">
+            {{ codeforcesTagName(tag) }}
+          </option>
         </select></label
       ><label
         >展示方式<select v-model="filters.view">
@@ -606,7 +609,7 @@ onBeforeUnmount(() => {
                   >{{ problem.display_id }} · {{ problem.name }}</a
                 >
                 <ProblemDifficulty :problem="problem" platform="codeforces" />
-                <ProblemTags v-if="problem.tags" :tags="problem.tags" />
+                <ProblemTags v-if="problem.tags" :tags="problem.tags" platform="codeforces" />
                 <br />{{ date(problem.ac_at) }}</span
               ><span
                 ><a
@@ -645,7 +648,7 @@ onBeforeUnmount(() => {
             </td>
             <td>
               <ProblemDifficulty :problem="row" platform="codeforces" />
-              <ProblemTags :tags="row.tags" />
+              <ProblemTags :tags="row.tags" platform="codeforces" />
             </td>
             <td>{{ row.recent_ac_count }} 人</td>
             <td>{{ row.history_ac_count }} 人</td>

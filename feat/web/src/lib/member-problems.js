@@ -1,5 +1,5 @@
 import { trainingReturn } from './training-tasks.js';
-import { rangeFilters } from './problem-filters.js';
+import { ratingFilters } from './problem-filters.js';
 import { nativeFilters } from './luogu-problems.js';
 const platforms = ['codeforces', 'luogu', 'atcoder', 'nowcoder', 'cjlu'];
 export function memberFilters(query = {}) {
@@ -7,7 +7,7 @@ export function memberFilters(query = {}) {
   const view = query.view === 'tracker' ? 'tracker' : 'list';
   const allowedPlatforms = view === 'tracker' ? ['codeforces', 'atcoder'] : ['all', ...platforms];
   // Keep existing all-OJ AC views and generic-filter bookmarks intact.
-  const genericFilters = ['problem_tag', 'labels', 'rating_min', 'rating_max'].some(
+  const genericFilters = ['problem_tag', 'rating_min', 'rating_max'].some(
     (key) => typeof query[key] === 'string' && query[key].trim(),
   );
   const listDefault =
@@ -20,33 +20,24 @@ export function memberFilters(query = {}) {
       ? 'codeforces'
       : listDefault;
   const native = platform === 'luogu' && view !== 'tracker';
+  const problemTags =
+    platform === 'codeforces' && typeof query.problem_tags === 'string'
+      ? query.problem_tags.trim()
+      : '';
   const normalized = { ...query, platform, view };
   return {
     ...nativeFilters(normalized),
-    ...rangeFilters(normalized),
+    ...ratingFilters(normalized),
     view,
     scope: query.scope === 'solved' ? 'solved' : 'all',
     platform,
     tag: typeof query.tag === 'string' ? query.tag.slice(0, 100) : '',
     problem_tag:
-      !native && typeof query.problem_tag === 'string'
+      !native && !problemTags && typeof query.problem_tag === 'string'
         ? query.problem_tag.trim().slice(0, 100)
         : '',
+    problem_tags: problemTags,
     state: query.state === 'favorite' ? 'favorite' : '',
-    labels:
-      view === 'tracker' || native
-        ? ''
-        : [
-            ...new Set(
-              (typeof query.labels === 'string' ? query.labels : '')
-                .split(',')
-                .filter((t) => /^[a-z][a-z0-9_]{0,80}$/.test(t)),
-            ),
-          ]
-            .sort()
-            .slice(0, 115)
-            .join(','),
-    match: query.match === 'any' && view !== 'tracker' && !native ? 'any' : 'all',
     page: Number.isSafeInteger(number) && number > 0 && number <= 1000000 ? number : 1,
   };
 }
@@ -57,7 +48,6 @@ export function memberQuery(filters) {
         value &&
         !(key === 'view' && value === 'list') &&
         !(key === 'scope' && value === 'all') &&
-        !(key === 'match' && value === 'all') &&
         !(key === 'page' && value === 1),
     ),
   );

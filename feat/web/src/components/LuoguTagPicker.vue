@@ -1,15 +1,19 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue';
+import { codeforcesTagCategories, codeforcesTagName } from '../lib/codeforces-tags.js';
 import { MAX_NATIVE_TAGS } from '../lib/luogu-problems.js';
 import { luoguTagCategories, searchLuoguTags } from '../lib/luogu-tags.js';
 const props = defineProps({
+  platform: { type: String, default: 'luogu' },
   modelValue: { type: Array, default: () => [] },
   taxonomy: { type: Object, default: () => ({}) },
+  tags: { type: Array, default: () => [] },
+  triggerLabel: { type: String, default: '' },
   loading: Boolean,
   error: { type: String, default: '' },
 });
 const emit = defineEmits(['update:modelValue', 'retry']);
-const id = 'luogu-picker-' + useId();
+const id = 'problem-tag-picker-' + useId();
 const trigger = ref(null),
   dialog = ref(null),
   search = ref(null);
@@ -17,21 +21,32 @@ const opened = ref(false),
   draft = ref([]),
   query = ref(''),
   active = ref('');
-const categories = computed(() => luoguTagCategories(props.taxonomy));
+const isCodeforces = computed(() => props.platform === 'codeforces');
+const isLuogu = computed(() => props.platform === 'luogu');
+const isSingle = computed(() => !isLuogu.value && !isCodeforces.value);
+const maxTags = computed(() => (isSingle.value ? 1 : MAX_NATIVE_TAGS));
+const categories = computed(() => {
+  if (isCodeforces.value) return codeforcesTagCategories(props.tags);
+  if (isLuogu.value) return luoguTagCategories(props.taxonomy);
+  const ids = new Set(props.tags.filter((value) => typeof value === 'string' && value.trim()));
+  const items = [...ids].map((id) => ({ id, name: tagName(id) }));
+  return items.length ? [{ id: 'all', name: '', groups: [{ id: 'all', name: '', items }] }] : [];
+});
 const byId = computed(
   () => new Map((props.taxonomy.tags || []).map((tag) => [String(tag.id), tag])),
 );
-const selected = computed(() => [...new Set(props.modelValue.map(String))]);
+const selected = computed(() => [
+  ...new Map(props.modelValue.map(String).map((value) => [tagKey(value), value])).values(),
+]);
+const draftKeys = computed(() => new Set(draft.value.map(tagKey)));
 const category = computed(
   () => categories.value.find((item) => item.id === active.value) || categories.value[0],
 );
-const results = computed(() =>
-  query.value.trim()
-    ? searchLuoguTags(categories.value, query.value)
-    : category.value
-      ? [category.value]
-      : [],
-);
+const results = computed(() => {
+  if (query.value.trim()) return searchLuoguTags(categories.value, query.value);
+  if (!isLuogu.value) return categories.value;
+  return category.value ? [category.value] : [];
+});
 const resultCount = computed(() =>
   results.value.reduce(
     (sum, item) => sum + item.groups.reduce((n, group) => n + group.items.length, 0),
@@ -40,11 +55,19 @@ const resultCount = computed(() =>
 );
 const summary = computed(() => selected.value.slice(0, 3).map(tagName).join('、'));
 let body, overflow;
+function tagKey(value) {
+  return isCodeforces.value ? value.toLowerCase() : value;
+}
+function isSelected(value) {
+  return draftKeys.value.has(tagKey(value));
+}
 function tagName(value) {
-  return byId.value.get(value)?.name || '标签 #' + value + '（名称待更新）';
+  if (isCodeforces.value || props.platform === 'all') return codeforcesTagName(value);
+  if (isLuogu.value) return byId.value.get(value)?.name || '标签 #' + value + '（名称待更新）';
+  return value;
 }
 async function open() {
-  draft.value = [...selected.value];
+  draft.value = selected.value.slice(0, isSingle.value ? 1 : undefined);
   query.value = '';
   active.value = categories.value[0]?.id || '';
   opened.value = true;
@@ -67,14 +90,18 @@ function close(restoreFocus = true) {
   if (restoreFocus) nextTick(() => trigger.value?.focus?.());
 }
 function toggle(value) {
-  draft.value = draft.value.includes(value)
-    ? draft.value.filter((item) => item !== value)
+  if (isSingle.value) {
+    draft.value = isSelected(value) ? [] : [value];
+    return;
+  }
+  draft.value = isSelected(value)
+    ? draft.value.filter((item) => tagKey(item) !== tagKey(value))
     : draft.value.length < MAX_NATIVE_TAGS
       ? [...draft.value, value]
       : draft.value;
 }
 function apply() {
-  if (draft.value.length > MAX_NATIVE_TAGS) return;
+  if (draft.value.length > maxTags.value) return;
   const values = [...draft.value];
   close();
   emit('update:modelValue', values);
@@ -140,7 +167,7 @@ onBeforeUnmount(() => close(false));
             stroke-width="1.5"
           />
         </svg>
-        <span>按算法筛选</span
+        <span>{{ triggerLabel || (isLuogu ? '按算法筛选' : '按标签筛选') }}</span
         ><span v-if="selected.length" class="luogu-picker-count">{{ selected.length }}</span>
       </button>
       <button
@@ -172,8 +199,10 @@ onBeforeUnmount(() => close(false));
           <header class="luogu-picker-heading">
             <div>
               <h2 :id="id + '-title'">选择标签</h2>
-              <p :id="id + '-hint'">
-                洛谷原生分类 · 多个标签同时满足，最多选择 {{ MAX_NATIVE_TAGS }} 个
+              <p v-if="isSingle" :id="id + '-hint'">一次选择一个标签</p>
+              <p v-else :id="id + '-hint'">
+                {{ isCodeforces ? 'Codeforces 原生标签' : '洛谷原生分类' }} ·
+                多个标签同时满足，最多选择 {{ MAX_NATIVE_TAGS }} 个
               </p>
             </div>
             <button
@@ -186,7 +215,7 @@ onBeforeUnmount(() => close(false));
             </button>
           </header>
           <div class="luogu-picker-tools">
-            <div class="luogu-picker-tabs" role="tablist" aria-label="标签分类">
+            <div v-if="isLuogu" class="luogu-picker-tabs" role="tablist" aria-label="标签分类">
               <button
                 v-for="(item, index) in categories"
                 :id="id + '-tab-' + item.id"
@@ -227,7 +256,7 @@ onBeforeUnmount(() => close(false));
             <div class="luogu-picker-selected-heading">
               <strong
                 >已选标签
-                <span aria-live="polite">（{{ draft.length }}/{{ MAX_NATIVE_TAGS }}）</span></strong
+                <span aria-live="polite">（{{ draft.length }}/{{ maxTags }}）</span></strong
               ><button
                 v-if="draft.length"
                 type="button"
@@ -254,21 +283,45 @@ onBeforeUnmount(() => close(false));
           <div
             :id="id + '-results'"
             class="luogu-picker-body"
-            :role="query.trim() ? 'region' : 'tabpanel'"
-            :aria-label="query.trim() ? '全部分类的搜索结果' : undefined"
-            :aria-labelledby="!query.trim() && category ? id + '-tab-' + category.id : undefined"
+            :role="!isLuogu || query.trim() ? 'region' : 'tabpanel'"
+            :aria-label="
+              query.trim()
+                ? isSingle
+                  ? '标签搜索结果'
+                  : '全部分类的搜索结果'
+                : isLuogu
+                  ? undefined
+                  : '全部标签'
+            "
+            :aria-labelledby="
+              isLuogu && !query.trim() && category ? id + '-tab-' + category.id : undefined
+            "
             :aria-busy="loading"
             tabindex="0"
           >
-            <p v-if="loading" class="luogu-picker-state" role="status">正在加载洛谷原生标签…</p>
+            <p v-if="loading" class="luogu-picker-state" role="status">
+              {{
+                isCodeforces
+                  ? '正在加载 Codeforces 标签…'
+                  : isLuogu
+                    ? '正在加载洛谷原生标签…'
+                    : '正在加载标签…'
+              }}
+            </p>
             <p v-if="error" class="luogu-picker-state" role="alert">
               {{ error }}
               <button type="button" class="btn" :disabled="loading" @click="emit('retry')">
-                重试分类
+                {{ isLuogu ? '重试分类' : '重试' }}
               </button>
             </p>
             <p v-if="!loading && !categories.length && !error" class="luogu-picker-state">
-              原生标签尚未同步，已选条件仍然保留。
+              {{
+                isCodeforces
+                  ? '暂无可用的 Codeforces 标签。'
+                  : isLuogu
+                    ? '原生标签尚未同步，已选条件仍然保留。'
+                    : '暂无可用的标签。'
+              }}
             </p>
             <p
               v-else-if="!loading && categories.length && !results.length"
@@ -278,11 +331,11 @@ onBeforeUnmount(() => close(false));
               没有找到匹配的标签，试试其他关键词。
             </p>
             <p v-if="query.trim() && results.length" class="luogu-picker-search-note" role="status">
-              全部分类中找到 {{ resultCount }} 个标签
+              {{ isSingle ? '找到' : '全部分类中找到' }} {{ resultCount }} 个标签
             </p>
             <template v-for="item in results" :key="item.id">
               <section v-for="group in item.groups" :key="group.id" class="luogu-picker-group">
-                <h3>
+                <h3 v-if="!isSingle">
                   <span v-if="query.trim()" class="luogu-picker-group-category"
                     >{{ item.name }} / </span
                   >{{ group.name }}
@@ -293,13 +346,13 @@ onBeforeUnmount(() => close(false));
                     :key="tag.id"
                     type="button"
                     class="luogu-picker-chip"
-                    :class="{ 'is-selected': draft.includes(tag.id) }"
+                    :class="{ 'is-selected': isSelected(tag.id) }"
                     :aria-label="tag.name"
-                    :aria-pressed="draft.includes(tag.id)"
-                    :disabled="draft.length >= MAX_NATIVE_TAGS && !draft.includes(tag.id)"
+                    :aria-pressed="isSelected(tag.id)"
+                    :disabled="!isSingle && draft.length >= maxTags && !isSelected(tag.id)"
                     @click="toggle(tag.id)"
                   >
-                    <span v-if="draft.includes(tag.id)" aria-hidden="true">✓</span>{{ tag.name }}
+                    <span v-if="isSelected(tag.id)" aria-hidden="true">✓</span>{{ tag.name }}
                   </button>
                 </div>
               </section>
@@ -309,9 +362,11 @@ onBeforeUnmount(() => close(false));
         <footer class="luogu-picker-footer">
           <p aria-live="polite">
             {{
-              draft.length >= MAX_NATIVE_TAGS
+              !isSingle && draft.length >= maxTags
                 ? `已达 ${MAX_NATIVE_TAGS} 个标签上限，请先移除再添加。`
-                : '未选择标签时，不限制算法。'
+                : isLuogu
+                  ? '未选择标签时，不限制算法。'
+                  : '留空时不按标签筛选。'
             }}
           </p>
           <div>
@@ -319,7 +374,7 @@ onBeforeUnmount(() => close(false));
             ><button
               type="button"
               class="btn primary"
-              :disabled="draft.length > MAX_NATIVE_TAGS"
+              :disabled="draft.length > maxTags"
               @click="apply"
             >
               确认筛选
@@ -336,6 +391,7 @@ onBeforeUnmount(() => close(false));
 }
 .luogu-picker-trigger-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .luogu-picker-trigger {
@@ -343,8 +399,13 @@ onBeforeUnmount(() => close(false));
   flex: 1;
   align-items: center;
   justify-content: center;
-  gap: 9px;
+  gap: 6px;
   min-height: 44px;
+  padding-inline: 8px;
+  white-space: nowrap;
+}
+.luogu-picker-trigger > svg {
+  flex-shrink: 0;
 }
 .luogu-picker-count {
   display: inline-grid;
@@ -461,6 +522,10 @@ onBeforeUnmount(() => close(false));
   min-width: 160px;
   margin: 0 0 10px;
   align-items: center;
+}
+.luogu-picker-search:only-child {
+  width: 100%;
+  flex-grow: 1;
 }
 .luogu-picker-search > svg {
   position: absolute;

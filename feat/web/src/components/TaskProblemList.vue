@@ -40,6 +40,7 @@ defineEmits(['move', 'remove']);
           <ProblemTags
             v-else-if="problem.tags != null"
             :tags="problem.tags"
+            :platform="problem.platform"
             :neutral="problem.platform === 'luogu'"
           />
         </div>

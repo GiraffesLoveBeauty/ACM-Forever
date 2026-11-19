@@ -841,9 +841,9 @@ test('member native filters retain level zero and negative tag IDs in requests a
     '/problem-bank.html?platform=luogu&native_difficulty=0&native_tag=-2&labels=math&match=any&problem_tag=dp',
   );
   const nativeRequest = new URL(requests[0], 'https://example.invalid').searchParams;
-  assert.equal(nativeRequest.get('labels'), '');
+  assert(!nativeRequest.has('labels'));
   assert.equal(nativeRequest.get('problem_tag'), '');
-  assert.equal(nativeRequest.get('match'), 'all');
+  assert(!nativeRequest.has('match'));
   assert.equal(
     new URL(requests[0], 'https://example.invalid').searchParams.get('native_difficulty'),
     '0',
