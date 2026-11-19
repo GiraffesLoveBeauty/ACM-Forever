@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 
 from .cf_client import problem_url as cf_problem_url
 from .luogu_problem import canonical_problem_id as luogu_problem_id
-from .problem_tags import problem_tags, selected_problem_tag_keys
+from .problem_tags import codeforces_tag_search_keys, problem_tags, selected_problem_tag_keys
 from .atcoder_difficulty import difficulty_metadata
 
 
@@ -278,6 +278,7 @@ async def contest_tracker(db, owner, options):
         group["problems"].append(problem)
 
     keyword = options["tag"]
+    translated = codeforces_tag_search_keys(keyword)
     selected_tags = set(options["problem_tags"])
     cf_search_key = problem_id_key("codeforces", keyword) if CF_PROBLEM_ID.fullmatch(keyword) else None
 
@@ -286,8 +287,13 @@ async def contest_tracker(db, owner, options):
             return False
         if options["state"] == "favorite" and not problem["is_favorite"]:
             return False
-        if selected_tags and not selected_tags.issubset(tag.casefold() for tag in problem_tags(problem["tags"])):
-            return False
+        translated_tags = translated if problem["platform"] == "codeforces" else ()
+        if selected_tags or translated_tags:
+            tag_keys = {tag.casefold() for tag in problem_tags(problem["tags"])}
+            if not selected_tags.issubset(tag_keys):
+                return False
+            if not tag_keys.isdisjoint(translated_tags):
+                return True
         if (cf_search_key is not None and problem["platform"] == "codeforces"
                 and cf_search_key == problem_id_key("codeforces", problem["problem_id"])):
             return True

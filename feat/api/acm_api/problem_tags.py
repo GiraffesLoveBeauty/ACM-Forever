@@ -1,8 +1,19 @@
 """Read catalog tags consistently from legacy text and crawler JSON arrays."""
 
 import json
+from pathlib import Path
 
 from .training_logic import split_tags
+
+_CODEFORCES_TAG_NAMES = json.loads(
+    Path(__file__).with_name("codeforces-tags.zh.json").read_text(encoding="utf-8")
+)
+
+
+def codeforces_tag_search_keys(keyword):
+    """Find source tags whose displayed name contains the search keyword."""
+    needle = keyword.casefold()
+    return tuple(key for key, name in _CODEFORCES_TAG_NAMES.items() if needle and needle in name.casefold())
 
 
 def selected_problem_tag_keys(args, platform):

@@ -234,6 +234,58 @@ class MemberProblemTagTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual((await client.get(route + urlencode(query))).status_code, 400)
                 self.assertEqual((await client.get(route + "platform=codeforces&problem_tags=" + "dp," * 25 + "DP")).status_code, 200)
 
+    async def test_codeforces_keyword_search_matches_displayed_and_source_tags(self):
+        async with self.app.test_app():
+            client = self.app.test_client()
+            await self.account_login(client, role="member")
+            db = await connect_db(self.db_path)
+            try:
+                await save_metadata_batch(db, [
+                    {"platform": "codeforces", "problem_id": f"cf_{contest}{index}", "contest_id": contest,
+                     "problem_index": index, "problem_name": f"Problem {index}",
+                     "problem_url": f"https://codeforces.com/contest/{contest}/problem/{index}", "tags": tags}
+                    for contest, index, tags in (
+                        ("100", "A", ["Math"]), ("100", "B", ["greedy"]),
+                        ("200", "A", ["combinatorics"]), ("300", "A", []),
+                        ("400", "A", ["greedy"]), ("500", "A", []),
+                    )
+                ] + [{
+                    "platform": "atcoder", "problem_id": "abc100_a", "contest_id": "abc100",
+                    "problem_index": "A", "problem_name": "AtCoder problem",
+                    "problem_url": "https://atcoder.jp/contests/abc100/tasks/abc100_a", "tags": ["math"],
+                }])
+            finally:
+                await db.close()
+            await self.execute(
+                "INSERT INTO submissions(user_qq_id,platform,problem_id,tags,submit_time) "
+                "VALUES(?,'codeforces',?,'math',1)",
+                [("12345678", "300-A"), ("12345678", "cf_400A"), ("87654321", "cf_500A")],
+            )
+
+            for keyword, platform, problems, contests in (
+                ("math", "codeforces", {"cf_100A", "cf_300A"}, {"100", "300"}),
+                ("数学", "codeforces", {"cf_100A", "cf_200A", "cf_300A"}, {"100", "200", "300"}),
+                ("数学", "", {"cf_100A", "cf_200A", "cf_300A"}, {"100", "200", "300"}),
+                ("数学", "atcoder", set(), set()),
+                ("math", "atcoder", {"abc100_a"}, {"abc100"}),
+            ):
+                with self.subTest(keyword=keyword, platform=platform):
+                    query = "?" + urlencode({"platform": platform, "tag": keyword})
+                    listing_response = await client.get("/api/me/problems" + query)
+                    self.assertEqual(listing_response.status_code, 200)
+                    listing = await listing_response.get_json()
+                    self.assertEqual(listing["total"], len(problems))
+                    self.assertEqual({row["problem_id"] for row in listing["items"]}, problems)
+
+                    tracker_response = await client.get("/api/me/problems/tracker" + query)
+                    self.assertEqual(tracker_response.status_code, 200)
+                    tracker = await tracker_response.get_json()
+                    self.assertEqual(tracker["total"], len(contests))
+                    self.assertEqual({row["contest_id"] for row in tracker["items"]}, contests)
+                    for row in tracker["items"]:
+                        if row["contest_id"] == "100":
+                            self.assertEqual([problem["problem_index"] for problem in row["problems"]], ["A", "B"])
+
     async def test_options_list_and_tracker_share_effective_tags_for_empty_and_stale_sources(self):
         async with self.app.test_app():
             client = self.app.test_client()

@@ -228,7 +228,7 @@ Web 成员训练页和管理员进度页在可见且空闲时每 30 秒读取站
 
 `GET /api/me/problems?scope=solved` 从会话读取 QQ，客户端的 `qq_id/owner_qq_id` 不改变归属。以平台和题号去重，返回 `ac_at`（Unix 秒），按最近 AC 时间倒序，再按平台、题号稳定排序。`platform/tag/problem_tag/state=favorite/page/page_size` 与总数使用相同条件；`tag` 同时匹配题名、题号和当前成员可见的有效标签：公共标签为空时包含本人的 AC 标签回退，已有公共标签时不搜索被其替代的私人标签，也不搜索其他成员的标签；该条件与计数、分页共用。独立的 `problem_tag` 按完整标签忽略大小写匹配（最长 100 字符，超长返回 400），兼容逗号等分隔的旧标签及 JSON 标签数组，不把 `math` 匹配为 `mathematics`，`%`、`_` 不作为通配符。标签与搜索、收藏、本人 AC 范围共同生效，先筛选再统计与分页。本人范围默认每页 20、上限 100，默认全站目录仍为 500、上限 500。返回 `items/total/returned/page/page_size/next_cursor/tags_version`；无效 `scope` 或非整数分页参数返回 400。
 
-题目列表和比赛进度在 `platform=codeforces` 时支持 `problem_tags=math,dp`。最多 20 个不同标签，每项最长 100 字符，忽略大小写，要求同一道题同时包含全部标签。非空的 `problem_tags` 优先于旧参数 `problem_tag`。网页使用中文显示标签，API 仍接收原站标签值。
+题目列表和比赛进度的关键词 `tag` 同时匹配 Codeforces 标签的原站名称与网页中文名称，例如 `math` 和「数学」。在 `platform=codeforces` 时，两个接口也支持 `problem_tags=math,dp`。最多 20 个不同标签，每项最长 100 字符，忽略大小写，要求同一道题同时包含全部标签。非空的 `problem_tags` 优先于旧参数 `problem_tag`，这两个精确筛选参数仍使用原站标签值。
 
 `GET /api/me/problems/tags?platform=codeforces` 返回 `tags: string[]` 与不透明字符串 `tags_version`，供题库标签选择器使用，沿用成员登录和首次改密限制。选项、列表展示及标签筛选使用同一份有效标签：按已采集目录 → 推荐目录 → 会话本人的 AC 元数据取第一份非空标签，空字符串和 JSON 空数组均允许回退；不读取其他成员独有的提交标签，也不混入被优先来源替代的旧标签。比赛进度采用相同优先顺序。平台可为空或 `codeforces/atcoder/luogu/nowcoder/cjlu`，无效平台返回 400。按完整标签忽略大小写去重并排序，排除空白和超过 100 字符的标签；列表不受当前题目页码、搜索或收藏筛选限制，不联网或触发采集。
 
