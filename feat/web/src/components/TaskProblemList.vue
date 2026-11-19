@@ -55,7 +55,11 @@ defineEmits(['move', 'remove']);
         <template v-if="problem.status">
           <div class="tt-row">
             <span v-if="problem.is_ac" class="tt-tag on_time">已 AC</span>
-            <span class="tt-tag" :class="problem.status">{{ completions[problem.status] }}</span
+            <span class="tt-tag" :class="problem.status">{{
+              problem.platform === 'luogu' && problem.is_ac
+                ? '已完成 · 历史 AC'
+                : completions[problem.status]
+            }}</span
             ><span class="tt-caption">{{
               problem.verification === 'unbound'
                 ? '待绑定 ' + platformName(problem.platform)
@@ -68,7 +72,7 @@ defineEmits(['move', 'remove']);
             >
             <template v-else>
               AC 时间未知 · 首次核验 {{ date(problem.evidence.observed_at) }}
-              <span v-if="problem.evidence.evidence_type === 'snapshot'"> · 洛谷快照核验</span>
+              <span v-if="problem.platform === 'luogu'"> · 洛谷历史 AC</span>
               <span v-if="problem.evidence.evidence_type === 'manual'">
                 · 管理员确认 {{ date(problem.evidence.reviewed_at) }}：{{
                   problem.evidence.reason

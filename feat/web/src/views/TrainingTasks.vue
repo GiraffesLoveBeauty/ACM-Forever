@@ -32,11 +32,14 @@ const needsBinding = computed(() => task.value?.problems.some((p) => p.verificat
 const hasLuogu = computed(() =>
   task.value?.problems.some((p) => p.platform === 'luogu' && p.supported !== false),
 );
+const luoguOnly = computed(
+  () => task.value?.problems.length && task.value.problems.every((p) => p.platform === 'luogu'),
+);
 const verificationSource = computed(
   () =>
     [
       task.value?.problems.some((p) => p.platform === 'codeforces') && 'Codeforces 实际提交记录',
-      hasLuogu.value && '洛谷 AC 集合快照（实际 AC 时间未知）',
+      hasLuogu.value && '洛谷历史 AC 记录（实际 AC 时间未知）',
     ]
       .filter(Boolean)
       .join('；') || '本次不进行 AC 核验',
@@ -279,9 +282,13 @@ function refreshText(item) {
           <div>
             <h2>我的题目进度</h2>
             <p class="tt-caption">
-              按时 {{ task.recipient.on_time_problems }} 题 · 逾期
-              {{ task.recipient.late_problems }} 题 · 时段待确认
-              {{ task.recipient.uncertain_problems || 0 }} 题 ·
+              <template v-if="luoguOnly"
+                >历史 AC {{ task.recipient.completed_problems }} 题 ·
+              </template>
+              <template v-else
+                >按时 {{ task.recipient.on_time_problems }} 题 · 逾期
+                {{ task.recipient.late_problems }} 题 ·
+              </template>
               {{ completions[task.recipient.completion] }}
             </p>
           </div>
@@ -325,20 +332,18 @@ function refreshText(item) {
         </p>
         <p v-if="task.refresh" class="tt-note" role="status">{{ refreshText(task.refresh) }}</p>
         <p v-if="hasUnverifiedLuogu" class="tt-note">
-          本任务的洛谷题目未启用快照核验，可查看站内题面或前往原题练习；暂不核验
+          本任务包含暂不能核验的洛谷题型，可查看站内题面或前往原题练习；暂不核验
           AC，洛谷题目的完成进度不会自动更新，也无需绑定账号。
         </p>
         <p v-if="hasVerifiableProblems" class="tt-note">
           {{
             task.rule === 'historical_ac'
               ? '历史 AC 可计入；任务未开始时仍显示未开始。'
-              : '开始前的历史 AC 单独标记。'
+              : 'CF 开始前的历史 AC 单独标记；洛谷历史 AC 直接计入。'
           }}
           <template v-if="hasLuogu">
-            洛谷仅支持公开 P
-            题：历史模式按已通过集合核验；周期模式需要开始后确认未通过、截止前确认已通过。
-            快照时间不是实际 AC 时间，无法核验已做题的重复
-            AC。截止后首次发现且缺少边界证据时，显示完成时段待确认，可联系管理员审核。
+            洛谷公开 P 题只要历史上已 AC 就计入完成，不限制完成时间，也不要求周期内重新通过。
+            已同步记录会直接用于核验；点击刷新进度可同步最新过题记录，实际 AC 时间保持未知。
           </template>
           <template v-else>截止后 AC 为逾期，以 OJ 实际提交时间为准。</template>
           完成全部必做题才算完成整份任务。

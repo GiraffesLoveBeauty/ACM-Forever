@@ -1,4 +1,4 @@
-"""Boundary tests for observation evidence; no invented submission timestamps."""
+"""Historical Luogu AC never depends on task dates or invented timestamps."""
 import unittest
 from feat.api.acm_api import training_task_snapshot as snapshot
 
@@ -12,76 +12,44 @@ class SnapshotRulesTests(unittest.TestCase):
             value = snapshot.observe(value, accepted=True, requested_at=positive-1, observed_at=positive)
         return snapshot.classify(value, starts_at=100, due_at=200, rule=rule, problem_id="P1001", review=review)
 
-    def test_period_boundaries_and_history_are_distinct(self):
-        self.assertIsNotNone(self.result(negative=100, positive=200)[1])
-        self.assertIsNotNone(self.result(positive=99)[0])
-        self.assertIsNotNone(self.result(positive=100)[3])
-        self.assertIsNotNone(self.result(negative=99, positive=150)[3])
-        self.assertIsNotNone(self.result(negative=101, positive=150)[1])
-        proof = self.result(negative=100, positive=200)[1]
-        self.assertIsNone(proof["accepted_at"])
-        self.assertEqual((proof["observed_at"],proof["last_not_accepted_at"]), (200,100))
+    def test_any_historical_ac_counts_before_during_or_after_the_task(self):
+        for positive in (50, 100, 150, 200, 201, 999):
+            for rule in ("period_ac", "historical_ac"):
+                with self.subTest(positive=positive, rule=rule):
+                    history, timely, late, unknown = self.result(positive=positive, rule=rule)
+                    self.assertEqual((timely, late, unknown), (None, None, None))
+                    self.assertEqual(history["observed_at"], positive)
+                    self.assertIsNone(history["accepted_at"])
+                    self.assertEqual(history["evidence_type"], "historical_ac")
 
-    def test_first_late_detection_is_uncertain_without_deadline_negative(self):
-        for negative in (None, 100, 199):
-            with self.subTest(negative=negative):
-                history, timely, late, unknown = self.result(negative,201)
-                self.assertEqual((history,timely,late),(None,None,None))
-                self.assertIsNotNone(unknown)
-        self.assertIsNotNone(self.result(200,202)[2])
+    def test_no_ac_needs_no_period_baseline(self):
+        self.assertEqual(self.result(), (None, None, None, None))
+        self.assertEqual(self.result(negative=120), (None, None, None, None))
 
-    def test_historical_rule_still_needs_evidence_before_deadline_for_timely_credit(self):
-        self.assertIsNotNone(self.result(positive=150, rule="historical_ac")[1])
-        self.assertIsNotNone(self.result(positive=201, rule="historical_ac")[3])
+    def test_previous_negative_does_not_change_historical_credit(self):
+        self.assertEqual(self.result(positive=250), self.result(negative=220, positive=250))
 
-    def test_positive_is_frozen_and_absence_never_creates_repeat_ac(self):
+    def test_first_positive_is_frozen_when_a_later_page_omits_the_problem(self):
         first = snapshot.observe(None, accepted=True, requested_at=80, observed_at=81)
         second = snapshot.observe(first, accepted=False, requested_at=150, observed_at=151)
-        third = snapshot.observe(second, accepted=True, requested_at=180, observed_at=181)
-        self.assertEqual(third["first_seen_at"], 81)
-        self.assertNotIn("last_absent_at", third)
-        self.assertFalse(third["conflict"])
         self.assertTrue(second["conflict"])
-        self.assertIsNotNone(snapshot.classify(third, starts_at=100, due_at=200, rule="period_ac", problem_id="P1001")[0])
+        self.assertEqual(second["first_seen_at"], 81)
+        self.assertIsNotNone(snapshot.classify(second, problem_id="P1001")[0])
 
     def test_old_requests_do_not_move_the_snapshot_backwards(self):
         current = snapshot.observe(None, accepted=False, requested_at=120, observed_at=121)
         stale = snapshot.observe(current, accepted=True, requested_at=110, observed_at=130)
         self.assertEqual(stale, current)
 
-    def test_local_ac_is_never_backdated(self):
-        proof = snapshot.local_positive(201)
-        self.assertEqual(snapshot.classify(proof,starts_at=100,due_at=200,rule="historical_ac",problem_id="P1001")[:3],(None,None,None))
-        self.assertEqual(proof["source"],"local_luogu_ac_set")
+    def test_local_history_counts_without_backdating_an_ac_timestamp(self):
+        proof = snapshot.classify(snapshot.local_positive(201), problem_id="P1001")[0]
+        self.assertEqual(proof["source"], "local_luogu_ac_set")
+        self.assertEqual(proof["observed_at"], 201)
+        self.assertIsNone(proof["accepted_at"])
 
-    def test_extension_reclassifies_the_original_observations(self):
-        value = snapshot.observe(None,accepted=False,requested_at=120,observed_at=121)
-        value = snapshot.observe(value,accepted=True,requested_at=210,observed_at=211)
-        args = dict(starts_at=100,rule="period_ac",problem_id="P1001")
-        self.assertIsNotNone(snapshot.classify(value,due_at=200,**args)[3])
-        self.assertIsNotNone(snapshot.classify(value,due_at=250,**args)[1])
-
-    def test_review_changes_credit_without_creating_an_ac_timestamp(self):
-        review={"decision":"on_time","reviewed_at":300,"reason":"核对训练现场记录"}
-        proof=self.result(positive=220,review=review)[1]
-        self.assertEqual((proof["evidence_type"],proof["reviewed_at"],proof["accepted_at"]),("manual",300,None))
-        review["decision"]="late"
-        self.assertIsNotNone(self.result(positive=220,review=review)[2])
-
-    def test_local_positive_after_negative_is_not_a_public_delta(self):
-        value = snapshot.observe(None, accepted=False, requested_at=120, observed_at=121)
-        value = snapshot.observe(value, accepted=False, known_ac=True, requested_at=150, observed_at=151)
-        self.assertTrue(value['conflict'])
-        self.assertIsNotNone(snapshot.classify(value,starts_at=100,due_at=200,rule='period_ac',problem_id='P1001')[3])
-
-
-    def test_extension_rechecks_a_late_manual_decision_against_its_original_deadline(self):
-        value = snapshot.observe(None,accepted=True,requested_at=210,observed_at=211)
-        review = {'decision':'late','reviewed_at':230,'due_at':200,'reason':'核对逾期补做'}
-        args=dict(starts_at=100,rule='period_ac',problem_id='P1001',review=review)
-        self.assertIsNotNone(snapshot.classify(value,due_at=200,**args)[2])
-        self.assertIsNotNone(snapshot.classify(value,due_at=220,**args)[3])
-        self.assertIsNotNone(snapshot.classify(value,due_at=240,**args)[1])
+    def test_legacy_manual_late_decision_cannot_override_historical_ac(self):
+        review = {"decision":"late", "reviewed_at":300, "due_at":200, "reason":"旧审核"}
+        self.assertEqual(self.result(positive=250), self.result(positive=250, review=review))
 
 
 class SnapshotMigrationTests(unittest.IsolatedAsyncioTestCase):

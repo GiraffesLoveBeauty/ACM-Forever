@@ -280,10 +280,12 @@ async def review_progress(db, identity, task_id, recipient_id):
         raise service.TaskError("证据已更新，请重新加载后审核。", "evidence_conflict", 409)
     if row["closed"] or row["account_state"] != "active" or row["account_epoch"] != row["current_epoch"]:
         raise service.TaskError("历史或已注销账号不能重新核验。", "account_changed", 409)
+    if decision != "reset_binding":
+        raise service.TaskError("洛谷统一按历史 AC 判断完成，无需审核按期或逾期。", "historical_ac_only")
     anchor, generation, valid, verification = progress.live_state(row, now)
     before = {"decision": (progress.evidence(row["review_json"]) or {}).get("decision"), "problem_id": row["canonical_id"], "recipient_id": recipient_id}
     if decision == "reset_binding":
-        credited = row["on_time_json"] or row["late_json"] or task["rule"] == "historical_ac" and row["history_json"]
+        credited = row["on_time_json"] or row["late_json"] or row["history_json"]
         if verification != "binding_changed" or not row["luogu_id"] or credited:
             raise service.TaskError("仅绑定已变化且尚未计入完成的题目可重建核验起点；已有完成成绩保留。", "binding_reset_unavailable", 409)
         key = f'{str(row["luogu_id"]).strip().casefold()}:{row["luogu_binding_version"]}'
@@ -291,19 +293,6 @@ async def review_progress(db, identity, task_id, recipient_id):
             history_json=NULL,on_time_json=NULL,late_json=NULL,uncertain_json=NULL,checked_at=?,sync_success_at=0,
             verification='baseline_missing',evidence_version=evidence_version+1 WHERE recipient_id=? AND problem_id=?""",
             (key, row["luogu_binding_version"], now, recipient_id, data["problem_id"]))
-    else:
-        if decision != "clear" and (now < task["starts_at"] or decision == "late" and now <= task["due_at"]):
-            raise service.TaskError("任务未开始时不能确认完成，尚未截止时不能确认逾期。", "review_period_invalid", 409)
-        snapshot = progress.evidence(row["snapshot_json"])
-        if decision == "clear":
-            if not row["review_json"]:
-                raise service.TaskError("当前题目没有可撤销的人工决定。", "review_unavailable", 409)
-        elif not valid or not snapshot or not snapshot.get("first_seen_at"):
-            raise service.TaskError("请先取得当前任务绑定下的 AC 证据，再进行审核。", "ac_evidence_required", 409)
-        review = None if decision == "clear" else {"decision": decision, "reason": reason.strip(), "reviewed_at": now, "due_at": task["due_at"]}
-        row["review_json"] = service.dump(review) if review else None
-        await db.execute("UPDATE training_task_progress SET review_json=?,evidence_version=evidence_version+1 WHERE recipient_id=? AND problem_id=?", (row["review_json"], recipient_id, data["problem_id"]))
-        await progress.store_snapshot(db, row, snapshot, now)
     await service.audit(db, task_id, identity, "progress_reviewed", reason=reason.strip(), before=before,
                         after={"decision": decision, "problem_id": row["canonical_id"], "recipient_id": recipient_id})
     recipients = await progress.recipient_summaries(db, [task_id], now=now, include_real_name=True)

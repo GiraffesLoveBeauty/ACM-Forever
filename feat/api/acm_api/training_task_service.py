@@ -17,9 +17,9 @@ PREVIEW_TTL = 600
 PUBLISH_PLATFORMS = {"codeforces", "luogu"}
 CAPABILITIES = [
     {"platform": platform, "label": label, "can_publish": platform in PUBLISH_PLATFORMS, "period_ac": platform == "codeforces",
-     "historical_ac": platform in {"codeforces", "luogu"}, "snapshot_ac": platform == "luogu",
+     "historical_ac": platform in {"codeforces", "luogu"}, "snapshot_ac": False,
      "reason": "实际提交时间、重复 AC 与完整历史覆盖" if platform == "codeforces" else
-               "公开 P 题过题集合；支持历史 AC 或明确选择周期新增快照核验，不能证明重复 AC" if platform == "luogu" else
+               "公开 P 题按历史 AC 核验，不限制完成时间，也不要求周期内重新 AC" if platform == "luogu" else
                "尚未验证完整提交证据，不能发布"}
     for platform, label in LABELS.items()
 ]
@@ -91,7 +91,7 @@ async def get_task(db, task_id):
 
 def public_task(task):
     task["statuses"] = json.loads(task.pop("statuses_json"))
-    task["luogu_snapshot"] = bool(task["luogu_snapshot"])
+    task["luogu_snapshot"] = False  # Deprecated input; Luogu always uses historical AC.
     task["phase"] = phase(task)
     for field in ("preview_hash", "audience_hash", "preview_expires_at", "publish_key", "publish_version"):
         task.pop(field, None)
@@ -166,8 +166,11 @@ def can_publish(problem):
 def supports_ac(problem, task=None):
     if problem["platform"] == "codeforces":
         return True
-    return problem["platform"] == "luogu" and (
-        task is None or task.get("rule") == "historical_ac" or bool(task.get("luogu_snapshot")))
+    if problem["platform"] != "luogu":
+        return False
+    # Summary rows group already validated published problems and carry no ID.
+    pid = problem.get("canonical_id", problem.get("problem_id"))
+    return pid is None or can_publish({**problem, "problem_id": pid})
 
 
 async def attach_problem_state(db, items, task=None):
@@ -253,6 +256,7 @@ async def save_draft(db, identity, data, task_id=None):
     snapshot_policy = data.get("luogu_snapshot", False)
     if type(snapshot_policy) is not bool:
         raise TaskError("洛谷快照核验选项须为布尔值。")
+    snapshot_policy = False  # Accept old clients without retaining a period policy.
     start, due = timestamp(data.get("starts_at")), timestamp(data.get("due_at"))
     if start and due and start >= due:
         raise TaskError("开始时间必须早于截止时间。")
@@ -300,8 +304,6 @@ def publishable(task):
         raise TaskError("题单至少需要一道题。")
     if any(not can_publish(p) for p in task["problems"]):
         raise TaskError("题单存在当前不能可靠核验的平台或题型；洛谷目前仅支持公开 P 题。", "unsupported_capability")
-    if task["rule"] == "period_ac" and any(p["platform"] == "luogu" for p in task["problems"]) and not task["luogu_snapshot"]:
-        raise TaskError("洛谷无法取得可靠提交时间，请明确选择周期内新增 AC 的快照核验口径。", "snapshot_policy_required")
 
 
 async def preview(db, task_id, data):

@@ -72,14 +72,15 @@ class LuoguTrainingTests(unittest.IsolatedAsyncioTestCase):
         manager.submit_account_sync = AsyncMock(return_value={"id": "scheduled-snapshot"})
         return manager, qq_ids
 
-    async def test_publish_capabilities_require_opt_in_and_only_public_p_problems(self):
+    async def test_publish_uses_history_without_opt_in_and_only_public_p_problems(self):
         options=await (await self.client.get('/api/admin/training-tasks/options')).get_json()
         capability=next(c for c in options['capabilities'] if c['platform']=='luogu')
-        self.assertEqual((capability['historical_ac'],capability['period_ac'],capability['snapshot_ac']),(True,False,True))
+        self.assertEqual((capability['historical_ac'],capability['period_ac'],capability['snapshot_ac']),(True,False,False))
         task=await self.create(problems=[{'platform':'luogu','problem_id':'luogu_p1001'}])
         self.assertEqual(task['problems'][0]['problem_id'],'P1001')
         blocked=await self.client.post(f"/api/admin/training-tasks/{task['id']}/audience-preview",headers=self.headers,json={'version':task['version']})
-        self.assertEqual((blocked.status_code,(await blocked.get_json())['code']),(400,'snapshot_policy_required'))
+        self.assertEqual(blocked.status_code, 200)
+        self.assertFalse(task['luogu_snapshot'])
         for pid in ['B1001','T1001','U1001']:
             blocked = await self.client.post('/api/admin/training-tasks', headers=self.headers,
                 json=self.draft(problems=[{'platform':'luogu','problem_id':pid}],rule='historical_ac'))
@@ -98,7 +99,7 @@ class LuoguTrainingTests(unittest.IsolatedAsyncioTestCase):
             overview,detail=await self.info(item['id'])
             self.assertEqual(overview['summary']['on_time_count'],1)
             proof=detail['problems'][0]['evidence']
-            self.assertEqual((proof['accepted_at'],proof['observed_at'],proof['evidence_type']),(None,self.now-20,'snapshot'))
+            self.assertEqual((proof['accepted_at'],proof['observed_at'],proof['evidence_type']),(None,self.now-20,'historical_ac'))
         rows=await self.sql("SELECT submit_time FROM submissions WHERE platform='luogu'")
         self.assertEqual(rows,[{'submit_time':0}])
         self.assertEqual(await self.sql('SELECT * FROM submission_attempts'),[])
@@ -118,10 +119,10 @@ class LuoguTrainingTests(unittest.IsolatedAsyncioTestCase):
         await self.snapshot(['P1001'],self.now-5)
         await self.snapshot(['P1001','P1002'],self.now)
         overview,detail=await self.info(task['id'])
-        self.assertEqual([p['status'] for p in detail['problems']],['timing_unknown','late'])
-        self.assertEqual((overview['summary']['uncertain_problem_count'],overview['summary']['completed_problem_count']),(1,1))
+        self.assertEqual([p['status'] for p in detail['problems']],['on_time','on_time'])
+        self.assertEqual((overview['summary']['uncertain_problem_count'],overview['summary']['completed_problem_count']),(0,2))
         filtered=await (await self.client.get(f"/api/admin/training-tasks/{task['id']}/progress?status=timing_unknown")).get_json()
-        self.assertEqual(filtered['total'],1)
+        self.assertEqual(filtered['total'],0)
         response=await self.client.post(f"/api/admin/training-tasks/{task['id']}/extend-deadline",headers=self.headers,json={'version':2,'due_at':self.now+100,'reason':'延长周期'})
         self.assertEqual(response.status_code,200)
         self.assertEqual((await self.info(task['id']))[0]['summary']['on_time_count'],1)
@@ -132,12 +133,12 @@ class LuoguTrainingTests(unittest.IsolatedAsyncioTestCase):
         await self.publish(new)
         await self.publish(historical)
         await self.snapshot(['P1001'])
-        self.assertEqual((await self.info(new['id']))[1]['problems'][0]['status'],'timing_unknown')
+        self.assertEqual((await self.info(new['id']))[1]['problems'][0]['status'],'on_time')
         self.assertEqual((await self.info(historical['id']))[1]['problems'][0]['status'],'on_time')
         # A later empty but structurally valid snapshot never turns this into a new AC.
         await self.snapshot([],self.now+1)
         _,detail=await self.info(new['id'])
-        self.assertEqual((detail['problems'][0]['status'],detail['problems'][0]['verification']),('timing_unknown','snapshot_conflict'))
+        self.assertEqual((detail['problems'][0]['status'],detail['problems'][0]['verification']),('on_time','snapshot_conflict'))
 
     async def test_cached_unknown_time_ac_is_not_backdated(self):
         await self.sql("INSERT INTO submissions(user_qq_id,platform,problem_id,submit_time) VALUES('22345678','luogu','luogu_P1001',0)")
@@ -145,16 +146,19 @@ class LuoguTrainingTests(unittest.IsolatedAsyncioTestCase):
         await self.publish(task)
         _,detail=await self.info(task['id'])
         proof=detail['problems'][0]['evidence']
-        self.assertEqual((detail['problems'][0]['status'],proof['source'],proof['accepted_at']),('timing_unknown','local_luogu_ac_set',None))
+        self.assertEqual((detail['problems'][0]['status'],proof['source'],proof['accepted_at']),('on_time','local_luogu_ac_set',None))
 
-    async def test_review_is_authorized_versioned_audited_and_reversible(self):
+    async def test_history_needs_no_date_review_and_the_endpoint_stays_protected(self):
         task=await self.task()
         await self.publish(task)
         await self.snapshot(['P1001'])
         _,detail=await self.info(task['id'])
         recipient,problem=detail['recipient'],detail['problems'][0]
+        self.assertFalse(problem['can_review'])
+        self.assertFalse(problem['can_clear_review'])
+        self.assertEqual(problem['status'], 'on_time')
         url=f"/api/admin/training-tasks/{task['id']}/progress/{recipient['id']}/review"
-        payload={'problem_id':problem['id'],'version':problem['progress_version'],'task_version':2,'decision':'on_time','reason':'核对现场验收记录'}
+        payload={'problem_id':problem['id'],'version':problem['progress_version'],'task_version':2,'decision':'on_time','reason':'旧客户端审核请求'}
         self.assertEqual((await self.client.post(url,json=payload)).status_code,403)
         member=self.app.test_client()
         login=await member.post('/api/auth/login',json={'qq_id':'22345678','password':'Test-Password-123!'})
@@ -163,15 +167,8 @@ class LuoguTrainingTests(unittest.IsolatedAsyncioTestCase):
         stale=await self.client.post(url,headers=self.headers,json={**payload,'version':-1})
         self.assertEqual((stale.status_code,(await stale.get_json())['code']),(409,'evidence_conflict'))
         response=await self.client.post(url,headers=self.headers,json=payload)
-        self.assertEqual(response.status_code,200,await response.get_json())
-        reviewed=(await response.get_json())['problems'][0]
-        self.assertEqual((reviewed['status'],reviewed['evidence']['source'],reviewed['evidence']['accepted_at']),('on_time','admin_review',None))
-        response=await self.client.post(url,headers=self.headers,json={**payload,'version':reviewed['progress_version'],'decision':'clear','reason':'撤销人工判断以复核'})
-        self.assertEqual(response.status_code,200)
-        self.assertEqual((await response.get_json())['problems'][0]['status'],'timing_unknown')
-        audit=await self.sql("SELECT action,actor_qq_id FROM training_task_audit WHERE action='progress_reviewed'")
-        self.assertEqual(len(audit),2)
-        self.assertTrue(all(a['actor_qq_id']=='12345678' for a in audit))
+        self.assertEqual((response.status_code,(await response.get_json())['code']),(400,'historical_ac_only'))
+        self.assertEqual(await self.sql("SELECT * FROM training_task_audit WHERE action='progress_reviewed'"), [])
 
     async def test_rebinding_preserves_credit_and_requires_explicit_reset_for_pending_problem(self):
         task=await self.create(problems=[{'platform':'luogu','problem_id':'P1001'},{'platform':'luogu','problem_id':'P1002'}],luogu_snapshot=True)
@@ -188,10 +185,10 @@ class LuoguTrainingTests(unittest.IsolatedAsyncioTestCase):
         response=await self.client.post(url,headers=self.headers,json={'problem_id':pending['id'],'version':pending['progress_version'],'task_version':2,'decision':'reset_binding','reason':'管理员核对账号更正'})
         self.assertEqual(response.status_code,200,await response.get_json())
         self.assertEqual((await response.get_json())['problems'][1]['verification'],'baseline_missing')
-        # A positive already present on the new UID remains timing-unknown.
+        # An accepted problem on the corrected UID counts immediately as historical AC.
         await self.snapshot(['P1001','P1002'],self.now+1,uid='5678')
         _,detail=await self.info(task['id'])
-        self.assertEqual([p['status'] for p in detail['problems']],['on_time','timing_unknown'])
+        self.assertEqual([p['status'] for p in detail['problems']],['on_time','on_time'])
 
     async def test_sync_failure_rolls_back_ac_and_progress_together(self):
         task=await self.task()
@@ -214,10 +211,6 @@ class LuoguTrainingTests(unittest.IsolatedAsyncioTestCase):
         self.extra_engine, self.extra_manager = engine, manager
         manager.submit_account_sync=AsyncMock(return_value={'id':'scheduled-snapshot'})
         await self.sql("UPDATE training_tasks SET luogu_snapshot=0 WHERE id=?", (task['id'],))
-        self.assertEqual(await manager.schedule_training_snapshots(now=self.now), 0)
-        await self.snapshot([], self.now)
-        self.assertTrue(all(row['snapshot_json'] is None for row in await self.sql('SELECT snapshot_json FROM training_task_progress')))
-        await self.sql("UPDATE training_tasks SET luogu_snapshot=1 WHERE id=?", (task['id'],))
         self.assertEqual(await manager.schedule_training_snapshots(now=self.now),1)
         manager.submit_account_sync.assert_awaited_once_with('22345678',['luogu'],expected_epoch=1)
         self.assertEqual(await manager.schedule_training_snapshots(now=self.now+1),0)
@@ -239,76 +232,24 @@ class LuoguTrainingTests(unittest.IsolatedAsyncioTestCase):
         config['_account_sync_submitter'].assert_awaited_once_with('22345678',['luogu'],0,expected_epoch=1)
         self.assertEqual((await self.client.post(url,headers=headers,json={'qq_id':'12345678'})).status_code,400)
 
-    async def test_review_clear_survives_unbinding_and_rebinding_without_adopting_new_evidence(self):
-        for new_uid in (None, "5678"):
-            with self.subTest(new_uid=new_uid):
-                await self.sql("UPDATE users SET luogu_id='1234' WHERE qq_id='22345678'")
-                task = await self.task()
-                self.assertEqual((await self.publish(task)).status_code, 200)
-                await self.snapshot(["P1001"])
-                _, detail = await self.info(task["id"])
-                problem = detail["problems"][0]
-                self.assertFalse(problem["can_clear_review"])
-                url = f"/api/admin/training-tasks/{task['id']}/progress/{detail['recipient']['id']}/review"
-                payload = {"problem_id": problem["id"], "version": problem["progress_version"],
-                           "task_version": 2, "decision": "on_time", "reason": "人工验收"}
-                confirmed = await self.client.post(url, headers=self.headers, json=payload)
-                self.assertEqual(confirmed.status_code, 200, await confirmed.get_json())
-                before = (await self.sql("SELECT snapshot_json,binding_key,binding_version FROM training_task_progress WHERE problem_id=?", (problem["id"],)))[0]
-                await self.sql("UPDATE users SET luogu_id=? WHERE qq_id='22345678'", (new_uid,))
-                _, detail = await self.info(task["id"])
-                problem = detail["problems"][0]
-                self.assertEqual(problem["status"], "on_time")
-                self.assertFalse(problem["can_review"])
-                self.assertTrue(problem["can_clear_review"])
-                self.assertFalse(problem["can_reset_binding"])
-                payload["version"] = problem["progress_version"]
-                blocked = await self.client.post(url, headers=self.headers, json=payload)
-                self.assertEqual((blocked.status_code, (await blocked.get_json())["code"]), (409, "ac_evidence_required"))
-                payload.update(decision="clear", reason="原判断有误，恢复原始快照")
-                cleared = await self.client.post(url, headers=self.headers, json=payload)
-                self.assertEqual(cleared.status_code, 200, await cleared.get_json())
-                problem = (await cleared.get_json())["problems"][0]
-                self.assertEqual(problem["status"], "timing_unknown")
-                self.assertIsNone(problem["review"])
-                self.assertFalse(problem["can_clear_review"])
-                self.assertEqual(problem["verification"], "binding_changed" if new_uid else "unbound")
-                after = (await self.sql("SELECT snapshot_json,binding_key,binding_version FROM training_task_progress WHERE problem_id=?", (problem["id"],)))[0]
-                self.assertEqual(after, before)
-                if new_uid:
-                    self.assertTrue(problem["can_reset_binding"])
-                    await self.snapshot(["P1001"], self.now + 1, uid=new_uid)
-                    self.assertEqual((await self.sql("SELECT snapshot_json,binding_key,binding_version FROM training_task_progress WHERE problem_id=?", (problem["id"],)))[0], before)
-                overview, _ = await self.info(task["id"])
-                self.assertEqual(overview["summary"]["completed_problem_count"], 0)
-                audit = await self.sql("SELECT reason FROM training_task_audit WHERE task_id=? AND action='progress_reviewed' ORDER BY id", (task["id"],))
-                self.assertEqual([entry["reason"] for entry in audit], ["人工验收", "原判断有误，恢复原始快照"])
-                payload["version"] = problem["progress_version"]
-                repeated = await self.client.post(url, headers=self.headers, json=payload)
-                self.assertEqual((repeated.status_code, (await repeated.get_json())["code"]), (409, "review_unavailable"))
 
-    async def test_review_clear_after_rebinding_keeps_authorization_versions_and_lifecycle_fences(self):
+    async def test_binding_reset_keeps_authorization_versions_and_lifecycle_fences(self):
         task = await self.task()
         await self.publish(task)
-        await self.snapshot(["P1001"])
+        await self.sql("UPDATE users SET luogu_id='5678' WHERE qq_id='22345678'")
         _, detail = await self.info(task["id"])
         problem = detail["problems"][0]
         url = f"/api/admin/training-tasks/{task['id']}/progress/{detail['recipient']['id']}/review"
         payload = {"problem_id": problem["id"], "version": problem["progress_version"],
-                   "task_version": 2, "decision": "on_time", "reason": "人工验收"}
-        confirmed = await self.client.post(url, headers=self.headers, json=payload)
-        self.assertEqual(confirmed.status_code, 200)
-        await self.sql("UPDATE users SET luogu_id='5678' WHERE qq_id='22345678'")
-        payload.update(decision="clear", reason="撤销人工决定")
+                   "task_version": 2, "decision": "reset_binding", "reason": "核对更正绑定"}
         denied = await self.client.post(url, json=payload)
         self.assertEqual(denied.status_code, 403)
         member = self.app.test_client()
         login = await member.post('/api/auth/login', json={'qq_id': '22345678', 'password': 'Test-Password-123!'})
         denied = await member.post(url, headers={'X-CSRF-Token': (await login.get_json())['csrf_token']}, json=payload)
         self.assertEqual(denied.status_code, 403)
-        stale = await self.client.post(url, headers=self.headers, json=payload)
+        stale = await self.client.post(url, headers=self.headers, json={**payload, "version": payload["version"] + 1})
         self.assertEqual((stale.status_code, (await stale.get_json())["code"]), (409, "evidence_conflict"))
-        payload["version"] = (await confirmed.get_json())["problems"][0]["progress_version"]
         stale = await self.client.post(url, headers=self.headers, json={**payload, "task_version": 1})
         self.assertEqual((stale.status_code, (await stale.get_json())["code"]), (409, "version_conflict"))
         await self.sql("UPDATE training_tasks SET state='cancelled' WHERE id=?", (task["id"],))
@@ -375,3 +316,50 @@ class LuoguTrainingTests(unittest.IsolatedAsyncioTestCase):
         await self.sql("UPDATE user_platform_sync_state SET next_retry_at=? WHERE user_qq_id='22345678' AND platform='luogu'", (self.now + 2000,))
         self.assertEqual(await manager.schedule_training_snapshots(now=self.now + 1900), 0)
         self.assertEqual(await manager.schedule_training_snapshots(now=self.now + 2000), 1)
+
+
+    async def test_upcoming_task_already_displays_known_luogu_ac(self):
+        await self.sql("INSERT INTO submissions(user_qq_id,platform,problem_id,submit_time) VALUES('22345678','luogu','P1001',0)")
+        task=await self.task(starts_at=self.now+3600,due_at=self.now+7200)
+        await self.publish(task)
+        _,detail=await self.info(task['id'])
+        self.assertEqual(detail['recipient']['completed_problems'],1)
+        self.assertEqual(detail['recipient']['completion'],'not_started')
+        self.assertTrue(detail['problems'][0]['is_ac'])
+
+
+    async def test_startup_reclassifies_old_tasks_and_uses_existing_local_ac_without_fetching(self):
+        task=await self.task(due_at=self.now-86400,starts_at=self.now-172800)
+        await self.publish(task)
+        await self.sql("UPDATE training_task_recipients SET bindings_json=json_remove(bindings_json,'$.luogu') WHERE task_id=?",(task['id'],))
+        await self.sql("UPDATE training_task_progress SET binding_key=NULL,snapshot_json=NULL WHERE problem_id IN (SELECT id FROM training_task_problems WHERE task_id=?)",(task['id'],))
+        await self.sql("UPDATE users SET luogu_binding_version=7 WHERE qq_id='22345678'")
+        await self.sql("INSERT INTO submissions(user_qq_id,platform,problem_id,submit_time) VALUES('22345678','luogu','luogu_P1001',0)")
+        await self.lifespan.__aexit__(None,None,None)
+        from feat.api.app import create_app
+        self.app=create_app(member_sync=False,training_sync=True)
+        self.lifespan=self.app.test_app()
+        with patch.object(luogu,'luogu_get',new=AsyncMock()) as network, patch.object(WebTaskManager,'start_training_task_sync') as start:
+            await self.lifespan.__aenter__()
+        network.assert_not_awaited()
+        start.assert_called_once()
+        self.client=self.app.test_client()
+        await self.client.post('/api/auth/login',json={'qq_id':'12345678','password':'Test-Password-123!'})
+        overview,detail=await self.info(task['id'])
+        self.assertEqual(overview['summary']['completed_problem_count'],1)
+        self.assertEqual(overview['summary']['uncertain_problem_count'],0)
+        self.assertEqual(detail['problems'][0]['evidence']['source'],'local_luogu_ac_set')
+        self.assertEqual((await self.sql('SELECT binding_key FROM training_task_progress'))[0]['binding_key'],'1234:7')
+
+
+    async def test_scheduler_includes_future_and_long_ended_tasks(self):
+        for start,due in [(self.now+86400,self.now+172800),(self.now-172800,self.now-86400)]:
+            task=await self.task(starts_at=start,due_at=due)
+            await self.publish(task)
+        engine=SyncEngine(self.db_path,{})
+        await engine.start()
+        manager=WebTaskManager(engine)
+        self.extra_engine,self.extra_manager=engine,manager
+        manager.submit_account_sync=AsyncMock(return_value={'id':'historical-sync'})
+        self.assertEqual(await manager.schedule_training_snapshots(now=self.now),1)
+        manager.submit_account_sync.assert_awaited_once_with('22345678',['luogu'],expected_epoch=1)

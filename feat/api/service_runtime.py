@@ -439,12 +439,9 @@ class WebTaskManager:
                 SELECT r.qq_id,r.account_epoch,u.luogu_id,u.luogu_binding_version,
                   s.last_status AS sync_status,COALESCE(s.last_attempt_at,0) AS last_attempt_at,
                   COALESCE(s.consecutive_failures,0) AS consecutive_failures,
-                  MIN(CASE WHEN t.starts_at>? THEN t.starts_at ELSE t.due_at END) AS priority,
-                  MAX(CASE
-                    WHEN t.starts_at>? THEN COALESCE(json_extract(x.snapshot_json,'$.last_checked_at'),0)=0
-                    WHEN COALESCE(json_extract(x.snapshot_json,'$.last_request_at'),0)<t.starts_at THEN 1
-                    ELSE COALESCE(json_extract(x.snapshot_json,'$.last_checked_at'),0) < ? - CASE WHEN t.due_at-?<=600 THEN 120 ELSE 900 END
-                  END) AS needed
+                  MIN(COALESCE(json_extract(x.snapshot_json,'$.last_checked_at'),0)) AS priority,
+                  MAX(COALESCE(json_extract(x.snapshot_json,'$.last_checked_at'),0) <= ? - 900
+                      OR COALESCE(json_extract(x.snapshot_json,'$.last_checked_at'),0)=0) AS needed
                 FROM training_task_recipients r JOIN training_tasks t ON t.id=r.task_id
                 JOIN training_task_problems p ON p.task_id=t.id AND p.platform='luogu'
                 JOIN training_task_progress x ON x.recipient_id=r.id AND x.problem_id=p.id
@@ -452,8 +449,7 @@ class WebTaskManager:
                 JOIN web_accounts a ON a.qq_id=u.qq_id AND a.is_active=1
                 LEFT JOIN user_platform_sync_state s ON s.user_qq_id=u.qq_id AND s.platform='luogu'
                 LEFT JOIN binding_rate_limits b ON b.qq_id=u.qq_id AND b.platform='luogu' AND b.action='training_task_auto'
-                WHERE t.state='published' AND (t.rule='historical_ac' OR t.luogu_snapshot=1)
-                  AND r.closed=0 AND t.starts_at<=?+300 AND t.due_at>=?-600
+                WHERE t.state='published' AND r.closed=0
                   AND u.luogu_id IS NOT NULL AND TRIM(u.luogu_id)<>''
                   AND COALESCE(s.next_retry_at,0)<=? AND COALESCE(s.last_status,'')<>'paused'
                   AND COALESCE(b.last_at,0)<=?-60
@@ -464,7 +460,7 @@ class WebTaskManager:
                     OR (x.binding_key IS NULL AND COALESCE(json_extract(r.bindings_json,'$.luogu.account'),'')=''
                         AND u.luogu_binding_version=COALESCE(json_extract(r.bindings_json,'$.luogu.version'),0)+1))
                 GROUP BY r.qq_id,r.account_epoch HAVING needed=1 ORDER BY priority,COALESCE(b.last_at,0),r.qq_id
-                """, (now, now, now, now, now, now, now, now))
+                """, (now, now, now))
             candidates = [dict(r) for r in await candidates.fetchall()]
         submitted = 0
         for candidate in candidates:

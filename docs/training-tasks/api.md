@@ -10,7 +10,7 @@
 
 `ACM_TRAINING_TASKS_ENABLED` 默认 `true`，未配置时个人中心显示训练任务入口，管理员可按正常流程发布。显式设置为 `false` 并重启服务后隐藏个人中心入口，发布返回 `feature_disabled`，历史查询及证据仍保留。管理员接口要求 admin/root 会话，成员接口使用会话 QQ 和 `account_epoch`，不能指定他人；所有变更要求 CSRF，写事务内重新核验操作者。响应使用 `Cache-Control: no-store`。
 
-Codeforces 支持 `period_ac`（周期内 AC）和 `historical_ac`（历史 AC 可计入）。洛谷公开 P 题支持历史 AC；周期模式须显式选择 `luogu_snapshot:true`，采用新增快照口径，不能证明重复 AC。其他平台可保存草稿，禁止发布。GET 仅读站内数据，刷新复用异步同步队列。
+Codeforces 支持 `period_ac`（周期内 AC）和 `historical_ac`（历史 AC 可计入）。洛谷公开 P 题统一按历史 AC 判断，不限制完成时间，不要求周期内重新通过。其他平台可保存草稿，禁止发布。GET 仅读站内数据，刷新复用异步同步队列。
 
 ## 草稿与冻结字段
 
@@ -20,7 +20,7 @@ Codeforces 支持 `period_ac`（周期内 AC）和 `historical_ac`（历史 AC �
 | `statuses` | 最多 100 个业务身份字符串，发布至少一个；动态选项来自 options |
 | `starts_at` / `due_at` | UTC 整数秒或带时区的 ISO 时间；开始须早于截止，界面显示 Asia/Shanghai；草稿可留空 |
 | `rule` | `period_ac` 或 `historical_ac` |
-| `luogu_snapshot` | 布尔值，默认 false；周期模式包含洛谷题时必须为 true；发布后冻结 |
+| `luogu_snapshot` | 兼容旧客户端的弃用布尔字段；输入不再改变核验规则，返回 false；洛谷始终按历史 AC |
 | `problems` | 有序 `{platform, problem_id}` 数组，服务端规范化并去重；去重后最多 50 题，全部必做 |
 | `version` | PATCH、DELETE、预览、发布、延期及取消均必填当前整数版本；过期返回 409，并附当前 version |
 
@@ -28,7 +28,7 @@ PATCH 只更新提供的白名单字段；省略字段保留，修改后版本�
 
 任务存储状态为 `draft/published/cancelled`；发布后 `phase=upcoming/active/ended` 由当前时间派生。发布事务冻结名单、发布时身份与名称、账号代际、OJ 绑定版本、题单顺序和元数据、周期和规则，并记录实际发布管理员。身份变更不补发或撤回。发布后仅允许带原因延期或取消；原截止时间、最小证据和审计记录保留。洛谷 `content_available` 是读取时批量查询的当前站内题面状态，不作为冻结内容；补采或移除题面后，重新加载管理员或成员任务详情即更新站内入口，不重写题名、题单顺序、规则或任务版本，也不请求原站。
 
-`options.capabilities[].can_publish` 与题目 `can_publish` 保留发布能力的含义；`period_ac` 只表示精确提交时间能力，洛谷返回 false，另以 `snapshot_ac:true` 表示快照能力。题目 `supported` 根据任务规则和 `luogu_snapshot` 派生；升级前已发布且未启用快照的洛谷周期任务继续返回 `unsupported/unverified`，不自动改变原核验约定。标准题号校验、大小写及历史前缀别名、本地题面可用性和原生难度/标签展示复用现有题库工具，拒绝新建 B/T/U 题；旧草稿的非 P 题仍不能发布。
+`options.capabilities[].can_publish` 与题目 `can_publish` 表示发布能力；洛谷返回 `historical_ac:true`、`period_ac:false`、`snapshot_ac:false`，公开 P 题的 `supported` 不受任务规则或旧 `luogu_snapshot` 字段限制。旧任务也统一使用历史 AC 核验，无需重新发布。标准题号校验、大小写及历史前缀别名、本地题面可用性和原生难度/标签展示复用现有题库工具，拒绝新建 B/T/U 题；旧草稿的非 P 题仍不能发布。
 
 ## 管理员接口
 
@@ -66,9 +66,9 @@ PATCH 只更新提供的白名单字段；省略字段保留，修改后版本�
 | `GET /api/me/training-tasks/{task_id}` | 本人详情、固定题单、逐题证据与 refresh 状态；他人或旧代际任务返回 404 |
 | `POST /api/me/training-tasks/{task_id}/refresh` | 正文必须为 `{}`；202 返回本人任务中可核验且已绑定平台的排队任务（CF/洛谷）；相同绑定版本的运行任务复用，各平台持久化 60 秒冷却，离开页面不取消后台同步；无可核验平台的旧任务返回 409 `unsupported_verification`，不入队 |
 
-升级前已发布且未启用快照的洛谷周期题仍返回 `verification:unsupported`、`status:unverified` 和 `evidence:null`；`unsupported_problems` 表示此类题数，不计为绑定异常或等待同步，也不参与自动完成和刷新。新发布的洛谷周期任务必须明确启用快照口径，历史 AC 任务按已确认过题集合核验。题单总数包含全部必做题；混合任务不会仅因 CF 部分完成而判定整任务完成。
+旧已发布的洛谷公开 P 题无需启用快照或重新创建任务，统一按历史 AC 核验。服务启动会补算已有本地记录；无绑定时提示 unbound，尚未同步时提示 baseline_missing，成功同步后历史 AC 直接计入。题单总数包含全部必做题，混合任务需同时满足各平台的完成规则。
 
-CF 周期包含开始和截止两端，以 OJ 实际提交时间核验。开始前 AC 默认仅标历史已做，截止后 AC 标逾期；截止后才同步到的周期内 AC 可以回补。“历史 AC 可计入”也要等任务开始才计完成。核验、个人完成状态和任务时间阶段分别返回；无绑定、覆盖不足、同步暂停/失败及绑定变化不能被表述为确定未做。已确认的证据在同步失败后保留。
+CF 周期包含开始和截止两端，以 OJ 实际提交时间核验。开始前 AC 默认仅标历史已做，截止后 AC 标逾期；截止后才同步到的周期内 AC 可以回补。CF 的“历史 AC 可计入”也要等任务开始才计完成；洛谷历史 AC 立即计入题目进度，未开始任务仍显示未开始。核验、个人完成状态和任务时间阶段分别返回；无绑定、覆盖不足、同步暂停/失败及绑定变化不能被表述为确定未做。已确认的证据在同步失败后保留。
 
 新增证据必须同时匹配账号 epoch、冻结绑定和同步覆盖绑定。发布时未绑定者只可接纳第一次绑定代际，改绑不能继承他人成绩。队列不可用或失败不清空进度；服务重启后丢失的刷新任务显示 interrupted，可重新发起。详见 [progress.md（证据核验与同步）](progress.md)。
 
@@ -80,24 +80,20 @@ CF 周期包含开始和截止两端，以 OJ 实际提交时间核验。开始�
 
 测试、性能、备份恢复和发布回退见 [acceptance.md（联调与发布验收）](acceptance.md)。
 
-## 洛谷快照核验与管理员审核
+## 洛谷历史 AC 核验与绑定更正
 
-洛谷仅使用当前成员绑定 UID 的公开 P 题过题集合，复用成员 AC 同步。一次完整有效快照同时更新该成员的相关任务；新增 AC 数为零也需要更新负向基线。AC 与证据写入同一绑定保护事务，证据失败则一起回滚。旧 `submit_time=0` 保持未知，不生成 submission_attempts，不把 `last_success_at` 当作实际 AC 时间。任务中只有本题的状态和观察时间，不复制整份成员过题集合。
+洛谷使用当前成员绑定 UID 的公开 P 题过题集合，复用成员 AC 同步。历史上已通过即可计入，不受 starts_at、due_at 或任务 rule 影响，不要求重新 AC。同步成功会更新所有相关任务，新增题数为零也会更新核验状态；AC 与任务证据使用同一绑定保护事务。
 
-周期模式以开始后发起的有效未通过观察为下界，随后在截止前收到的有效已通过快照为按期完成依据。开始前已通过为 history_ac；首次采集晚于开始且题目已通过、或截止后首见而上次未通过观察早于截止，均为 timing_unknown。截止时或之后仍观察未通过、随后出现通过，按快照口径记逾期。请求跨越边界采用保守口径，采样时间不是实际 AC 时间。历史模式允许截止前已确认的过题，截止后首次发现同样不自动算按期。
+`evidence` 返回 `accepted_at:null`、`observed_at`、`source` 及 `evidence_type:historical_ac`。未知实际时间的旧 `submissions.submit_time=0` 保持不变，不生成提交尝试。历史 AC 计入 `completed_problems`、`ac_problems`；不生成洛谷 `timing_unknown` 或 late。为兼容既有汇总字段，已开始任务使用 on_time 完成状态，含义为满足任务完成规则，不推断真实完成时间。
 
-返回的快照 evidence 包含 `accepted_at:null`、`observed_at`、`last_not_accepted_at`、`source` 和 `evidence_type:snapshot`。逐题返回 `is_ac/progress_version/review/can_review/can_clear_review/can_reset_binding`；时段不明的题计入 ac_problems 与 uncertain_problems，不计入 completed_problems。summary 增加 uncertain_count（人数）、uncertain_problem_count 与 ac_problem_count。已有本地 AC 可作为当前时点的阳性证据，不能倒填旧任务开始或截止前的证据；不允许从本地记录缺失推断未 AC。
+发布和启动补算直接使用本地已有 AC；启动时会重算旧已发布任务，包括以前未启用快照或具有待确认结果的任务。GET 只读，不抓取原站、不触发补算。自动调度独立由 `ACM_TRAINING_TASK_SYNC_ENABLED` 控制，不再受全员同步开关及任务开始／截止窗口限制；每轮最多 20 个账号，未完成账号通常每 15 分钟一次，队列与失败重试规则沿用现有机制。
 
-新增 `POST /api/admin/training-tasks/{task_id}/progress/{recipient_id}/review`。正文必须包含：
+`POST /api/admin/training-tasks/{task_id}/progress/{recipient_id}/review` 仅保留绑定更正：
 
 ```json
-{"problem_id": 31, "version": 4, "task_version": 2, "decision": "on_time", "reason": "核对现场验收记录"}
+{"problem_id":31,"version":4,"task_version":2,"decision":"reset_binding","reason":"管理员核对账号更正"}
 ```
 
-problem_id 是训练题目行 ID，version 对应逐题 progress_version；task_version 对应任务 version。decision 为 on_time、late、clear 或 reset_binding。前两者需要冻结绑定下已有 AC 证据，原因 1–500 字并公开给成员，保留原始快照和 progress_reviewed 审计；clear 撤销已有人工决定，按原快照恢复派生结果；即使随后改绑或解绑，同一有效账号代际内仍可由管理员撤销，`can_clear_review` 单独表示该能力。没有人工决定时返回 409/review_unavailable。撤销保留原快照、绑定锚点和审计，不采纳新绑定成绩；新增完成判断仍需绑定匹配。证据版本变化返回 evidence_conflict，任务版本变化返回 version_conflict。人工证据的 accepted_at 仍为 null，evidence_type=manual。
+problem_id 为训练题目行 ID，version 对应 progress_version。仅当前账号代际、已发布任务、绑定已变化且本题尚未完成时允许更正；原因 1–500 字并记录审计。更正锚定当前 UID，随后需重新同步。证据版本冲突返回 evidence_conflict，任务版本冲突返回 version_conflict。旧 on_time、late、clear 审核请求返回 historical_ac_only，不再手动判断洛谷完成时段。逐题 can_review、can_clear_review 均为 false，can_reset_binding 单独控制更正入口。
 
-reset_binding 仅允许管理员确认绑定变化、且本题尚未计入完成时使用。它清除该题的旧待核验证据，锚定当前 UID/绑定版本；之后需要重新同步，首次就已通过仍不能自动证明周期新增。已计入完成的旧绑定成绩保留。注销、账号代际变化、取消任务和非洛谷题不能使用该入口。
-
-数据库采用加法迁移：training_tasks 增加 luogu_snapshot；training_task_progress 增加 snapshot_json、uncertain_json、review_json、evidence_version。旧任务不自动启用快照口径，也不补造基线。反复启动保持数据与决定。关闭功能/调度不删除证据；代码回退保留新增列，生产升级前按原发布规范备份数据库并完成分支环境验证。
-
-延期会保留原人工决定对应的截止时间：原按期确认继续有效；原逾期确认若在新截止前已审核，可重算按期，否则回到原始快照证据判断，证据不足显示时段待确认。未开始任务不能确认完成，未截止任务不能确认逾期。
+已有数据库列继续保留，旧 luogu_snapshot／人工时间决定不再约束历史 AC。原审计记录不删除，账号注销、代际隔离和绑定保护仍生效。升级前按项目发布规范准备备份；代码回退不能替代数据库恢复。

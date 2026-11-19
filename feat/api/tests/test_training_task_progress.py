@@ -350,23 +350,22 @@ class TrainingProgressTests(unittest.IsolatedAsyncioTestCase):
         await self.sql("INSERT INTO submission_attempts(owner_qq_id,platform,external_submission_id,problem_id,verdict,submitted_at,created_at) VALUES('22345678','luogu','local-luogu','P1001','OK',?,?)", (self.now - 10, self.now))
         task = await self.create(luogu_snapshot=True, problems=[{'platform': 'luogu', 'problem_id': 'P1001'}, {'platform': 'codeforces', 'problem_id': '1A'}])
         self.assertEqual((await self.publish(task)).status_code, 200)
-        # Existing mixed period tasks retain CF-only verification until explicitly replaced.
+        # A legacy task without a Luogu binding snapshot can adopt the current binding once.
         await self.sql("UPDATE training_tasks SET luogu_snapshot=0 WHERE id=?", (task['id'],))
         await self.sql("UPDATE training_task_recipients SET bindings_json=json_remove(bindings_json,'$.luogu') WHERE task_id=?", (task['id'],))
-        await self.sql("UPDATE training_task_progress SET binding_key=NULL,binding_version=0,checked_at=0,sync_success_at=0,evidence_version=0 WHERE problem_id IN (SELECT id FROM training_task_problems WHERE task_id=? AND platform='luogu')", (task['id'],))
         recipient = (await self.info(task['id']))['items'][0]
-        self.assertEqual((recipient['completed_problems'], recipient['problem_count'], recipient['unsupported_problems']), (1, 2, 1))
+        self.assertEqual((recipient['completed_problems'], recipient['problem_count'], recipient['unsupported_problems']), (1, 2, 0))
         self.assertEqual(recipient['completion'], 'incomplete')
         self.assertEqual(recipient['binding_warnings'], 0)
         self.assertGreater(recipient['checked_at'], 0)
-        self.assertEqual(recipient['last_success_at'], self.now)
+        self.assertEqual(recipient['last_success_at'], 0)
         member = self.app.test_client()
         login = await member.post('/api/auth/login', json={'qq_id': '22345678', 'password': 'Test-Password-123!'})
         headers = {'X-CSRF-Token': (await login.get_json())['csrf_token']}
         personal = f'/api/me/training-tasks/{task["id"]}'
         detail = await (await member.get(personal)).get_json()
         luogu, cf = detail['problems']
-        self.assertEqual((luogu['verification'], luogu['status'], luogu['evidence']), ('unsupported', 'unverified', None))
+        self.assertEqual((luogu['verification'], luogu['status'], luogu['evidence']), ('baseline_missing', 'pending', None))
         self.assertEqual((cf['verification'], cf['status']), ('verified', 'on_time'))
         self.assertEqual(cf['evidence']['source'], 'codeforces_user_status')
         config = self.app.config['PLUGIN_CONFIG']
@@ -374,8 +373,11 @@ class TrainingProgressTests(unittest.IsolatedAsyncioTestCase):
         config['_task_provider'] = lambda: []
         response = await member.post(personal + '/refresh', headers=headers, json={})
         self.assertEqual(response.status_code, 202, await response.get_json())
-        config['_account_sync_submitter'].assert_awaited_once_with('22345678', ['codeforces'], 0, expected_epoch=1)
+        config['_account_sync_submitter'].assert_awaited_once_with('22345678', ['codeforces', 'luogu'], 0, expected_epoch=1)
         await self.reconcile(task['id'])
         rows = await self.sql("SELECT x.* FROM training_task_progress x JOIN training_task_problems p ON p.id=x.problem_id WHERE p.platform='luogu'")
         self.assertIsNone(rows[0]['on_time_json'])
-        self.assertEqual(rows[0]['checked_at'], 0)
+        self.assertGreater(rows[0]['checked_at'], 0)
+        await self.sql("INSERT INTO submissions(user_qq_id,platform,problem_id,submit_time) VALUES('22345678','luogu','P1001',0)")
+        await self.reconcile(task['id'])
+        self.assertEqual((await self.info(task['id']))['summary']['completed_problem_count'], 2)

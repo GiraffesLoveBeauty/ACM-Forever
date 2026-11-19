@@ -21,19 +21,21 @@ def live_state(row, now):
     if not tasks.supports_ac(row, row):
         return None, 0, False, "unsupported"
     platform, field, version_field = platform_spec(row["platform"])
-    original = json.loads(row["bindings_json"]).get(platform, {})
+    bindings = json.loads(row["bindings_json"])
+    original = bindings.get(platform, {})
     anchor = row["binding_key"] or (f'{original["account"]}:{original["version"]}' if original.get("account") else None)
     generation = row.get("binding_version", 0) if row["binding_key"] else original.get("version", 0)
     account = str(row.get(field) or "").strip().casefold()
     current = f'{account}:{row[version_field]}' if account else None
     active = not row["closed"] and row["account_state"] == "active" and row["account_epoch"] == row["current_epoch"]
-    if active and not anchor and current and row[version_field] == original.get("version", 0) + 1:
+    legacy_luogu = platform == "luogu" and platform not in bindings
+    if active and not anchor and current and (legacy_luogu or row[version_field] == original.get("version", 0) + 1):
         anchor, generation = current, row[version_field]
     valid = bool(active and anchor and anchor == current)
     snapshot = evidence(row.get("snapshot_json")) or {}
     snapshot_checked = row.get("snapshot_checked_at", snapshot.get("last_checked_at", 0)) or 0
     conclusive = row.get("unresolved_problems") == 0 if "unresolved_problems" in row else bool(
-        row.get("on_time_json") or row.get("late_json") or row.get("rule") == "historical_ac" and row.get("history_json"))
+        row.get("on_time_json") or row.get("late_json") or (platform == "luogu" or row.get("rule") == "historical_ac") and row.get("history_json"))
     if not active:
         verification = "account_closed" if row["closed"] else "account_changed"
     elif not row["is_active"]:
@@ -53,7 +55,7 @@ def live_state(row, now):
             verification = "verified"
         elif not snapshot_checked:
             verification = "baseline_missing"
-        elif snapshot_checked < min(now - 900, row["due_at"]):
+        elif snapshot_checked < now - 900:
             verification = "pending_sync"
         else:
             verification = "verified"
@@ -98,7 +100,7 @@ async def store_snapshot(db, row, snapshot, now):
 
 async def record_luogu_snapshot(db, user, passed, known, *, requested_at, observed_at):
     """Called inside the guarded AC write transaction, including zero-new-AC syncs."""
-    records = await progress_records(db, "t.state='published' AND r.qq_id=? AND p.platform='luogu' AND (t.rule='historical_ac' OR t.luogu_snapshot=1)", [str(user["qq_id"])])
+    records = await progress_records(db, "t.state='published' AND r.qq_id=? AND p.platform='luogu'", [str(user["qq_id"])])
     for row in records:
         _, _, valid, _ = live_state(row, observed_at)
         if not valid:
@@ -111,7 +113,7 @@ async def record_luogu_snapshot(db, user, passed, known, *, requested_at, observ
         await store_snapshot(db, row, snapshot, observed_at)
 
 
-async def reconcile(db, *, qq_id=None, task_id=None, now=None):
+async def reconcile(db, *, qq_id=None, task_id=None, platform=None, now=None):
     """Caller holds the write transaction; never join evidence across a binding fence."""
     now = int(time.time()) if now is None else now
     clauses, params = ["t.state='published'"], []
@@ -121,22 +123,27 @@ async def reconcile(db, *, qq_id=None, task_id=None, now=None):
     if task_id is not None:
         clauses.append("t.id=?")
         params.append(task_id)
+    if platform is not None:
+        clauses.append("p.platform=?")
+        params.append(platform)
     where = " AND ".join(clauses)
     records = await progress_records(db, where, params)
     # Three minimum timestamps per assigned problem retain repeat AC information.
-    found = await tasks.rows(db, """
-        SELECT r.id AS recipient_id,p.id AS problem_id,
-        MIN(CASE WHEN a.submitted_at<t.starts_at THEN printf('%012d|',a.submitted_at)||COALESCE(a.external_submission_id,'') END) AS historical,
-        MIN(CASE WHEN a.submitted_at>=t.starts_at AND a.submitted_at<=t.due_at THEN printf('%012d|',a.submitted_at)||COALESCE(a.external_submission_id,'') END) AS timely,
-        MIN(CASE WHEN a.submitted_at>t.due_at THEN printf('%012d|',a.submitted_at)||COALESCE(a.external_submission_id,'') END) AS late
-        FROM training_task_recipients r JOIN training_tasks t ON t.id=r.task_id
-        JOIN training_task_problems p ON p.task_id=t.id
-        JOIN submission_attempts a ON a.owner_qq_id=r.qq_id AND a.platform=p.platform
-          AND a.problem_id IN(p.problem_id,substr(p.problem_id,4)) AND a.verdict='OK' AND a.submitted_at<=?
-        WHERE """ + where + " AND p.platform='codeforces' GROUP BY r.id,p.id", [now, *params])
+    found = []
+    if any(r["platform"] == "codeforces" for r in records):
+        found = await tasks.rows(db, """
+            SELECT r.id AS recipient_id,p.id AS problem_id,
+            MIN(CASE WHEN a.submitted_at<t.starts_at THEN printf('%012d|',a.submitted_at)||COALESCE(a.external_submission_id,'') END) AS historical,
+            MIN(CASE WHEN a.submitted_at>=t.starts_at AND a.submitted_at<=t.due_at THEN printf('%012d|',a.submitted_at)||COALESCE(a.external_submission_id,'') END) AS timely,
+            MIN(CASE WHEN a.submitted_at>t.due_at THEN printf('%012d|',a.submitted_at)||COALESCE(a.external_submission_id,'') END) AS late
+            FROM training_task_recipients r JOIN training_tasks t ON t.id=r.task_id
+            JOIN training_task_problems p ON p.task_id=t.id
+            JOIN submission_attempts a ON a.owner_qq_id=r.qq_id AND a.platform=p.platform
+              AND a.problem_id IN(p.problem_id,substr(p.problem_id,4)) AND a.verdict='OK' AND a.submitted_at<=?
+            WHERE """ + where + " AND p.platform='codeforces' GROUP BY r.id,p.id", [now, *params])
     found = {(r["recipient_id"], r["problem_id"]): r for r in found}
     local_ac = set()
-    if any(r["platform"] == "luogu" and not r["snapshot_json"] for r in records):
+    if any(r["platform"] == "luogu" and not (evidence(r["snapshot_json"]) or {}).get("first_seen_at") for r in records):
         positives = await tasks.rows(db, """
             SELECT r.id AS recipient_id,p.id AS problem_id
             FROM training_task_recipients r JOIN training_tasks t ON t.id=r.task_id
@@ -152,7 +159,7 @@ async def reconcile(db, *, qq_id=None, task_id=None, now=None):
             if not tasks.supports_ac(row, row):
                 continue
             snapshot = evidence(row["snapshot_json"])
-            if valid and not snapshot and (row["recipient_id"], row["problem_id"]) in local_ac:
+            if valid and not (snapshot or {}).get("first_seen_at") and (row["recipient_id"], row["problem_id"]) in local_ac:
                 snapshot = snapshots.local_positive(now)
             await store_snapshot(db, row, snapshot, now)
             continue
@@ -176,7 +183,7 @@ def recipient_state(row, now):
     total, ontime, late = row["problem_count"], row["on_time_problems"], row["late_problems"]
     if now < row["starts_at"]:
         row["completion"] = "not_started"
-        ontime = late = 0
+        ontime, late = row.get("luogu_completed_problems", 0), 0
     else:
         row["completion"] = "on_time" if total and ontime == total else "late" if total and ontime + late == total else "timing_unknown" if row.get("uncertain_problems") else "incomplete"
     row["on_time_problems"], row["late_problems"] = ontime, late
@@ -205,11 +212,12 @@ async def recipient_summaries(db, task_ids, *, qq_id=None, epoch=None, now=None,
         u.cf_handle,u.cf_binding_version,u.luogu_id,u.luogu_binding_version,a.is_active,p.platform,x.binding_key,MAX(x.binding_version) AS binding_version,
         s.binding_key AS sync_binding,s.full_history_at,s.coverage_through_at,s.last_status AS sync_status,
         COUNT(x.problem_id) AS problem_count,
-        SUM(CASE WHEN x.on_time_json IS NOT NULL OR (t.rule='historical_ac' AND x.history_json IS NOT NULL) THEN 1 ELSE 0 END) AS on_time_problems,
-        SUM(CASE WHEN x.on_time_json IS NULL AND NOT(t.rule='historical_ac' AND x.history_json IS NOT NULL) AND x.late_json IS NOT NULL THEN 1 ELSE 0 END) AS late_problems,
+        SUM(CASE WHEN p.platform='luogu' AND x.history_json IS NOT NULL THEN 1 ELSE 0 END) AS luogu_completed_problems,
+        SUM(CASE WHEN x.on_time_json IS NOT NULL OR ((t.rule='historical_ac' OR p.platform='luogu') AND x.history_json IS NOT NULL) THEN 1 ELSE 0 END) AS on_time_problems,
+        SUM(CASE WHEN x.on_time_json IS NULL AND NOT((t.rule='historical_ac' OR p.platform='luogu') AND x.history_json IS NOT NULL) AND x.late_json IS NOT NULL THEN 1 ELSE 0 END) AS late_problems,
         SUM(CASE WHEN x.uncertain_json IS NOT NULL THEN 1 ELSE 0 END) AS uncertain_problems,
         SUM(CASE WHEN x.history_json IS NOT NULL OR x.on_time_json IS NOT NULL OR x.late_json IS NOT NULL OR x.uncertain_json IS NOT NULL THEN 1 ELSE 0 END) AS ac_problems,
-        SUM(CASE WHEN x.on_time_json IS NULL AND x.late_json IS NULL AND NOT(t.rule='historical_ac' AND x.history_json IS NOT NULL) THEN 1 ELSE 0 END) AS unresolved_problems,
+        SUM(CASE WHEN x.on_time_json IS NULL AND x.late_json IS NULL AND NOT((t.rule='historical_ac' OR p.platform='luogu') AND x.history_json IS NOT NULL) THEN 1 ELSE 0 END) AS unresolved_problems,
         MIN(COALESCE(json_extract(x.snapshot_json,'$.last_checked_at'),0)) AS snapshot_checked_at,
         MAX(COALESCE(json_extract(x.snapshot_json,'$.conflict'),0)) AS snapshot_conflict,
         MIN(x.checked_at) AS checked_at,MIN(x.sync_success_at) AS last_success_at
@@ -233,7 +241,7 @@ async def recipient_summaries(db, task_ids, *, qq_id=None, epoch=None, now=None,
             grouped[row["id"]] = row
         else:
             had_supported = previous["problem_count"] > previous["unsupported_problems"]
-            for key in ("problem_count", "on_time_problems", "late_problems", "pending_problems", "binding_warnings", "uncertain_problems", "ac_problems", "unsupported_problems"):
+            for key in ("problem_count", "on_time_problems", "late_problems", "pending_problems", "binding_warnings", "uncertain_problems", "ac_problems", "unsupported_problems", "luogu_completed_problems"):
                 previous[key] += row[key]
             for key in ("checked_at", "last_success_at"):
                 if verification != "unsupported":
@@ -299,14 +307,14 @@ async def problem_progress(db, recipient, *, now=None):
         row["supported"] = tasks.supports_ac(row, row)
         if not row["supported"]:
             historical = timely = late = uncertain = None
-        accepted = timely or (historical if recipient["rule"] == "historical_ac" else None)
+        accepted = timely or (historical if row["platform"] == "luogu" or recipient["rule"] == "historical_ac" else None)
         row["status"] = "unverified" if not row["supported"] else "not_started" if recipient["phase"] == "upcoming" else "on_time" if accepted else "late" if late else "history_ac" if historical else "timing_unknown" if uncertain else "pending"
         row["evidence"] = accepted or late or historical or uncertain
         row["is_ac"] = bool(row["evidence"])
-        row["review"] = evidence(row.pop("review_json"))
-        row["can_review"] = row["platform"] == "luogu" and row["is_ac"] and valid and row["state"] == "published"
-        row["can_clear_review"] = bool(row["platform"] == "luogu" and row["review"] and row["state"] == "published"
-            and not row["closed"] and row["account_state"] == "active" and row["account_epoch"] == row["current_epoch"])
+        row.pop("review_json")
+        row["review"] = None
+        row["can_review"] = False
+        row["can_clear_review"] = False
         row["can_reset_binding"] = row["platform"] == "luogu" and row["state"] == "published" and row["verification"] == "binding_changed" and bool(row["luogu_id"]) and not (accepted or late)
         row.pop("snapshot_json", None)
         for key in ("cf_handle", "cf_binding_version", "luogu_id", "luogu_binding_version", "rule", "state", "starts_at", "binding_key", "binding_version", "bindings_json", "account_epoch", "closed", "due_at", "account_state", "current_epoch", "is_active", "sync_binding", "full_history_at"):

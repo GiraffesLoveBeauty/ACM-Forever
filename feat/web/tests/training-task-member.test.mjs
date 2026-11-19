@@ -210,7 +210,7 @@ test('mixed CF and Luogu member tasks retain the CF refresh action', async () =>
   assert(calls.some((call) => call.url.endsWith('/refresh')));
 });
 
-test('Luogu uncertain AC is separate from task credit and never shown as an actual submission time', async () => {
+test('Luogu historical AC counts without a period boundary or invented submission time', async () => {
   taskOverride = {
     luogu_snapshot: true,
     problems: [
@@ -220,24 +220,25 @@ test('Luogu uncertain AC is separate from task credit and never shown as an actu
         problem_id: 'P1001',
         problem_name: '洛谷合成题',
         is_ac: true,
-        status: 'timing_unknown',
+        status: 'on_time',
         verification: 'verified',
-        evidence: { accepted_at: null, observed_at: 1800000000, evidence_type: 'snapshot' },
+        evidence: { accepted_at: null, observed_at: 1800000000, evidence_type: 'historical_ac' },
         tags: [],
       },
     ],
   };
   mounted = await mount(Root, routes, '/training-tasks.html?task_id=17');
   const text = textOf(mounted.root);
-  assert(text.includes('已 AC，完成时段待确认'));
+  assert(text.includes('已完成 · 历史 AC'));
+  assert(!text.includes('已 AC，完成时段待确认'));
   assert(text.includes('AC 时间未知'));
-  assert(text.includes('洛谷快照核验'));
+  assert(text.includes('洛谷历史 AC'));
   assert(!text.includes('实际 AC：'));
-  assert(text.includes('无法核验已做题的重复 AC'));
-  assert(text.includes('洛谷 AC 集合快照（实际 AC 时间未知）'));
+  assert(text.includes('不限制完成时间'));
+  assert(text.includes('洛谷历史 AC 记录（实际 AC 时间未知）'));
   assert(!text.includes('Codeforces 实际提交记录'));
 });
-test('mixed tasks describe both actual submissions and Luogu snapshots', async () => {
+test('mixed tasks describe CF submissions and historical Luogu AC', async () => {
   const cfProblems = task().problems;
   taskOverride = {
     luogu_snapshot: true,
@@ -245,7 +246,7 @@ test('mixed tasks describe both actual submissions and Luogu snapshots', async (
   };
   mounted = await mount(Root, routes, '/training-tasks.html?task_id=17');
   assert(
-    textOf(mounted.root).includes('Codeforces 实际提交记录；洛谷 AC 集合快照（实际 AC 时间未知）'),
+    textOf(mounted.root).includes('Codeforces 实际提交记录；洛谷历史 AC 记录（实际 AC 时间未知）'),
   );
 });
 test('Luogu binding remains administrator managed and blocks refresh only when all platforms are unbound', async () => {
@@ -275,12 +276,12 @@ test('completed queue tasks still surface a failed Luogu fetch', async () => {
   mounted = await mount(Root, routes, '/training-tasks.html?task_id=17');
   assert(textOf(mounted.root).includes('同步失败，已有进度保留'));
 });
-test('administrator review submits the server progress version and a public reason', async () => {
+test('administrator binding correction submits the progress version and a public reason', async () => {
   let payload;
   const ReviewPage = {
     render: () =>
       h(Review, {
-        problem: { id: 9, problem_id: 'P1001', progress_version: 4, can_review: true },
+        problem: { id: 9, problem_id: 'P1001', progress_version: 4, can_reset_binding: true },
         taskVersion: 2,
         onReview: (value) => {
           payload = value;
@@ -296,50 +297,11 @@ test('administrator review submits the server progress version and a public reas
     problem_id: 9,
     version: 4,
     task_version: 2,
-    decision: 'on_time',
+    decision: 'reset_binding',
     reason: '核对现场验收记录',
   });
 });
 
-test('a changed binding exposes only revocation and submits clear with the original evidence version', async () => {
-  let payload;
-  const ReviewPage = {
-    render: () =>
-      h(Review, {
-        problem: {
-          id: 9,
-          problem_id: 'P1001',
-          progress_version: 7,
-          can_review: false,
-          can_clear_review: true,
-          can_reset_binding: false,
-          review: { decision: 'on_time', reason: '原人工决定' },
-        },
-        taskVersion: 2,
-        onReview: (value) => {
-          payload = value;
-        },
-      }),
-  };
-  mounted = await mount(Root, [{ path: '/review.html', component: ReviewPage }], '/review.html');
-  const select = find(mounted.root, (n) => n.type === 'select')[0];
-  assert.deepEqual(
-    find(select, (n) => n.type === 'option').map((n) => n.props.value),
-    ['clear'],
-  );
-  find(mounted.root, (n) => n.type === 'textarea')[0].props['onUpdate:modelValue'](
-    '撤销错误人工决定',
-  );
-  await settle();
-  find(mounted.root, (n) => n.type === 'form')[0].props.onSubmit({ preventDefault() {} });
-  assert.deepEqual(payload, {
-    problem_id: 9,
-    version: 7,
-    task_version: 2,
-    decision: 'clear',
-    reason: '撤销错误人工决定',
-  });
-});
 test('a pending changed binding still offers an explicit reset without completion decisions', async () => {
   let payload;
   const ReviewPage = {
@@ -360,11 +322,8 @@ test('a pending changed binding still offers an explicit reset without completio
       }),
   };
   mounted = await mount(Root, [{ path: '/review.html', component: ReviewPage }], '/review.html');
-  const select = find(mounted.root, (n) => n.type === 'select')[0];
-  assert.deepEqual(
-    find(select, (n) => n.type === 'option').map((n) => n.props.value),
-    ['reset_binding'],
-  );
+  assert.equal(find(mounted.root, (n) => n.type === 'select').length, 0);
+  assert(textOf(mounted.root).includes('使用当前绑定重新核验历史 AC'));
   find(mounted.root, (n) => n.type === 'textarea')[0].props['onUpdate:modelValue']('核对新 UID');
   await settle();
   find(mounted.root, (n) => n.type === 'form')[0].props.onSubmit({ preventDefault() {} });

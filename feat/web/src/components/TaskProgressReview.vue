@@ -2,17 +2,10 @@
 import { ref, watch } from 'vue';
 const props = defineProps({ problem: Object, taskVersion: Number, disabled: Boolean });
 const emit = defineEmits(['review']);
-const decision = ref('on_time');
 const reason = ref('');
 watch(
-  () =>
-    props.problem.can_review
-      ? 'on_time'
-      : props.problem.can_clear_review
-        ? 'clear'
-        : 'reset_binding',
-  (available) => {
-    decision.value = available;
+  () => props.problem.can_reset_binding,
+  () => {
     reason.value = '';
   },
   { immediate: true },
@@ -22,7 +15,7 @@ function submit() {
     problem_id: props.problem.id,
     version: props.problem.progress_version,
     task_version: props.taskVersion,
-    decision: decision.value,
+    decision: 'reset_binding',
     reason: reason.value.trim(),
   });
 }
@@ -30,17 +23,12 @@ function submit() {
 <template>
   <form class="tt-panel tt-stack" @submit.prevent="submit">
     <h4>{{ problem.problem_id }} · 管理员核验</h4>
-    <p class="tt-caption">审核原因会展示给成员，操作保留记录。审核不会生成实际提交时间。</p>
+    <p class="tt-caption">
+      审核原因会展示给成员，操作保留记录。洛谷按历史 AC 判断完成，不判断按期或逾期。
+    </p>
     <label class="tt-field"
       ><span>处理方式</span>
-      <select v-model="decision" :disabled="disabled">
-        <option v-if="problem.can_review" value="on_time">确认按期完成</option>
-        <option v-if="problem.can_review" value="late">确认逾期完成</option>
-        <option v-if="problem.can_clear_review" value="clear">撤销人工决定，恢复快照判定</option>
-        <option v-if="problem.can_reset_binding" value="reset_binding">
-          使用当前绑定重新建立核验起点
-        </option>
-      </select>
+      <span>使用当前绑定重新核验历史 AC；已完成的成绩保留。</span>
     </label>
     <label class="tt-field"
       ><span>公开审核原因</span>
