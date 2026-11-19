@@ -49,7 +49,7 @@ class SyncMixin:
             await connection.commit()
             return state
 
-    async def _mark_platform_sync(self, qq_id, platform, status, now, *, success=False, error_code=None, error_message=None, cursor=None, full_history=False):
+    async def _mark_platform_sync(self, qq_id, platform, status, now, *, success=False, error_code=None, error_message=None, cursor=None, full_history=False, failure=None):
         # Luogu always reads the complete public P-problem AC set, even for a day-range request.
         # This marks snapshot coverage only; it is not acceptance-time evidence.
         if platform == "luogu" and success:
@@ -70,8 +70,11 @@ class SyncMixin:
                 clause = "cursor_timestamp=?,last_attempt_at=?,last_success_at=?,last_status=?,last_error_code=NULL,last_error_message=NULL,consecutive_failures=0,next_retry_at=0,updated_at=?,full_history_at=CASE WHEN ? THEN ? ELSE full_history_at END"
                 values = [int(cursor or now), now, now, status, now, full_history, now]
             else:
-                clause = "last_attempt_at=?,last_status=?,last_error_code=?,last_error_message=?,consecutive_failures=consecutive_failures+1,updated_at=?"
-                values = [now, status, error_code, error_message, now]
+                error_code = getattr(failure, "code", error_code)
+                error_message = getattr(failure, "message", error_message)
+                retry_at = now + getattr(failure, "retry_after", 0)
+                clause = "last_attempt_at=?,last_status=?,last_error_code=?,last_error_message=?,consecutive_failures=consecutive_failures+1,next_retry_at=MAX(next_retry_at,?),updated_at=?"
+                values = [now, status, error_code, error_message, retry_at, now]
             where = "user_qq_id=? AND platform=?"
             values.extend([str(qq_id), platform])
             token = getattr(self, "_binding_tokens", {}).get((str(qq_id), platform))
@@ -175,7 +178,7 @@ class SyncMixin:
                         sync_succeeded = False
                         await self._mark_platform_sync(
                             qq_id, platform, "failed", int(time.time()),
-                            error_code="fetch_failed", error_message="平台抓取失败",
+                            error_code="fetch_failed", error_message="平台抓取失败", failure=result,
                         )
                     else:
                         user_new_count += result
@@ -310,7 +313,7 @@ class SyncMixin:
                     if not await self._mark_platform_sync(qq_id, normalized_platform, "backfill", finished_at):
                         return -4
             else:
-                await self._mark_platform_sync(qq_id, normalized_platform, "failed", int(time.time()), error_code="fetch_failed", error_message="平台抓取失败")
+                await self._mark_platform_sync(qq_id, normalized_platform, "failed", int(time.time()), error_code="fetch_failed", error_message="平台抓取失败", failure=result)
             return result
 
     async def sync_single_user_for_days(self, qq_id: str, days: int):
@@ -365,7 +368,7 @@ class SyncMixin:
                     else:
                         await self._mark_platform_sync(
                             qq_id, platform, "failed", int(time.time()),
-                            error_code="fetch_failed", error_message="平台抓取失败",
+                            error_code="fetch_failed", error_message="平台抓取失败", failure=result,
                         )
                 except asyncio.CancelledError:
                     await self._mark_platform_sync(
