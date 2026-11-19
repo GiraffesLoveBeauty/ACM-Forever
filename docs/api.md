@@ -183,7 +183,7 @@ response.raise_for_status()
 
 此模块对应 #118，管理员从 `/admin.html?section=training` 发放固定题单，成员从 `/training-tasks.html` 查看本人任务。原今日训练、自主选题及 Bot / 移动端随机挑战接口继续保留。业务身份使用动态 `users.status`，与 Web 管理权限独立。
 
-`ACM_TRAINING_TASKS_ENABLED` 默认 `true`，控制新发放与个人中心入口；关闭后历史任务及证据仍可查询。Codeforces 按真实提交时间核验。洛谷公开 P 题支持历史 AC 与明确选择的周期新增快照核验；其他平台可存草稿，不能发布。
+`ACM_TRAINING_TASKS_ENABLED` 默认 `true`，控制新发放与个人中心入口；关闭后历史任务及证据仍可查询。Codeforces 按真实提交时间核验。洛谷公开 P 题统一按历史 AC 核验；其他平台可存草稿，不能发布。
 
 | 方法与路径 | 权限 / 契约 |
 | --- | --- |
@@ -197,20 +197,24 @@ response.raise_for_status()
 | `POST /api/admin/training-tasks/<id>/cancel` | admin/root + CSRF；version/reason，保留题单、证据与审计 |
 | `GET /api/admin/training-tasks/<id>/progress` | admin/root；identity/status/search 和分页；固定分母、人数完成率、题目进度、待核验与异常分开 |
 | `GET /api/admin/training-tasks/<id>/progress/<recipient_id>` | admin/root；接收人快照与逐题最小证据 |
-| `POST /api/admin/training-tasks/<id>/progress/<recipient_id>/review` | admin/root + CSRF；洛谷逐题审核，需进度版本、任务版本与公开原因，保留审计 |
+| `POST /api/admin/training-tasks/<id>/progress/<recipient_id>/review` | admin/root + CSRF；仅洛谷未计入完成题目的 reset_binding，需进度版本、任务版本与公开原因，保留审计 |
 | `GET /api/me/training-tasks` | 当前会话本人；tab=active/upcoming/history/all 及分页，按账号 epoch 隔离 |
 | `GET /api/me/training-tasks/<id>` | 当前会话本人；固定题单、核验、覆盖和刷新队列；他人任务返回 404 |
 | `POST /api/me/training-tasks/<id>/refresh` | 当前会话本人 + CSRF，正文 `{}`；异步队列，202，运行任务去重和持久化 60 秒冷却 |
 
 分页默认 20、上限 100。所有 GET 仅读站内证据，不请求外部 OJ；响应 no-store。发布事务重新核对版本、预览有效期与名单指纹，变化返回 409；冻结身份、账号代际、绑定、题单、周期及规则，身份变动不会补发或撤回。有效未绑定成员可以接收，未开户/停用/注销/临时凭据过期成员列入排除清单。
 
-周期判断含开始/截止两端，使用 OJ 实际提交时间，UTC 保存、Asia/Shanghai 展示。晚同步到的周期内 AC 可回补；开始前默认仅标历史已做，截止后为逾期。只有全部必做题完成才算任务完成，历史 AC 规则也需等开始。绑定/账号代际变化不能继承新账号证据，注销保留匿名最小成绩和冻结分母。
+Codeforces 周期判断含开始/截止两端，使用 OJ 实际提交时间，UTC 保存、Asia/Shanghai 展示。晚同步到的周期内 AC 可回补；开始前默认仅标历史已做，截止后为逾期。只有全部必做题完成才算任务完成，历史 AC 规则也需等开始。绑定/账号代际变化不能继承新账号证据，注销保留匿名最小成绩和冻结分母。
 
 洛谷公开 P 题统一按历史 AC 核验，不限制完成时间，也不要求周期内重新通过。`luogu_snapshot` 为兼容旧客户端的弃用布尔字段，返回 false；capabilities 中 historical_ac=true、period_ac=false、snapshot_ac=false。洛谷历史 AC 计入完成题数，实际 AC 时间保持未知；证据使用 accepted_at:null、observed_at 和 evidence_type:historical_ac，不再产生时段待确认或逾期判断。GET 只读本地进度；发布、启动补算及成功同步会更新结果。绑定更正接口仅接受 reset_binding，旧时间审核请求返回 historical_ac_only。契约见 [api.md（训练任务历史 AC 核验）](training-tasks/api.md#洛谷历史-ac-核验与绑定更正)。
 
-审核正文为 `{problem_id,decision,reason,version,task_version}`：problem_id 是任务题目行 ID，version 是 progress_version；decision 为 `on_time/late/clear/reset_binding`，原因 1–500 字并对成员可见。`on_time/late` 仅接受当前任务绑定下已确认的 AC；`reset_binding` 仅用于绑定变化且尚未计入完成的题目，清除该题旧的待核验证据并建立当前 UID 的新起点，不转移已有成绩。证据或任务版本冲突返回 409；取消任务不能审核。原始快照保留，`clear` 撤销已有人工决定并按当前周期重算。同一有效账号代际内，改绑或解绑后仍可撤销，逐题 `can_clear_review` 与 `can_review` 分开表示能力；撤销保留原绑定锚点，不采纳新 UID 的成绩。无人工决定时返回 409/review_unavailable；注销或账号代际变化仍禁止撤销。
+绑定更正正文为 `{problem_id,decision,reason,version,task_version}`：problem_id 是任务题目行 ID，version 是 progress_version；decision 仅接受 `reset_binding`，原因 1–500 字并对成员可见。仅绑定变化且尚未计入完成的洛谷题目可重建当前 UID 的核验起点，不转移已有成绩。旧 `on_time/late/clear` 请求返回 `historical_ac_only`；证据或任务版本冲突返回 409，取消任务不能更正绑定。
 
 刷新失败保留已知进度；无绑定、覆盖不足、暂停或失败分别显示待核验原因；重启丢失队列显示 interrupted。业务错误包含 code/message/request_id，常见 409 version_conflict/audience_changed/immutable_task、429 refresh_rate_limited（retry_after）、503 feature_disabled/sync_unavailable。完整字段、幂等、错误及生命周期契约见 [api.md（训练任务存储与发布契约）](training-tasks/api.md)，实测与发布回退见 [acceptance.md（训练任务联调与验收）](training-tasks/acceptance.md)。
+
+同步任务及个人训练详情中的 `refresh` 保持原 `result` 数值契约，额外返回可选 `errors`：单成员为 `{platform:{code,message,next_retry_at}}`，全员任务为 `{qq_id:{platform:{code,message,next_retry_at}}}`，详情按账号生命周期过滤。`next_retry_at` 为 Unix 秒，0 表示无上游指定等待时间；数值 `-1` 只能显示同步失败，不能显示成员不存在。洛谷解析、网络与上游限制保留具体错误，原有失败退避与持久化重试时间共同约束训练调度。
+
+Web 成员训练页和管理员进度页在可见且空闲时每 30 秒读取站内进度，返回页面时更新；主动刷新运行中仍每 3 秒查询状态。后台读取不会触发 OJ 请求，离开页面清理定时器。
 
 ## 普通成员训练闭环
 
