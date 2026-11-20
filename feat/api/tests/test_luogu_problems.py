@@ -7,14 +7,16 @@ import os
 import tempfile
 import time
 import unittest
+from email.utils import formatdate
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import aiohttp
 
 from feat.api.acm_api.database import connect_db
-from feat.api.acm_api.luogu_client import LuoguUnavailable, luogu_get, page_context
+from feat.api.acm_api.luogu_client import (LuoguResponseError, LuoguUnavailable,
+    _gate, luogu_get, page_context, recovery_pending, request_failure, response_failed, response_recovered)
 from feat.api.acm_api.luogu_problem import (classifications, load_taxonomy, metadata,
     normalize_taxonomy, parse_problem, problem_id, render_markdown, save_taxonomy)
 from feat.api.acm_api.luogu_sync import LuoguSync
@@ -304,6 +306,89 @@ class RequestTests(unittest.IsolatedAsyncioTestCase):
             await luogu_get(session, "https://www.luogu.com.cn/problem/P1001")
         self.assertEqual(caught.exception.status, 302)
 
+    async def test_member_cookie_redirect_is_followed_once_and_bare_403_is_local(self):
+        first_url = "https://www.luogu.com.cn/user/1234/practice"
+        next_url = "https://www.luogu.com.cn/user/5678/practice"
+        redirect = _Response(status=302, headers={"Location": first_url})
+        redirect.cookies = {"anon": "session"}
+        session = SimpleNamespace(get=Mock(side_effect=[redirect, _Response(status=403), _Response()]))
+        with patch("feat.api.acm_api.luogu_client.asyncio.sleep", new_callable=AsyncMock):
+            with self.assertRaises(LuoguUnavailable) as caught:
+                await luogu_get(session, first_url, member_practice=True)
+            self.assertEqual(caught.exception.status, 403)
+            self.assertTrue(caught.exception.request_attempted)
+            self.assertFalse(recovery_pending())
+            self.assertEqual(await luogu_get(session, next_url, member_practice=True), b"ok")
+        self.assertEqual([call.args[0] for call in session.get.call_args_list], [first_url, first_url, next_url])
+        self.assertTrue(all(not call.kwargs["allow_redirects"] for call in session.get.call_args_list))
+
+    async def test_member_failures_without_a_site_signal_are_local(self):
+        url = "https://www.luogu.com.cn/user/1234/practice"
+        redirect = _Response(status=302, headers={"Location": "/auth/login?return=private"})
+        refused = _Response(status=403, headers={"Retry-After": "unparseable"})
+        malformed_redirect = _Response(status=302, headers={"Location": "https://["})
+        session = SimpleNamespace(get=Mock(side_effect=[redirect, malformed_redirect, refused, _Response()]))
+        with self.assertRaises(LuoguUnavailable) as caught:
+            await luogu_get(session, url, member_practice=True)
+        self.assertEqual(caught.exception.status, 302)
+        self.assertIn("/auth/login", str(caught.exception))
+        self.assertNotIn("return=private", str(caught.exception))
+        self.assertEqual(session.get.call_count, 1)
+        self.assertFalse(recovery_pending())
+        with patch("feat.api.acm_api.luogu_client.MAX_RESPONSE_BYTES", 1), \
+                patch("feat.api.acm_api.luogu_client.asyncio.sleep", new_callable=AsyncMock):
+            with self.assertRaises(LuoguUnavailable) as caught:
+                await luogu_get(session, url, member_practice=True)
+            self.assertEqual(caught.exception.status, 302)
+            self.assertTrue(caught.exception.request_attempted)
+            self.assertFalse(recovery_pending())
+            with self.assertRaises(LuoguUnavailable) as caught:
+                await luogu_get(session, url, member_practice=True)
+            self.assertEqual(caught.exception.status, 403)
+            self.assertFalse(recovery_pending())
+            with self.assertRaises(LuoguResponseError) as caught:
+                await luogu_get(session, url, member_practice=True)
+        self.assertEqual(caught.exception.status, 200)
+        self.assertTrue(caught.exception.request_attempted)
+        self.assertFalse(recovery_pending())
+
+    async def test_member_shared_limits_honor_retry_after_and_explicit_challenge(self):
+        url = "https://www.luogu.com.cn/user/1234/practice"
+        now = 1_800_000_000
+        signals = (
+            (403, {"Retry-After": "900"}, 900),
+            (403, {"Retry-After": "0"}, 300),
+            (503, {"Retry-After": formatdate(now + 900, usegmt=True)}, 900),
+            (200, {"CF-Mitigated": "challenge"}, 300),
+            (429, {}, 60),
+        )
+        with patch("feat.api.acm_api.luogu_client.time.time", return_value=now), \
+                patch("feat.api.acm_api.luogu_client.asyncio.sleep", new_callable=AsyncMock):
+            for status, headers, delay in signals:
+                with self.subTest(status=status, headers=headers):
+                    response_recovered()
+                    session = SimpleNamespace(get=Mock(return_value=_Response(status=status, headers=headers)))
+                    with self.assertRaises(LuoguUnavailable) as caught:
+                        await luogu_get(session, url, member_practice=True)
+                    self.assertEqual(caught.exception.status, status)
+                    self.assertEqual(caught.exception.retry_after, delay)
+                    self.assertTrue(caught.exception.request_attempted)
+                    with self.assertRaises(LuoguUnavailable) as waiting:
+                        await luogu_get(session, url, member_practice=True)
+                    self.assertIsNone(waiting.exception.status)
+                    self.assertEqual(waiting.exception.cause_http_status, status)
+                    self.assertFalse(waiting.exception.request_attempted)
+                    self.assertEqual(session.get.call_count, 1)
+
+    async def test_invalid_request_configuration_is_not_an_attempt(self):
+        session = SimpleNamespace(get=Mock())
+        with self.assertRaises(ValueError) as caught:
+            await luogu_get(session, "https://www.luogu.com.cn/user/1234/practice", interval=0)
+        failure = request_failure(caught.exception)
+        self.assertEqual(failure.code, "luogu_invalid_request")
+        self.assertFalse(failure.request_attempted)
+        session.get.assert_not_called()
+
     async def test_requests_are_paced_and_response_size_is_bounded(self):
         session = SimpleNamespace(get=unittest.mock.Mock(return_value=_Response()))
         with patch("feat.api.acm_api.luogu_client.asyncio.sleep", new_callable=AsyncMock) as wait:
@@ -316,6 +401,17 @@ class RequestTests(unittest.IsolatedAsyncioTestCase):
         for url in ("http://www.luogu.com.cn/problem/P1", "https://evil.com/problem/P1", "https://www.luogu.com.cn@evil.com/"):
             with self.assertRaises(ValueError):
                 await luogu_get(session, url)
+
+    async def test_http_200_does_not_clear_gate_without_explicit_validation(self):
+        gate = _gate()
+        response_failed(LuoguResponseError("invalid snapshot", status=200))
+        gate["cooldown"] = 0
+        session = SimpleNamespace(get=unittest.mock.Mock(return_value=_Response(raw=b"challenge")))
+        with patch("feat.api.acm_api.luogu_client.asyncio.sleep", new_callable=AsyncMock):
+            self.assertEqual(await luogu_get(session, "https://www.luogu.com.cn/user/1"), b"challenge")
+            self.assertTrue(recovery_pending())
+            await luogu_get(session, "https://www.luogu.com.cn/user/1", recover_on_response=True)
+        self.assertFalse(recovery_pending())
 
 
 class StorageTests(unittest.IsolatedAsyncioTestCase):

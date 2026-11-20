@@ -12,6 +12,7 @@ from .acm_api.problem_listing import ListingConnection
 
 from .acm_api.constants import PLATFORM_SYNC_CONCURRENCY
 from .acm_api.database import connect_db, isolated_connection
+from .acm_api.binding_guard import BindingChanged
 from .acm_api.binding_service import platform_spec
 from .acm_api.problem_sync import ProblemSync, sync_options
 from .acm_api.sync_service import SyncMixin
@@ -23,6 +24,14 @@ from .acm_api import problem_schedule
 PROBLEM_SYNC_TIMEZONE = timezone(timedelta(hours=8))
 PROBLEM_SYNC_HOUR = 4
 PROBLEM_SYNC_RETRY_SECONDS = 60
+ACCOUNT_SYNC_KINDS = frozenset({"账号全量同步", "全员平台同步", "全员定时同步"})
+SYNC_PLATFORM_FIELDS = {
+    "codeforces": "cf_handle",
+    "luogu": "luogu_id",
+    "nowcoder": "nowcoder_id",
+    "atcoder": "atcoder_handle",
+    "cjlu": "cjlu_username",
+}
 
 
 class SyncEngine(SyncMixin):
@@ -70,11 +79,15 @@ class SyncEngine(SyncMixin):
 
     @staticmethod
     def failure_detail(result):
+        next_retry_at = result.next_retry_at
+        if next_retry_at is None:
+            next_retry_at = int(time.time()) + result.retry_after if result.retry_after else 0
         return {"code": result.code, "message": result.message,
                 "http_status": result.http_status, "cause_http_status": result.cause_http_status,
-                "deferred": result.deferred, "consecutive_failures": result.consecutive_failures,
+                "deferred": result.deferred, "request_attempted": result.request_attempted,
+                "consecutive_failures": result.consecutive_failures,
                 "attention_required": result.attention_required,
-                "next_retry_at": int(time.time()) + result.retry_after if result.retry_after else 0}
+                "next_retry_at": next_retry_at}
 
     @staticmethod
     def sync_outcome(results, errors, *, many=False):
@@ -119,6 +132,8 @@ class SyncEngine(SyncMixin):
                         results[platform] = result
                     except asyncio.CancelledError:
                         raise
+                    except BindingChanged:
+                        results[platform] = -4 if platform == "luogu" else -3
                     except Exception:
                         # A failure on one OJ should not discard results from
                         # the other platforms in this account sync task.
@@ -140,14 +155,15 @@ class SyncEngine(SyncMixin):
         task["started_at"] = int(time.time())
         results = {}
         task["errors"] = {}
+        luogu_members = task["luogu_members"] = {}
         try:
             async with self._sync_cycle_lock:
                 members = task.get("_account_snapshots", [])
                 task["progress"] = {"done": 0, "total": len(members)}
                 platforms = task.get("_platforms") or ("codeforces", "luogu", "nowcoder", "atcoder", "cjlu")
                 for user in members:
-                    qq_id = user["qq_id"]
-                    results[str(qq_id)] = {}
+                    qq_id = str(user["qq_id"])
+                    results[qq_id] = {}
                     for platform in platforms:
                         snapshot = self.binding_snapshot(user, [platform])[platform]
                         if not snapshot["account"].strip():
@@ -159,13 +175,17 @@ class SyncEngine(SyncMixin):
                             )
                         except asyncio.CancelledError:
                             raise
+                        except BindingChanged:
+                            count = -4 if platform == "luogu" else -3
                         except Exception:
                             count = -3
                         if isinstance(count, SyncFailure):
-                            task["errors"].setdefault(str(qq_id), {})[platform] = self.failure_detail(count)
+                            task["errors"].setdefault(qq_id, {})[platform] = self.failure_detail(count)
                             count = int(count)
                         if count != -2:
-                            results[str(qq_id)][platform] = -3 if count is None else count
+                            results[qq_id][platform] = -3 if count is None else count
+                            if platform == "luogu" and snapshot["account"].strip():
+                                luogu_members[qq_id] = {"name": user["name"], "uid": snapshot["account"].strip()}
                     task["progress"]["done"] += 1
             task["result"] = results
             task["status"] = self.sync_outcome(results, task["errors"], many=True)
@@ -190,6 +210,9 @@ class WebTaskManager:
         self._member_sync_task = None
         self._training_sync_task = None
         self._claiming_all_accounts_sync = False
+        # Admission is separate from the execution lock so concurrent submissions
+        # cannot both pass the active-task check before either task is stored.
+        self._sync_admission_lock = asyncio.Lock()
 
     async def _logged_task(self, operation, item, *args, **kwargs):
         fields = {"task_id": item["id"], "task_kind": item.get("kind", "后台任务")}
@@ -228,6 +251,13 @@ class WebTaskManager:
     def _active_problem_sync(self):
         return next((item for item in self.tasks.values()
                      if item.get("kind") == "题目采集" and item["status"] in {"queued", "running"}), None)
+
+    def _active_account_sync(self, qq_id):
+        qq_id = str(qq_id)
+        return next((item for item in self.tasks.values()
+                     if item.get("kind") in ACCOUNT_SYNC_KINDS
+                     and item.get("status") in {"queued", "running"}
+                     and str(item.get("qq_id") or "") in {qq_id, "*"}), None)
 
     def submit_problem_sync(self, options):
         if self._claiming_daily_problem_sync or self._claiming_all_accounts_sync:
@@ -322,129 +352,150 @@ class WebTaskManager:
                 pass
             self._problem_schedule_changed.clear()
 
-    async def submit_account_sync(self, qq_id, platforms, days=0, *, expected_epoch=None):
-        if self._claiming_all_accounts_sync:
-            return None
-        normalized = []
-        for platform in platforms or ():
-            value = "codeforces" if platform == "cf" else str(platform).strip()
-            if value in {"codeforces", "luogu", "nowcoder", "atcoder", "cjlu"}:
-                if value not in normalized:
-                    normalized.append(value)
-        if not normalized:
-            return None
-
-        try:
-            days = max(0, min(3650, int(days)))
-        except (TypeError, ValueError):
-            days = 0
-
-        async with aiosqlite.connect(str(self.sync_engine.db_path), factory=ListingConnection) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute("SELECT * FROM users WHERE qq_id=? AND account_state='active'", (str(qq_id),)) as cursor:
-                user = await cursor.fetchone()
-        if not user or expected_epoch is not None and user["account_epoch"] != expected_epoch:
-            return None
-        if self._claiming_all_accounts_sync:
-            return None
-        task_id = uuid.uuid4().hex[:12]
-        item = {
-            "id": task_id,
-            "kind": "账号全量同步",
-            "qq_id": str(qq_id),
-            "account_epoch": user["account_epoch"],
-            "bindings": SyncEngine.binding_snapshot(user, normalized),
-            "platform": ",".join(normalized),
-            "days": days,
-            "status": "queued",
-            "started_at": None,
-            "finished_at": None,
-            "result": None,
-        }
-        self.tasks[task_id] = item
-        item["_task"] = asyncio.create_task(
-            self._logged_task(self.sync_engine.sync_account, item, str(qq_id), normalized, item, days=days)
-        )
-        return {"id": task_id}
-
-    async def submit_all_accounts_sync(self, days=0, *, incremental=False, scheduled=False, interval_seconds=3600, platforms=None):
-        if self._claiming_all_accounts_sync or self._claiming_daily_problem_sync or any(
-            item.get("status") in {"queued", "running"}
-            for item in self.tasks.values()
-        ):
-            return None
-        allowed = ("codeforces", "luogu", "nowcoder", "atcoder", "cjlu")
-        if platforms is None:
-            normalized_platforms = list(allowed)
-        else:
-            if isinstance(platforms, str):
-                platforms = platforms.replace("，", ",").split(",")
-            normalized_platforms = []
+    async def submit_account_sync(self, qq_id, platforms, days=0, *, expected_epoch=None, incremental=False):
+        async with self._sync_admission_lock:
+            if self._claiming_all_accounts_sync or self._active_account_sync(qq_id):
+                return None
+            normalized = []
             for platform in platforms or ():
-                value = "codeforces" if str(platform).strip().lower() in {"cf", "codeforces"} else str(platform).strip().lower()
-                if value in allowed and value not in normalized_platforms:
-                    normalized_platforms.append(value)
-        if not normalized_platforms:
-            return None
-        try:
-            days = max(0, min(3650, int(days)))
-        except (TypeError, ValueError):
-            days = 0
-        self._claiming_all_accounts_sync = True
-        try:
+                value = "codeforces" if platform == "cf" else str(platform).strip()
+                if value in {"codeforces", "luogu", "nowcoder", "atcoder", "cjlu"}:
+                    if value not in normalized:
+                        normalized.append(value)
+            if not normalized:
+                return None
+
+            try:
+                days = max(0, min(3650, int(days)))
+            except (TypeError, ValueError):
+                days = 0
+
             async with aiosqlite.connect(str(self.sync_engine.db_path), factory=ListingConnection) as db:
                 db.row_factory = aiosqlite.Row
-                if scheduled:
-                    now = int(time.time())
-                    await db.execute("BEGIN IMMEDIATE")
-                    async with db.execute(
-                        "INSERT INTO settings(key,value) VALUES('member_sync_last_started_at',?) "
-                        "ON CONFLICT(key) DO UPDATE SET value=excluded.value "
-                        "WHERE CAST(settings.value AS INTEGER)<=?",
-                        (str(now), now - interval_seconds),
-                    ) as cursor:
-                        if cursor.rowcount != 1:
-                            return None
-                query = "SELECT * FROM users WHERE account_state='active'"
-                if scheduled:
-                    query += (
-                        " AND (TRIM(COALESCE(cf_handle,''))<>'' OR TRIM(COALESCE(luogu_id,''))<>''"
-                        " OR TRIM(COALESCE(nowcoder_id,''))<>'' OR TRIM(COALESCE(atcoder_handle,''))<>''"
-                        " OR TRIM(COALESCE(cjlu_username,''))<>'')"
-                    )
-                async with db.execute(query + " ORDER BY qq_id") as cursor:
-                    members = [dict(row) for row in await cursor.fetchall()]
-                await db.commit()
-        finally:
-            self._claiming_all_accounts_sync = False
-        if scheduled:
-            for task_id, item in list(self.tasks.items()):
-                if item.get("scheduled") and item["_task"].done():
-                    del self.tasks[task_id]
-        task_id = uuid.uuid4().hex[:12]
-        item = {
-            "id": task_id,
-            "kind": "全员定时同步" if scheduled else "全员平台同步",
-            "qq_id": "*",
-            "_account_snapshots": members,
-            "_account_epochs": {user["qq_id"]: user["account_epoch"] for user in members},
-            "platform": ",".join(normalized_platforms),
-            "_platforms": normalized_platforms,
-            "days": days,
-            "scheduled": scheduled,
-            "status": "queued",
-            "started_at": None,
-            "finished_at": None,
-            "result": None,
-        }
-        self.tasks[task_id] = item
-        options = {"days": days}
-        if incremental:
-            options["incremental"] = True
-        item["_task"] = asyncio.create_task(
-            self._logged_task(self.sync_engine.sync_all_accounts, item, item, **options)
-        )
-        return {"id": task_id}
+                async with db.execute("SELECT * FROM users WHERE qq_id=? AND account_state='active'", (str(qq_id),)) as cursor:
+                    user = await cursor.fetchone()
+            if not user or expected_epoch is not None and user["account_epoch"] != expected_epoch:
+                return None
+            if self._claiming_all_accounts_sync or self._active_account_sync(qq_id):
+                return None
+            task_id = uuid.uuid4().hex[:12]
+            item = {
+                "id": task_id,
+                "kind": "账号全量同步",
+                "qq_id": str(qq_id),
+                "account_epoch": user["account_epoch"],
+                "bindings": SyncEngine.binding_snapshot(user, normalized),
+                "platform": ",".join(normalized),
+                "days": days,
+                "incremental": bool(incremental),
+                "status": "queued",
+                "started_at": None,
+                "finished_at": None,
+                "result": None,
+            }
+            self.tasks[task_id] = item
+            item["_task"] = asyncio.create_task(
+                self._logged_task(self.sync_engine.sync_account, item, str(qq_id), normalized, item, days=days, incremental=bool(incremental))
+            )
+            return {"id": task_id}
+
+    async def submit_all_accounts_sync(self, days=0, *, incremental=False, scheduled=False, interval_seconds=3600, platforms=None):
+        async with self._sync_admission_lock:
+            if self._claiming_all_accounts_sync or self._claiming_daily_problem_sync or any(
+                item.get("status") in {"queued", "running"}
+                for item in self.tasks.values()
+            ):
+                return None
+            allowed = ("codeforces", "luogu", "nowcoder", "atcoder", "cjlu")
+            if platforms is None:
+                normalized_platforms = list(allowed)
+            else:
+                if isinstance(platforms, str):
+                    platforms = platforms.replace("，", ",").split(",")
+                normalized_platforms = []
+                for platform in platforms or ():
+                    value = "codeforces" if str(platform).strip().lower() in {"cf", "codeforces"} else str(platform).strip().lower()
+                    if value in allowed and value not in normalized_platforms:
+                        normalized_platforms.append(value)
+            if not normalized_platforms:
+                return None
+            try:
+                days = max(0, min(3650, int(days)))
+            except (TypeError, ValueError):
+                days = 0
+            priority_platform = "luogu" if "luogu" in normalized_platforms else normalized_platforms[0]
+            priority_field = SYNC_PLATFORM_FIELDS[priority_platform]
+            self._claiming_all_accounts_sync = True
+            try:
+                async with aiosqlite.connect(str(self.sync_engine.db_path), factory=ListingConnection) as db:
+                    db.row_factory = aiosqlite.Row
+                    if scheduled:
+                        now = int(time.time())
+                        await db.execute("BEGIN IMMEDIATE")
+                        async with db.execute(
+                            "INSERT INTO settings(key,value) VALUES('member_sync_last_started_at',?) "
+                            "ON CONFLICT(key) DO UPDATE SET value=excluded.value "
+                            "WHERE CAST(settings.value AS INTEGER)<=?",
+                            (str(now), now - interval_seconds),
+                        ) as cursor:
+                            if cursor.rowcount != 1:
+                                return None
+                    query = f"""
+                        SELECT u.* FROM users u
+                        LEFT JOIN user_platform_sync_state s ON s.user_qq_id=u.qq_id AND s.platform='{priority_platform}'
+                            AND TRIM(COALESCE(u.{priority_field},''))<>''
+                        WHERE u.account_state='active'
+                    """
+                    if scheduled:
+                        query += (
+                            " AND (TRIM(COALESCE(u.cf_handle,''))<>'' OR TRIM(COALESCE(u.luogu_id,''))<>''"
+                            " OR TRIM(COALESCE(u.nowcoder_id,''))<>'' OR TRIM(COALESCE(u.atcoder_handle,''))<>''"
+                            " OR TRIM(COALESCE(u.cjlu_username,''))<>'')"
+                        )
+                    # Prefer Luogu when it is selected because its shared gate can defer
+                    # the whole platform; otherwise use the first selected platform.
+                    query += f"""
+                        ORDER BY CASE
+                            WHEN TRIM(COALESCE(u.{priority_field},''))='' THEN 4
+                            WHEN COALESCE(s.consecutive_failures,0)>0 THEN 3
+                            WHEN COALESCE(s.last_attempt_at,0)=0 THEN 0
+                            WHEN s.last_status='waiting' THEN 1
+                            ELSE 2
+                        END, COALESCE(s.last_attempt_at,0), u.qq_id
+                    """
+                    async with db.execute(query) as cursor:
+                        members = [dict(row) for row in await cursor.fetchall()]
+                    await db.commit()
+            finally:
+                self._claiming_all_accounts_sync = False
+            if scheduled:
+                for task_id, item in list(self.tasks.items()):
+                    if item.get("scheduled") and item["_task"].done():
+                        del self.tasks[task_id]
+            task_id = uuid.uuid4().hex[:12]
+            item = {
+                "id": task_id,
+                "kind": "全员定时同步" if scheduled else "全员平台同步",
+                "qq_id": "*",
+                "_account_snapshots": members,
+                "_account_epochs": {user["qq_id"]: user["account_epoch"] for user in members},
+                "platform": ",".join(normalized_platforms),
+                "_platforms": normalized_platforms,
+                "days": days,
+                "scheduled": scheduled,
+                "status": "queued",
+                "started_at": None,
+                "finished_at": None,
+                "result": None,
+            }
+            self.tasks[task_id] = item
+            options = {"days": days}
+            if incremental:
+                options["incremental"] = True
+            item["_task"] = asyncio.create_task(
+                self._logged_task(self.sync_engine.sync_all_accounts, item, item, **options)
+            )
+            return {"id": task_id}
 
     def start_member_sync(self, interval_seconds=3600):
         if self._member_sync_task is None:
@@ -565,7 +616,7 @@ class WebTaskManager:
         keys = (
             "id", "kind", "qq_id", "platform", "days", "status",
             "started_at", "finished_at", "result",
-            "progress", "bindings", "account_epoch", "errors",
+            "progress", "bindings", "account_epoch", "errors", "luogu_members",
         )
         return [{key: item.get(key) for key in keys} for item in self.tasks.values()]
 
@@ -592,6 +643,9 @@ class WebTaskManager:
                 # Errors accumulate before results exist, including in cancelled tasks.
                 item["errors"] = {key: value for key, value in (item.get("errors") or {}).items()
                                   if active.get(key) == epochs.get(key, 1)}
+                if isinstance(item.get("luogu_members"), dict):
+                    item["luogu_members"] = {key: value for key, value in item["luogu_members"].items()
+                                             if active.get(key) == epochs.get(key, 1)}
         return snapshots
 
     def revoke_account_tasks(self, qq_id):

@@ -5,6 +5,7 @@ import json
 import math
 import time
 import weakref
+from email.utils import parsedate_to_datetime
 from http import HTTPStatus
 from urllib.parse import urljoin, urlsplit
 
@@ -26,19 +27,21 @@ class LuoguUnavailable(RuntimeError):
         self.code = code or (f"luogu_http_{status}" if status else "luogu_cooldown")
         self.cause_http_status = cause_http_status
         self.deferred = self.code == "luogu_cooldown"
+        self.request_attempted = not self.deferred
         self.attention_required = False
 
 
 class LuoguRequestError(aiohttp.ClientError):
     """保留网络错误类型，让题库采集沿用原来的缓存回退和逐题失败处理。"""
 
-    def __init__(self, message, *, status=None, code="luogu_network_error"):
+    def __init__(self, message, *, status=None, code="luogu_network_error", request_attempted=True):
         super().__init__(message)
         self.status = status
         self.code = code
         self.retry_after = 0
         self.cause_http_status = None
         self.deferred = False
+        self.request_attempted = request_attempted
         self.attention_required = False
 
 
@@ -53,6 +56,7 @@ class LuoguResponseError(ValueError):
         self.retry_after = 0
         self.cause_http_status = None
         self.deferred = False
+        self.request_attempted = True
         self.attention_required = False
 
 
@@ -81,6 +85,9 @@ def request_failure(error, *, status=None, timeout=None):
     elif isinstance(error, aiohttp.ClientError):
         code, reason = "luogu_network_error", f"网络请求失败（{type(error).__name__}）"
     elif isinstance(error, ValueError):
+        if status is None:
+            return LuoguRequestError(f"洛谷请求参数无效，本次未发送请求：{error}",
+                                     code="luogu_invalid_request", request_attempted=False)
         code, reason = "luogu_invalid_snapshot", str(error)
     else:
         raise TypeError("不支持的洛谷请求异常") from error
@@ -133,7 +140,7 @@ def response_recovered():
 
 
 def response_failed(error):
-    """HTTP 200 的访问验证页或坏快照仍应等待，不能放行后续成员。"""
+    """非成员页面的无效站点数据会重新打开共享门禁。"""
     return _open_gate(error, 300)
 
 
@@ -176,8 +183,32 @@ async def save_request_state(db):
     await db.commit()
 
 
-async def luogu_get(session, url, *, interval=2.0, headers=None, timeout=30, recover_on_response=True):
-    """匿名访问固定原站；不跟随登录/验证跳转，不重试 403/429。"""
+def _retry_after_seconds(value, *, allow_date):
+    if value.isascii() and value.isdigit():
+        # 限制读取数字位数，等待上限沿用 24 小时。
+        return min(86400, int(value.lstrip("0")[:6] or "0"))
+    if not allow_date or not value:
+        return None
+    try:
+        retry_at = parsedate_to_datetime(value)
+        if retry_at.tzinfo is not None:
+            return min(86400, max(0, math.ceil(retry_at.timestamp() - time.time())))
+    except (TypeError, ValueError, OverflowError):
+        pass
+    return None
+
+
+async def luogu_get(session, url, *, interval=2.0, headers=None, timeout=30,
+                    recover_on_response=False, member_practice=False):
+    """匿名访问固定原站；不跟随登录/验证跳转，不重试 403/429。
+
+    HTTP 200 只证明收到了响应，不能证明它是可用的洛谷公开数据。
+    调用方完成页面或 JSON 结构校验后，才可以显式传入
+    ``recover_on_response=True`` 清除共享冷却；默认保持门禁状态，避免
+    验证码页、错误页或残缺响应提前放行后续账号。
+
+    成员练习页的普通访问拒绝和跳转由调用方按成员退避。明确限流和访问验证仍使用共享门禁。
+    """
     parsed = urlsplit(url)
     if parsed.scheme != "https" or parsed.netloc != "www.luogu.com.cn" or parsed.fragment:
         raise ValueError("洛谷采集仅支持固定 HTTPS 原站")
@@ -198,25 +229,43 @@ async def luogu_get(session, url, *, interval=2.0, headers=None, timeout=30, rec
             try:
                 async with session.get(url, headers=headers, timeout=timeout, allow_redirects=False) as response:
                     status = response.status
-                    if status in (403, 429):
-                        delay = 300 if status == 403 else 60
-                        retry = response.headers.get("Retry-After", "")
-                        if retry.isdigit():
-                            delay = max(delay, min(int(retry), 86400))
-                        reason = "服务器拒绝本次访问" if status == 403 else "请求频率受限"
+                    retry_after = _retry_after_seconds(response.headers.get("Retry-After", "").strip(),
+                                                       allow_date=member_practice)
+                    challenge = member_practice and response.headers.get("CF-Mitigated", "").strip().lower() == "challenge"
+                    site_limited = status == 429 or (member_practice and (retry_after is not None or challenge))
+                    if site_limited or (status == 403 and not member_practice):
+                        base_delay = 300 if status == 403 or challenge else 60
+                        delay = max(base_delay, retry_after or 0)
+                        if status == 429:
+                            reason = "请求频率受限"
+                        elif challenge:
+                            reason = "服务器要求访问验证"
+                        elif status == 403:
+                            reason = "服务器拒绝本次访问"
+                        else:
+                            reason = "服务器要求延后请求"
                         error = LuoguUnavailable(f"洛谷返回 HTTP {status}：{reason}，停止采集并冷却至少 {delay} 秒",
                                                  status=status, retry_after=delay)
-                        raise _open_gate(error, 300 if status == 403 else 60)
+                        raise _open_gate(error, base_delay)
+                    if status == 403:
+                        raise LuoguUnavailable("洛谷返回 HTTP 403：服务器拒绝访问该练习页", status=status)
                     if status == 404:
                         raise LuoguUnavailable("洛谷返回 HTTP 404：题目或公开资源不存在", status=status)
                     if 300 <= status < 400:
                         location = response.headers.get("Location", "")
-                        target = urljoin(url, location)
+                        try:
+                            target = urljoin(url, location)
+                        except ValueError:
+                            if not member_practice:
+                                raise
+                            target = None
                         if (attempt == 0 and status in (302, 303, 307)
                                 and location and target == url and getattr(response, "cookies", None)):
                             continue
                         if not location:
                             reason = "跳转响应缺少 Location 地址"
+                        elif target is None:
+                            reason = "跳转响应的 Location 地址格式无效"
                         elif target == url:
                             reason = ("匿名会话初始化后仍重复跳转到同一公开页面" if attempt
                                       else "跳转到同一公开页面，但未收到用于初始化的匿名会话 Cookie")
@@ -228,7 +277,9 @@ async def luogu_get(session, url, *, interval=2.0, headers=None, timeout=30, rec
                                 # 只展示路径，去掉可能带凭据的查询参数；不凭 302 推断必须登录。
                                 reason = f"跳转到其他路径 {redirect.path[:120]}，未获取到预期公开页面"
                         error = LuoguUnavailable(f"洛谷返回 HTTP {status}：{reason}，停止本次采集",
-                                                 status=status, retry_after=300)
+                                                 status=status)
+                        if member_practice:
+                            raise error
                         raise _open_gate(error, 300)
                     if status != 200:
                         try:
@@ -247,6 +298,8 @@ async def luogu_get(session, url, *, interval=2.0, headers=None, timeout=30, rec
                         response_recovered()
                     return b"".join(chunks)
             except LuoguResponseError as error:
+                if member_practice:
+                    raise
                 raise response_failed(error) from None
             except (aiohttp.ClientError, asyncio.TimeoutError) as error:
                 # 读取途中失败时保留已收到的状态；网络/5xx 故障也需要等待，避免逐成员重试。
