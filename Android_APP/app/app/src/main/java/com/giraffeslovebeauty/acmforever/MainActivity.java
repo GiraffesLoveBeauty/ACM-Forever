@@ -213,7 +213,10 @@ public final class MainActivity extends Activity {
         }
         if (returnFromAdmin) { returnFromAdmin = false; loadScreen(); }
         if (returnFromBindings) { returnFromBindings = false; if ("mine".equals(screen) || "account".equals(screen)) loadScreen(); }
-        if(headerAvatar!=null)refreshHeaderAvatar(true);
+        // Do not force a second /api/auth/me on every resume.  The avatar
+        // loader already refreshes when the account changes or its 30-second
+        // freshness window expires.
+        if(headerAvatar!=null)refreshHeaderAvatar(false);
         openingUpdates=false;application.updates().attach(this,null);
     }
 

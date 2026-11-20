@@ -50,7 +50,11 @@ public class AcmApplication extends Application {
             vault.clear();
             vault.clearPassword();
         });
-        ModuleHealth.checkAll(this);
+        // Full module verification is deliberately lazy.  Optional modules are
+        // checked when opened or from the update/storage page, so cold start
+        // only restores the session and can render the shell immediately.
+        // Keep only the lightweight native-uninstall receipt reconciliation.
+        ModuleDownloads.get(this).reconcileRemovals();
     }
 
     ApiClient api() { return api; }
