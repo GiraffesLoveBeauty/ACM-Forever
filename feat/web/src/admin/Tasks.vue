@@ -1,16 +1,13 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue';
-import { useRequests, date, showError } from '../lib/api.js';
+import { useRequests, date, showError, syncFailureMessage } from '../lib/api.js';
 import ProblemTaskProgress from '../components/ProblemTaskProgress.vue';
 const request = useRequests(),
   rows = ref([]);
 let timer,
   disposed = false;
 function describe(value, errors) {
-  if (errors?.message)
-    return (
-      errors.message + (errors.next_retry_at ? `（可重试时间：${date(errors.next_retry_at)}）` : '')
-    );
+  if (errors?.message) return syncFailureMessage(errors);
   if (value == null) return '';
   if (typeof value === 'object')
     return Object.entries(value)
@@ -62,7 +59,7 @@ onBeforeUnmount(() => {
         ><ProblemTaskProgress v-if="task.kind === '题目采集'" :task="task" />
         <template v-else
           ><br />成员 {{ task.qq_id || '全部' }} · 平台 {{ task.platform || '全部' }} ·
-          {{ task.status }}<br /><small v-if="task.progress"
+          {{ task.status === 'waiting' ? '等待重试' : task.status }}<br /><small v-if="task.progress"
             >已处理 {{ task.progress.done }} / {{ task.progress.total }} 位成员<br /></small
           ><small>{{ describe(task.result, task.errors) }}</small></template
         >

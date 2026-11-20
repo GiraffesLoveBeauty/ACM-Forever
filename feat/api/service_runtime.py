@@ -16,7 +16,7 @@ from .acm_api.binding_service import platform_spec
 from .acm_api.problem_sync import ProblemSync, sync_options
 from .acm_api.sync_service import SyncMixin
 from .acm_api.event_log import emit
-from .acm_api.sync_policy import SYNC_PAUSED, SyncFailure
+from .acm_api.sync_policy import SYNC_PAUSED, SyncFailure, luogu_retry_delay
 from .acm_api import problem_schedule
 
 
@@ -71,7 +71,22 @@ class SyncEngine(SyncMixin):
     @staticmethod
     def failure_detail(result):
         return {"code": result.code, "message": result.message,
+                "http_status": result.http_status, "cause_http_status": result.cause_http_status,
+                "deferred": result.deferred, "consecutive_failures": result.consecutive_failures,
+                "attention_required": result.attention_required,
                 "next_retry_at": int(time.time()) + result.retry_after if result.retry_after else 0}
+
+    @staticmethod
+    def sync_outcome(results, errors, *, many=False):
+        def states(values, details):
+            for key, value in values.items():
+                detail = details.get(key, {})
+                if isinstance(value, dict):
+                    yield from states(value, detail)
+                elif value is None or value < 0 and value != SYNC_PAUSED:
+                    yield "waiting" if detail.get("deferred") else "failed"
+        outcomes = set(states(results, errors))
+        return ("partial" if many else "failed") if "failed" in outcomes else "waiting" if outcomes else "completed"
 
     async def sync_account(self, qq_id, platforms, task, days=0, *, incremental=False):
         task["status"] = "running"
@@ -109,11 +124,7 @@ class SyncEngine(SyncMixin):
                         # the other platforms in this account sync task.
                         results[platform] = -3
             task["result"] = results
-            task["status"] = (
-                "completed"
-                if all(value is not None and (value >= 0 or value == SYNC_PAUSED) for value in results.values())
-                else "failed"
-            )
+            task["status"] = self.sync_outcome(results, task["errors"])
         except asyncio.CancelledError:
             task["status"] = "cancelled"
             raise
@@ -156,9 +167,7 @@ class SyncEngine(SyncMixin):
                             results[str(qq_id)][platform] = -3 if count is None else count
                     task["progress"]["done"] += 1
             task["result"] = results
-            failed = any(count < 0 and count != SYNC_PAUSED
-                         for platforms in results.values() for count in platforms.values())
-            task["status"] = "partial" if failed else "completed"
+            task["status"] = self.sync_outcome(results, task["errors"], many=True)
         except asyncio.CancelledError:
             task["status"] = "cancelled"
             raise
@@ -203,7 +212,9 @@ class WebTaskManager:
                             or any(failed(v) for v in value.values()))
                 return type(value) is int and value < 0 and value not in {-2, SYNC_PAUSED}
 
-            if status == "failed":
+            if status == "waiting":
+                level, message = "info", "同步正在等待重试，已有记录和训练进度保留"
+            elif status == "failed":
                 level, message = "error", "后台任务执行失败，请在同步任务页面查看结果"
             elif status in {"cancelled", "interrupted"}:
                 level, message = "warning", "后台任务已取消或中断"
@@ -448,9 +459,16 @@ class WebTaskManager:
         now = int(time.time()) if now is None else now
         if any(t.get("qq_id") == "*" and t.get("status") in {"queued", "running"} for t in self.tasks.values()):
             return 0
+        from .acm_api.luogu_client import cooldown_error, load_request_state, recovery_pending
         async with isolated_connection(self.sync_engine.db) as db:
+            await load_request_state(db)
+            if cooldown_error():
+                return 0
+            recovery = recovery_pending()
+            dispatch_limit = 1 if recovery else 20
             candidates = await db.execute("""
                 SELECT r.qq_id,r.account_epoch,u.luogu_id,u.luogu_binding_version,
+                  GROUP_CONCAT(DISTINCT r.id) AS recipient_ids,
                   s.last_status AS sync_status,COALESCE(s.last_attempt_at,0) AS last_attempt_at,
                   COALESCE(s.consecutive_failures,0) AS consecutive_failures,
                   MIN(COALESCE(json_extract(x.snapshot_json,'$.last_checked_at'),0)) AS priority,
@@ -473,16 +491,16 @@ class WebTaskManager:
                        =u.luogu_id||':'||u.luogu_binding_version
                     OR (x.binding_key IS NULL AND COALESCE(json_extract(r.bindings_json,'$.luogu.account'),'')=''
                         AND u.luogu_binding_version=COALESCE(json_extract(r.bindings_json,'$.luogu.version'),0)+1))
-                GROUP BY r.qq_id,r.account_epoch HAVING needed=1 ORDER BY priority,COALESCE(b.last_at,0),r.qq_id
-                """, (now, now, now))
+                GROUP BY r.qq_id,r.account_epoch HAVING needed=1 OR ?=1 ORDER BY priority,COALESCE(b.last_at,0),r.qq_id
+                """, (now, now, now, int(recovery)))
             candidates = [dict(r) for r in await candidates.fetchall()]
         submitted = 0
         for candidate in candidates:
             # Limit dispatched work, so busy/cooling accounts cannot consume the batch.
-            if submitted >= 20:
+            if submitted >= dispatch_limit:
                 break
-            if candidate["sync_status"] in {"failed", "error"}:
-                retry_delay = min(900, 60 * 2 ** min(4, max(0, candidate["consecutive_failures"] - 1)))
+            if candidate["consecutive_failures"]:
+                retry_delay = luogu_retry_delay(candidate["consecutive_failures"])
                 if candidate["last_attempt_at"] + retry_delay > now:
                     continue
             qq = candidate["qq_id"]
@@ -503,6 +521,21 @@ class WebTaskManager:
             if claimed:
                 task = await self.submit_account_sync(qq, ["luogu"], expected_epoch=candidate["account_epoch"])
                 submitted += bool(task)
+                if task:
+                    # 页面跟随最新的自动重试；限定本次候选、账号代际及绑定版本，避免旧任务串号。
+                    recipient_ids = [int(value) for value in candidate["recipient_ids"].split(",")]
+                    async with isolated_connection(self.sync_engine.db) as db:
+                        for offset in range(0, len(recipient_ids), 400):
+                            batch = recipient_ids[offset:offset + 400]
+                            placeholders = ",".join("?" for _ in batch)
+                            await db.execute("""UPDATE training_task_recipients SET refresh_task_id=?,refresh_at=?
+                                WHERE id IN (""" + placeholders + """) AND qq_id=? AND account_epoch=? AND closed=0
+                                  AND task_id IN (SELECT id FROM training_tasks WHERE state='published')
+                                  AND EXISTS (SELECT 1 FROM users WHERE qq_id=? AND account_state='active'
+                                      AND account_epoch=? AND luogu_id=? AND luogu_binding_version=?)""",
+                                [task["id"], now, *batch, qq, candidate["account_epoch"], qq,
+                                 candidate["account_epoch"], candidate["luogu_id"], candidate["luogu_binding_version"]])
+                        await db.commit()
         return submitted
 
     async def _training_task_sync_loop(self):

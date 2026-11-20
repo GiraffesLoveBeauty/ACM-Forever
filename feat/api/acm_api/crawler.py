@@ -18,7 +18,8 @@ import aiosqlite
 
 import logging
 from .cf_client import CFUnavailable, cf_request
-from .luogu_client import luogu_get, page_context
+from .luogu_client import (LuoguResponseError, luogu_get, page_context,
+                            response_failed, response_recovered)
 from .sync_policy import SYNC_PAUSED, submission_sync_paused
 
 LOG = logging.getLogger("acm_api.crawler")
@@ -75,7 +76,18 @@ async def _store_cf_attempts(db, qq_id, submissions, *, commit=True):
 
 async def _fetch_luogu_json(session, url, headers, timeout):
     """Optional timed challenge verification shares the public collector request gate."""
-    return json.loads(await luogu_get(session, url, headers=headers, timeout=timeout))
+    raw = await luogu_get(session, url, headers=headers, timeout=timeout,
+                          recover_on_response=False)
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError("洛谷记录响应不是 JSON 对象")
+        return data
+    except (TypeError, ValueError) as error:
+        if isinstance(error, LuoguResponseError):
+            raise
+        raise response_failed(LuoguResponseError(
+            f"洛谷记录响应 JSON 校验失败：{str(error)[:500]}", status=200)) from error
 
 
 luogu_difficulty_map = {
@@ -295,17 +307,17 @@ class Crawler:
             LOG.info("[同步模块] 洛谷用户过题记录同步已暂停，保留已有记录。")
             return SYNC_PAUSED
         from .luogu_user_sync import sync_public_practice
-        from .luogu_client import LuoguUnavailable
+        from .luogu_client import LuoguUnavailable, request_failure
         try:
             return await sync_public_practice(session, user_row, db, config)
         except (aiohttp.ClientError, asyncio.TimeoutError, LuoguUnavailable, ValueError) as error:
             from .sync_policy import SyncFailure
-            status = getattr(error, "status", None)
-            code = (f"luogu_http_{status}" if status else "luogu_cooldown" if isinstance(error, LuoguUnavailable)
-                    else "luogu_invalid_snapshot" if isinstance(error, ValueError) else "luogu_network_error")
-            message = str(error) or "洛谷请求超时，请稍后重试"
-            LOG.warning("[同步模块] 洛谷公开练习页同步失败，保留已有记录：%s", message)
-            return SyncFailure(message, code=code, retry_after=getattr(error, "retry_after", 0))
+            failure = request_failure(error)
+            LOG.warning("[同步模块] 洛谷公开练习页同步失败，保留已有记录：%s", failure)
+            # 保持旧调用方使用的 -1 结果，同时让任务接口拿到具体原因和实际 HTTP 状态。
+            return SyncFailure(str(failure), code=failure.code, retry_after=failure.retry_after,
+                               http_status=failure.status, cause_http_status=failure.cause_http_status,
+                               deferred=failure.deferred, attention_required=failure.attention_required)
 
     # ================= 牛客 Nowcoder =================
 
@@ -653,30 +665,55 @@ class Crawler:
             for page in range(1, 4):
                 url = f"https://www.luogu.com.cn/record/list?user={urllib.parse.quote(uid)}&page={page}&status=12&_contentOnly=1"
                 data = await _fetch_luogu_json(session, url, headers, 15)
-                records = data.get("currentData", {}).get("records", {}).get("result", [])
+                try:
+                    current_data = data.get("currentData")
+                    records_data = current_data.get("records") if isinstance(current_data, dict) else None
+                    records = records_data.get("result") if isinstance(records_data, dict) else None
+                    if not isinstance(records, list):
+                        raise ValueError("洛谷记录响应缺少完整的 result 列表")
+                except (AttributeError, TypeError, ValueError) as error:
+                    if isinstance(error, LuoguResponseError):
+                        raise
+                    raise response_failed(LuoguResponseError(
+                        f"洛谷记录响应结构校验失败：{str(error)[:500]}", status=200)) from error
                 if not records:
+                    response_recovered()
                     break
                 stop = False
-                for record in records:
-                    submitted_at = int(record.get("submitTime", 0) or 0)
-                    if submitted_at < since_timestamp:
-                        stop = True
-                        break
-                    problem = record.get("problem") or {}
-                    problem_id = str(problem.get("pid") or "")
-                    if not problem_id or problem_id in seen:
-                        continue
-                    seen.add(problem_id)
-                    result.append({
-                        "platform": "luogu",
-                        "problem_id": problem_id,
-                        "problem_name": problem.get("title") or problem_id,
-                        "problem_rating": luogu_difficulty_map.get(problem.get("difficulty", 0), "未知"),
-                        "problem_url": f"https://www.luogu.com.cn/problem/{problem_id}",
-                        "submit_time": submitted_at,
-                    })
-                    if len(result) >= limit:
-                        return result
+                page_result = []
+                try:
+                    for record in records:
+                        if not isinstance(record, dict):
+                            raise ValueError("洛谷记录响应包含格式异常的记录")
+                        submitted_at = int(record.get("submitTime", 0) or 0)
+                        if submitted_at < since_timestamp:
+                            stop = True
+                            break
+                        problem = record.get("problem") or {}
+                        if not isinstance(problem, dict):
+                            raise ValueError("洛谷记录响应包含格式异常的题目")
+                        problem_id = str(problem.get("pid") or "")
+                        if not problem_id or problem_id in seen:
+                            continue
+                        seen.add(problem_id)
+                        page_result.append({
+                            "platform": "luogu",
+                            "problem_id": problem_id,
+                            "problem_name": problem.get("title") or problem_id,
+                            "problem_rating": luogu_difficulty_map.get(problem.get("difficulty", 0), "未知"),
+                            "problem_url": f"https://www.luogu.com.cn/problem/{problem_id}",
+                            "submit_time": submitted_at,
+                        })
+                except (AttributeError, TypeError, ValueError) as error:
+                    if isinstance(error, LuoguResponseError):
+                        raise
+                    raise response_failed(LuoguResponseError(
+                        f"洛谷记录响应内容校验失败：{str(error)[:500]}", status=200)) from error
+                # 记录列表已完整遍历并通过结构校验后，才解除共享冷却。
+                response_recovered()
+                result.extend(page_result)
+                if len(result) >= limit:
+                    return result[:limit]
                 if stop:
                     break
                 await asyncio.sleep(0.2)

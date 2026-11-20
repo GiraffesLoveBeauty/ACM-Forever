@@ -212,7 +212,14 @@ Codeforces 周期判断含开始/截止两端，使用 OJ 实际提交时间，U
 
 刷新失败保留已知进度；无绑定、覆盖不足、暂停或失败分别显示待核验原因；重启丢失队列显示 interrupted。业务错误包含 code/message/request_id，常见 409 version_conflict/audience_changed/immutable_task、429 refresh_rate_limited（retry_after）、503 feature_disabled/sync_unavailable。完整字段、幂等、错误及生命周期契约见 [api.md（训练任务存储与发布契约）](training-tasks/api.md)，实测与发布回退见 [acceptance.md（训练任务联调与验收）](training-tasks/acceptance.md)。
 
-同步任务及个人训练详情中的 `refresh` 保持原 `result` 数值契约，额外返回可选 `errors`：单成员为 `{platform:{code,message,next_retry_at}}`，全员任务为 `{qq_id:{platform:{code,message,next_retry_at}}}`，详情按账号生命周期过滤。`next_retry_at` 为 Unix 秒，0 表示无上游指定等待时间；数值 `-1` 只能显示同步失败，不能显示成员不存在。洛谷解析、网络与上游限制保留具体错误，原有失败退避与持久化重试时间共同约束训练调度。
+同步任务及个人训练详情中的 `refresh` 保持原 `result` 数值契约，额外返回可选 `errors`。单成员为 `{platform:{code,message,http_status,cause_http_status,deferred,consecutive_failures,attention_required,next_retry_at}}`，全员任务为 `{qq_id:{platform:{code,message,http_status,cause_http_status,deferred,consecutive_failures,attention_required,next_retry_at}}}`，详情按账号生命周期过滤。
+
+- `http_status`：本次实际收到的洛谷上游 HTTP 状态码。连接失败、超时未收到响应或冷却跳过时为 `null`；收到 HTTP 200 后解析失败仍为 `200`，同时使用 `luogu_invalid_snapshot` 说明内容异常。
+- `cause_http_status`：仅用于冷却跳过，记录先前触发冷却的状态码，其余为 `null`。冷却期间没有发出新请求，不能把上次的 403/429 当成本次响应。
+- `code` / `message`：超时为 `luogu_timeout`，连接或传输失败为 `luogu_network_error`，HTTP 错误沿用 `luogu_http_<状态码>`；异常跳转只描述实际响应，不据此认定公开练习页需要登录。
+- `next_retry_at`：Unix 秒，0 表示没有等待。`deferred=true` 表示本次没有发送请求（全站冷却或成员退避），不会增加失败次数；`consecutive_failures` 只累计真实请求失败，连续 3 次起 `attention_required=true`。训练调度在冷却中暂停，冷却结束只派一个恢复探测；恢复成功后继续按成员退避调度。门禁状态复用 `settings.luogu_request_gate` 持久化，不新增表。
+
+以上为上游抓取结果，不改变异步任务提交接口的 202 或任务读取接口的 200。数值 `-1` 只能显示同步失败，不能显示成员不存在。
 
 Web 成员训练页和管理员进度页在可见且空闲时每 30 秒读取站内进度，返回页面时更新；主动刷新运行中仍每 3 秒查询状态。后台读取不会触发 OJ 请求，离开页面清理定时器。
 
@@ -437,7 +444,7 @@ print(task["status"], task["progress"], task["result"])
 
 `result.scope=platform` 表示全平台任务；`metadata_count` 是已导入目录题数，`batch_count/completed_batches` 是题面总批次 / 已完成批次。`progress.phase` 为 `catalog/metadata/statements`，目录阶段有 `metadata_done/metadata_total`，题面阶段有当前 `batch`。全平台的 `remaining_count` 表示本任务尚未尝试的题数，失败题数单独统计。任务错误列表最多显示前 100 条，超出时 `failure_details_truncated=true`；完整逐题错误保存在数据库对应行中。
 
-用户平台同步任务的 `result` 按平台返回新增记录数；`-5` 表示该平台同步已暂停，后台显示“已暂停，保留已有记录”。暂停属于跳过操作，不算抓取失败，也不会推进该平台的同步游标。洛谷默认匿名同步公开练习页中 P 开头的 AC 题号集合，其他题号跳过且不阻断 P 题同步，不依赖 Cookie；可用 `ACM_LUOGU_USER_SYNC_ENABLED=false` 显式暂停。管理员在成员资料 `luogu_id` 字段手填数字 UID，沿用绑定确认与版本参数，保存后排队同步对应平台。
+用户平台同步任务的 `result` 按平台返回新增记录数；`-5` 表示该平台同步已暂停，后台显示“已暂停，保留已有记录”。暂停属于跳过操作，不算抓取失败，也不会推进该平台的同步游标。洛谷默认匿名同步公开练习页中 P 开头的 AC 题号集合，其他题号跳过且不阻断 P 题同步，不依赖登录 Cookie；匿名会话 Cookie 只用于原站正常初始化；可用 `ACM_LUOGU_USER_SYNC_ENABLED=false` 显式暂停。管理员在成员资料 `luogu_id` 字段手填数字 UID，沿用绑定确认与版本参数，保存后排队同步对应平台。
 
 洛谷新 AC 若没有可靠时间，沿用非空数据库时间列中的 `submit_time=0` 表示未知，对应已 AC 题目 `ac_at=0`；记录仍属于已 AC，不得以时间真假判断是否通过。保留已有真实时间，不产生虚构的 `submission_attempts`。无时间记录计入累计过题数，排除日期排行榜和活跃天数，该记录本身不作训练任务按期完成证据；训练任务另外保存经绑定版本校验的快照差分或管理员审核，详见上文训练任务契约。洛谷的 `days` 参数不筛掉未知时间记录：每次读取公开已通过列表，仅幂等补入 P 题，保留已有非 P 历史记录；同步状态时间是采集时间。历史 `luogu_` 前缀和大小写别名在成员题库聚合、原生难度/标签筛选、题号搜索、详情与收藏中按同一 P 题识别，读取归一化不改写原始记录或 AC 时间。访问受限、解析异常或账号不符时返回失败，不推进成功游标、不删除原记录。配置与验收方式见 [README.md（洛谷公开 AC 记录同步）](../feat/api/README.md#洛谷公开-ac-记录同步)。
 
@@ -466,7 +473,7 @@ print(task["status"], task["progress"], task["result"])
 {"platform":"luogu","scope":"problems","problem_ids":["P1001","P1002"],"refresh":false}
 ```
 
-公开来源为 `/problem/list?type=P&page=N` 和 `/problem/P题号` 页内 `lentille-context`，字典为 `/_lfe/config` 的 `ProblemDifficulty` 及 `/_lfe/tags`。后端只请求固定 HTTPS 原站，不接受任意 URL，不带 Cookie。所有请求有响应大小限制、超时与共享节流；403/429 或登录跳转停止整批任务，`result.access_limited/retry_after/error` 提供原因和建议等待秒数，冷却后需重新发起。三次连续单题错误也停止任务。
+公开来源为 `/problem/list?type=P&page=N` 和 `/problem/P题号` 页内 `lentille-context`，字典为 `/_lfe/config` 的 `ProblemDifficulty` 及 `/_lfe/tags`。后端只请求固定 HTTPS 原站，不接受任意 URL，不带登录凭据；原站下发的普通匿名会话 Cookie 仅在当前会话内复用。所有请求有响应大小限制、超时与共享节流；403/429、异常跳转或连续网络/服务端失败会进入指数冷却，`result.access_limited/retry_after/error` 提供原因和建议等待秒数。HTTP 200 但内容无法解析也不会解除冷却；冷却结束后由训练调度只发送一个低频恢复探测，完整解析成功后才恢复其他账号。三次连续单题错误也停止任务。
 
 目录逐页、逐批提交；重复题号、不完整页、总数变化或配置页数上限会报告 `catalog_complete=false` 和 partial/failed，保留已写入目录。目录之外的旧题保留，不据此推断删除。指定题号首次失败时保存仅有题号/原站链接的占位目录及失败信息，未验证题目不会有题面。取消后重跑可继续补齐。
 
