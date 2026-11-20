@@ -9,6 +9,7 @@
 - `/api/me/problems/tracker`：0.2.24本地适配保留每题真实难度，并增加`tags: string[]`，供App直接展示算法标签；沿用既有来源、本人权限和筛选，不触发逐题抓取。旧客户端可忽略新增字段，旧服务器未返回标签时App如实提示。详见[题目优化说明](../../docs/android-v0.2.24-problem-reading.md)。
 
 - `/api/*`：移植的 WebUI API，包含登录与账号管理、成员信息、提交记录、训练与挑战、学习计划、统计分析、审核与复盘、排行榜等功能。Web 端使用 Cookie 会话和 CSRF 校验。
+- `/api/admin/sync/*`：管理员成员同步中心，查询五个平台的持久化同步状态，按成员或平台提交增量/历史同步，并展示洛谷全局请求门禁；手动全员同步默认由 Web 端提交增量参数。
 - `/api/forum/*`：公开话题列表与详情、分类、搜索、热门与待回答筛选；登录成员可以发帖、评论、回复、点赞、收藏和举报。新话题进入管理员审核队列，审核与举报处理都需要 Web 管理员权限。
 - `/api/community/leaderboard`：公开展示昵称、身份和各平台 AC 统计，不返回 QQ 号、真实姓名或学校字段。可选 `period=today` 按北京时间当日统计，`positive_only=1` 在分页前排除零 AC 成员；与移动端公开排名共享查询，默认保持原网页语义。响应包含实际 page/total/page_size 及周期确认字段，详见 API 指南。
 - `/api/mobile/v1/*`：Android App 专用能力查询、带稳定公开 ID 的排名与论坛、公开成员资料/帖子及本人座右铭编辑；复用现有数据库和 Web 会话权限，完整路径见 [api.md（API 调用指南）](../../docs/api.md#android-app-专用接口v1)。
@@ -246,6 +247,7 @@ Bot 服务接口包括：
 | `/admin.html?section=cf-practice&tab=check` | CF 候选查重；`tab=recent` 为近期刷题 |
 | `/admin.html?section=contests` | 比赛题目和逐题状态；可附 `qq_id/contest_id` |
 | `/admin.html?section=tasks` | 同步队列、执行结果、失败原因、取消和刷新 |
+| `/admin.html?section=sync-center` | 成员五平台同步状态、洛谷全局门禁、增量同步和按平台/成员筛选 |
 | `/admin.html?section=moderation&tab=reports` | 举报处理；`tab=posts` 为话题审核 |
 | `/admin.html?section=settings` | 外观、比赛播报、QQBot 管理员 |
 

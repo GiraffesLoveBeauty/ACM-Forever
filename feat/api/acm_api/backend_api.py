@@ -1050,6 +1050,15 @@ _SYNC_PLATFORMS = (
 )
 _SYNC_PLATFORM_ALIASES = {"cf": "codeforces", "codeforces": "codeforces", "luogu": "luogu", "nowcoder": "nowcoder", "atcoder": "atcoder", "cjlu": "cjlu"}
 _SYNC_STATUS_VALUES = {"never", "running", "waiting", "success", "failed", "cancelled", "paused", "unbound"}
+_SYNC_TASK_KINDS = {"账号全量同步", "全员平台同步", "全员定时同步"}
+
+
+async def _sync_request_data():
+    raw = await request.get_data(cache=True)
+    if not raw or not raw.strip():
+        return {}
+    data = await request.get_json(silent=True)
+    return data if isinstance(data, dict) else None
 
 
 def _normalize_sync_platforms(values, *, default=True):
@@ -1067,6 +1076,16 @@ def _normalize_sync_platforms(values, *, default=True):
         if normalized not in result:
             result.append(normalized)
     return result
+
+
+def _parse_sync_incremental(value, *, default=True):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    raise ValueError("incremental 必须是布尔值。")
 
 
 def _sync_time(value):
@@ -1140,19 +1159,29 @@ async def _load_luogu_gate(db):
 
 def _active_sync_tasks(tasks):
     active = {}
+    default_platforms = [item[0] for item in _SYNC_PLATFORMS]
     for task in tasks or []:
-        if task.get("status") not in {"queued", "running"}:
+        if task.get("kind") not in _SYNC_TASK_KINDS or task.get("status") not in {"queued", "running"}:
             continue
         qq_id = str(task.get("qq_id") or "")
-        platforms = str(task.get("platform") or "").split(",")
+        raw_platforms = str(task.get("platform") or "").strip()
+        if raw_platforms.lower() in {"", "all"}:
+            platforms = default_platforms
+        else:
+            platforms = []
+            for value in raw_platforms.split(","):
+                normalized = _SYNC_PLATFORM_ALIASES.get(value.strip().lower())
+                if normalized and normalized not in platforms:
+                    platforms.append(normalized)
+        if not platforms:
+            continue
         if qq_id and qq_id != "*":
             for platform in platforms:
-                normalized = _SYNC_PLATFORM_ALIASES.get(platform.strip().lower())
-                if normalized:
-                    active[(qq_id, normalized)] = task
+                active[(qq_id, platform)] = task
         elif qq_id == "*":
-            # 全员任务只需要把该任务标记为全局运行；具体成员会在表格中显示为同步中。
-            active[("*", "*")] = task
+            # 只把任务实际选择的平台标记为运行中，避免 CF-only 任务把洛谷等平台误报为同步中。
+            for platform in platforms:
+                active[("*", platform)] = task
     return active
 
 
@@ -1220,7 +1249,7 @@ async def api_admin_sync_members():
         for member in members:
             platforms = {}
             for platform, _label, field in _SYNC_PLATFORMS:
-                active_task = active_tasks.get((member["qq_id"], platform)) or active_tasks.get(("*", "*"))
+                active_task = active_tasks.get((member["qq_id"], platform)) or active_tasks.get(("*", platform))
                 paused = platform == "luogu" and crawler_config.get("luogu_user_sync_enabled", True) is not True
                 platforms[platform] = _sync_state_payload(member.get(field), states.get((member["qq_id"], platform)), platform, paused=paused, active_task=active_task)
             overall = _sync_overall_status(platforms)
@@ -1261,14 +1290,17 @@ async def _submit_sync_task(submitter, *args, **kwargs):
 async def api_admin_sync_member(qq_id):
     if not _valid_qq(qq_id):
         return jsonify({"success": False, "code": "invalid_qq", "message": "QQ 号必须为 4–12 位数字。"}), 400
-    data = await request.get_json(silent=True) or {}
+    data = await _sync_request_data()
+    if data is None:
+        return jsonify({"success": False, "code": "invalid_request", "message": "请求数据必须是 JSON 对象。"}), 400
     try:
         platforms = _normalize_sync_platforms(data.get("platforms"))
         days = max(0, min(3650, int(data.get("days", 0))))
+        incremental = _parse_sync_incremental(data.get("incremental"), default=False)
     except (TypeError, ValueError) as exc:
         return jsonify({"success": False, "code": "invalid_request", "message": str(exc)}), 400
     submitter = current_app.config.get("PLUGIN_CONFIG", {}).get("_account_sync_submitter")
-    task = await _submit_sync_task(submitter, str(qq_id), platforms, days=days)
+    task = await _submit_sync_task(submitter, str(qq_id), platforms, days=days, incremental=incremental)
     if not task:
         return jsonify({"success": False, "code": "sync_busy", "message": "同步任务未创建，可能已有全员同步或该成员任务正在运行。"}), 409
     return jsonify({"success": True, "task_id": task.get("id"), "message": "同步任务已排队。"}), 202
@@ -1277,14 +1309,17 @@ async def api_admin_sync_member(qq_id):
 @api.route("/admin/sync/all", methods=["POST"])
 @admin_required
 async def api_admin_sync_all():
-    data = await request.get_json(silent=True) or {}
+    data = await _sync_request_data()
+    if data is None:
+        return jsonify({"success": False, "code": "invalid_request", "message": "请求数据必须是 JSON 对象。"}), 400
     try:
         platforms = _normalize_sync_platforms(data.get("platforms"))
         days = max(0, min(3650, int(data.get("days", 0))))
+        incremental = _parse_sync_incremental(data.get("incremental"), default=True)
     except (TypeError, ValueError) as exc:
         return jsonify({"success": False, "code": "invalid_request", "message": str(exc)}), 400
     submitter = current_app.config.get("PLUGIN_CONFIG", {}).get("_all_account_sync_submitter")
-    task = await _submit_sync_task(submitter, days=days, platforms=platforms)
+    task = await _submit_sync_task(submitter, days=days, platforms=platforms, incremental=incremental)
     if not task:
         return jsonify({"success": False, "code": "sync_busy", "message": "已有全员或其他同步任务正在运行，请稍后再试。"}), 409
     return jsonify({"success": True, "task_id": task.get("id"), "message": "全员同步任务已排队。"}), 202

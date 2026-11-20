@@ -158,7 +158,7 @@ response.raise_for_status()
 
 ## 统一后台及保留的业务接口
 
-后台唯一入口为 `/admin.html`，通过 `section` 选择 `accounts`（默认）、`members`、`training`、`problems`、`cf-practice`、`contests`、`tasks`、`moderation`、`settings`。CF 使用 `tab=recent/check`，审核使用 `tab=posts/reports`，训练任务使用 `tab=edit/overview/progress` 与 `task_id/step/recipient_id`，成员详情使用 `qq_id`。浏览器刷新、前进后退和登录 / 强制改密均保留模块参数；原管理页地址由服务端转入对应模块，共用的训练 / 题库 / 赛事路径则按 Web 角色分别进入后台或成员前台。
+后台唯一入口为 `/admin.html`，通过 `section` 选择 `accounts`（默认）、`members`、`training`、`problems`、`cf-practice`、`contests`、`tasks`、`sync-center`、`moderation`、`settings`。CF 使用 `tab=recent/check`，审核使用 `tab=posts/reports`，训练任务使用 `tab=edit/overview/progress` 与 `task_id/step/recipient_id`，成员详情使用 `qq_id`。浏览器刷新、前进后退和登录 / 强制改密均保留模块参数；原管理页地址由服务端转入对应模块，共用的训练 / 题库 / 赛事路径则按 Web 角色分别进入后台或成员前台。
 
 | 方法与路径 | 权限 / 契约 |
 | --- | --- |
@@ -176,8 +176,13 @@ response.raise_for_status()
 | `PUT /api/contest/reviews`、`PUT /api/me/contest/reviews` | 正文 `contest_id/problem_id` 必填，管理接口另传 `owner_qq_id`；`status/verdict/rating` 至少一个，只更新提供的字段；省略字段及历史 `note_md` 原值保留 |
 | `/api/challenge/*`、`/api/me/challenge/*`、`/api/me/training/*` | 保留原训练推荐、挑战历史和统计；`/me/` 对 member / admin / root 均锁定会话本人，管理接口仅允许管理员与 Root |
 | `GET /api/tasks`、`POST /api/tasks/<id>/cancel` | admin/root；同步任务与原始结果，刷新 / 取消保留 |
+| `GET /api/admin/sync/members` | admin/root；分页返回 active 成员及五个平台的持久化同步状态；支持 `search/platform/status/school/member_status/page/page_size`，`platform` 支持 `cf` 别名，响应包含洛谷全局门禁与可用平台列表 |
+| `POST /api/admin/sync/members/<qq_id>` | admin/root；提交指定成员同步，正文必须是 JSON 对象，可传 `platforms`、`days`（0 为服务端策略）和 `incremental`；默认按请求值执行，任务已排队返回 202，重复或冲突返回 409 |
+| `POST /api/admin/sync/all` | admin/root；提交全员同步，正文必须是 JSON 对象，可传 `platforms`、`days` 和 `incremental`；管理后台默认传 `incremental=true`，仅按所选平台执行并返回 202；已有冲突任务返回 409 |
 
 赛事状态统一为 `todo/unsolved/queued/solved/reviewed/ignored`，其中 `reviewed` 可正常保存，`queued` 仅表示待补题状态，不创建复习或计划队列。`rating` 接受整数或 null。任何赛事 `note_md` 写请求均返回 410。所有写请求继续执行 CSRF 校验，模块路由不是权限边界。
+
+同步中心状态使用 `success/running/waiting/failed/paused/never/unbound/cancelled`。`running` 同时覆盖排队和执行中的任务；洛谷 `waiting` 表示共享门禁或该账号退避尚未到期，本次不会发送上游请求。`incremental=true` 对 Codeforces 使用已确认游标，对其他平台回看最近 7 天；没有完成过全量覆盖的账号会先执行必要的历史补齐。洛谷公开练习页只接受 `P` 开头的题号，响应异常、访问限制和请求冷却会保留已有记录，并在状态中返回下一次重试时间。全员任务按所选平台的同步状态排序，单个平台任务不会把其他平台标记为同步中。
 
 ## 管理员布置的训练任务
 

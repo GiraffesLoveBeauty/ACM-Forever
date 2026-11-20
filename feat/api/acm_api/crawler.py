@@ -693,8 +693,10 @@ class Crawler:
                         problem = record.get("problem") or {}
                         if not isinstance(problem, dict):
                             raise ValueError("洛谷记录响应包含格式异常的题目")
-                        problem_id = str(problem.get("pid") or "")
-                        if not problem_id or problem_id in seen:
+                        problem_id = str(problem.get("pid") or "").strip()
+                        # 洛谷 AC 记录可能包含镜像题或其他题型；成员记录和挑战
+                        # 结果统一只接受公开 P 开头题号，避免把非洛谷题写入题库。
+                        if not problem_id or not problem_id.upper().startswith("P") or problem_id in seen:
                             continue
                         seen.add(problem_id)
                         page_result.append({
