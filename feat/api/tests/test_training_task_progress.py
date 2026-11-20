@@ -82,6 +82,27 @@ class TrainingProgressTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await member.get(base)).status_code, 403)
         self.assertEqual((await member.get(base + '/' + str(members[0]['id']))).status_code, 403)
 
+    async def test_xcpc_view_keeps_fixed_score_columns_and_exposes_problem_cells(self):
+        task = await self.create()
+        await self.publish(task)
+        member = dict(id=1, task_id=task['id'], name='Member 1', qq_id='22345678', real_name=None,
+                      status_snapshot='训练组', completed_problems=1, problem_count=1,
+                      completion='on_time', pending=False, account_status='active', rank=1)
+        async def fake_problem_progress(db, recipient, *, now=None):
+            return [{'id': 1, 'problem_id': 'cf_1A', 'problem_name': 'A', 'platform': 'codeforces',
+                     'status': 'on_time', 'is_ac': True,
+                     'evidence': {'accepted_at': task['starts_at'] + 120}}]
+        base = f'/api/admin/training-tasks/{task["id"]}/progress'
+        with patch.object(progress, 'recipient_summaries', AsyncMock(return_value=[member])), \
+             patch.object(progress, 'summary', return_value={'recipient_count': 1}), \
+             patch.object(progress, 'problem_progress', side_effect=fake_problem_progress):
+            response = await self.client.get(base, query_string={'view': 'xcpc', 'order': 'completed'})
+        self.assertEqual(response.status_code, 200, await response.get_json())
+        board = (await response.get_json())['scoreboard']
+        self.assertEqual((board['columns'][0]['label'], board['rows'][0]['completed_problems']), ('A', 1))
+        self.assertEqual((board['rows'][0]['cells'][0]['state'], board['rows'][0]['penalty_minutes']), ('solved', 2))
+        self.assertIn('历史 AC 不计罚时', board['penalty_definition'])
+
     async def test_real_name_isolation_for_changed_closed_and_reused_accounts(self):
         await self.sql("UPDATE users SET real_name='合成旧姓名' WHERE qq_id='22345678'")
         task = await self.create()

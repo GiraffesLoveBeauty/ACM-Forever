@@ -323,3 +323,49 @@ async def problem_progress(db, recipient, *, now=None):
             row.pop(key, None)
     await tasks.attach_problem_state(db, records, recipient)
     return records
+
+
+async def xcpc_scoreboard(db, task, recipients, *, now=None):
+    """Build one batched presentation payload for the admin XCPC-style table.
+
+    The recipient list has already been filtered and ordered by the API handler. Cells
+    deliberately expose evidence state rather than inventing submission attempts when
+    a platform does not provide them. Penalty is the elapsed minute from the task start
+    for accepted evidence after the start; historical AC contributes zero penalty.
+    """
+    now = int(time.time()) if now is None else now
+    columns = []
+    for problem in task.get("problems", []):
+        columns.append({"key": str(problem.get("id", problem.get("problem_id", ""))),
+                        "label": chr(65 + len(columns)) if len(columns) < 26 else str(len(columns) + 1),
+                        "problem_id": problem.get("problem_id", ""),
+                        "problem_name": problem.get("problem_name", ""),
+                        "platform": problem.get("platform", "")})
+    rows = []
+    starts = int(task.get("starts_at") or 0)
+    for recipient in recipients:
+        details = await problem_progress(db, recipient, now=now)
+        by_key = {str(item.get("id", item.get("problem_id", ""))): item for item in details}
+        cells = []
+        penalty = 0
+        solved = 0
+        for column in columns:
+            item = by_key.get(column["key"], {})
+            status = item.get("status", "pending")
+            evidence = item.get("evidence") if isinstance(item.get("evidence"), dict) else None
+            accepted = int(evidence.get("accepted_at", 0)) if evidence else 0
+            is_ac = bool(item.get("is_ac"))
+            if is_ac:
+                solved += 1
+                if accepted and starts and accepted >= starts:
+                    penalty += max(0, (accepted - starts) // 60)
+                cells.append({"state": "solved", "label": "+1", "accepted_at": accepted})
+            elif status in {"pending", "timing_unknown", "unverified"}:
+                cells.append({"state": "pending", "label": "?"})
+            else:
+                cells.append({"state": "empty", "label": "—"})
+        rows.append({"id": recipient.get("id"), "rank": recipient.get("rank"),
+                     "name": recipient.get("name", ""), "real_name": recipient.get("real_name"),
+                     "completed_problems": solved, "problem_count": len(columns),
+                     "penalty_minutes": penalty, "cells": cells})
+    return {"columns": columns, "rows": rows, "penalty_definition": "按时段内首次已核验 AC 的分钟数；历史 AC 不计罚时，未知尝试显示为状态，不伪造次数。"}
