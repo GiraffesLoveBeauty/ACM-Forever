@@ -1,8 +1,39 @@
 """Read catalog tags consistently from legacy text and crawler JSON arrays."""
 
 import json
+from pathlib import Path
 
 from .training_logic import split_tags
+
+_CODEFORCES_TAG_NAMES = json.loads(
+    Path(__file__).with_name("codeforces-tags.zh.json").read_text(encoding="utf-8")
+)
+
+
+def codeforces_tag_search_keys(keyword):
+    """Find source tags whose displayed name contains the search keyword."""
+    needle = keyword.casefold()
+    return tuple(key for key, name in _CODEFORCES_TAG_NAMES.items() if needle and needle in name.casefold())
+
+
+def selected_problem_tag_keys(args, platform):
+    """Read Codeforces intersections and keep legacy exact single-tag links."""
+    multiple = args.get("problem_tags", "").strip()
+    if multiple:
+        if platform != "codeforces":
+            raise ValueError("多标签筛选须指定 platform=codeforces。")
+        values = [value.strip() for value in multiple.split(",")]
+        if not all(values):
+            raise ValueError("题目标签不能为空。")
+    else:
+        single = args.get("problem_tag", "").strip()
+        values = [single] if single else []
+    if any(len(value) > 100 for value in values):
+        raise ValueError("题目标签最多 100 个字符。")
+    keys = tuple(dict.fromkeys(value.casefold() for value in values))
+    if len(keys) > 20:
+        raise ValueError("最多选择 20 个题目标签。")
+    return keys
 
 
 def problem_tags(value):

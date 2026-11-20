@@ -25,6 +25,14 @@ const query = (url) => new URL(url, 'https://acm.test').searchParams;
 const lists = () => calls.filter((call) => !/\/(?:tags|taxonomy)\?/.test(call.url));
 const button = (name) =>
   find(mounted.root, (node) => node.type === 'button' && textOf(node).trim() === name)[0];
+async function openTags() {
+  const [trigger] = find(
+    mounted.root,
+    (node) => node.type === 'button' && node.props['aria-haspopup'] === 'dialog',
+  );
+  await trigger.props.onClick();
+  await settle();
+}
 const control = (name, kind = 'select') =>
   find(
     mounted.root,
@@ -183,7 +191,8 @@ test('slow or failed tag choices do not block queries, and late old tags stay di
   holdTags = true;
   await open();
   const oldTags = calls.find((call) => call.url.startsWith('/api/me/problems/tags?'));
-  assert(control('标签').props.disabled);
+  await openTags();
+  assert.match(textOf(mounted.root), /正在加载 Codeforces 标签/);
   assert(!button('查询').props.disabled);
   await platform('atcoder');
   assert(oldTags.options.signal.aborted);
@@ -399,6 +408,7 @@ test('tag options are reused while versions match and refreshed after a data cha
   assert.equal(tagCalls().length, 2);
   tagCalls()[1].resolve({ tags: ['new tag'], tags_version: '2:0' });
   await settle();
+  await openTags();
   assert(textOf(mounted.root).includes('new tag'));
 });
 
@@ -413,6 +423,7 @@ test('a late outdated tag response refreshes against the latest list version', a
   assert.equal(tagCalls().length, 2);
   tagCalls()[1].resolve({ tags: ['latest'], tags_version: '2:0' });
   await settle();
+  await openTags();
   assert(textOf(mounted.root).includes('latest'));
   assert.equal(tagCalls().length, 2);
 });

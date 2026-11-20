@@ -62,7 +62,9 @@ export function searchLuoguTags(categories, query) {
           items:
             matches(category.name) || matches(group.name)
               ? group.items
-              : group.items.filter((tag) => matches(tag.name) || matches(tag.id)),
+              : group.items.filter(
+                  (tag) => matches(tag.name) || matches(tag.id) || matches(tag.searchText || ''),
+                ),
         }))
         .filter((group) => group.items.length),
     }))

@@ -12,7 +12,7 @@ import time
 
 from .problem_time import time_options
 from .problem_tracker import problem_id_aliases, problem_id_key
-from .problem_tags import problem_tags
+from .problem_tags import codeforces_tag_search_keys, problem_tags, selected_problem_tag_keys
 
 
 _SCHEMA = (
@@ -259,6 +259,16 @@ class ListingConnection(sqlite3.Connection):
             raise
 
 
+def _tag_candidates(owner, keys):
+    marks = ",".join("?" for _ in keys)
+    # Public tags and the member fallback are mutually exclusive per problem.
+    query = f"""SELECT platform,id_key FROM problem_listing_tags WHERE tag_key IN ({marks})
+        UNION ALL SELECT t.platform,t.id_key FROM member_problem_tags t
+        JOIN problem_listing c ON c.platform=t.platform AND c.id_key=t.id_key
+        WHERE t.owner=? AND t.tag_key IN ({marks}) AND c.tags=''"""
+    return query, [*keys, owner, *keys]
+
+
 async def indexed_query(db, owner, args):
     """Build one filter shared by count/page; enrich personal data after paging."""
     platform = args.get("platform", "")
@@ -284,20 +294,23 @@ async def indexed_query(db, owner, args):
         params.append(platform)
     tag = str(args.get("tag", "")).strip()[:100]
     if tag:
-        conditions.append("(p.problem_name LIKE ? OR p.problem_id LIKE ? OR p.id_key LIKE ? OR p.tags LIKE ? OR "
-                          "(p.platform='codeforces' AND p.id_key=?) OR (p.platform='luogu' AND p.id_key=?) OR "
-                          "(p.tags='' AND EXISTS(SELECT 1 FROM member_problem_index s WHERE s.owner=? "
-                          "AND s.platform=p.platform AND s.id_key=p.id_key AND s.own_tags LIKE ?)))")
+        search_condition = ("p.problem_name LIKE ? OR p.problem_id LIKE ? OR p.id_key LIKE ? OR p.tags LIKE ? OR "
+                            "(p.platform='codeforces' AND p.id_key=?) OR (p.platform='luogu' AND p.id_key=?) OR "
+                            "(p.tags='' AND EXISTS(SELECT 1 FROM member_problem_index s WHERE s.owner=? "
+                            "AND s.platform=p.platform AND s.id_key=p.id_key AND s.own_tags LIKE ?))")
         params.extend([f"%{tag}%"] * 4 + [problem_id_key("codeforces", tag), problem_id_key("luogu", tag), owner, f"%{tag}%"])
-    selected = str(args.get("problem_tag", "")).strip()
-    if len(selected) > 100:
-        raise ValueError("题目标签最多 100 个字符。")
+        translated = codeforces_tag_search_keys(tag) if platform in ("", "codeforces") else ()
+        if translated:
+            candidates, tag_params = _tag_candidates(owner, translated)
+            search_condition += " OR (p.platform='codeforces' AND (p.platform,p.id_key) IN (" + candidates + "))"
+            params.extend(tag_params)
+        conditions.append("(" + search_condition + ")")
+    selected = selected_problem_tag_keys(args, platform)
     if selected:
-        candidates = """SELECT platform,id_key FROM problem_listing_tags WHERE tag_key=?
-            UNION SELECT t.platform,t.id_key FROM member_problem_tags t
-            JOIN problem_listing c ON c.platform=t.platform AND c.id_key=t.id_key
-            WHERE t.owner=? AND t.tag_key=? AND c.tags=''"""
-        tag_params = [selected.casefold(), owner, selected.casefold()]
+        candidates, tag_params = _tag_candidates(owner, selected)
+        if len(selected) > 1:
+            candidates = "SELECT platform,id_key FROM (" + candidates + ") GROUP BY platform,id_key HAVING COUNT(*)=?"
+            tag_params.append(len(selected))
         if scope == "all" and state != "favorite":
             # Selective tags start at their indexed references, not the entire OJ.
             source = "(" + candidates + ") selected CROSS JOIN problem_listing p ON p.platform=selected.platform AND p.id_key=selected.id_key"

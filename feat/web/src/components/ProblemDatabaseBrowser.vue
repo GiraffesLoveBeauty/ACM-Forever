@@ -327,7 +327,7 @@ onMounted(() => {
               </td>
               <td class="problem-database-tags">
                 <LuoguBadges v-if="row.platform === 'luogu'" :problem="row" :difficulty="false" />
-                <ProblemTags v-else :tags="row.tags" />
+                <ProblemTags v-else :tags="row.tags" :platform="row.platform" />
                 <small>{{
                   row.platform === 'luogu'
                     ? '洛谷原生标签 · 随源站同步'

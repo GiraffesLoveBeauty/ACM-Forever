@@ -1,7 +1,11 @@
 <script setup>
 import { computed } from 'vue';
 import { localTime, timeValue } from '../lib/problem-filters.js';
-const props = defineProps({ filters: { type: Object, required: true }, collection: Boolean });
+const props = defineProps({
+  filters: { type: Object, required: true },
+  collection: Boolean,
+  difficultyOnly: Boolean,
+});
 const emit = defineEmits(['change']);
 const numeric = computed(
   () => !props.collection && ['codeforces', 'atcoder'].includes(props.filters.platform),
@@ -41,42 +45,44 @@ function setTime(key, value) {
           placeholder="不限"
       /></label>
     </template>
-    <label
-      ><span>时间依据</span
-      ><select
-        :value="basis"
-        @change="
-          emit(
-            'change',
-            $event.target.value === 'unknown'
-              ? { time_basis: 'unknown', start_at: '', end_at: '' }
-              : { time_basis: $event.target.value },
-          )
-        "
+    <template v-if="!difficultyOnly">
+      <label
+        ><span>时间依据</span
+        ><select
+          :value="basis"
+          @change="
+            emit(
+              'change',
+              $event.target.value === 'unknown'
+                ? { time_basis: 'unknown', start_at: '', end_at: '' }
+                : { time_basis: $event.target.value },
+            )
+          "
+        >
+          <option v-if="!collection" value="auto">题目时间（比赛 / 首次收录）</option>
+          <option v-if="filters.platform !== 'luogu'" value="contest">比赛时间</option>
+          <option value="first_seen">本站首次收录时间</option>
+          <option v-if="!collection" value="unknown">原站发布时间未知</option>
+        </select></label
       >
-        <option v-if="!collection" value="auto">题目时间（比赛 / 首次收录）</option>
-        <option v-if="filters.platform !== 'luogu'" value="contest">比赛时间</option>
-        <option value="first_seen">本站首次收录时间</option>
-        <option v-if="!collection" value="unknown">原站发布时间未知</option>
-      </select></label
-    >
-    <label
-      ><span>开始时间（北京时间）</span
-      ><input
-        type="datetime-local"
-        :disabled="basis === 'unknown'"
-        :value="localTime(filters.start_at)"
-        @change="setTime('start_at', $event.target.value)"
-    /></label>
-    <label
-      ><span>结束时间（不含，北京时间）</span
-      ><input
-        type="datetime-local"
-        :disabled="basis === 'unknown'"
-        :value="localTime(filters.end_at)"
-        @change="setTime('end_at', $event.target.value)"
-    /></label>
-    <p v-if="filters.platform === 'luogu'">
+      <label
+        ><span>开始时间（北京时间）</span
+        ><input
+          type="datetime-local"
+          :disabled="basis === 'unknown'"
+          :value="localTime(filters.start_at)"
+          @change="setTime('start_at', $event.target.value)"
+      /></label>
+      <label
+        ><span>结束时间（不含，北京时间）</span
+        ><input
+          type="datetime-local"
+          :disabled="basis === 'unknown'"
+          :value="localTime(filters.end_at)"
+          @change="setTime('end_at', $event.target.value)"
+      /></label>
+    </template>
+    <p v-if="!difficultyOnly && filters.platform === 'luogu'">
       洛谷仅公开 P 题；缺少可靠发布时间，按本站首次收录时间筛选。首次建库请选择全部。
     </p>
     <p v-else-if="filters.platform === 'atcoder'">
