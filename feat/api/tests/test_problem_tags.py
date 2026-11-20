@@ -297,6 +297,11 @@ class MemberProblemTagTests(unittest.IsolatedAsyncioTestCase):
                      "problem_index": "A", "problem_name": f"Problem {contest}",
                      "problem_url": f"https://codeforces.com/contest/{contest}/problem/A", "tags": tags}
                     for contest, tags in (("500", []), ("501", ["math"]), ("502", []), ("503", []))])
+                # Exercise distinct first-seen seconds, which can change the listing order.
+                await db.executemany(
+                    "UPDATE crawler_problems SET created_at=? WHERE platform='codeforces' AND problem_id=?",
+                    [("2020-01-01 00:00:00", "cf_500A"), ("2020-01-01 00:00:01", "cf_501A")],
+                )
                 await db.executemany("UPDATE recommendations SET tags=? WHERE problem_id=?",
                                      [("", "cf_500A"), ("stale", "cf_501A"),
                                       ("greedy", "cf_502A"), ("", "cf_503A")])
@@ -314,12 +319,12 @@ class MemberProblemTagTests(unittest.IsolatedAsyncioTestCase):
                                        ("stale", []), ("dp", []), ("other-only", [])):
                 query = "?platform=codeforces&" + urlencode({"problem_tag": selected})
                 listing = await (await client.get("/api/me/problems" + query)).get_json()
-                self.assertEqual([item["problem_id"] for item in listing["items"]], expected)
+                self.assertCountEqual([item["problem_id"] for item in listing["items"]], expected)
                 for item in listing["items"]:
                     self.assertIn(selected, problem_tags(item["tags"]))
                 tracker = await (await client.get("/api/me/problems/tracker" + query)).get_json()
-                self.assertEqual(sorted(p["problem_id"] for contest in tracker["items"]
-                                        for p in contest["problems"]), expected)
+                self.assertCountEqual([p["problem_id"] for contest in tracker["items"]
+                                       for p in contest["problems"]], expected)
 
     async def test_codeforces_aliases_share_tags_and_member_state_across_views(self):
         async with self.app.test_app():
