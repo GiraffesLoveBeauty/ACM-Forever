@@ -144,12 +144,13 @@ class SyncEngine(SyncMixin):
             async with self._sync_cycle_lock:
                 members = task.get("_account_snapshots", [])
                 task["progress"] = {"done": 0, "total": len(members)}
+                platforms = task.get("_platforms") or ("codeforces", "luogu", "nowcoder", "atcoder", "cjlu")
                 for user in members:
                     qq_id = user["qq_id"]
                     results[str(qq_id)] = {}
-                    for platform in ("codeforces", "luogu", "nowcoder", "atcoder", "cjlu"):
+                    for platform in platforms:
                         snapshot = self.binding_snapshot(user, [platform])[platform]
-                        if incremental and not snapshot["account"].strip():
+                        if not snapshot["account"].strip():
                             continue
                         try:
                             count = await self.sync_single_platform_for_days(
@@ -366,11 +367,24 @@ class WebTaskManager:
         )
         return {"id": task_id}
 
-    async def submit_all_accounts_sync(self, days=0, *, incremental=False, scheduled=False, interval_seconds=3600):
+    async def submit_all_accounts_sync(self, days=0, *, incremental=False, scheduled=False, interval_seconds=3600, platforms=None):
         if self._claiming_all_accounts_sync or self._claiming_daily_problem_sync or any(
             item.get("status") in {"queued", "running"}
             for item in self.tasks.values()
         ):
+            return None
+        allowed = ("codeforces", "luogu", "nowcoder", "atcoder", "cjlu")
+        if platforms is None:
+            normalized_platforms = list(allowed)
+        else:
+            if isinstance(platforms, str):
+                platforms = platforms.replace("，", ",").split(",")
+            normalized_platforms = []
+            for platform in platforms or ():
+                value = "codeforces" if str(platform).strip().lower() in {"cf", "codeforces"} else str(platform).strip().lower()
+                if value in allowed and value not in normalized_platforms:
+                    normalized_platforms.append(value)
+        if not normalized_platforms:
             return None
         try:
             days = max(0, min(3650, int(days)))
@@ -414,7 +428,8 @@ class WebTaskManager:
             "qq_id": "*",
             "_account_snapshots": members,
             "_account_epochs": {user["qq_id"]: user["account_epoch"] for user in members},
-            "platform": "all",
+            "platform": ",".join(normalized_platforms),
+            "_platforms": normalized_platforms,
             "days": days,
             "scheduled": scheduled,
             "status": "queued",

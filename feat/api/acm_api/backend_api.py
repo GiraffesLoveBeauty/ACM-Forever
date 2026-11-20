@@ -1041,6 +1041,255 @@ async def api_cancel_task(task_id):
     return jsonify({"success": ok, "message": "任务已取消。" if ok else "任务不存在或已结束。"}), (200 if ok else 404)
 
 
+_SYNC_PLATFORMS = (
+    ("codeforces", "Codeforces", "cf_handle"),
+    ("luogu", "洛谷", "luogu_id"),
+    ("nowcoder", "牛客", "nowcoder_id"),
+    ("atcoder", "AtCoder", "atcoder_handle"),
+    ("cjlu", "校 OJ", "cjlu_username"),
+)
+_SYNC_PLATFORM_ALIASES = {"cf": "codeforces", "codeforces": "codeforces", "luogu": "luogu", "nowcoder": "nowcoder", "atcoder": "atcoder", "cjlu": "cjlu"}
+_SYNC_STATUS_VALUES = {"never", "running", "waiting", "success", "failed", "cancelled", "paused", "unbound"}
+
+
+def _normalize_sync_platforms(values, *, default=True):
+    if values is None:
+        return [item[0] for item in _SYNC_PLATFORMS] if default else []
+    if isinstance(values, str):
+        values = values.replace("，", ",").split(",")
+    if not isinstance(values, (list, tuple, set)):
+        raise ValueError("platforms 必须是平台名称列表。")
+    result = []
+    for value in values:
+        normalized = _SYNC_PLATFORM_ALIASES.get(str(value).strip().lower())
+        if not normalized:
+            raise ValueError(f"不支持的平台：{value}")
+        if normalized not in result:
+            result.append(normalized)
+    return result
+
+
+def _sync_time(value):
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _sync_state_payload(account, state, platform, *, paused=False, active_task=None):
+    state = dict(state or {})
+    if not str(account or "").strip():
+        status = "unbound"
+    elif paused:
+        status = "paused"
+    elif active_task:
+        status = "running"
+    else:
+        status = str(state.get("last_status") or "never")
+        if status not in _SYNC_STATUS_VALUES:
+            status = "failed"
+        if _sync_time(state.get("next_retry_at")) > int(time.time()) and status in {"failed", "never"}:
+            status = "waiting"
+    return {
+        "platform": platform,
+        "account": str(account or ""),
+        "bound": bool(str(account or "").strip()),
+        "status": status,
+        "last_attempt_at": _sync_time(state.get("last_attempt_at")),
+        "last_success_at": _sync_time(state.get("last_success_at")),
+        "next_retry_at": _sync_time(state.get("next_retry_at")),
+        "consecutive_failures": int(state.get("consecutive_failures") or 0),
+        "last_error_code": state.get("last_error_code") or "",
+        "last_error_message": state.get("last_error_message") or "",
+        "cursor_timestamp": _sync_time(state.get("cursor_timestamp")),
+        "full_history_at": _sync_time(state.get("full_history_at")),
+        "coverage_through_at": _sync_time(state.get("coverage_through_at")),
+        "task_id": active_task.get("id") if active_task else None,
+        "task_status": active_task.get("status") if active_task else None,
+    }
+
+
+def _sync_overall_status(platforms):
+    statuses = {item["status"] for item in platforms.values() if item["bound"]}
+    if not statuses:
+        return "unbound"
+    for status in ("failed", "waiting", "running", "paused", "never", "cancelled"):
+        if status in statuses:
+            return status
+    return "success"
+
+
+async def _load_luogu_gate(db):
+    async with db.execute("SELECT value FROM settings WHERE key='luogu_request_gate'") as cursor:
+        row = await cursor.fetchone()
+    if not row:
+        return {"blocked_until": 0, "failures": 0, "cause_http_status": None, "cooldown_seconds": 0}
+    try:
+        gate = json.loads(row[0])
+    except (TypeError, ValueError):
+        gate = {}
+    blocked_until = float(gate.get("blocked_until") or 0)
+    now = time.time()
+    return {
+        "blocked_until": int(blocked_until) if blocked_until > 0 else 0,
+        "failures": int(gate.get("failures") or 0),
+        "cause_http_status": gate.get("cause_http_status") if isinstance(gate.get("cause_http_status"), int) else None,
+        "cooldown_seconds": max(0, int(blocked_until - now)),
+    }
+
+
+def _active_sync_tasks(tasks):
+    active = {}
+    for task in tasks or []:
+        if task.get("status") not in {"queued", "running"}:
+            continue
+        qq_id = str(task.get("qq_id") or "")
+        platforms = str(task.get("platform") or "").split(",")
+        if qq_id and qq_id != "*":
+            for platform in platforms:
+                normalized = _SYNC_PLATFORM_ALIASES.get(platform.strip().lower())
+                if normalized:
+                    active[(qq_id, normalized)] = task
+        elif qq_id == "*":
+            # 全员任务只需要把该任务标记为全局运行；具体成员会在表格中显示为同步中。
+            active[("*", "*")] = task
+    return active
+
+
+@api.route("/admin/sync/members", methods=["GET"])
+@admin_required
+async def api_admin_sync_members():
+    """返回成员与各 OJ 的持久化同步状态，供管理后台同步中心使用。"""
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+        page_size = max(1, min(100, int(request.args.get("page_size", 20))))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "code": "invalid_pagination", "message": "分页参数必须为整数。"}), 400
+    search = str(request.args.get("search", "")).strip()
+    platform_filter = str(request.args.get("platform", "")).strip().lower()
+    status_filter = str(request.args.get("status", "")).strip().lower()
+    school = str(request.args.get("school", "")).strip()
+    member_status = str(request.args.get("member_status", "")).strip()
+    if len(search) > 100 or len(school) > 128 or len(member_status) > 64:
+        return jsonify({"success": False, "code": "invalid_filter", "message": "筛选值过长。"}), 400
+    if platform_filter:
+        platform_filter = _SYNC_PLATFORM_ALIASES.get(platform_filter, "")
+        if not platform_filter:
+            return jsonify({"success": False, "code": "invalid_platform", "message": "不支持的平台。"}), 400
+    if status_filter and status_filter not in _SYNC_STATUS_VALUES:
+        return jsonify({"success": False, "code": "invalid_status", "message": "不支持的同步状态。"}), 400
+    db = await get_db()
+    try:
+        filters, values = ["u.account_state='active'"], []
+        if search:
+            fields = ("u.qq_id", "u.name", "u.real_name", "u.school", "u.status", "u.cf_handle", "u.luogu_id", "u.nowcoder_id", "u.atcoder_handle", "u.cjlu_username")
+            filters.append("(" + " OR ".join(f"LOWER(COALESCE({field},'')) LIKE ?" for field in fields) + ")")
+            values.extend([f"%{search.lower()}%"] * len(fields))
+        if school:
+            filters.append("TRIM(COALESCE(u.school,''))=?")
+            values.append(school)
+        if member_status:
+            filters.append("TRIM(COALESCE(u.status,''))=?")
+            values.append(member_status)
+        where = " WHERE " + " AND ".join(filters)
+        async with db.execute(
+            "SELECT u.qq_id,u.name,u.real_name,u.school,u.status,u.avatar_url,u.cf_handle,u.luogu_id,u.nowcoder_id,u.atcoder_handle,u.cjlu_username "
+            "FROM users u" + where + " ORDER BY u.name COLLATE NOCASE,u.qq_id",
+            values,
+        ) as cursor:
+            members = [dict(row) for row in await cursor.fetchall()]
+        total = len(members)
+        qq_ids = [member["qq_id"] for member in members]
+        states = {}
+        if qq_ids:
+            placeholders = ",".join("?" for _ in qq_ids)
+            async with db.execute(
+                f"SELECT * FROM user_platform_sync_state WHERE user_qq_id IN ({placeholders})",
+                qq_ids,
+            ) as cursor:
+                states = {(row["user_qq_id"], row["platform"]): dict(row) for row in await cursor.fetchall()}
+        gate = await _load_luogu_gate(db)
+        config = getattr(current_app, "sync_engine", None)
+        crawler_config = config._crawler_config() if config else {}
+        tasks_provider = current_app.config.get("PLUGIN_CONFIG", {}).get("_task_provider")
+        tasks = tasks_provider() if callable(tasks_provider) else []
+        if inspect.isawaitable(tasks):
+            tasks = await tasks
+        active_tasks = _active_sync_tasks(tasks)
+        items = []
+        for member in members:
+            platforms = {}
+            for platform, _label, field in _SYNC_PLATFORMS:
+                active_task = active_tasks.get((member["qq_id"], platform)) or active_tasks.get(("*", "*"))
+                paused = platform == "luogu" and crawler_config.get("luogu_user_sync_enabled", True) is not True
+                platforms[platform] = _sync_state_payload(member.get(field), states.get((member["qq_id"], platform)), platform, paused=paused, active_task=active_task)
+            overall = _sync_overall_status(platforms)
+            if platform_filter and platform_filter not in platforms:
+                continue
+            if status_filter and (platforms[platform_filter]["status"] if platform_filter else overall) != status_filter:
+                continue
+            items.append({
+                "qq_id": member["qq_id"], "name": member.get("name") or "未命名", "real_name": member.get("real_name") or "",
+                "school": member.get("school") or "", "member_status": member.get("status") or "", "avatar_url": member.get("avatar_url") or "",
+                "sync_status": overall, "platforms": platforms,
+            })
+        summary = {status: 0 for status in ("success", "running", "waiting", "failed", "paused", "never", "unbound", "cancelled")}
+        for member in items:
+            summary[member["sync_status"]] = summary.get(member["sync_status"], 0) + 1
+        total = len(items)
+        page = min(page, max(1, (total + page_size - 1) // page_size))
+        start = (page - 1) * page_size
+        items = items[start:start + page_size]
+        return jsonify({
+            "generated_at": int(time.time()), "items": items, "total": total, "page": page, "page_size": page_size,
+            "summary": summary, "platforms": [{"key": key, "label": label} for key, label, _ in _SYNC_PLATFORMS],
+            "global": {"luogu": {**gate, "enabled": crawler_config.get("luogu_user_sync_enabled", True) is True}},
+        })
+    finally:
+        await db.close()
+
+
+async def _submit_sync_task(submitter, *args, **kwargs):
+    if not callable(submitter):
+        return None
+    result = submitter(*args, **kwargs)
+    return await result if inspect.isawaitable(result) else result
+
+
+@api.route("/admin/sync/members/<qq_id>", methods=["POST"])
+@admin_required
+async def api_admin_sync_member(qq_id):
+    if not _valid_qq(qq_id):
+        return jsonify({"success": False, "code": "invalid_qq", "message": "QQ 号必须为 4–12 位数字。"}), 400
+    data = await request.get_json(silent=True) or {}
+    try:
+        platforms = _normalize_sync_platforms(data.get("platforms"))
+        days = max(0, min(3650, int(data.get("days", 0))))
+    except (TypeError, ValueError) as exc:
+        return jsonify({"success": False, "code": "invalid_request", "message": str(exc)}), 400
+    submitter = current_app.config.get("PLUGIN_CONFIG", {}).get("_account_sync_submitter")
+    task = await _submit_sync_task(submitter, str(qq_id), platforms, days=days)
+    if not task:
+        return jsonify({"success": False, "code": "sync_busy", "message": "同步任务未创建，可能已有全员同步或该成员任务正在运行。"}), 409
+    return jsonify({"success": True, "task_id": task.get("id"), "message": "同步任务已排队。"}), 202
+
+
+@api.route("/admin/sync/all", methods=["POST"])
+@admin_required
+async def api_admin_sync_all():
+    data = await request.get_json(silent=True) or {}
+    try:
+        platforms = _normalize_sync_platforms(data.get("platforms"))
+        days = max(0, min(3650, int(data.get("days", 0))))
+    except (TypeError, ValueError) as exc:
+        return jsonify({"success": False, "code": "invalid_request", "message": str(exc)}), 400
+    submitter = current_app.config.get("PLUGIN_CONFIG", {}).get("_all_account_sync_submitter")
+    task = await _submit_sync_task(submitter, days=days, platforms=platforms)
+    if not task:
+        return jsonify({"success": False, "code": "sync_busy", "message": "已有全员或其他同步任务正在运行，请稍后再试。"}), 409
+    return jsonify({"success": True, "task_id": task.get("id"), "message": "全员同步任务已排队。"}), 202
+
+
 @api.route("/register", methods=["POST"])
 @admin_required
 async def api_register_user():
