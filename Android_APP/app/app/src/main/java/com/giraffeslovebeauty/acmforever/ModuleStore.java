@@ -72,6 +72,7 @@ final class ModuleStore {
     static void updateTogether(Context c,boolean on){AppAppearance.prefs(c).edit().putBoolean("app_update_modules",on).apply();}
     static InputStream open(Context c,String id,String relative)throws IOException{
         if(!available(c,id))throw new FileNotFoundException("尚未下载"+ModuleSpec.name(id));ModuleFiles.safePath(relative);File root=assets(c,id),file=new File(root,relative);
+        if(!ModuleHealth.ensureForUse(c,id))throw new IOException("模块正在检查或需要修复，请稍后重试");
         if(!file.getCanonicalPath().startsWith(root.getCanonicalPath()+File.separator))throw new IOException("模块路径越界");try{return new FileInputStream(file);}catch(IOException failure){ModuleHealth.bad(c,id,"资源读取失败，需要检查修复");throw failure;}
     }
     static Set<String> trusted(Context c)throws Exception{

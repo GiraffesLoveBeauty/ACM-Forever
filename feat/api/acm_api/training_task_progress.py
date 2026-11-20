@@ -353,14 +353,24 @@ async def xcpc_scoreboard(db, task, recipients, *, now=None):
             item = by_key.get(column["key"], {})
             status = item.get("status", "pending")
             evidence = item.get("evidence") if isinstance(item.get("evidence"), dict) else None
-            accepted = int(evidence.get("accepted_at", 0)) if evidence else 0
+            accepted_value = evidence.get("accepted_at") if evidence else None
+            # Historical Luogu evidence deliberately has no submission time.
+            # It still counts as +1, but must never contribute penalty minutes.
+            try:
+                accepted = int(accepted_value) if accepted_value is not None else 0
+            except (TypeError, ValueError):
+                accepted = 0
             is_ac = bool(item.get("is_ac"))
-            if is_ac:
+            # An unresolved timing state is not a solved cell, even if an
+            # upstream evidence row was marked is_ac.  Do not invent a score.
+            if status in {"timing_unknown", "unverified"}:
+                cells.append({"state": "pending", "label": "?"})
+            elif is_ac:
                 solved += 1
                 if accepted and starts and accepted >= starts:
                     penalty += max(0, (accepted - starts) // 60)
                 cells.append({"state": "solved", "label": "+1", "accepted_at": accepted})
-            elif status in {"pending", "timing_unknown", "unverified"}:
+            elif status == "pending":
                 cells.append({"state": "pending", "label": "?"})
             else:
                 cells.append({"state": "empty", "label": "—"})

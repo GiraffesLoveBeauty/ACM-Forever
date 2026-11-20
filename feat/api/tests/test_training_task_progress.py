@@ -103,6 +103,49 @@ class TrainingProgressTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((board['rows'][0]['cells'][0]['state'], board['rows'][0]['penalty_minutes']), ('solved', 2))
         self.assertIn('历史 AC 不计罚时', board['penalty_definition'])
 
+    async def test_xcpc_view_accepts_historical_luogu_ac_without_penalty(self):
+        task = await self.create()
+        await self.publish(task)
+        member = dict(id=1, task_id=task['id'], name='Member 1', qq_id='22345678', real_name=None,
+                      status_snapshot='训练组', completed_problems=1, problem_count=1,
+                      completion='on_time', pending=False, account_status='active', rank=1)
+
+        async def fake_problem_progress(db, recipient, *, now=None):
+            return [{'id': 1, 'problem_id': 'luogu_P1000', 'problem_name': 'A', 'platform': 'luogu',
+                     'status': 'history_ac', 'is_ac': True,
+                     'evidence': {'accepted_at': None, 'evidence_type': 'historical_ac'}}]
+
+        base = f'/api/admin/training-tasks/{task["id"]}/progress'
+        with patch.object(progress, 'recipient_summaries', AsyncMock(return_value=[member])), \
+             patch.object(progress, 'summary', return_value={'recipient_count': 1}), \
+             patch.object(progress, 'problem_progress', side_effect=fake_problem_progress):
+            response = await self.client.get(base, query_string={'view': 'xcpc'})
+        self.assertEqual(response.status_code, 200, await response.get_json())
+        board = (await response.get_json())['scoreboard']
+        self.assertEqual((board['rows'][0]['cells'][0]['state'], board['rows'][0]['cells'][0]['label']), ('solved', '+1'))
+        self.assertEqual((board['rows'][0]['completed_problems'], board['rows'][0]['penalty_minutes']), (1, 0))
+
+    async def test_xcpc_view_does_not_solve_uncertain_evidence(self):
+        task = await self.create()
+        await self.publish(task)
+        member = dict(id=1, task_id=task['id'], name='Member 1', qq_id='22345678', real_name=None,
+                      status_snapshot='训练组', completed_problems=0, problem_count=1,
+                      completion='timing_unknown', pending=True, account_status='active', rank=1)
+
+        async def fake_problem_progress(db, recipient, *, now=None):
+            return [{'id': 1, 'problem_id': 'cf_1A', 'problem_name': 'A', 'platform': 'codeforces',
+                     'status': 'timing_unknown', 'is_ac': True,
+                     'evidence': {'accepted_at': task['starts_at'] + 120, 'evidence_type': 'uncertain'}}]
+
+        base = f'/api/admin/training-tasks/{task["id"]}/progress'
+        with patch.object(progress, 'recipient_summaries', AsyncMock(return_value=[member])), \
+             patch.object(progress, 'summary', return_value={'recipient_count': 1}), \
+             patch.object(progress, 'problem_progress', side_effect=fake_problem_progress):
+            response = await self.client.get(base, query_string={'view': 'xcpc'})
+        self.assertEqual(response.status_code, 200, await response.get_json())
+        cell = (await response.get_json())['scoreboard']['rows'][0]['cells'][0]
+        self.assertEqual((cell['state'], cell['label']), ('pending', '?'))
+
     async def test_real_name_isolation_for_changed_closed_and_reused_accounts(self):
         await self.sql("UPDATE users SET real_name='合成旧姓名' WHERE qq_id='22345678'")
         task = await self.create()
