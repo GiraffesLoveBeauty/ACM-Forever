@@ -54,20 +54,22 @@ class SyncMixin:
         # This marks snapshot coverage only; it is not acceptance-time evidence.
         if platform == "luogu" and success:
             full_history = True
+        luogu_failure = platform == "luogu" and isinstance(failure, SyncFailure)
         async with isolated_connection(self.db) as connection:
             if status == "running":
                 # 洛谷尚可能被门禁跳过；直到实际请求有结果才更新尝试时间。
                 clause, values = ("last_status=?,updated_at=?", [status, now]) if platform == "luogu" else (
                     "last_attempt_at=?,last_status=?,updated_at=?", [now, status, now])
-            elif getattr(failure, "deferred", False):
+            elif luogu_failure and failure.deferred:
                 clause = "last_status='waiting',last_error_code=CASE WHEN consecutive_failures>0 THEN last_error_code ELSE ? END,last_error_message=CASE WHEN consecutive_failures>0 THEN last_error_message ELSE ? END,next_retry_at=MAX(next_retry_at,?),updated_at=?"
-                values = [failure.code, failure.message, now + failure.retry_after, now]
-                async with connection.execute("SELECT consecutive_failures FROM user_platform_sync_state WHERE user_qq_id=? AND platform=?", (str(qq_id), platform)) as cursor:
-                    previous = await cursor.fetchone()
-                failure.consecutive_failures = previous[0] if previous else 0
+                retry_at = failure.next_retry_at if failure.next_retry_at is not None else now + failure.retry_after
+                values = [failure.code, failure.message, retry_at, now]
             elif platform == "luogu" and status == "cancelled":
                 # 人工取消不等于原站失败，也不能擦掉已有失败的等待时间。
                 clause, values = "last_status=?,updated_at=?", [status, now]
+            elif platform == "luogu" and (error_code == "internal" or (luogu_failure and not failure.request_attempted)):
+                clause = "last_status=?,last_error_code=?,last_error_message=?,updated_at=?"
+                values = [status, getattr(failure, "code", error_code), getattr(failure, "message", error_message), now]
             elif status == "backfill":
                 # A bounded backfill succeeds without claiming full-history coverage.
                 clause = "last_attempt_at=?,last_success_at=?,last_status=?,last_error_code=NULL,last_error_message=NULL,consecutive_failures=0,next_retry_at=0,updated_at=?"
@@ -90,10 +92,6 @@ class SyncMixin:
                         previous = await cursor.fetchone()
                     failures = (previous[0] if previous else 0) + 1
                     retry_delay = max(retry_delay, luogu_retry_delay(failures))
-                    if isinstance(failure, SyncFailure):
-                        failure.retry_after = retry_delay
-                        failure.consecutive_failures = failures
-                        failure.attention_required |= failures >= 3
                 retry_at = now + retry_delay
                 clause = "last_attempt_at=?,last_status=?,last_error_code=?,last_error_message=?,consecutive_failures=consecutive_failures+1,next_retry_at=MAX(next_retry_at,?),updated_at=?"
                 values = [now, status, error_code, error_message, retry_at, now]
@@ -108,9 +106,19 @@ class SyncMixin:
                 values.extend([epoch, str(qq_id), generation, account])
             else:
                 return False
-            cursor_result = await connection.execute("UPDATE user_platform_sync_state SET " + clause + " WHERE " + where, values)
+            sql = "UPDATE user_platform_sync_state SET " + clause + " WHERE " + where
+            if luogu_failure:
+                sql += " RETURNING consecutive_failures,next_retry_at"
+            async with connection.execute(sql, values) as cursor_result:
+                stored_failure = await cursor_result.fetchone() if luogu_failure else None
+                updated = stored_failure is not None if luogu_failure else bool(cursor_result.rowcount)
             await connection.commit()
-            if cursor_result.rowcount and platform in {"codeforces", "luogu"}:
+            if stored_failure is not None:
+                failure.consecutive_failures = stored_failure["consecutive_failures"]
+                failure.next_retry_at = stored_failure["next_retry_at"]
+                failure.retry_after = max(0, failure.next_retry_at - now)
+                failure.attention_required |= failure.consecutive_failures >= 3
+            if updated and platform in {"codeforces", "luogu"}:
                 from .training_task_progress import reconcile
                 try:
                     await connection.execute("BEGIN IMMEDIATE")
@@ -119,7 +127,7 @@ class SyncMixin:
                 except Exception:
                     await connection.rollback()
                     LOG.exception("训练任务证据聚合失败，将在下次同步时重试")
-            return bool(cursor_result.rowcount)
+            return updated
 
     async def _mark_user_synced(self, user, now):
         # A late all-platform task must not mark a changed (even rebound) user current.
@@ -158,11 +166,10 @@ class SyncMixin:
                 if waiting:
                     return SyncFailure(str(waiting), code=waiting.code, retry_after=waiting.retry_after,
                                        cause_http_status=waiting.cause_http_status, deferred=True,
-                                       attention_required=waiting.attention_required)
+                                       attention_required=waiting.attention_required, next_retry_at=now + waiting.retry_after)
                 if until > now:
                     return SyncFailure("洛谷账号正在等待重试，本次未发送请求；" + (state["last_error_message"] or "上次同步失败"),
-                                       code="luogu_retry_wait", retry_after=until-now, deferred=True,
-                                       attention_required=state["consecutive_failures"] >= 3)
+                                       code="luogu_retry_wait", retry_after=until-now, deferred=True, next_retry_at=until)
                 try:
                     return await fetcher(session, user, start_timestamp, guarded, self._crawler_config())
                 finally:
@@ -311,6 +318,8 @@ class SyncMixin:
             if not user:
                 return -1
             if not (user[field] or "").strip():
+                if platform == "luogu" and expected_binding and expected_binding["account"].strip():
+                    return -4
                 return -2
             normalized_platform = "codeforces" if platform == "cf" else platform
             if expected_binding is not None:
@@ -357,7 +366,12 @@ class SyncMixin:
                     if not await self._mark_platform_sync(qq_id, normalized_platform, "backfill", finished_at):
                         return -4
             else:
-                await self._mark_platform_sync(qq_id, normalized_platform, "failed", int(time.time()), error_code="fetch_failed", error_message="平台抓取失败", failure=result)
+                updated = await self._mark_platform_sync(
+                    qq_id, normalized_platform, "failed", int(time.time()),
+                    error_code="fetch_failed", error_message="平台抓取失败", failure=result,
+                )
+                if normalized_platform == "luogu" and not updated:
+                    return -4
             return result
 
     async def sync_single_user_for_days(self, qq_id: str, days: int):

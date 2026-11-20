@@ -2,7 +2,8 @@
 import re
 import time
 
-from .luogu_client import ORIGIN, LuoguResponseError, luogu_get, page_context, response_failed, response_recovered
+from .luogu_client import (ORIGIN, LuoguRequestError, LuoguResponseError, luogu_get, page_context,
+                           request_failure, response_recovered)
 from .luogu_problem import canonical_problem_id as canonical_pid, classifications, load_taxonomy
 
 MAX_PASSED_PROBLEMS = 100000
@@ -59,21 +60,29 @@ def practice_snapshot(raw, expected_uid):
 async def sync_public_practice(session, user, db, config):
     from .binding_guard import BindingGuard
 
-    account = uid(user["luogu_id"])
+    try:
+        account = uid(user["luogu_id"])
+    except ValueError as error:
+        raise LuoguRequestError(f"{error}，本次未发送请求", code="luogu_invalid_uid", request_attempted=False) from error
     requested_at = time.time()
-    # 该 URL 无需登录；不传登录 Cookie/CSRF，不请求每道题的题面或全站成员数据。
+    # 仅匿名访问该练习页，不传登录 Cookie/CSRF，不请求每道题的题面或全站成员数据。
     # 如原站设置匿名会话 Cookie，由现有 session 保存，仅用于正常的匿名页面初始化。
-    raw = await luogu_get(
-        session, ORIGIN + "/user/" + account + "/practice",
-        interval=config.get("luogu_request_interval", 2.0),
-        headers={"User-Agent": "Mozilla/5.0", "Accept": "text/html,application/xhtml+xml"},
-        timeout=30, recover_on_response=False,
-    )
+    try:
+        raw = await luogu_get(
+            session, ORIGIN + "/user/" + account + "/practice",
+            interval=config.get("luogu_request_interval", 2.0),
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "text/html,application/xhtml+xml"},
+            timeout=30, member_practice=True,
+        )
+    except LuoguResponseError:
+        raise
+    except ValueError as error:
+        raise request_failure(error) from error
     try:
         passed = practice_snapshot(raw, account)
     except ValueError as error:
-        # HTTP 200 只代表拿到响应；解析失败仍需明确标记，不能误当作“没有 AC”。
-        raise response_failed(LuoguResponseError(f"洛谷同步失败：{error}（HTTP 200）", status=200)) from error
+        # HTTP 200 只代表拿到响应；坏快照按当前成员失败处理，保留已有 AC。
+        raise LuoguResponseError(f"洛谷同步失败：{error}（HTTP 200）", status=200) from error
     # 从请求返回到完整校验没有 await；确认是当前 UID 的完整快照后才解除共享门禁。
     response_recovered()
     observed_at = int(time.time())

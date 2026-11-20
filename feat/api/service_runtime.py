@@ -12,6 +12,7 @@ from .acm_api.problem_listing import ListingConnection
 
 from .acm_api.constants import PLATFORM_SYNC_CONCURRENCY
 from .acm_api.database import connect_db, isolated_connection
+from .acm_api.binding_guard import BindingChanged
 from .acm_api.binding_service import platform_spec
 from .acm_api.problem_sync import ProblemSync, sync_options
 from .acm_api.sync_service import SyncMixin
@@ -70,11 +71,15 @@ class SyncEngine(SyncMixin):
 
     @staticmethod
     def failure_detail(result):
+        next_retry_at = result.next_retry_at
+        if next_retry_at is None:
+            next_retry_at = int(time.time()) + result.retry_after if result.retry_after else 0
         return {"code": result.code, "message": result.message,
                 "http_status": result.http_status, "cause_http_status": result.cause_http_status,
-                "deferred": result.deferred, "consecutive_failures": result.consecutive_failures,
+                "deferred": result.deferred, "request_attempted": result.request_attempted,
+                "consecutive_failures": result.consecutive_failures,
                 "attention_required": result.attention_required,
-                "next_retry_at": int(time.time()) + result.retry_after if result.retry_after else 0}
+                "next_retry_at": next_retry_at}
 
     @staticmethod
     def sync_outcome(results, errors, *, many=False):
@@ -119,6 +124,8 @@ class SyncEngine(SyncMixin):
                         results[platform] = result
                     except asyncio.CancelledError:
                         raise
+                    except BindingChanged:
+                        results[platform] = -4 if platform == "luogu" else -3
                     except Exception:
                         # A failure on one OJ should not discard results from
                         # the other platforms in this account sync task.
@@ -140,14 +147,15 @@ class SyncEngine(SyncMixin):
         task["started_at"] = int(time.time())
         results = {}
         task["errors"] = {}
+        luogu_members = task["luogu_members"] = {}
         try:
             async with self._sync_cycle_lock:
                 members = task.get("_account_snapshots", [])
                 task["progress"] = {"done": 0, "total": len(members)}
                 platforms = task.get("_platforms") or ("codeforces", "luogu", "nowcoder", "atcoder", "cjlu")
                 for user in members:
-                    qq_id = user["qq_id"]
-                    results[str(qq_id)] = {}
+                    qq_id = str(user["qq_id"])
+                    results[qq_id] = {}
                     for platform in platforms:
                         snapshot = self.binding_snapshot(user, [platform])[platform]
                         if not snapshot["account"].strip():
@@ -159,13 +167,17 @@ class SyncEngine(SyncMixin):
                             )
                         except asyncio.CancelledError:
                             raise
+                        except BindingChanged:
+                            count = -4 if platform == "luogu" else -3
                         except Exception:
                             count = -3
                         if isinstance(count, SyncFailure):
-                            task["errors"].setdefault(str(qq_id), {})[platform] = self.failure_detail(count)
+                            task["errors"].setdefault(qq_id, {})[platform] = self.failure_detail(count)
                             count = int(count)
                         if count != -2:
-                            results[str(qq_id)][platform] = -3 if count is None else count
+                            results[qq_id][platform] = -3 if count is None else count
+                            if platform == "luogu" and snapshot["account"].strip():
+                                luogu_members[qq_id] = {"name": user["name"], "uid": snapshot["account"].strip()}
                     task["progress"]["done"] += 1
             task["result"] = results
             task["status"] = self.sync_outcome(results, task["errors"], many=True)
@@ -405,14 +417,30 @@ class WebTaskManager:
                     ) as cursor:
                         if cursor.rowcount != 1:
                             return None
-                query = "SELECT * FROM users WHERE account_state='active'"
+                query = """
+                    SELECT u.* FROM users u
+                    LEFT JOIN user_platform_sync_state s ON s.user_qq_id=u.qq_id AND s.platform='luogu'
+                        AND TRIM(COALESCE(u.luogu_id,''))<>''
+                    WHERE u.account_state='active'
+                """
                 if scheduled:
                     query += (
-                        " AND (TRIM(COALESCE(cf_handle,''))<>'' OR TRIM(COALESCE(luogu_id,''))<>''"
-                        " OR TRIM(COALESCE(nowcoder_id,''))<>'' OR TRIM(COALESCE(atcoder_handle,''))<>''"
-                        " OR TRIM(COALESCE(cjlu_username,''))<>'')"
+                        " AND (TRIM(COALESCE(u.cf_handle,''))<>'' OR TRIM(COALESCE(u.luogu_id,''))<>''"
+                        " OR TRIM(COALESCE(u.nowcoder_id,''))<>'' OR TRIM(COALESCE(u.atcoder_handle,''))<>''"
+                        " OR TRIM(COALESCE(u.cjlu_username,''))<>'')"
                     )
-                async with db.execute(query + " ORDER BY qq_id") as cursor:
+                # A skipped request leaves last_attempt_at unchanged. After the shared
+                # gate expires, the least recently attempted eligible member probes first.
+                query += """
+                    ORDER BY CASE
+                        WHEN TRIM(COALESCE(u.luogu_id,''))='' THEN 4
+                        WHEN COALESCE(s.consecutive_failures,0)>0 THEN 3
+                        WHEN COALESCE(s.last_attempt_at,0)=0 THEN 0
+                        WHEN s.last_status='waiting' THEN 1
+                        ELSE 2
+                    END, COALESCE(s.last_attempt_at,0), u.qq_id
+                """
+                async with db.execute(query) as cursor:
                     members = [dict(row) for row in await cursor.fetchall()]
                 await db.commit()
         finally:
@@ -565,7 +593,7 @@ class WebTaskManager:
         keys = (
             "id", "kind", "qq_id", "platform", "days", "status",
             "started_at", "finished_at", "result",
-            "progress", "bindings", "account_epoch", "errors",
+            "progress", "bindings", "account_epoch", "errors", "luogu_members",
         )
         return [{key: item.get(key) for key in keys} for item in self.tasks.values()]
 
@@ -592,6 +620,9 @@ class WebTaskManager:
                 # Errors accumulate before results exist, including in cancelled tasks.
                 item["errors"] = {key: value for key, value in (item.get("errors") or {}).items()
                                   if active.get(key) == epochs.get(key, 1)}
+                if isinstance(item.get("luogu_members"), dict):
+                    item["luogu_members"] = {key: value for key, value in item["luogu_members"].items()
+                                             if active.get(key) == epochs.get(key, 1)}
         return snapshots
 
     def revoke_account_tasks(self, qq_id):

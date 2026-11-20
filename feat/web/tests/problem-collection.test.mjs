@@ -456,6 +456,84 @@ test('the task page explains paused user crawling alongside other platform resul
   assert.doesNotMatch(content, /同步失败|新增 -5 条/);
 });
 
+test('the task page separates actual Luogu failures, retries without requests, and successes', async () => {
+  jobs = [
+    {
+      id: 'all-account-sync',
+      kind: '全员平台同步',
+      qq_id: '*',
+      status: 'partial',
+      result: {
+        11111111: { luogu: -1, atcoder: 2 },
+        22222222: { luogu: -1 },
+        33333333: { luogu: 0 },
+        44444444: { luogu: -4 },
+        55555555: { luogu: -1 },
+        66666666: { luogu: -5 },
+        77777777: { luogu: -3 },
+      },
+      errors: {
+        11111111: {
+          luogu: {
+            message: '洛谷练习页拒绝访问',
+            http_status: 403,
+            request_attempted: true,
+            consecutive_failures: 2,
+            next_retry_at: 1700000000,
+          },
+        },
+        22222222: {
+          luogu: {
+            message: '洛谷站点冷却中',
+            cause_http_status: 429,
+            request_attempted: false,
+            deferred: true,
+            consecutive_failures: 0,
+            next_retry_at: 1700000000,
+          },
+        },
+        55555555: { luogu: { message: 'UID 格式无效', request_attempted: false } },
+      },
+      luogu_members: {
+        11111111: { name: '小吴', uid: '2249860' },
+        22222222: { name: '小赵', uid: '2240405' },
+        33333333: { name: '小陈', uid: '2240404' },
+        44444444: { name: '小林', uid: '2240406' },
+        55555555: { name: '小张', uid: 'invalid' },
+        66666666: { name: '小周', uid: '2240407' },
+        77777777: { name: '小孙', uid: '2240408' },
+      },
+    },
+  ];
+  await page(Tasks);
+  function section(title) {
+    const summary = find(
+      mounted.root,
+      (node) => node.type === 'summary' && textOf(node).startsWith(title),
+    )[0];
+    assert.ok(summary, title);
+    return textOf(summary.parent).replace(/\s+/g, ' ');
+  }
+
+  const failed = section('洛谷实际请求失败 1 人');
+  assert.match(failed, /小吴 · QQ 11111111 · 洛谷 UID 2249860/);
+  assert.match(failed, /洛谷练习页拒绝访问（HTTP 403；可重试时间：[^）]+）.*连续失败 2 次/);
+  const waiting = section('洛谷等待重试 1 人（本次未发送请求）');
+  assert.match(waiting, /小赵 · QQ 22222222 · 洛谷 UID 2240405/);
+  assert.match(
+    waiting,
+    /洛谷站点冷却中（触发冷却的状态：HTTP 429；可重试时间：[^）]+）.*连续失败 0 次/,
+  );
+  assert.match(section('洛谷同步成功 1 人'), /小陈 · QQ 33333333 · 洛谷 UID 2240404 · 新增 0 条/);
+  assert.match(
+    section('其他洛谷结果 4 人'),
+    /绑定已变更，已跳过.*UID 格式无效.*已暂停，保留已有记录.*同步未完成，请重试/,
+  );
+  const content = textOf(mounted.root);
+  assert.match(content, /11111111：atcoder：新增 2 条/);
+  assert.doesNotMatch(content, /11111111：luogu/);
+});
+
 test('Luogu collection submits normalized P IDs without contest fields', async () => {
   await page();
   await model('sync-platform', 'luogu');

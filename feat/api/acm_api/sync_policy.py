@@ -16,7 +16,8 @@ class SyncFailure(int):
     """Preserve the numeric sync contract while carrying an actionable failure."""
 
     def __new__(cls, message, *, code="fetch_failed", retry_after=0, http_status=None,
-                cause_http_status=None, deferred=False, consecutive_failures=0, attention_required=False):
+                cause_http_status=None, deferred=False, consecutive_failures=0, attention_required=False,
+                request_attempted=None, next_retry_at=None):
         value = super().__new__(cls, -1)
         value.message = str(message)[:500]
         value.code = code
@@ -25,6 +26,8 @@ class SyncFailure(int):
         value.http_status = http_status
         value.cause_http_status = cause_http_status
         value.deferred = bool(deferred)
+        value.request_attempted = not value.deferred and (request_attempted is None or bool(request_attempted))
         value.consecutive_failures = int(consecutive_failures)
         value.attention_required = bool(attention_required)
+        value.next_retry_at = next_retry_at
         return value

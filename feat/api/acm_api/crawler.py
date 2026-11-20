@@ -307,17 +307,18 @@ class Crawler:
             LOG.info("[同步模块] 洛谷用户过题记录同步已暂停，保留已有记录。")
             return SYNC_PAUSED
         from .luogu_user_sync import sync_public_practice
-        from .luogu_client import LuoguUnavailable, request_failure
+        from .luogu_client import LuoguResponseError, LuoguUnavailable, request_failure
         try:
             return await sync_public_practice(session, user_row, db, config)
-        except (aiohttp.ClientError, asyncio.TimeoutError, LuoguUnavailable, ValueError) as error:
+        except (aiohttp.ClientError, asyncio.TimeoutError, LuoguUnavailable, LuoguResponseError) as error:
             from .sync_policy import SyncFailure
             failure = request_failure(error)
             LOG.warning("[同步模块] 洛谷公开练习页同步失败，保留已有记录：%s", failure)
             # 保持旧调用方使用的 -1 结果，同时让任务接口拿到具体原因和实际 HTTP 状态。
             return SyncFailure(str(failure), code=failure.code, retry_after=failure.retry_after,
                                http_status=failure.status, cause_http_status=failure.cause_http_status,
-                               deferred=failure.deferred, attention_required=failure.attention_required)
+                               deferred=failure.deferred, attention_required=failure.attention_required,
+                               request_attempted=failure.request_attempted)
 
     # ================= 牛客 Nowcoder =================
 
