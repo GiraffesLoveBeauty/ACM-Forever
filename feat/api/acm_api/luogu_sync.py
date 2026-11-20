@@ -10,7 +10,9 @@ import aiosqlite
 
 from .problem_listing import ListingConnection
 
-from .luogu_client import ORIGIN, LuoguUnavailable, luogu_get, load_request_state, save_request_state
+from .luogu_client import (ORIGIN, LuoguResponseError, LuoguUnavailable, luogu_get,
+                            load_request_state, response_failed, response_recovered,
+                            save_request_state)
 from .luogu_problem import (catalog_page, load_taxonomy,
                             normalize_taxonomy, parse_problem, problem_id, save_taxonomy)
 from .problem_bank import record_problem_failure, save_metadata_batch, save_problem
@@ -54,7 +56,10 @@ class LuoguSync:
         self.config = config or {}
 
     async def download(self, http, path):
-        return await luogu_get(http, ORIGIN + path, interval=self.config.get("luogu_request_interval", 2.0))
+        # HTTP 200 仅代表收到响应；由各调用方完成页面/JSON 校验后再解除共享冷却。
+        return await luogu_get(http, ORIGIN + path,
+                               interval=self.config.get("luogu_request_interval", 2.0),
+                               recover_on_response=False)
 
     async def taxonomy(self, db, http, result):
         cached = await load_taxonomy(db)
@@ -64,15 +69,27 @@ class LuoguSync:
             config = json.loads(await self.download(http, "/_lfe/config"))
             tags = json.loads(await self.download(http, "/_lfe/tags"))
             normalized = normalize_taxonomy(config, tags)
-            await save_taxonomy(db, normalized)
-            return await load_taxonomy(db)
         except LuoguUnavailable:
             raise
-        except (ValueError, aiohttp.ClientError, OSError, asyncio.TimeoutError) as error:
+        except ValueError as error:
+            if isinstance(error, LuoguResponseError):
+                failure = error
+            else:
+                failure = response_failed(LuoguResponseError(
+                    f"洛谷分类响应校验失败：{str(error)[:500]}", status=200))
+            if not cached:
+                raise failure from error
+            result["taxonomy_warning"] = "分类字典刷新失败，使用本地缓存：" + str(failure)[:300]
+            return cached
+        except (aiohttp.ClientError, OSError, asyncio.TimeoutError) as error:
             if not cached:
                 raise
             result["taxonomy_warning"] = "分类字典刷新失败，使用本地缓存：" + str(error)[:300]
             return cached
+        # 两份分类字典都已解析并通过结构校验后，才解除共享冷却。
+        response_recovered()
+        await save_taxonomy(db, normalized)
+        return await load_taxonomy(db)
 
     async def catalog(self, db, http, taxonomy, task):
         result = task["result"]
@@ -80,14 +97,25 @@ class LuoguSync:
         total = per_page = None
         maximum = self.config.get("luogu_catalog_max_pages", 1000)
         for page in range(1, maximum + 1):
-            batch, count, size = catalog_page(await self.download(http, f"/problem/list?type=P&page={page}"), taxonomy)
-            if total is None:
-                total, per_page = count, size
-            elif (count, size) != (total, per_page):
-                raise ValueError("洛谷目录在分页期间发生变化，请重新采集；已提交批次保留")
-            expected = min(size, max(0, total - (page - 1) * size))
-            if len(batch) != expected or any(item["problem_id"] in seen for item in batch) or len({item["problem_id"] for item in batch}) != len(batch):
-                raise ValueError("洛谷目录出现重复题号或不完整分页，已停止以避免误报完成")
+            try:
+                batch, count, size = catalog_page(
+                    await self.download(http, f"/problem/list?type=P&page={page}"), taxonomy)
+                if total is None:
+                    total, per_page = count, size
+                elif (count, size) != (total, per_page):
+                    raise ValueError("洛谷目录在分页期间发生变化，请重新采集；已提交批次保留")
+                expected = min(size, max(0, total - (page - 1) * size))
+                if (len(batch) != expected
+                        or any(item["problem_id"] in seen for item in batch)
+                        or len({item["problem_id"] for item in batch}) != len(batch)):
+                    raise ValueError("洛谷目录出现重复题号或不完整分页，已停止以避免误报完成")
+            except ValueError as error:
+                if isinstance(error, LuoguResponseError):
+                    raise
+                raise response_failed(LuoguResponseError(
+                    f"洛谷目录响应校验失败：{str(error)[:500]}", status=200)) from error
+            # 只有完整分页校验通过后，才允许恢复全站调度。
+            response_recovered()
             result["discovered_count"] = len(items) + len(batch)
             for offset in range(0, len(batch), task["options"]["batch_size"]):
                 chunk = batch[offset:offset + task["options"]["batch_size"]]
@@ -161,7 +189,16 @@ class LuoguSync:
                     pid = item["problem_id"]
                     task["progress"] = {"phase": "statements", "done": index - 1, "total": len(selected), "problem_id": pid}
                     try:
-                        item, content = parse_problem(await self.download(http, "/problem/" + pid), pid, taxonomy)
+                        raw = await self.download(http, "/problem/" + pid)
+                        try:
+                            item, content = parse_problem(raw, pid, taxonomy)
+                        except ValueError as error:
+                            if isinstance(error, LuoguResponseError):
+                                raise
+                            raise response_failed(LuoguResponseError(
+                                f"洛谷题面响应校验失败：{str(error)[:500]}", status=200)) from error
+                        # parse_problem 已校验模板、题号、题面和样例后再恢复门禁。
+                        response_recovered()
                         await save_problem(db, item, content)
                         result["success_count"] += 1
                         result["sample_count"] += len(content["samples"])

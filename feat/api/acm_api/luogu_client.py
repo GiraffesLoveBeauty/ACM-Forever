@@ -176,8 +176,14 @@ async def save_request_state(db):
     await db.commit()
 
 
-async def luogu_get(session, url, *, interval=2.0, headers=None, timeout=30, recover_on_response=True):
-    """匿名访问固定原站；不跟随登录/验证跳转，不重试 403/429。"""
+async def luogu_get(session, url, *, interval=2.0, headers=None, timeout=30, recover_on_response=False):
+    """匿名访问固定原站；不跟随登录/验证跳转，不重试 403/429。
+
+    HTTP 200 只证明收到了响应，不能证明它是可用的洛谷公开数据。
+    调用方完成页面或 JSON 结构校验后，才可以显式传入
+    ``recover_on_response=True`` 清除共享冷却；默认保持门禁状态，避免
+    验证码页、错误页或残缺响应提前放行后续账号。
+    """
     parsed = urlsplit(url)
     if parsed.scheme != "https" or parsed.netloc != "www.luogu.com.cn" or parsed.fragment:
         raise ValueError("洛谷采集仅支持固定 HTTPS 原站")
