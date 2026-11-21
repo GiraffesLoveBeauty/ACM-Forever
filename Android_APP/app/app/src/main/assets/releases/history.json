@@ -1,7 +1,23 @@
 {
   "schemaVersion": 1,
-  "currentVersionCode": 45,
+  "currentVersionCode": 46,
   "entries": [
+    {
+      "versionName": "1.0.1",
+      "versionCode": 46,
+      "recordDate": "2026-11-21",
+      "summary": "XCPC 社团题单计分板与启动性能优化。",
+      "changes": [
+        "社团题单完成情况新增 XCPC 风格计分板，支持题目列横向查看、通过数与罚时。",
+        "修复洛谷历史 AC 的 accepted_at=null 计分，历史 AC 显示 +1 且不计罚时。",
+        "模块资源首次读取改为按需健康检查，损坏资源先安全回退并进入修复流程。",
+        "启动阶段延后可选模块检查，避免模块扫描和重复会话验证拖慢冷启动。"
+      ],
+      "notes": [
+        "本版基于 PR #168 合并内容发布。",
+        "GitHub Release 发布后由维护者同步相同制品到 Gitee。"
+      ]
+    },
     {
       "versionName": "1.0.0",
       "versionCode": 45,
