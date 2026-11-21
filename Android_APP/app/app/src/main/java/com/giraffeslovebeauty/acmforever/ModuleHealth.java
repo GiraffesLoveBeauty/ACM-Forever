@@ -16,6 +16,17 @@ final class ModuleHealth {
     private static final Set<Runnable> observers=Collections.newSetFromMap(new ConcurrentHashMap<>());
     static boolean damaged(String id){return broken.contains(id);}
     static Status state(String id){return states.getOrDefault(id,new Status(false,"待检查",""));}
+    /**
+     * Resource reads must not trust a persisted completion marker after a
+     * process restart.  Schedule one background repair/check and let the
+     * caller use its normal fallback until the result is known.
+     */
+    static boolean ensureForUse(Context context,String id){
+        Status current=state(id);
+        if(current.intact)return true;
+        if("待检查".equals(current.message))check(context,id,null);
+        return false;
+    }
     static void listen(Runnable observer){observers.add(observer);}
     static void unlisten(Runnable observer){observers.remove(observer);}
     private static void publish(String id,Status status){if(status.intact)broken.remove(id);else if(!"检查中".equals(status.message))broken.add(id);states.put(id,status);for(Runnable observer:observers)main.post(observer);}

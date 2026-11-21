@@ -141,6 +141,9 @@ async def admin_progress(db, identity, task_id):
     order = request.args.get("order", "none")
     if order not in {"none", "completed"}:
         raise service.TaskError("排列方式无效。")
+    view = request.args.get("view", "list")
+    if view not in {"list", "xcpc"}:
+        raise service.TaskError("进度展示方式无效。")
     selected = [r for r in members if (not cohort or r["status_snapshot"] == cohort)
                 and (not search or search in (r["real_name"] or "").casefold() or search in r["name"].casefold() or search in str(r["qq_id"] or ""))
                 and (not status or (r["pending"] if status == "pending" else r["account_status"] != "active" if status == "abnormal" else r["completion"] == status))]
@@ -154,7 +157,12 @@ async def admin_progress(db, identity, task_id):
                 rank = position
                 previous = row["completed_problems"]
             row["rank"] = rank
-    return jsonify({"summary": overview, "items": selected[(page - 1) * size:page * size], "total": len(selected), "page": page, "page_size": size, "order": order})
+    page_items = selected[(page - 1) * size:page * size]
+    result = {"summary": overview, "items": page_items, "total": len(selected), "page": page, "page_size": size, "order": order}
+    if view == "xcpc":
+        task = await service.detail(db, task_id)
+        result["scoreboard"] = await progress.xcpc_scoreboard(db, task, page_items)
+    return jsonify(result)
 
 
 @training_task_api.get("/admin/training-tasks/<int:task_id>/progress/<int:recipient_id>")

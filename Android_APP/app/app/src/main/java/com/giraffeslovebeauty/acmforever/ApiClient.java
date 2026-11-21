@@ -22,6 +22,7 @@ import java.util.Map;
 
 /** Calls the existing Web session API. No /internal/v1 token is used by the app. */
 final class ApiClient {
+    private static final int CONNECT_TIMEOUT_MS = 5000;
     private final Object stateLock=new Object();
     private final ReadRequests reads=new ReadRequests();
     private final ThreadLocal<ReadRequests.Scope> readScope=new ThreadLocal<>();
@@ -656,7 +657,9 @@ final class ApiClient {
         URI uri = url.toURI();
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setRequestMethod(method);
-        connection.setConnectTimeout(10000);
+        // Fail quickly when the server or Tailscale route is unavailable;
+        // keep the longer read timeout below for a slow but usable server.
+        connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
         // Ownership checks may wait up to 20 seconds for the OJ; match Web's binding timeout.
         connection.setReadTimeout(path.startsWith("/api/me/bindings/") ? 25000 : path.equals("/api/admin/android/releases/latest") ? 65000 : 10000);
         connection.setInstanceFollowRedirects(false);
