@@ -16,7 +16,9 @@ from .acm_api.binding_service import platform_spec
 from .acm_api.problem_sync import ProblemSync, sync_options
 from .acm_api.sync_service import SyncMixin
 from .acm_api.event_log import emit
-from .acm_api.sync_policy import SYNC_PAUSED
+from .acm_api.sync_policy import (
+    SYNC_LUOGU_ACCESS_RESTRICTED, SYNC_PAUSED, sync_result_is_non_failure,
+)
 from .acm_api import problem_schedule
 
 
@@ -101,7 +103,7 @@ class SyncEngine(SyncMixin):
             task["result"] = results
             task["status"] = (
                 "completed"
-                if all(value is not None and (value >= 0 or value == SYNC_PAUSED) for value in results.values())
+                if all(value is not None and (value >= 0 or sync_result_is_non_failure(value)) for value in results.values())
                 else "failed"
             )
         except asyncio.CancelledError:
@@ -142,8 +144,10 @@ class SyncEngine(SyncMixin):
                             results[str(qq_id)][platform] = -3 if count is None else count
                     task["progress"]["done"] += 1
             task["result"] = results
-            failed = any(count < 0 and count != SYNC_PAUSED
-                         for platforms in results.values() for count in platforms.values())
+            failed = any(
+                count < 0 and not sync_result_is_non_failure(count)
+                for platforms in results.values() for count in platforms.values()
+            )
             task["status"] = "partial" if failed else "completed"
         except asyncio.CancelledError:
             task["status"] = "cancelled"
@@ -187,7 +191,7 @@ class WebTaskManager:
                     return ("error" in value or any(type(value.get(key)) is int and value[key] > 0
                                                    for key in ("failure_count", "failed_count"))
                             or any(failed(v) for v in value.values()))
-                return type(value) is int and value < 0 and value not in {-2, SYNC_PAUSED}
+                return type(value) is int and value < 0 and value not in {-2, SYNC_PAUSED, SYNC_LUOGU_ACCESS_RESTRICTED}
 
             if status == "failed":
                 level, message = "error", "后台任务执行失败，请在同步任务页面查看结果"
@@ -451,6 +455,7 @@ class WebTaskManager:
                 LEFT JOIN binding_rate_limits b ON b.qq_id=u.qq_id AND b.platform='luogu' AND b.action='training_task_auto'
                 WHERE t.state='published' AND r.closed=0
                   AND u.luogu_id IS NOT NULL AND TRIM(u.luogu_id)<>''
+                  AND COALESCE(s.sync_enabled,1)=1
                   AND COALESCE(s.next_retry_at,0)<=? AND COALESCE(s.last_status,'')<>'paused'
                   AND COALESCE(b.last_at,0)<=?-60
                   AND x.on_time_json IS NULL AND x.late_json IS NULL AND x.uncertain_json IS NULL AND x.history_json IS NULL
@@ -510,22 +515,48 @@ class WebTaskManager:
     async def public_snapshots(self):
         # Compare generations, including already re-registered QQs. A callback
         # can cancel only this process; other workers must consult durable state.
+        # The member identity is included so the admin task page can filter
+        # all-account results without exposing private task internals.
         async with aiosqlite.connect(str(self.sync_engine.db_path), factory=ListingConnection) as db:
-            async with db.execute("SELECT qq_id,account_state,account_epoch FROM users") as cursor:
-                active = {row[0]: row[2] for row in await cursor.fetchall() if row[1] == "active"}
+            async with db.execute("SELECT qq_id,account_state,account_epoch,name,status FROM users") as cursor:
+                active = {
+                    row[0]: {"epoch": row[2], "name": row[3], "status": row[4] or ""}
+                    for row in await cursor.fetchall()
+                    if row[1] == "active"
+                }
         snapshots = self.snapshots()
         for item in snapshots:
             qq_id = item.get("qq_id")
             original = self.tasks[item["id"]]
-            if qq_id and qq_id != "*" and active.get(qq_id) != original.get("account_epoch", 1):
-                item.update(qq_id=None, bindings={}, result=None, status="cancelled")
-            elif qq_id == "*" and isinstance(item.get("result"), dict):
+            if qq_id and qq_id != "*":
+                member = active.get(qq_id)
+                if not member or member["epoch"] != original.get("account_epoch", 1):
+                    item.update(qq_id=None, bindings={}, result=None, status="cancelled")
+                else:
+                    item["member"] = {"qq_id": qq_id, "name": member["name"], "status": member["status"]}
+            elif qq_id == "*":
                 epochs = original.get("_account_epochs", {})
-                filtered = {key: value for key, value in item["result"].items()
-                            if key != "error" and active.get(key) == epochs.get(key, 1)}
-                if "error" in item["result"]:
-                    filtered["error"] = "后台同步失败，请重试"
-                item["result"] = filtered
+                members = []
+                for target_qq, target_epoch in epochs.items():
+                    member = active.get(target_qq)
+                    if member and member["epoch"] == target_epoch:
+                        members.append({
+                            "qq_id": target_qq,
+                            "name": member["name"],
+                            "status": member["status"],
+                        })
+                item["members"] = members
+                item["member_statuses"] = {member["qq_id"]: member["status"] for member in members}
+                if isinstance(item.get("result"), dict):
+                    visible = {member["qq_id"] for member in members}
+                    filtered = {
+                        key: value
+                        for key, value in item["result"].items()
+                        if key == "error" or key in visible
+                    }
+                    if "error" in item["result"]:
+                        filtered["error"] = "后台同步失败，请重试"
+                    item["result"] = filtered
         return snapshots
 
     def revoke_account_tasks(self, qq_id):

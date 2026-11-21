@@ -28,7 +28,7 @@ def _gate():
     return _GATES[loop]
 
 
-async def luogu_get(session, url, *, interval=2.0, headers=None, timeout=30):
+async def luogu_get(session, url, *, interval=2.0, headers=None, timeout=30, cooldown_on_forbidden=True):
     """Never follow a login/challenge redirect or retry an access restriction."""
     parsed = urlsplit(url)
     if parsed.scheme != "https" or parsed.netloc != "www.luogu.com.cn" or parsed.fragment:
@@ -49,8 +49,18 @@ async def luogu_get(session, url, *, interval=2.0, headers=None, timeout=30):
                     retry = response.headers.get("Retry-After", "")
                     if retry.isdigit():
                         delay = max(delay, min(int(retry), 86400))
-                    gate["cooldown"] = time.monotonic() + delay
-                    raise LuoguUnavailable(f"洛谷返回 HTTP {response.status}，本次采集已停止", status=response.status, retry_after=delay)
+                    # A public user practice page can return 403 because that
+                    # member enabled access restrictions.  Only that member
+                    # should be disabled; catalog/rate-limit callers retain
+                    # the old shared cooldown behaviour through the opt-in
+                    # default.
+                    if response.status != 403 or cooldown_on_forbidden:
+                        gate["cooldown"] = time.monotonic() + delay
+                    raise LuoguUnavailable(
+                        f"洛谷返回 HTTP {response.status}，本次采集已停止",
+                        status=response.status,
+                        retry_after=delay if response.status != 403 or cooldown_on_forbidden else 0,
+                    )
                 if response.status == 404:
                     raise LuoguUnavailable("洛谷题目或公开资源不存在（HTTP 404）", status=404)
                 if 300 <= response.status < 400:

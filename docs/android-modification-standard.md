@@ -77,7 +77,7 @@
 | `ModalDialogs`、`KeyboardInputs`、窗口样式 | 普通弹窗/全屏表单和软键盘 | 自定义全屏Dialog安装编辑器后清除阻挡IME的窗口标志；仅搜索入口主动显示，普通表单点击唤起；不绕过权限/防重 |
 | `MobilePageActivity`、`PullRefreshLayout`、`PageRefresh` | 搜索与便捷管理的页面壳、缓存读取、串行后台操作 | 页面代次、会话代次、槽位绑定；缓存展示不能启动下一轮轮询，使用仅在有效网络响应展示并结束后执行的回调；下拉只重复注册的读取，排序长按不能被父滚动抢占，不得刷新草稿或重放写操作 |
 | `AdminQuickActivity`、`AdminApiPolicy`、`AdminMemberEdits` | 手机便捷管理和 API 白名单 | 服务端角色重验证、CSRF、审核版本、敏感内容禁止通用缓存 |
-| `SyncTaskResult` | 同步任务的数值结果展示 | `-1`也可能是已有成员抓取失败，显示通用“同步失败”；不能据此推断成员不存在。新增条数与未绑定/抓取异常/暂停仍各自展示 |
+| `SyncTaskResult` | 同步任务的数值结果展示 | `-1`也可能是已有成员抓取失败，显示通用“同步失败”；不能据此推断成员不存在。新增条数与未绑定/抓取异常/暂停/洛谷访问受限停用仍各自展示；`-6`只表示该成员洛谷账号被单独停用，不得把它解释为全局洛谷暂停 |
 | `ChallengeDifficulty` | 管理员单题训练的难度选项和默认值 | 与 `acm_api/difficulty.py` 的有效值及网页训练默认值一致；切换平台同步难度，空选项不得发送请求 |
 | `WebFeaturesActivity` | 通知/投稿进度/比赛进度/Wiki | Wiki 站内练习相对链接进入原生题面，外链 HTTPS 校验 |
 | `WikiCatalog`、`WikiOutline`、`WikiReaderNavigation`、`ContentView`及`reader/content.js` | Wiki分类路径、文章标签、章节目录/高亮与阅读位置 | 只读公开接口；分类和文章独立失败；从清理后的实际DOM取标题，代码块不算目录、重复标题ID唯一；无JS应用桥，章内偏移/历史版本/转屏/返回及动态布局必须联查 |
@@ -145,7 +145,7 @@ Wiki完整目录与阅读导航的本地适配见[android-wiki-navigation-local-
 
 个人中心的单平台通过题数卡在本人未绑定时显示“绑定”，替代题数位置；已绑定且零AC显示0，不显示绑定按钮；ALL与他人主页不展示操作。账号设置 → 个人资料 → OJ账号绑定进入原生列表，已绑定展示用户名和“修改”，未绑定展示“绑定”。
 
-状态来自 `GET /api/me/profile` 的 `user` 与 `bindings`；不凭平台名称假定服务可用。绑定详情复用 `POST /api/me/bindings/{platform}/verification`、`confirm`、`sync` 和 `DELETE /api/me/bindings/{platform}`。当前正式后端仅CF的 `self_service=true`，其他平台说明联系管理员；已绑定平台仍可按既有接口解绑和同步。旧服务没有 `bindings` 时只读账号，并说明缺少接口。
+状态来自 `GET /api/me/profile` 的 `user` 与 `bindings`；不凭平台名称假定服务可用。绑定详情复用 `POST /api/me/bindings/{platform}/verification`、`confirm`、`sync` 和 `DELETE /api/me/bindings/{platform}`。同步状态可能为 `disabled`：表示洛谷公开练习页返回 HTTP 403，保留已有记录但不再自动请求，管理员重新开启后才恢复；客户端应展示服务端 `message`，不要把它当成全局暂停。当前正式后端仅CF的 `self_service=true`，其他平台说明联系管理员；已绑定平台仍可按既有接口解绑和同步。旧服务没有 `bindings` 时只读账号，并说明缺少接口。
 
 CF申请验证码后，将验证码保存到公开资料再确认；改绑、解绑及已有账号的归属核验携带当前平台账号、ACMForever登录密码和显式确认。按后端原约束解释清理影响，不收集OJ密码，不使用管理员接口。密码/勾选/验证码不写实例状态；恢复时重新读服务器待验证状态。网络失败不自动重发写入，服务器拒绝时保留原绑定。归属核验写请求读取超时25秒，与网页一致，其余请求及10秒读取预警不变。
 

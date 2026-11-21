@@ -12,6 +12,7 @@ from feat.api.acm_api.crawler import Crawler
 from feat.api.acm_api.database import connect_db
 from feat.api.acm_api.luogu_client import LuoguUnavailable
 from feat.api.acm_api.problem_bank import save_metadata_batch
+from feat.api.acm_api.sync_policy import SYNC_LUOGU_ACCESS_RESTRICTED, SyncOutcome
 from feat.api.service_runtime import SyncEngine, WebTaskManager
 
 
@@ -149,6 +150,41 @@ class PracticeStorageTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(await Crawler.fetch_luogu_submission(None, self.user, 0, self.db, {}), -1)
             self.assertEqual(http.await_count, 1)
         self.assertEqual(await self.rows(), [])
+
+    async def test_http_403_preserves_account_restriction_metadata(self):
+        with patch.object(sync, "luogu_get", new=AsyncMock(side_effect=LuoguUnavailable("restricted", status=403))):
+            result = await Crawler.fetch_luogu_submission(None, self.user, 0, self.db, {})
+        self.assertIsInstance(result, SyncOutcome)
+        self.assertEqual(result, -1)
+        self.assertEqual(result.status, 403)
+        self.assertEqual(result.error_code, "access_restricted")
+
+    async def test_http_403_disables_only_that_member_and_later_skips_it(self):
+        await self.db.execute("INSERT INTO users(qq_id,name,luogu_id) VALUES('87654321','Other','5678')")
+        await self.db.commit()
+        engine = SyncEngine(self.path, {})
+        await engine.start()
+        self.addAsyncCleanup(engine.close)
+
+        calls = []
+
+        async def fetch(*args):
+            user = args[1]
+            calls.append(user["qq_id"])
+            if user["qq_id"] == "12345678":
+                return SyncOutcome(-1, status=403, error_code="access_restricted")
+            return 1
+
+        with patch.object(Crawler, "fetch_luogu_submission", new=fetch):
+            await engine.sync_all_users_data()
+            self.assertEqual(set(calls), {"12345678", "87654321"})
+            self.assertEqual(await engine.sync_single_platform_for_days("12345678", "luogu", 0), SYNC_LUOGU_ACCESS_RESTRICTED)
+
+        restricted = await self.one("SELECT sync_enabled,last_status,last_error_code FROM user_platform_sync_state WHERE user_qq_id='12345678' AND platform='luogu'")
+        healthy = await self.one("SELECT sync_enabled,last_status FROM user_platform_sync_state WHERE user_qq_id='87654321' AND platform='luogu'")
+        self.assertEqual((restricted["sync_enabled"], restricted["last_status"], restricted["last_error_code"]), (0, "disabled", "access_restricted"))
+        self.assertEqual((healthy["sync_enabled"], healthy["last_status"]), (1, "success"))
+        self.assertEqual(calls.count("12345678"), 1)
 
     async def test_changed_binding_cannot_receive_stale_snapshot(self):
         async def download(*args, **kwargs):

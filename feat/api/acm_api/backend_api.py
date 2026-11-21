@@ -1033,6 +1033,94 @@ async def api_tasks():
     return jsonify(tasks)
 
 
+@api.route("/admin/luogu-sync", methods=["GET"])
+@admin_required
+async def api_admin_luogu_sync():
+    """List Luogu accounts disabled after an account-level HTTP 403."""
+    db = await get_db()
+    try:
+        async with db.execute(
+            """
+            SELECT u.qq_id,u.name,u.status,u.luogu_id,u.account_epoch,
+                   s.last_status,s.last_error_code,s.last_error_message,
+                   s.last_attempt_at,s.last_success_at,s.updated_at
+            FROM users u
+            JOIN user_platform_sync_state s
+              ON s.user_qq_id=u.qq_id AND s.platform='luogu'
+            WHERE u.account_state='active'
+              AND TRIM(COALESCE(u.luogu_id,''))<>''
+              AND COALESCE(s.sync_enabled,1)=0
+            ORDER BY u.name COLLATE NOCASE,u.qq_id
+            """
+        ) as cursor:
+            return jsonify([dict(row) for row in await cursor.fetchall()])
+    finally:
+        await db.close()
+
+
+@api.route("/admin/luogu-sync/<qq_id>/enable", methods=["POST"])
+@admin_required
+async def api_enable_luogu_sync(qq_id):
+    """Clear one account-level Luogu block and optionally queue a fresh sync."""
+    qq_id = str(qq_id).strip()
+    if not _valid_qq(qq_id):
+        return jsonify({"success": False, "message": "QQ 号必须为 4–12 位数字。"}), 400
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        await require_active_user(db, qq_id)
+        async with db.execute(
+            "SELECT luogu_id,account_epoch FROM users WHERE qq_id=? AND account_state='active'",
+            (qq_id,),
+        ) as cursor:
+            user = await cursor.fetchone()
+        if not user or not (user["luogu_id"] or "").strip():
+            await db.rollback()
+            return jsonify({"success": False, "message": "该成员尚未绑定洛谷账号。"}), 400
+        now = int(time.time())
+        await db.execute(
+            """
+            INSERT INTO user_platform_sync_state(user_qq_id,platform,sync_enabled,updated_at)
+            VALUES(?,?,1,?)
+            ON CONFLICT(user_qq_id,platform) DO UPDATE SET
+              sync_enabled=1,
+              last_status=CASE WHEN user_platform_sync_state.last_success_at>0 THEN 'success' ELSE 'never' END,
+              last_error_code=NULL,last_error_message=NULL,
+              consecutive_failures=0,next_retry_at=0,updated_at=excluded.updated_at
+            """,
+            (qq_id, "luogu", now),
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
+
+    task_id = None
+    submitter = current_app.config.get("PLUGIN_CONFIG", {}).get("_account_sync_submitter")
+    if callable(submitter):
+        try:
+            task = submitter(qq_id, ["luogu"], expected_epoch=user["account_epoch"])
+            if inspect.isawaitable(task):
+                task = await task
+            task_id = task.get("id") if task else None
+        except TypeError:
+            # Keep compatibility with small test/deployment adapters that only
+            # accept the historical two positional arguments.
+            task = submitter(qq_id, ["luogu"])
+            if inspect.isawaitable(task):
+                task = await task
+            task_id = task.get("id") if task else None
+        except Exception:
+            LOG.exception("洛谷同步已重新开启，但任务调度失败：%s", qq_id)
+    return jsonify({
+        "success": True,
+        "message": "已重新开启该成员的洛谷同步。" + ("同步任务已排队。" if task_id else "下一轮同步将自动处理。"),
+        "task_id": task_id,
+    }), 202 if task_id else 200
+
+
 @api.route("/tasks/<task_id>/cancel", methods=["POST"])
 @admin_required
 async def api_cancel_task(task_id):

@@ -245,9 +245,29 @@ async def bindings_summary(db, qq_id):
         token = getattr(engine, "_binding_tokens", {}).get((str(qq_id), platform))
         live_sync = state and state["last_status"] == "running" and lock and lock.locked() and token and token[3] == identity["version"] and token[2].casefold() == identity["account"].casefold()
         account = user[field] or ""
-        status = "running" if live_sync else active["status"] if active and account else "success" if state and state["last_status"] in {"success", "backfill"} else "failed" if state and state["last_status"] not in {"never", "migrated"} else "never"
-        message = {"never": "账号已绑定，尚无成功同步记录。" if account else "尚未绑定 OJ 账号。", "queued": "同步已排队。", "running": "正在同步，已有记录仍可查看。", "success": "同步成功。", "failed": "最近同步失败或任务已中断，可重试；有效历史数据保留。"}[status]
-        result.append({"platform": platform, "label": LABELS[platform], "account": account, "binding_status": "pending" if pending else "bound" if account else "unbound", "self_service": platform == "codeforces", "sync_status": status, "last_success_at": state["last_success_at"] if state else 0, "message": message, "verification": {"account": pending["account"], "verification_id": pending["verification_id"], "code": pending["verification_code"], "expires_at": pending["expires_at"]} if pending else None})
+        restricted = platform == "luogu" and state and int(state["sync_enabled"] or 0) == 0
+        status = (
+            "disabled"
+            if restricted
+            else "running"
+            if live_sync
+            else active["status"]
+            if active and account
+            else "success"
+            if state and state["last_status"] in {"success", "backfill"}
+            else "failed"
+            if state and state["last_status"] not in {"never", "migrated"}
+            else "never"
+        )
+        message = {
+            "never": "账号已绑定，尚无成功同步记录。" if account else "尚未绑定 OJ 账号。",
+            "queued": "同步已排队。",
+            "running": "正在同步，已有记录仍可查看。",
+            "success": "同步成功。",
+            "disabled": "账号开启了访问限制，洛谷同步已停用，请联系管理员重新开启。",
+            "failed": "最近同步失败或任务已中断，可重试；有效历史数据保留。",
+        }[status]
+        result.append({"platform": platform, "label": LABELS[platform], "account": account, "binding_status": "pending" if pending else "bound" if account else "unbound", "self_service": platform == "codeforces", "sync_status": status, "sync_enabled": not restricted, "last_success_at": state["last_success_at"] if state else 0, "message": message, "verification": {"account": pending["account"], "verification_id": pending["verification_id"], "code": pending["verification_code"], "expires_at": pending["expires_at"]} if pending else None})
     for item in result:
         provenance = await row(db, "SELECT source,owner_verified_at,existence_status FROM binding_provenance WHERE qq_id=? AND platform=? AND binding_version=? AND account_canonical=?", (qq_id, item["platform"], user[platform_spec(item["platform"])[2]], item["account"].casefold()))
         item["provenance"] = dict(provenance) if provenance else None

@@ -255,7 +255,7 @@ CF 详情及 PDF 接口在读取时统一解析 `100A` / `cf_100A` 等前缀和�
 
 | 接口 | 请求 / 返回 |
 | --- | --- |
-| `GET /api/me/profile` | 新增 `bindings` 数组，每个平台包含 `platform/label/account/binding_status/self_service/sync_status/last_success_at/message/verification`；`verification` 是本人仍有效的验证信息或 null |
+| `GET /api/me/profile` | 新增 `bindings` 数组，每个平台包含 `platform/label/account/binding_status/self_service/sync_status/sync_enabled/last_success_at/message/verification`；`verification` 是本人仍有效的验证信息或 null |
 | `POST /api/me/bindings/<platform>/verification` | JSON `account`；返回 `verification_id/account/code/expires_at/instructions`。验证码 10 分钟有效，重新申请替换旧验证 |
 | `POST /api/me/bindings/<platform>/confirm` | JSON `verification_id`；改绑还须提交 `password`、`confirmed:true`、`current_account`；服务端重新读取公开资料核验，成功消费验证并提交绑定 |
 | `DELETE /api/me/bindings/<platform>` | JSON `password`、`confirmed:true`、`current_account`；确认当前 Web 密码及目标账号后解绑 |
@@ -265,11 +265,13 @@ Web 归属验证当前实现 Codeforces：账号存在性使用已有验证器�
 
 管理员导入且尚未完成本人核验的 Codeforces 绑定，允许向 `verification` 申请当前 handle（忽略大小写）的验证码；来源记录必须匹配当前账号与绑定版本且 `owner_verified_at=null`。确认接口仍要求当前 Web 密码、明确确认和服务端公开资料归属验证。成功后原子更新来源为 `member_verified`，保留原账号、绑定版本、AC、提交证据及活动挑战；仍沿用确认后的同步调度。已核验、无来源记录或来源与当前绑定不匹配时，重复申请当前 handle 返回 `409 already_bound`。
 
-`binding_status` 为 `unbound/pending/bound`，同步为 `never/queued/running/success/failed`。`last_success_at` 为 Unix 秒，0 代表没有成功记录。`verification` 含 `account/verification_id/code/expires_at`，不能将该资料发给其他成员。服务重启后丢失的运行中任务显示失败并可重试；旧账号的任务不会使新绑定显示同步中。绑定提交与同步调度分别反馈：排队失败时响应仍表明绑定成功，`sync_status=failed`，刷新后仍能看到失败状态。
+`binding_status` 为 `unbound/pending/bound`，同步为 `never/queued/running/success/failed/disabled`。`disabled` 只用于洛谷公开练习页返回 HTTP 403 的成员账号；此时 `sync_enabled=false`，自动同步和普通手动同步跳过该平台，但已有记录保留，需管理员重新开启。`last_success_at` 为 Unix 秒，0 代表没有成功记录。`verification` 含 `account/verification_id/code/expires_at`，不能将该资料发给其他成员。服务重启后丢失的运行中任务显示失败并可重试；旧账号的任务不会使新绑定显示同步中。绑定提交与同步调度分别反馈：排队失败时响应仍表明绑定成功，`sync_status=failed`，刷新后仍能看到失败状态。
 
 限频按成员、平台、动作持久保存：申请验证码间隔 30 秒，确认与解绑间隔 3 秒，同步间隔 60 秒，每个动作最多 15 次 / 15 分钟；上游核验并发最多 4。常见错误为 `confirmation_required`（400）、`invalid_password`（403）、`ownership_unverified`（400）、`verification_expired/verification_changed/binding_changed/account_occupied`（409）、`rate_limited`（429）、`upstream_unavailable/verification_unavailable`（503）。仅浏览器提交“已验证”不会完成绑定。
 
 成功解绑 / 改绑在同一事务清理该成员该平台的 AC、提交证据、同步状态并结束活动挑战；收藏、历史笔记、复习与计划存档保留。每个平台使用持久绑定版本拦截旧同步批次，包括解绑后重绑同名账号的情况。
+
+管理员同步任务页使用 `GET /api/admin/luogu-sync` 查看被 403 单独停用的洛谷账号，使用 `POST /api/admin/luogu-sync/<qq_id>/enable` 清除停用标记并尝试重新排队该成员的洛谷全量同步。`GET /api/tasks` 的成员任务快照补充 `member` 或 `members/member_statuses`，页面可按成员资料中的 `users.status` 身份筛选；未设置身份使用空值筛选。
 
 管理员 `PUT /api/user`、`POST /api/register` 改动 OJ 绑定时，须附 `confirm_bindings:true`、`expected_bindings`（按字段名，如 `cf_handle`）和 `binding_versions`（按平台名，如 `codeforces`）。版本来自成员详情中的 `cf_binding_version/luogu_binding_version/nowcoder_binding_version/atcoder_binding_version/cjlu_binding_version`；新成员的预期账号为空、版本为 0。资料编辑省略的绑定字段不会被清空。成功与确认失败均记录操作者、目标、平台、动作、结果和时间，不保存提交的密码。
 

@@ -19,7 +19,7 @@ import aiosqlite
 import logging
 from .cf_client import CFUnavailable, cf_request
 from .luogu_client import luogu_get, page_context
-from .sync_policy import SYNC_PAUSED, submission_sync_paused
+from .sync_policy import SYNC_PAUSED, SyncOutcome, submission_sync_paused
 
 LOG = logging.getLogger("acm_api.crawler")
 
@@ -300,6 +300,11 @@ class Crawler:
             return await sync_public_practice(session, user_row, db, config)
         except (aiohttp.ClientError, asyncio.TimeoutError, LuoguUnavailable, ValueError) as error:
             LOG.warning("[同步模块] 洛谷公开练习页同步失败，保留已有记录：%s", error)
+            if getattr(error, "status", None) == 403:
+                # Keep the historical ``-1`` fetcher contract while carrying
+                # enough metadata for the sync engine to disable only this
+                # member's Luogu account.
+                return SyncOutcome(-1, status=403, error_code="access_restricted", message=str(error))
             return -1
 
     # ================= 牛客 Nowcoder =================

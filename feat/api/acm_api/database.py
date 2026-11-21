@@ -95,12 +95,13 @@ async def connect_db(db_path):
         "last_attempt_at INTEGER NOT NULL DEFAULT 0, last_success_at INTEGER NOT NULL DEFAULT 0, "
         "last_status TEXT NOT NULL DEFAULT 'never', last_error_code TEXT, last_error_message TEXT, "
         "consecutive_failures INTEGER NOT NULL DEFAULT 0, next_retry_at INTEGER NOT NULL DEFAULT 0, "
-        "updated_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_qq_id, platform))"
+        "sync_enabled INTEGER NOT NULL DEFAULT 1, updated_at INTEGER NOT NULL DEFAULT 0, "
+        "PRIMARY KEY(user_qq_id, platform))"
     )
     await db.execute("CREATE INDEX IF NOT EXISTS idx_sync_state_status ON user_platform_sync_state(last_status, next_retry_at)")
     async with db.execute("PRAGMA table_info(user_platform_sync_state)") as cursor:
         sync_cols = {row["name"] for row in await cursor.fetchall()}
-    for column, definition in (("binding_key", "TEXT"), ("full_history_at", "INTEGER NOT NULL DEFAULT 0"), ("coverage_through_at", "INTEGER NOT NULL DEFAULT 0")):
+    for column, definition in (("binding_key", "TEXT"), ("full_history_at", "INTEGER NOT NULL DEFAULT 0"), ("coverage_through_at", "INTEGER NOT NULL DEFAULT 0"), ("sync_enabled", "INTEGER NOT NULL DEFAULT 1")):
         if column not in sync_cols:
             await db.execute(f"ALTER TABLE user_platform_sync_state ADD COLUMN {column} {definition}")
     await db.execute("CREATE TABLE IF NOT EXISTS cf_problem_cache (contest_id INTEGER NOT NULL, problem_index TEXT NOT NULL, name TEXT NOT NULL, rating INTEGER, tags TEXT NOT NULL DEFAULT '[]', verified_at INTEGER NOT NULL, PRIMARY KEY(contest_id,problem_index))")
