@@ -1006,6 +1006,24 @@
         "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/150"
       ],
       "pr": 150
+    },
+    "1.0.1": {
+      "uploaders": [
+        "MiaoJJ13445"
+      ],
+      "reviewRequesters": [
+        "MiaoJJ13445"
+      ],
+      "reviewers": [
+        "MiaoJJ13445"
+      ],
+      "publishers": [],
+      "pr": 170,
+      "status": "pending",
+      "scope": "1.0.1/code46 发布准备；待 PR #170 Review 完成后更新为 reviewed，再创建 v1.0.1 Tag。",
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/170"
+      ]
     }
   },
   "sources": [
