@@ -11,7 +11,15 @@ from .database import isolated_connection
 from .binding_guard import BindingGuard, BindingChanged
 from .binding_service import platform_spec
 from .account_lifecycle_service import AccountLifecycleError, snapshot_epoch, require_active_user
-from .sync_policy import SYNC_PAUSED, SyncFailure, luogu_retry_delay, submission_sync_paused
+from .sync_policy import (
+    SYNC_LUOGU_ACCESS_RESTRICTED,
+    SYNC_PAUSED,
+    SyncFailure,
+    SyncOutcome,
+    luogu_retry_delay,
+    submission_sync_paused,
+    sync_result_is_non_failure,
+)
 
 
 def _sync_platform_label(platform):
@@ -72,6 +80,11 @@ class SyncMixin:
                 # A bounded backfill succeeds without claiming full-history coverage.
                 clause = "last_attempt_at=?,last_success_at=?,last_status=?,last_error_code=NULL,last_error_message=NULL,consecutive_failures=0,next_retry_at=0,updated_at=?"
                 values = [now, now, status, now]
+            elif status == "disabled":
+                # A Luogu 403 is an account-level access restriction, not a
+                # reason to cool down or fail every other Luogu account.
+                clause = "last_attempt_at=?,last_status=?,last_error_code=?,last_error_message=?,consecutive_failures=consecutive_failures+1,next_retry_at=0,sync_enabled=0,updated_at=?"
+                values = [now, status, error_code, error_message, now]
             elif success:
                 if platform == "codeforces":
                     async with connection.execute("SELECT coverage_through_at FROM user_platform_sync_state WHERE user_qq_id=? AND platform=?", (str(qq_id), platform)) as state_cursor:
@@ -137,6 +150,72 @@ class SyncMixin:
             await connection.commit()
             return bool(result.rowcount)
 
+    @staticmethod
+    def _platform_sync_disabled(platform, state):
+        return platform == "luogu" and state is not None and int(state["sync_enabled"] or 0) == 0
+
+    @staticmethod
+    def _is_access_restricted_exception(error):
+        return getattr(error, "status", None) == 403
+
+    @staticmethod
+    def _restricted_outcome(error):
+        return SyncOutcome(
+            -1,
+            status=403,
+            error_code="access_restricted",
+            message=str(error),
+        )
+
+    @staticmethod
+    def _is_access_restricted_result(result):
+        if isinstance(result, SyncOutcome):
+            return result.status == 403 and result.error_code == "access_restricted"
+        return (
+            isinstance(result, SyncFailure)
+            and result.code == "access_restricted"
+            and result.http_status == 403
+        )
+
+    async def _finalize_platform_result(self, qq_id, platform, result, days, *, full_history=None):
+        """Persist one fetch result and normalize account-level Luogu blocks."""
+        if platform == "luogu" and self._is_access_restricted_result(result):
+            await self._mark_platform_sync(
+                qq_id,
+                platform,
+                "disabled",
+                int(time.time()),
+                error_code="access_restricted",
+                error_message="洛谷用户开启了访问限制（HTTP 403），已停用该用户的洛谷同步",
+            )
+            return SYNC_LUOGU_ACCESS_RESTRICTED
+        if result is not None and result >= 0:
+            finished_at = int(time.time())
+            if days == 0:
+                success_options = {"success": True, "cursor": finished_at}
+                if full_history is not None:
+                    success_options["full_history"] = full_history
+                if not await self._mark_platform_sync(
+                    qq_id, platform, "success", finished_at, **success_options
+                ):
+                    return -4
+            else:
+                if not await self._mark_platform_sync(
+                    qq_id, platform, "backfill", finished_at
+                ):
+                    return -4
+        else:
+            await self._mark_platform_sync(
+                qq_id,
+                platform,
+                "failed",
+                int(time.time()),
+                error_code=getattr(result, "code", "fetch_failed"),
+                error_message=getattr(result, "message", "平台抓取失败"),
+                failure=result,
+            )
+        return result
+
     async def _fetch_platform_with_limit(self, platform, fetcher, session, user, start_timestamp):
         async def fetch():
             if platform == "codeforces":
@@ -190,6 +269,7 @@ class SyncMixin:
             user_new_count = 0
             sync_succeeded = True
             has_paused_platform = False
+            has_disabled_platform = False
             session = self._http_session
             for platform, field, fetcher in (
                 ("codeforces", "cf_handle", Crawler.fetch_cf_submissions),
@@ -204,6 +284,10 @@ class SyncMixin:
                     has_paused_platform = True
                     continue
                 state = await self._get_platform_sync_state(qq_id, platform, legacy_cursor, user=user)
+                if self._platform_sync_disabled(platform, state):
+                    has_disabled_platform = True
+                    LOG.info("跳过用户 %s 的洛谷同步：该账号已被管理员停用。", qq_id)
+                    continue
                 cursor_timestamp = int(state["cursor_timestamp"] or 0)
                 # 外部平台偶发延迟或请求异常时，游标可能先推进而漏掉记录。
                 # AtCoder 每轮回看 7 天，已有题目由爬虫集合去重，不会重复入库。
@@ -218,18 +302,13 @@ class SyncMixin:
                     result = await self._fetch_platform_with_limit(
                         platform, fetcher, session, user, start_timestamp
                     )
-                    if result < 0:
-                        sync_succeeded = False
-                        await self._mark_platform_sync(
-                            qq_id, platform, "failed", int(time.time()),
-                            error_code="fetch_failed", error_message="平台抓取失败", failure=result,
-                        )
-                    else:
+                    result = await self._finalize_platform_result(qq_id, platform, result, 0)
+                    if result == SYNC_LUOGU_ACCESS_RESTRICTED:
+                        has_disabled_platform = True
+                    elif result is not None and result >= 0:
                         user_new_count += result
-                        await self._mark_platform_sync(
-                            qq_id, platform, "success", int(time.time()),
-                            success=True, cursor=current_sync_time,
-                        )
+                    elif not sync_result_is_non_failure(result):
+                        sync_succeeded = False
                 except asyncio.CancelledError:
                     await self._mark_platform_sync(
                         qq_id, platform, "cancelled", int(time.time()),
@@ -237,6 +316,12 @@ class SyncMixin:
                     )
                     raise
                 except Exception as exc:
+                    if platform == "luogu" and self._is_access_restricted_exception(exc):
+                        restricted = await self._finalize_platform_result(
+                            qq_id, platform, self._restricted_outcome(exc), 0
+                        )
+                        has_disabled_platform = restricted == SYNC_LUOGU_ACCESS_RESTRICTED
+                        continue
                     sync_succeeded = False
                     await self._mark_platform_sync(
                         qq_id, platform, "failed", int(time.time()),
@@ -244,8 +329,11 @@ class SyncMixin:
                     )
                     LOG.exception("同步用户 %s 的 %s 数据失败", qq_id, field)
             if sync_succeeded:
-                if has_paused_platform:
-                    LOG.info("用户 %s 的启用平台已同步；洛谷过题记录同步已暂停，保留原同步时间。", qq_id)
+                if has_paused_platform or has_disabled_platform:
+                    if has_disabled_platform:
+                        LOG.info("用户 %s 的启用平台已同步；洛谷访问受限账号已跳过，等待管理员重新开启。", qq_id)
+                    else:
+                        LOG.info("用户 %s 的启用平台已同步；洛谷过题记录同步已暂停，保留原同步时间。", qq_id)
                     return True
                 if not await self._mark_user_synced(user, current_sync_time):
                     return False
@@ -321,6 +409,9 @@ class SyncMixin:
                 return SYNC_PAUSED
             start_timestamp = 0 if days == 0 else int(time.time()) - days * 24 * 60 * 60
             state = await self._get_platform_sync_state(qq_id, normalized_platform, user["last_sync_timestamp"] or 0, user=user)
+            if self._platform_sync_disabled(normalized_platform, state):
+                LOG.info("跳过用户 %s 的洛谷同步：该账号已被管理员停用。", qq_id)
+                return SYNC_LUOGU_ACCESS_RESTRICTED
             if incremental and normalized_platform == "codeforces":
                 start_timestamp = int(state["cursor_timestamp"] or 0) if (
                     state["full_history_at"] and state["coverage_through_at"]
@@ -342,23 +433,20 @@ class SyncMixin:
                 await self._mark_platform_sync(qq_id, normalized_platform, "cancelled", int(time.time()), error_code="cancelled")
                 raise
             except Exception as exc:
+                if normalized_platform == "luogu" and self._is_access_restricted_exception(exc):
+                    return await self._finalize_platform_result(
+                        qq_id, normalized_platform, self._restricted_outcome(exc), days,
+                        full_history=True,
+                    )
                 await self._mark_platform_sync(qq_id, normalized_platform, "failed", int(time.time()), error_code="internal", error_message=str(exc)[:500])
                 raise
-            if result is not None and result >= 0:
-                finished_at = int(time.time())
-                if days == 0:
-                    if not await self._mark_platform_sync(
-                        qq_id, normalized_platform, "success", finished_at,
-                        success=True, cursor=finished_at,
-                        full_history=normalized_platform != "codeforces",
-                    ):
-                        return -4
-                else:
-                    if not await self._mark_platform_sync(qq_id, normalized_platform, "backfill", finished_at):
-                        return -4
-            else:
-                await self._mark_platform_sync(qq_id, normalized_platform, "failed", int(time.time()), error_code="fetch_failed", error_message="平台抓取失败", failure=result)
-            return result
+            return await self._finalize_platform_result(
+                qq_id,
+                normalized_platform,
+                result,
+                days,
+                full_history=normalized_platform != "codeforces",
+            )
 
     async def sync_single_user_for_days(self, qq_id: str, days: int):
         """同步指定用户的各已绑定平台，返回平台到新增数量的明细。"""
@@ -388,6 +476,10 @@ class SyncMixin:
                     results[platform] = SYNC_PAUSED
                     continue
                 state = await self._get_platform_sync_state(qq_id, platform, legacy_cursor, user=user)
+                if self._platform_sync_disabled(platform, state):
+                    results[platform] = SYNC_LUOGU_ACCESS_RESTRICTED
+                    LOG.info("跳过用户 %s 的洛谷同步：该账号已被管理员停用。", qq_id)
+                    continue
                 cursor_timestamp = int(state["cursor_timestamp"] or 0)
                 start_timestamp = requested_start if days else (cursor_timestamp or int(time.time()) - 7 * 86400)
                 attempt_at = int(time.time())
@@ -396,30 +488,20 @@ class SyncMixin:
                     result = await self._fetch_platform_with_limit(
                         platform, fetcher, session, user, start_timestamp
                     )
-                    results[platform] = result
-                    if result is not None and result >= 0:
-                        if days == 0:
-                            finished_at = int(time.time())
-                            if not await self._mark_platform_sync(
-                                qq_id, platform, "success", finished_at,
-                                success=True, cursor=finished_at,
-                            ):
-                                results[platform] = -4
-                        else:
-                            finished_at = int(time.time())
-                            if not await self._mark_platform_sync(qq_id, platform, "backfill", finished_at):
-                                results[platform] = -4
-                    else:
-                        await self._mark_platform_sync(
-                            qq_id, platform, "failed", int(time.time()),
-                            error_code="fetch_failed", error_message="平台抓取失败", failure=result,
-                        )
+                    results[platform] = await self._finalize_platform_result(
+                        qq_id, platform, result, days
+                    )
                 except asyncio.CancelledError:
                     await self._mark_platform_sync(
                         qq_id, platform, "cancelled", int(time.time()), error_code="cancelled"
                     )
                     raise
                 except Exception as exc:
+                    if platform == "luogu" and self._is_access_restricted_exception(exc):
+                        results[platform] = await self._finalize_platform_result(
+                            qq_id, platform, self._restricted_outcome(exc), days
+                        )
+                        continue
                     results[platform] = -4
                     await self._mark_platform_sync(
                         qq_id, platform, "failed", int(time.time()),
@@ -437,7 +519,10 @@ class SyncMixin:
             if not isinstance(result, dict):
                 await event.reply(text="⚠️ 账号已保存，但首次同步未能完成，将在后续自动同步时重试。")
                 return
-            failed = [platform for platform, count in result.items() if count is None or (count < 0 and count != SYNC_PAUSED)]
+            failed = [
+                platform for platform, count in result.items()
+                if count is None or (count < 0 and not sync_result_is_non_failure(count))
+            ]
             if failed:
                 await event.reply(
                     text="⚠️ 账号已保存，但以下平台首次同步失败："
@@ -445,7 +530,9 @@ class SyncMixin:
                     + "。后续自动同步会继续重试。"
                 )
                 return
-            if SYNC_PAUSED in result.values():
+            if SYNC_LUOGU_ACCESS_RESTRICTED in result.values():
+                await event.reply(text="ℹ️ 账号已保存，其他平台已同步；洛谷因访问限制已停用，需管理员重新开启。")
+            elif SYNC_PAUSED in result.values():
                 await event.reply(text="ℹ️ 账号已保存，启用平台已同步；洛谷过题记录同步已暂停，已有记录保留。")
             else:
                 await event.reply(text="✅ 账号绑定后的全部历史记录同步已完成。")
@@ -463,6 +550,8 @@ class SyncMixin:
                 count = await self.sync_single_platform_for_days(qq_id, sync_platform, 0)
             if count is None:
                 await event.reply(text=f"⚠️ {_sync_platform_label(sync_platform)} 已绑定，但已有同步任务运行，将在后续自动同步时重试。")
+            elif count == SYNC_LUOGU_ACCESS_RESTRICTED:
+                await event.reply(text=f"ℹ️ {_sync_platform_label(sync_platform)} 已绑定；账号开启了访问限制，已停用该用户同步，请管理员重新开启。")
             elif count == SYNC_PAUSED:
                 await event.reply(text=f"ℹ️ {_sync_platform_label(sync_platform)} 已绑定；过题记录同步已暂停，已有记录保留。")
             elif count < 0:
@@ -511,7 +600,7 @@ class SyncMixin:
             count = await self.sync_single_platform_for_days(qq_id, platform, days)
             if task:
                 task["result"] = count
-                task["status"] = "completed" if count is not None and (count >= 0 or count == SYNC_PAUSED) else "failed"
+                task["status"] = "completed" if count is not None and (count >= 0 or sync_result_is_non_failure(count)) else "failed"
                 task["finished_at"] = int(time.time())
             if count is None:
                 await event.reply(text="⚠️ 当前已有该用户的同步任务运行，请稍后再试。")
@@ -519,6 +608,8 @@ class SyncMixin:
                 await event.reply(text=f"❌ 找不到用户 {qq_id}。")
             elif count == -2:
                 await event.reply(text=f"❌ 用户 {qq_id} 尚未绑定 {platform} 账号。")
+            elif count == SYNC_LUOGU_ACCESS_RESTRICTED:
+                await event.reply(text=f"ℹ️ {_sync_platform_label(platform)} 账号开启了访问限制，已停用该用户同步；请管理员重新开启。")
             elif count == SYNC_PAUSED:
                 await event.reply(text=f"ℹ️ {_sync_platform_label(platform)} 过题记录同步已暂停，已有记录保留。")
             elif count < 0:
@@ -550,15 +641,30 @@ class SyncMixin:
             if not isinstance(result, dict):
                 await event.reply(text=f"❌ 用户 {qq_id} 不存在或同步被跳过。")
                 return
-            failed = any(count < 0 and count != SYNC_PAUSED for count in result.values())
+            failed = any(count < 0 and not sync_result_is_non_failure(count) for count in result.values())
             rows = [
-                (name, "已暂停，保留已有记录" if count == SYNC_PAUSED else "失败" if count < 0 else f"新增 {count} 条记录")
+                (
+                    name,
+                    "洛谷访问受限，已停用，等待管理员重新开启"
+                    if count == SYNC_LUOGU_ACCESS_RESTRICTED
+                    else "已暂停，保留已有记录"
+                    if count == SYNC_PAUSED
+                    else "失败"
+                    if count < 0
+                    else f"新增 {count} 条记录"
+                )
                 for name, count in result.items()
             ]
             image = await asyncio.to_thread(
                 self._generate_table_image,
                 f"用户 {qq_id} 同步结果",
-                "⚠️ 部分平台失败" if failed else "ℹ️ 启用平台同步完成，部分平台已暂停" if SYNC_PAUSED in result.values() else "✅ 全部平台同步完成",
+                "⚠️ 部分平台失败"
+                if failed
+                else "ℹ️ 洛谷访问受限，已停用该用户同步"
+                if SYNC_LUOGU_ACCESS_RESTRICTED in result.values()
+                else "ℹ️ 启用平台同步完成，部分平台已暂停"
+                if SYNC_PAUSED in result.values()
+                else "✅ 全部平台同步完成",
                 ("平台", "结果"),
                 rows,
                 (360, 970),

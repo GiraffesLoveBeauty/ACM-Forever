@@ -293,6 +293,22 @@ class RequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.get.call_count, 1)
         self.assertFalse(session.get.call_args.kwargs["allow_redirects"])
 
+    async def test_user_forbidden_can_be_retried_without_shared_cooldown(self):
+        session = SimpleNamespace(get=unittest.mock.Mock(side_effect=[_Response(status=403), _Response(raw=b'ok')]))
+        with self.assertRaises(LuoguUnavailable) as caught:
+            await luogu_get(
+                session,
+                "https://www.luogu.com.cn/user/1234/practice",
+                cooldown_on_forbidden=False,
+            )
+        self.assertEqual(caught.exception.retry_after, 0)
+        self.assertEqual(await luogu_get(
+            session,
+            "https://www.luogu.com.cn/user/5678/practice",
+            cooldown_on_forbidden=False,
+        ), b"ok")
+        self.assertEqual(session.get.call_count, 2)
+
     async def test_429_honors_longer_retry_after(self):
         session = SimpleNamespace(get=lambda *a, **k: _Response(status=429, headers={"Retry-After": "900"}))
         with self.assertRaises(LuoguUnavailable) as caught:

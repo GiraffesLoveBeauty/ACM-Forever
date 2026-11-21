@@ -67,7 +67,9 @@ async def sync_public_practice(session, user, db, config):
         session, ORIGIN + "/user/" + account + "/practice",
         interval=config.get("luogu_request_interval", 2.0),
         headers={"User-Agent": "Mozilla/5.0", "Accept": "text/html,application/xhtml+xml"},
-        timeout=30, recover_on_response=False,
+        timeout=30,
+        recover_on_response=False,
+        cooldown_on_forbidden=False,
     )
     try:
         passed = practice_snapshot(raw, account)

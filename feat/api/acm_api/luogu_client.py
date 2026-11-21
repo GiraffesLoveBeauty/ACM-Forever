@@ -176,7 +176,7 @@ async def save_request_state(db):
     await db.commit()
 
 
-async def luogu_get(session, url, *, interval=2.0, headers=None, timeout=30, recover_on_response=False):
+async def luogu_get(session, url, *, interval=2.0, headers=None, timeout=30, recover_on_response=False, cooldown_on_forbidden=True):
     """匿名访问固定原站；不跟随登录/验证跳转，不重试 403/429。
 
     HTTP 200 只证明收到了响应，不能证明它是可用的洛谷公开数据。
@@ -210,8 +210,12 @@ async def luogu_get(session, url, *, interval=2.0, headers=None, timeout=30, rec
                         if retry.isdigit():
                             delay = max(delay, min(int(retry), 86400))
                         reason = "服务器拒绝本次访问" if status == 403 else "请求频率受限"
-                        error = LuoguUnavailable(f"洛谷返回 HTTP {status}：{reason}，停止采集并冷却至少 {delay} 秒",
-                                                 status=status, retry_after=delay)
+                        cooldown = status != 403 or cooldown_on_forbidden
+                        suffix = f"，停止采集并冷却至少 {delay} 秒" if cooldown else "，停止本次成员采集"
+                        error = LuoguUnavailable(f"洛谷返回 HTTP {status}：{reason}{suffix}",
+                                                 status=status, retry_after=delay if cooldown else 0)
+                        if not cooldown:
+                            raise error
                         raise _open_gate(error, 300 if status == 403 else 60)
                     if status == 404:
                         raise LuoguUnavailable("洛谷返回 HTTP 404：题目或公开资源不存在", status=status)

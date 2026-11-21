@@ -311,10 +311,13 @@ class Crawler:
         try:
             return await sync_public_practice(session, user_row, db, config)
         except (aiohttp.ClientError, asyncio.TimeoutError, LuoguUnavailable, ValueError) as error:
-            from .sync_policy import SyncFailure
+            from .sync_policy import SyncFailure, SyncOutcome
             failure = request_failure(error)
             LOG.warning("[同步模块] 洛谷公开练习页同步失败，保留已有记录：%s", failure)
-            # 保持旧调用方使用的 -1 结果，同时让任务接口拿到具体原因和实际 HTTP 状态。
+            # 403 表示当前成员开启了访问限制，不应触发全站冷却；保留旧的
+            # SyncOutcome 整数契约，调度器会将其归一化为 -6。
+            if failure.status == 403:
+                return SyncOutcome(-1, status=403, error_code="access_restricted", message=str(failure))
             return SyncFailure(str(failure), code=failure.code, retry_after=failure.retry_after,
                                http_status=failure.status, cause_http_status=failure.cause_http_status,
                                deferred=failure.deferred, attention_required=failure.attention_required)
