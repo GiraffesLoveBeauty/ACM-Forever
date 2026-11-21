@@ -82,6 +82,24 @@ export function date(value) {
   const d = new Date(typeof value === 'number' ? value * 1000 : value);
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
 }
+// 同步任务的失败提示统一格式化，管理员任务页与成员训练页显示相同的原因和状态。
+export function syncFailureMessage(detail) {
+  if (!detail?.message) return '';
+  const extra = [];
+  if (
+    Number.isInteger(detail.http_status) &&
+    !detail.message.includes(`HTTP ${detail.http_status}`)
+  )
+    extra.push(`HTTP ${detail.http_status}`);
+  if (
+    Number.isInteger(detail.cause_http_status) &&
+    !detail.message.includes(`HTTP ${detail.cause_http_status}`)
+  )
+    extra.push(`触发冷却的状态：HTTP ${detail.cause_http_status}`);
+  if (detail.attention_required) extra.push('多次请求失败，请管理员检查访问情况');
+  if (detail.next_retry_at) extra.push(`可重试时间：${date(detail.next_retry_at)}`);
+  return detail.message + (extra.length ? `（${extra.join('；')}）` : '');
+}
 export async function api(path, options = {}) {
   const sessionVersion = adminSessionVersion();
   let body = options.body;

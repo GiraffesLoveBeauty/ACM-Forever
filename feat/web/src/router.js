@@ -16,6 +16,7 @@ export const sections = {
   'cf-practice': 'CF 练习赛选题',
   contests: '复盘管理',
   tasks: '同步任务',
+  'sync-center': '成员同步中心',
   moderation: '内容审核',
   settings: '全局设置',
   wiki: 'Wiki 知识手册',

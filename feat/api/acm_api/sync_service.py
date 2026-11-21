@@ -12,8 +12,13 @@ from .binding_guard import BindingGuard, BindingChanged
 from .binding_service import platform_spec
 from .account_lifecycle_service import AccountLifecycleError, snapshot_epoch, require_active_user
 from .sync_policy import (
-    SYNC_LUOGU_ACCESS_RESTRICTED, SYNC_PAUSED, SyncOutcome,
-    submission_sync_paused, sync_result_is_non_failure,
+    SYNC_LUOGU_ACCESS_RESTRICTED,
+    SYNC_PAUSED,
+    SyncFailure,
+    SyncOutcome,
+    luogu_retry_delay,
+    submission_sync_paused,
+    sync_result_is_non_failure,
 )
 
 
@@ -52,14 +57,25 @@ class SyncMixin:
             await connection.commit()
             return state
 
-    async def _mark_platform_sync(self, qq_id, platform, status, now, *, success=False, error_code=None, error_message=None, cursor=None, full_history=False):
+    async def _mark_platform_sync(self, qq_id, platform, status, now, *, success=False, error_code=None, error_message=None, cursor=None, full_history=False, failure=None):
         # Luogu always reads the complete public P-problem AC set, even for a day-range request.
         # This marks snapshot coverage only; it is not acceptance-time evidence.
         if platform == "luogu" and success:
             full_history = True
         async with isolated_connection(self.db) as connection:
             if status == "running":
-                clause, values = "last_attempt_at=?,last_status=?,updated_at=?", [now, status, now]
+                # 洛谷尚可能被门禁跳过；直到实际请求有结果才更新尝试时间。
+                clause, values = ("last_status=?,updated_at=?", [status, now]) if platform == "luogu" else (
+                    "last_attempt_at=?,last_status=?,updated_at=?", [now, status, now])
+            elif getattr(failure, "deferred", False):
+                clause = "last_status='waiting',last_error_code=CASE WHEN consecutive_failures>0 THEN last_error_code ELSE ? END,last_error_message=CASE WHEN consecutive_failures>0 THEN last_error_message ELSE ? END,next_retry_at=MAX(next_retry_at,?),updated_at=?"
+                values = [failure.code, failure.message, now + failure.retry_after, now]
+                async with connection.execute("SELECT consecutive_failures FROM user_platform_sync_state WHERE user_qq_id=? AND platform=?", (str(qq_id), platform)) as cursor:
+                    previous = await cursor.fetchone()
+                failure.consecutive_failures = previous[0] if previous else 0
+            elif platform == "luogu" and status == "cancelled":
+                # 人工取消不等于原站失败，也不能擦掉已有失败的等待时间。
+                clause, values = "last_status=?,updated_at=?", [status, now]
             elif status == "backfill":
                 # A bounded backfill succeeds without claiming full-history coverage.
                 clause = "last_attempt_at=?,last_success_at=?,last_status=?,last_error_code=NULL,last_error_message=NULL,consecutive_failures=0,next_retry_at=0,updated_at=?"
@@ -78,8 +94,22 @@ class SyncMixin:
                 clause = "cursor_timestamp=?,last_attempt_at=?,last_success_at=?,last_status=?,last_error_code=NULL,last_error_message=NULL,consecutive_failures=0,next_retry_at=0,updated_at=?,full_history_at=CASE WHEN ? THEN ? ELSE full_history_at END"
                 values = [int(cursor or now), now, now, status, now, full_history, now]
             else:
-                clause = "last_attempt_at=?,last_status=?,last_error_code=?,last_error_message=?,consecutive_failures=consecutive_failures+1,updated_at=?"
-                values = [now, status, error_code, error_message, now]
+                error_code = getattr(failure, "code", error_code)
+                error_message = getattr(failure, "message", error_message)
+                retry_delay = getattr(failure, "retry_after", 0)
+                if platform == "luogu" and status == "failed":
+                    await connection.execute("BEGIN IMMEDIATE")
+                    async with connection.execute("SELECT consecutive_failures FROM user_platform_sync_state WHERE user_qq_id=? AND platform=?", (str(qq_id), platform)) as cursor:
+                        previous = await cursor.fetchone()
+                    failures = (previous[0] if previous else 0) + 1
+                    retry_delay = max(retry_delay, luogu_retry_delay(failures))
+                    if isinstance(failure, SyncFailure):
+                        failure.retry_after = retry_delay
+                        failure.consecutive_failures = failures
+                        failure.attention_required |= failures >= 3
+                retry_at = now + retry_delay
+                clause = "last_attempt_at=?,last_status=?,last_error_code=?,last_error_message=?,consecutive_failures=consecutive_failures+1,next_retry_at=MAX(next_retry_at,?),updated_at=?"
+                values = [now, status, error_code, error_message, retry_at, now]
             where = "user_qq_id=? AND platform=?"
             values.extend([str(qq_id), platform])
             token = getattr(self, "_binding_tokens", {}).get((str(qq_id), platform))
@@ -139,10 +169,12 @@ class SyncMixin:
 
     @staticmethod
     def _is_access_restricted_result(result):
+        if isinstance(result, SyncOutcome):
+            return result.status == 403 and result.error_code == "access_restricted"
         return (
-            isinstance(result, SyncOutcome)
-            and result.status == 403
-            and result.error_code == "access_restricted"
+            isinstance(result, SyncFailure)
+            and result.code == "access_restricted"
+            and result.http_status == 403
         )
 
     async def _finalize_platform_result(self, qq_id, platform, result, days, *, full_history=None):
@@ -178,8 +210,9 @@ class SyncMixin:
                 platform,
                 "failed",
                 int(time.time()),
-                error_code="fetch_failed",
-                error_message="平台抓取失败",
+                error_code=getattr(result, "code", "fetch_failed"),
+                error_message=getattr(result, "message", "平台抓取失败"),
+                failure=result,
             )
         return result
 
@@ -190,7 +223,29 @@ class SyncMixin:
             async with isolated_connection(self.db) as connection:
                 guarded = BindingGuard(connection, user, platform)
                 await guarded.check()
-                return await fetcher(session, user, start_timestamp, guarded, self._crawler_config())
+                if platform != "luogu":
+                    return await fetcher(session, user, start_timestamp, guarded, self._crawler_config())
+                from .luogu_client import cooldown_error, load_request_state, save_request_state
+                await load_request_state(connection)
+                async with connection.execute("SELECT * FROM user_platform_sync_state WHERE user_qq_id=? AND platform='luogu'", (str(user["qq_id"]),)) as cursor:
+                    state = await cursor.fetchone()
+                now = int(time.time())
+                until = state["next_retry_at"] if state else 0
+                if state and state["consecutive_failures"]:
+                    until = max(until, state["last_attempt_at"] + luogu_retry_delay(state["consecutive_failures"]))
+                waiting = cooldown_error()
+                if waiting:
+                    return SyncFailure(str(waiting), code=waiting.code, retry_after=waiting.retry_after,
+                                       cause_http_status=waiting.cause_http_status, deferred=True,
+                                       attention_required=waiting.attention_required)
+                if until > now:
+                    return SyncFailure("洛谷账号正在等待重试，本次未发送请求；" + (state["last_error_message"] or "上次同步失败"),
+                                       code="luogu_retry_wait", retry_after=until-now, deferred=True,
+                                       attention_required=state["consecutive_failures"] >= 3)
+                try:
+                    return await fetcher(session, user, start_timestamp, guarded, self._crawler_config())
+                finally:
+                    await save_request_state(connection)
         semaphore = self._platform_sync_semaphores.get(platform)
         if semaphore is None:
             return await fetch()

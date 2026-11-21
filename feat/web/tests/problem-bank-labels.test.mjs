@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { after, afterEach, beforeEach, test } from 'node:test';
 import { h } from 'vue';
 import { JSDOM } from 'jsdom';
-import { auth, setAuth } from '../src/lib/api.js';
+import { setAuth } from '../src/lib/api.js';
 import { memberFilters, memberQuery, problemReturn } from '../src/lib/member-problems.js';
-import { cleanupCompiled, find, loadSfc, mount, settle, textOf } from './helpers/vue-harness.mjs';
+import { cleanupCompiled, find, loadSfc, mount, textOf } from './helpers/vue-harness.mjs';
 
 const Bank = (await import(await loadSfc('src/views/MemberProblems.vue'))).default;
 const facets = [
@@ -76,7 +76,7 @@ test('list defaults to Luogu while explicit all and tracker platforms remain ava
   assert.equal(memberFilters({ view: 'tracker' }).platform, 'codeforces');
   assert.equal(memberFilters({ scope: 'solved' }).platform, 'all');
   assert.equal(memberFilters({ problem_tag: 'Math' }).platform, 'all');
-  assert.equal(memberFilters({ labels: 'dp' }).platform, 'all');
+  assert.equal(memberFilters({ labels: 'dp' }).platform, 'luogu');
   assert.equal(memberFilters({ platform: 'unknown' }).platform, 'all');
 });
 test('unqualified entry renders Luogu filters and queries that same platform exactly once', async () => {
@@ -86,8 +86,9 @@ test('unqualified entry renders Luogu filters and queries that same platform exa
     (node) => node.type === 'label' && textOf(node).startsWith('平台'),
   ).flatMap((label) => find(label, (node) => node.type === 'select'))[0];
   assert.equal(select.options[select.selectedIndex]?.props.value, 'luogu');
-  assert.ok(textOf(mounted.root).includes('洛谷题库'));
-  assert.ok(textOf(mounted.root).includes('浏览洛谷公开 P 题'));
+  assert.equal(textOf(find(mounted.root, (node) => node.type === 'h1')[0]), '题库');
+  assert.ok(textOf(mounted.root).includes('按题目标签寻找练习题'));
+  assert.doesNotMatch(textOf(mounted.root), /洛谷题库|浏览洛谷公开 P 题|从熟悉的分类开始练习/);
   assert.equal(textOf(mounted.root).includes('人工修正后的有效标签'), false);
   assert.ok(textOf(mounted.root).includes('洛谷难度下限'));
   assert.equal(find(mounted.root, (node) => node.props.class === 'bank-label-filter').length, 0);
@@ -115,18 +116,20 @@ test('default platform normalization preserves native filters and the detail ret
   assert.equal(returned.searchParams.get('platform'), 'luogu');
   assert.equal(returned.searchParams.get('native_tags'), '1,-2');
 });
-test('algorithm filters survive query normalization and detail return', () => {
+test('retired algorithm filters are omitted from member queries and detail return', () => {
   const query = memberQuery({
     platform: 'atcoder',
     labels: 'enumeration,difference_array,enumeration',
     match: 'any',
     page: 3,
   });
-  assert.equal(query.labels, 'difference_array,enumeration');
-  const path = '/my-problems.html?' + new URLSearchParams(query);
+  assert.equal(query.labels, undefined);
+  assert.equal(query.match, undefined);
+  const path = '/my-problems.html?platform=atcoder&labels=difference_array&match=any&page=3';
   const returned = new URL(problemReturn(path), 'https://local.invalid');
-  assert.equal(returned.searchParams.get('labels'), 'difference_array,enumeration');
-  assert.equal(returned.searchParams.get('match'), 'any');
+  assert.equal(returned.searchParams.get('labels'), null);
+  assert.equal(returned.searchParams.get('match'), null);
+  assert.equal(returned.searchParams.get('platform'), 'atcoder');
   assert.equal(returned.searchParams.get('page'), '3');
 });
 test('tracker does not inherit algorithm-only filters', () => {
@@ -135,37 +138,24 @@ test('tracker does not inherit algorithm-only filters', () => {
   assert.equal(query.match, undefined);
 });
 
-test('member algorithm labels share category colours without losing filter IDs or source hints', async () => {
-  await page();
+test('member algorithm labels retain category colours and source hints as static badges', async () => {
+  await page('/my-problems.html?platform=atcoder&labels=difference_array&match=any&page=3');
   const result = find(
     mounted.root,
-    (n) => n.type === 'button' && String(n.props.class).includes('bank-result-tag'),
-  )[0];
-  const option = find(
-    mounted.root,
-    (n) => n.type === 'button' && n.props['data-tag-id'] === 'difference_array',
+    (n) => n.type === 'span' && String(n.props.class).split(' ').includes('bank-result-tag'),
   )[0];
   assert.match(String(result.props.class), /problem-tone-orange/);
-  assert.match(String(option.props.class), /problem-tone-orange/);
-  assert.match(result.props.title, /difference_array.*点击筛选/);
+  assert.match(result.props.title, /difference_array.*AI 自动/);
+  assert.doesNotMatch(result.props.title, /点击筛选/);
   assert.equal(result.props['data-tag-category'], 'strategy');
-  await result.props.onClick();
-  await settle();
-  assert.equal(mounted.router.currentRoute.value.query.labels, 'difference_array');
-});
-test('clicking taxonomy label changes URL and sends server-side filter', async () => {
-  await page('/my-problems.html?platform=atcoder&page=3');
-  const tag = find(mounted.root, (n) => n.props['data-tag-id'] === 'difference_array')[0];
-  await tag.props.onClick();
-  await settle();
-  assert.equal(mounted.router.currentRoute.value.query.labels, 'difference_array');
-  assert.equal(mounted.router.currentRoute.value.query.page, undefined);
-  assert.ok(
-    calls.some(
-      (c) =>
-        new URL(c.url, 'https://local.invalid').searchParams.get('labels') === 'difference_array',
-    ),
-  );
+  assert.equal(result.props.onClick, undefined);
+  assert.equal(find(mounted.root, (node) => node.props.class === 'bank-label-filter').length, 0);
+  const request = calls.find((call) => call.url.startsWith('/api/me/problems?'));
+  const queried = new URL(request.url, 'https://local.invalid').searchParams;
+  assert.equal(queried.get('platform'), 'atcoder');
+  assert.equal(queried.get('page'), '3');
+  assert.equal(queried.get('labels'), null);
+  assert.equal(queried.get('match'), null);
 });
 test('members see effective labels but no modification action', async () => {
   await page();
@@ -186,14 +176,4 @@ test('administrators use the backstage management entry rather than a public edi
     find(mounted.root, (n) => n.type === 'a' && textOf(n).trim() === '后台管理').length,
     1,
   );
-});
-test('clicking a result tag uses the same algorithm filter', async () => {
-  await page();
-  const tag = find(
-    mounted.root,
-    (n) => n.type === 'button' && String(n.props.class).includes('bank-result-tag'),
-  )[0];
-  await tag.props.onClick();
-  await settle();
-  assert.equal(mounted.router.currentRoute.value.query.labels, 'difference_array');
 });

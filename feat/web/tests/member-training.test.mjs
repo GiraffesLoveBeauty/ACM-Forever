@@ -127,6 +127,12 @@ const click = async (node) => {
   await node.props.onClick({ button: 0, preventDefault() {} });
   await settle();
 };
+const tagChoices = () =>
+  find(
+    mounted.root,
+    (node) => node.type === 'button' && String(node.props.class).includes('luogu-picker-chip'),
+  );
+const tagChoice = (name) => tagChoices().find((node) => node.props['aria-label'] === name);
 const labeledControl = (label, type = 'select') => {
   const wrapper = find(
     mounted.root,
@@ -338,25 +344,36 @@ test('exact tag filters normalize independently of keyword search and survive sa
   assert(!back.has('owner_qq_id'));
 });
 
-test('tag dropdown submits independently with search and favorites and resets pagination', async () => {
+test('Codeforces tag picker submits Chinese selections using raw IDs and resets pagination', async () => {
   mounted = await mount(
     View,
     routes,
     '/my-problems.html?scope=solved&platform=codeforces&tag=member&page=2',
   );
-  assert.deepEqual(labeledControl('标签').options.map(textOf), ['全部标签', 'math', 'greedy']);
-  labeledControl('标签').props['onUpdate:modelValue']('greedy');
   labeledControl('收藏').props['onUpdate:modelValue']('favorite');
-  await submitFilters();
+  await click(buttons('按标签筛选')[0]);
+  assert.match(textOf(mounted.root), /Codeforces 原生标签/);
+  await click(buttons('贪心')[0]);
+  const dialog = find(mounted.root, (node) => node.type === 'dialog')[0];
+  const search = find(dialog, (node) => node.type === 'input' && node.props.type === 'search')[0];
+  search.props['onUpdate:modelValue']('math');
+  await settle();
+  await click(buttons('数学').find((node) => node.props['aria-pressed'] === false));
+  assert(!queryOf(mounted.router.currentRoute.value.fullPath).has('problem_tags'));
+  await click(buttons('确认筛选')[0]);
   const query = queryOf(calls.filter(({ url }) => url.startsWith('/api/me/problems?')).at(-1).url);
   assert.equal(query.get('tag'), 'member');
-  assert.equal(query.get('problem_tag'), 'greedy');
+  assert.equal(query.get('problem_tags'), 'greedy,math');
+  assert.equal(
+    queryOf(problemReturn(mounted.router.currentRoute.value.fullPath)).get('problem_tags'),
+    'greedy,math',
+  );
   assert.equal(query.get('state'), 'favorite');
   assert.equal(query.get('scope'), 'solved');
   assert.equal(query.get('page'), '1');
   assert(!query.has('owner_qq_id'));
   await click(buttons('清除筛选')[0]);
-  assert(!queryOf(mounted.router.currentRoute.value.fullPath).has('problem_tag'));
+  assert(!queryOf(mounted.router.currentRoute.value.fullPath).has('problem_tags'));
   assert(!queryOf(mounted.router.currentRoute.value.fullPath).has('tag'));
 });
 
@@ -379,7 +396,7 @@ test('problem cards display JSON, array and legacy tags as readable labels', asy
   const labels = cards.map((card) =>
     find(card, (node) => String(node.props.class).includes('algorithm-tag')).map(textOf),
   );
-  assert.deepEqual(labels, [['math', 'dp'], ['graphs', 'trees'], ['greedy', 'sortings'], []]);
+  assert.deepEqual(labels, [['数学', '动态规划'], ['图论', '树上算法'], ['贪心', '排序'], []]);
   assert(!textOf(cards[0]).includes('["math"'));
   assert(textOf(cards[3]).includes('无标签'));
 });
@@ -392,7 +409,9 @@ test('changing platform replaces tag choices and clears stale selection without 
   );
   labeledControl('平台').props['onUpdate:modelValue']('atcoder');
   await settle();
-  assert.deepEqual(labeledControl('标签').options.map(textOf), ['全部标签', 'dp', 'graphs']);
+  await click(buttons('按标签筛选')[0]);
+  assert.deepEqual(tagChoices().map((node) => node.props['aria-label']), ['dp', 'graphs']);
+  await click(buttons('取消')[0]);
   await submitFilters();
   const query = queryOf(mounted.router.currentRoute.value.fullPath);
   assert.equal(query.get('platform'), 'atcoder');
@@ -400,13 +419,35 @@ test('changing platform replaces tag choices and clears stale selection without 
   assert(!query.has('problem_tag'));
   await mounted.router.push('/my-problems.html?platform=codeforces&problem_tag=legacy');
   await settle();
-  assert(labeledControl('标签').options.map(textOf).includes('legacy'));
+  assert.match(textOf(mounted.root), /已选：legacy/);
   assert.equal(
     queryOf(calls.filter(({ url }) => url.startsWith('/api/me/problems?')).at(-1).url).get(
       'problem_tag',
     ),
     'legacy',
   );
+});
+
+test('AtCoder tag picker replaces a draft and submits one raw tag on confirmation', async () => {
+  mounted = await mount(
+    Problems,
+    routes,
+    '/my-problems.html?platform=atcoder&problem_tag=dp&page=2',
+  );
+  await click(buttons('按标签筛选')[0]);
+  assert.equal(tagChoice('dp').props['aria-pressed'], true);
+  await click(tagChoice('graphs'));
+  assert.equal(tagChoice('graphs').props['aria-pressed'], true);
+  assert.equal(tagChoice('dp').props['aria-pressed'], false);
+  assert.equal(mounted.router.currentRoute.value.query.problem_tag, 'dp');
+  await click(buttons('确认筛选')[0]);
+  const query = queryOf(calls.filter(({ url }) => url.startsWith('/api/me/problems?')).at(-1).url);
+  assert.equal(query.get('problem_tag'), 'graphs');
+  assert.equal(query.get('page'), '1');
+  assert.equal(query.has('problem_tags'), false);
+  assert.equal(mounted.router.currentRoute.value.query.problem_tag, 'graphs');
+  await click(buttons('清空')[0]);
+  assert.equal(mounted.router.currentRoute.value.query.problem_tag, undefined);
 });
 
 test('tag endpoint failures retain the problem list and retry only the tag choices', async () => {
@@ -419,11 +460,12 @@ test('tag endpoint failures retain the problem list and retry only the tag choic
   mounted = await mount(Problems, routes, '/my-problems.html?problem_tag=legacy');
   assert(textOf(mounted.root).includes('列表题目'));
   assert(textOf(mounted.root).includes('标签服务暂不可用'));
-  assert(labeledControl('标签').options.map(textOf).includes('legacy'));
+  assert.match(textOf(mounted.root), /已选：legacy/);
   const listRequests = calls.filter(({ url }) => url.startsWith('/api/me/problems?')).length;
   tagsFailed = false;
   await click(buttons('重试标签')[0]);
-  assert(labeledControl('标签').options.map(textOf).includes('math'));
+  await click(buttons('按标签筛选')[0]);
+  assert(tagChoice('数学'));
   assert(!textOf(mounted.root).includes('标签服务暂不可用'));
   assert.equal(calls.filter(({ url }) => url.startsWith('/api/me/problems?')).length, listRequests);
 });
@@ -444,14 +486,17 @@ test('a delayed old platform tag response cannot replace current choices', async
     return fetch(url, options);
   };
   mounted = await mount(Problems, routes, '/my-problems.html?platform=codeforces');
-  assert(labeledControl('标签').props.disabled);
+  await click(buttons('按标签筛选')[0]);
+  assert.match(textOf(mounted.root), /正在加载/);
   labeledControl('平台').props['onUpdate:modelValue']('atcoder');
   await settle();
   assert(pending.signal.aborted);
-  assert.deepEqual(labeledControl('标签').options.map(textOf), ['全部标签', 'dp', 'graphs']);
+  const picker = buttons('按标签筛选')[0];
+  if (!picker.props['aria-expanded']) await click(picker);
+  assert.deepEqual(tagChoices().map((node) => node.props['aria-label']), ['dp', 'graphs']);
   release();
   await settle();
-  assert(!labeledControl('标签').options.map(textOf).includes('old-platform-only'));
+  assert.equal(tagChoice('old-platform-only'), undefined);
 });
 for (const scope of ['all', 'solved']) {
   for (const platform of ['', 'all', 'codeforces', 'atcoder']) {
@@ -764,7 +809,7 @@ for (const role of ['member', 'admin', 'root']) {
     assert(calls.some(({ url }) => url.startsWith('/api/me/problems?')));
     const list = calls.find(({ url }) => url.startsWith('/api/me/problems?'));
     assert.equal(new URL(list.url, 'https://acm.test').searchParams.get('platform'), 'luogu');
-    assert(textOf(mounted.root).includes('洛谷题库'));
+    assert.equal(textOf(find(mounted.root, (node) => node.type === 'h1')[0]), '题库');
     assert(
       !calls.some(({ url }) => url.startsWith('/api/admin/') || url.startsWith('/api/problems?')),
     );

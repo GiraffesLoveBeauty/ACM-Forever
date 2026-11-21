@@ -175,7 +175,7 @@ async def queue_snapshots():
 
 
 def public_refresh(item):
-    return {key: item.get(key) for key in ("id", "status", "started_at", "finished_at", "error", "result")}
+    return {key: item.get(key) for key in ("id", "status", "started_at", "finished_at", "error", "result", "errors")}
 
 
 @training_task_api.get("/me/training-tasks")

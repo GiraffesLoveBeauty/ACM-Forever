@@ -17,7 +17,11 @@ from .acm_api.problem_sync import ProblemSync, sync_options
 from .acm_api.sync_service import SyncMixin
 from .acm_api.event_log import emit
 from .acm_api.sync_policy import (
-    SYNC_LUOGU_ACCESS_RESTRICTED, SYNC_PAUSED, sync_result_is_non_failure,
+    SYNC_LUOGU_ACCESS_RESTRICTED,
+    SYNC_PAUSED,
+    SyncFailure,
+    luogu_retry_delay,
+    sync_result_is_non_failure,
 )
 from .acm_api import problem_schedule
 
@@ -70,16 +74,37 @@ class SyncEngine(SyncMixin):
                                 "account_epoch": user["account_epoch"]}
         return result
 
+    @staticmethod
+    def failure_detail(result):
+        return {"code": result.code, "message": result.message,
+                "http_status": result.http_status, "cause_http_status": result.cause_http_status,
+                "deferred": result.deferred, "consecutive_failures": result.consecutive_failures,
+                "attention_required": result.attention_required,
+                "next_retry_at": int(time.time()) + result.retry_after if result.retry_after else 0}
+
+    @staticmethod
+    def sync_outcome(results, errors, *, many=False):
+        def states(values, details):
+            for key, value in values.items():
+                detail = details.get(key, {})
+                if isinstance(value, dict):
+                    yield from states(value, detail)
+                elif value is None or value < 0 and not sync_result_is_non_failure(value):
+                    yield "waiting" if detail.get("deferred") else "failed"
+        outcomes = set(states(results, errors))
+        return ("partial" if many else "failed") if "failed" in outcomes else "waiting" if outcomes else "completed"
+
     async def sync_account(self, qq_id, platforms, task, days=0, *, incremental=False):
         task["status"] = "running"
         task["started_at"] = int(time.time())
         results = {}
+        task["errors"] = {}
         try:
             async with isolated_connection(self.db) as connection:
                 async with connection.execute("SELECT * FROM users WHERE account_state='active' AND qq_id=?", (str(qq_id),)) as cursor:
                     user = await cursor.fetchone()
             if not user or user["account_epoch"] != task.get("account_epoch", 1):
-                task.update(status="cancelled", bindings={}, result=None)
+                task.update(status="cancelled", bindings={}, result=None, errors={})
                 return
             task["account_epoch"] = user["account_epoch"]
             if "bindings" not in task:
@@ -90,10 +115,14 @@ class SyncEngine(SyncMixin):
             async with self._sync_cycle_lock:
                 for platform in platforms:
                     try:
-                        results[platform] = await self.sync_single_platform_for_days(
+                        result = await self.sync_single_platform_for_days(
                             qq_id, platform, days, incremental=incremental,
                             expected_binding=task["bindings"].get(platform),
                         )
+                        if isinstance(result, SyncFailure):
+                            task["errors"][platform] = self.failure_detail(result)
+                            result = int(result)
+                        results[platform] = result
                     except asyncio.CancelledError:
                         raise
                     except Exception:
@@ -101,11 +130,7 @@ class SyncEngine(SyncMixin):
                         # the other platforms in this account sync task.
                         results[platform] = -3
             task["result"] = results
-            task["status"] = (
-                "completed"
-                if all(value is not None and (value >= 0 or sync_result_is_non_failure(value)) for value in results.values())
-                else "failed"
-            )
+            task["status"] = self.sync_outcome(results, task["errors"])
         except asyncio.CancelledError:
             task["status"] = "cancelled"
             raise
@@ -120,16 +145,18 @@ class SyncEngine(SyncMixin):
         task["status"] = "running"
         task["started_at"] = int(time.time())
         results = {}
+        task["errors"] = {}
         try:
             async with self._sync_cycle_lock:
                 members = task.get("_account_snapshots", [])
                 task["progress"] = {"done": 0, "total": len(members)}
+                platforms = task.get("_platforms") or ("codeforces", "luogu", "nowcoder", "atcoder", "cjlu")
                 for user in members:
                     qq_id = user["qq_id"]
                     results[str(qq_id)] = {}
-                    for platform in ("codeforces", "luogu", "nowcoder", "atcoder", "cjlu"):
+                    for platform in platforms:
                         snapshot = self.binding_snapshot(user, [platform])[platform]
-                        if incremental and not snapshot["account"].strip():
+                        if not snapshot["account"].strip():
                             continue
                         try:
                             count = await self.sync_single_platform_for_days(
@@ -140,15 +167,14 @@ class SyncEngine(SyncMixin):
                             raise
                         except Exception:
                             count = -3
+                        if isinstance(count, SyncFailure):
+                            task["errors"].setdefault(str(qq_id), {})[platform] = self.failure_detail(count)
+                            count = int(count)
                         if count != -2:
                             results[str(qq_id)][platform] = -3 if count is None else count
                     task["progress"]["done"] += 1
             task["result"] = results
-            failed = any(
-                count < 0 and not sync_result_is_non_failure(count)
-                for platforms in results.values() for count in platforms.values()
-            )
-            task["status"] = "partial" if failed else "completed"
+            task["status"] = self.sync_outcome(results, task["errors"], many=True)
         except asyncio.CancelledError:
             task["status"] = "cancelled"
             raise
@@ -191,9 +217,11 @@ class WebTaskManager:
                     return ("error" in value or any(type(value.get(key)) is int and value[key] > 0
                                                    for key in ("failure_count", "failed_count"))
                             or any(failed(v) for v in value.values()))
-                return type(value) is int and value < 0 and value not in {-2, SYNC_PAUSED, SYNC_LUOGU_ACCESS_RESTRICTED}
+                return type(value) is int and value < 0 and not sync_result_is_non_failure(value) and value != -2
 
-            if status == "failed":
+            if status == "waiting":
+                level, message = "info", "同步正在等待重试，已有记录和训练进度保留"
+            elif status == "failed":
                 level, message = "error", "后台任务执行失败，请在同步任务页面查看结果"
             elif status in {"cancelled", "interrupted"}:
                 level, message = "warning", "后台任务已取消或中断"
@@ -345,11 +373,24 @@ class WebTaskManager:
         )
         return {"id": task_id}
 
-    async def submit_all_accounts_sync(self, days=0, *, incremental=False, scheduled=False, interval_seconds=3600):
+    async def submit_all_accounts_sync(self, days=0, *, incremental=False, scheduled=False, interval_seconds=3600, platforms=None):
         if self._claiming_all_accounts_sync or self._claiming_daily_problem_sync or any(
             item.get("status") in {"queued", "running"}
             for item in self.tasks.values()
         ):
+            return None
+        allowed = ("codeforces", "luogu", "nowcoder", "atcoder", "cjlu")
+        if platforms is None:
+            normalized_platforms = list(allowed)
+        else:
+            if isinstance(platforms, str):
+                platforms = platforms.replace("，", ",").split(",")
+            normalized_platforms = []
+            for platform in platforms or ():
+                value = "codeforces" if str(platform).strip().lower() in {"cf", "codeforces"} else str(platform).strip().lower()
+                if value in allowed and value not in normalized_platforms:
+                    normalized_platforms.append(value)
+        if not normalized_platforms:
             return None
         try:
             days = max(0, min(3650, int(days)))
@@ -393,7 +434,8 @@ class WebTaskManager:
             "qq_id": "*",
             "_account_snapshots": members,
             "_account_epochs": {user["qq_id"]: user["account_epoch"] for user in members},
-            "platform": "all",
+            "platform": ",".join(normalized_platforms),
+            "_platforms": normalized_platforms,
             "days": days,
             "scheduled": scheduled,
             "status": "queued",
@@ -438,9 +480,16 @@ class WebTaskManager:
         now = int(time.time()) if now is None else now
         if any(t.get("qq_id") == "*" and t.get("status") in {"queued", "running"} for t in self.tasks.values()):
             return 0
+        from .acm_api.luogu_client import cooldown_error, load_request_state, recovery_pending
         async with isolated_connection(self.sync_engine.db) as db:
+            await load_request_state(db)
+            if cooldown_error():
+                return 0
+            recovery = recovery_pending()
+            dispatch_limit = 1 if recovery else 20
             candidates = await db.execute("""
                 SELECT r.qq_id,r.account_epoch,u.luogu_id,u.luogu_binding_version,
+                  GROUP_CONCAT(DISTINCT r.id) AS recipient_ids,
                   s.last_status AS sync_status,COALESCE(s.last_attempt_at,0) AS last_attempt_at,
                   COALESCE(s.consecutive_failures,0) AS consecutive_failures,
                   MIN(COALESCE(json_extract(x.snapshot_json,'$.last_checked_at'),0)) AS priority,
@@ -464,16 +513,16 @@ class WebTaskManager:
                        =u.luogu_id||':'||u.luogu_binding_version
                     OR (x.binding_key IS NULL AND COALESCE(json_extract(r.bindings_json,'$.luogu.account'),'')=''
                         AND u.luogu_binding_version=COALESCE(json_extract(r.bindings_json,'$.luogu.version'),0)+1))
-                GROUP BY r.qq_id,r.account_epoch HAVING needed=1 ORDER BY priority,COALESCE(b.last_at,0),r.qq_id
-                """, (now, now, now))
+                GROUP BY r.qq_id,r.account_epoch HAVING needed=1 OR ?=1 ORDER BY priority,COALESCE(b.last_at,0),r.qq_id
+                """, (now, now, now, int(recovery)))
             candidates = [dict(r) for r in await candidates.fetchall()]
         submitted = 0
         for candidate in candidates:
             # Limit dispatched work, so busy/cooling accounts cannot consume the batch.
-            if submitted >= 20:
+            if submitted >= dispatch_limit:
                 break
-            if candidate["sync_status"] in {"failed", "error"}:
-                retry_delay = min(900, 60 * 2 ** min(4, max(0, candidate["consecutive_failures"] - 1)))
+            if candidate["consecutive_failures"]:
+                retry_delay = luogu_retry_delay(candidate["consecutive_failures"])
                 if candidate["last_attempt_at"] + retry_delay > now:
                     continue
             qq = candidate["qq_id"]
@@ -494,6 +543,21 @@ class WebTaskManager:
             if claimed:
                 task = await self.submit_account_sync(qq, ["luogu"], expected_epoch=candidate["account_epoch"])
                 submitted += bool(task)
+                if task:
+                    # 页面跟随最新的自动重试；限定本次候选、账号代际及绑定版本，避免旧任务串号。
+                    recipient_ids = [int(value) for value in candidate["recipient_ids"].split(",")]
+                    async with isolated_connection(self.sync_engine.db) as db:
+                        for offset in range(0, len(recipient_ids), 400):
+                            batch = recipient_ids[offset:offset + 400]
+                            placeholders = ",".join("?" for _ in batch)
+                            await db.execute("""UPDATE training_task_recipients SET refresh_task_id=?,refresh_at=?
+                                WHERE id IN (""" + placeholders + """) AND qq_id=? AND account_epoch=? AND closed=0
+                                  AND task_id IN (SELECT id FROM training_tasks WHERE state='published')
+                                  AND EXISTS (SELECT 1 FROM users WHERE qq_id=? AND account_state='active'
+                                      AND account_epoch=? AND luogu_id=? AND luogu_binding_version=?)""",
+                                [task["id"], now, *batch, qq, candidate["account_epoch"], qq,
+                                 candidate["account_epoch"], candidate["luogu_id"], candidate["luogu_binding_version"]])
+                        await db.commit()
         return submitted
 
     async def _training_task_sync_loop(self):
@@ -508,7 +572,7 @@ class WebTaskManager:
         keys = (
             "id", "kind", "qq_id", "platform", "days", "status",
             "started_at", "finished_at", "result",
-            "progress", "bindings", "account_epoch",
+            "progress", "bindings", "account_epoch", "errors",
         )
         return [{key: item.get(key) for key in keys} for item in self.tasks.values()]
 
@@ -531,7 +595,7 @@ class WebTaskManager:
             if qq_id and qq_id != "*":
                 member = active.get(qq_id)
                 if not member or member["epoch"] != original.get("account_epoch", 1):
-                    item.update(qq_id=None, bindings={}, result=None, status="cancelled")
+                    item.update(qq_id=None, bindings={}, result=None, errors={}, status="cancelled")
                 else:
                     item["member"] = {"qq_id": qq_id, "name": member["name"], "status": member["status"]}
             elif qq_id == "*":
@@ -547,8 +611,8 @@ class WebTaskManager:
                         })
                 item["members"] = members
                 item["member_statuses"] = {member["qq_id"]: member["status"] for member in members}
+                visible = {member["qq_id"] for member in members}
                 if isinstance(item.get("result"), dict):
-                    visible = {member["qq_id"] for member in members}
                     filtered = {
                         key: value
                         for key, value in item["result"].items()
@@ -557,13 +621,18 @@ class WebTaskManager:
                     if "error" in item["result"]:
                         filtered["error"] = "后台同步失败，请重试"
                     item["result"] = filtered
+                item["errors"] = {
+                    key: value
+                    for key, value in (item.get("errors") or {}).items()
+                    if key == "error" or key in visible
+                }
         return snapshots
 
     def revoke_account_tasks(self, qq_id):
         for item in self.tasks.values():
             if item.get("qq_id") == str(qq_id):
                 self.cancel(item["id"])
-                item.update(bindings={}, result=None, status="cancelled")
+                item.update(bindings={}, result=None, errors={}, status="cancelled")
 
     def cancel(self, task_id):
         item = self.tasks.get(str(task_id))

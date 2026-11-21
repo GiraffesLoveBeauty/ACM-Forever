@@ -183,7 +183,7 @@ response.raise_for_status()
 
 此模块对应 #118，管理员从 `/admin.html?section=training` 发放固定题单，成员从 `/training-tasks.html` 查看本人任务。原今日训练、自主选题及 Bot / 移动端随机挑战接口继续保留。业务身份使用动态 `users.status`，与 Web 管理权限独立。
 
-`ACM_TRAINING_TASKS_ENABLED` 默认 `true`，控制新发放与个人中心入口；关闭后历史任务及证据仍可查询。Codeforces 按真实提交时间核验。洛谷公开 P 题支持历史 AC 与明确选择的周期新增快照核验；其他平台可存草稿，不能发布。
+`ACM_TRAINING_TASKS_ENABLED` 默认 `true`，控制新发放与个人中心入口；关闭后历史任务及证据仍可查询。Codeforces 按真实提交时间核验。洛谷公开 P 题统一按历史 AC 核验；其他平台可存草稿，不能发布。
 
 | 方法与路径 | 权限 / 契约 |
 | --- | --- |
@@ -197,20 +197,31 @@ response.raise_for_status()
 | `POST /api/admin/training-tasks/<id>/cancel` | admin/root + CSRF；version/reason，保留题单、证据与审计 |
 | `GET /api/admin/training-tasks/<id>/progress` | admin/root；identity/status/search 和分页；固定分母、人数完成率、题目进度、待核验与异常分开 |
 | `GET /api/admin/training-tasks/<id>/progress/<recipient_id>` | admin/root；接收人快照与逐题最小证据 |
-| `POST /api/admin/training-tasks/<id>/progress/<recipient_id>/review` | admin/root + CSRF；洛谷逐题审核，需进度版本、任务版本与公开原因，保留审计 |
+| `POST /api/admin/training-tasks/<id>/progress/<recipient_id>/review` | admin/root + CSRF；仅洛谷未计入完成题目的 reset_binding，需进度版本、任务版本与公开原因，保留审计 |
 | `GET /api/me/training-tasks` | 当前会话本人；tab=active/upcoming/history/all 及分页，按账号 epoch 隔离 |
 | `GET /api/me/training-tasks/<id>` | 当前会话本人；固定题单、核验、覆盖和刷新队列；他人任务返回 404 |
 | `POST /api/me/training-tasks/<id>/refresh` | 当前会话本人 + CSRF，正文 `{}`；异步队列，202，运行任务去重和持久化 60 秒冷却 |
 
 分页默认 20、上限 100。所有 GET 仅读站内证据，不请求外部 OJ；响应 no-store。发布事务重新核对版本、预览有效期与名单指纹，变化返回 409；冻结身份、账号代际、绑定、题单、周期及规则，身份变动不会补发或撤回。有效未绑定成员可以接收，未开户/停用/注销/临时凭据过期成员列入排除清单。
 
-周期判断含开始/截止两端，使用 OJ 实际提交时间，UTC 保存、Asia/Shanghai 展示。晚同步到的周期内 AC 可回补；开始前默认仅标历史已做，截止后为逾期。只有全部必做题完成才算任务完成，历史 AC 规则也需等开始。绑定/账号代际变化不能继承新账号证据，注销保留匿名最小成绩和冻结分母。
+Codeforces 周期判断含开始/截止两端，使用 OJ 实际提交时间，UTC 保存、Asia/Shanghai 展示。晚同步到的周期内 AC 可回补；开始前默认仅标历史已做，截止后为逾期。只有全部必做题完成才算任务完成，历史 AC 规则也需等开始。绑定/账号代际变化不能继承新账号证据，注销保留匿名最小成绩和冻结分母。
 
 洛谷公开 P 题统一按历史 AC 核验，不限制完成时间，也不要求周期内重新通过。`luogu_snapshot` 为兼容旧客户端的弃用布尔字段，返回 false；capabilities 中 historical_ac=true、period_ac=false、snapshot_ac=false。洛谷历史 AC 计入完成题数，实际 AC 时间保持未知；证据使用 accepted_at:null、observed_at 和 evidence_type:historical_ac，不再产生时段待确认或逾期判断。GET 只读本地进度；发布、启动补算及成功同步会更新结果。绑定更正接口仅接受 reset_binding，旧时间审核请求返回 historical_ac_only。契约见 [api.md（训练任务历史 AC 核验）](training-tasks/api.md#洛谷历史-ac-核验与绑定更正)。
 
-审核正文为 `{problem_id,decision,reason,version,task_version}`：problem_id 是任务题目行 ID，version 是 progress_version；decision 为 `on_time/late/clear/reset_binding`，原因 1–500 字并对成员可见。`on_time/late` 仅接受当前任务绑定下已确认的 AC；`reset_binding` 仅用于绑定变化且尚未计入完成的题目，清除该题旧的待核验证据并建立当前 UID 的新起点，不转移已有成绩。证据或任务版本冲突返回 409；取消任务不能审核。原始快照保留，`clear` 撤销已有人工决定并按当前周期重算。同一有效账号代际内，改绑或解绑后仍可撤销，逐题 `can_clear_review` 与 `can_review` 分开表示能力；撤销保留原绑定锚点，不采纳新 UID 的成绩。无人工决定时返回 409/review_unavailable；注销或账号代际变化仍禁止撤销。
+绑定更正正文为 `{problem_id,decision,reason,version,task_version}`：problem_id 是任务题目行 ID，version 是 progress_version；decision 仅接受 `reset_binding`，原因 1–500 字并对成员可见。仅绑定变化且尚未计入完成的洛谷题目可重建当前 UID 的核验起点，不转移已有成绩。旧 `on_time/late/clear` 请求返回 `historical_ac_only`；证据或任务版本冲突返回 409，取消任务不能更正绑定。
 
 刷新失败保留已知进度；无绑定、覆盖不足、暂停或失败分别显示待核验原因；重启丢失队列显示 interrupted。业务错误包含 code/message/request_id，常见 409 version_conflict/audience_changed/immutable_task、429 refresh_rate_limited（retry_after）、503 feature_disabled/sync_unavailable。完整字段、幂等、错误及生命周期契约见 [api.md（训练任务存储与发布契约）](training-tasks/api.md)，实测与发布回退见 [acceptance.md（训练任务联调与验收）](training-tasks/acceptance.md)。
+
+同步任务及个人训练详情中的 `refresh` 保持原 `result` 数值契约，额外返回可选 `errors`。单成员为 `{platform:{code,message,http_status,cause_http_status,deferred,consecutive_failures,attention_required,next_retry_at}}`，全员任务为 `{qq_id:{platform:{code,message,http_status,cause_http_status,deferred,consecutive_failures,attention_required,next_retry_at}}}`，详情按账号生命周期过滤。
+
+- `http_status`：本次实际收到的洛谷上游 HTTP 状态码。连接失败、超时未收到响应或冷却跳过时为 `null`；收到 HTTP 200 后解析失败仍为 `200`，同时使用 `luogu_invalid_snapshot` 说明内容异常。
+- `cause_http_status`：仅用于冷却跳过，记录先前触发冷却的状态码，其余为 `null`。冷却期间没有发出新请求，不能把上次的 403/429 当成本次响应。
+- `code` / `message`：超时为 `luogu_timeout`，连接或传输失败为 `luogu_network_error`，HTTP 错误沿用 `luogu_http_<状态码>`；异常跳转只描述实际响应，不据此认定公开练习页需要登录。
+- `next_retry_at`：Unix 秒，0 表示没有等待。`deferred=true` 表示本次没有发送请求（全站冷却或成员退避），不会增加失败次数；`consecutive_failures` 只累计真实请求失败，连续 3 次起 `attention_required=true`。训练调度在冷却中暂停，冷却结束只派一个恢复探测；恢复成功后继续按成员退避调度。门禁状态复用 `settings.luogu_request_gate` 持久化，不新增表。
+
+以上为上游抓取结果，不改变异步任务提交接口的 202 或任务读取接口的 200。数值 `-1` 只能显示同步失败，不能显示成员不存在。
+
+Web 成员训练页和管理员进度页在可见且空闲时每 30 秒读取站内进度，返回页面时更新；主动刷新运行中仍每 3 秒查询状态。后台读取不会触发 OJ 请求，离开页面清理定时器。
 
 ## 普通成员训练闭环
 
@@ -224,12 +235,14 @@ response.raise_for_status()
 
 `GET /api/me/problems?scope=solved` 从会话读取 QQ，客户端的 `qq_id/owner_qq_id` 不改变归属。以平台和题号去重，返回 `ac_at`（Unix 秒），按最近 AC 时间倒序，再按平台、题号稳定排序。`platform/tag/problem_tag/state=favorite/page/page_size` 与总数使用相同条件；`tag` 同时匹配题名、题号和当前成员可见的有效标签：公共标签为空时包含本人的 AC 标签回退，已有公共标签时不搜索被其替代的私人标签，也不搜索其他成员的标签；该条件与计数、分页共用。独立的 `problem_tag` 按完整标签忽略大小写匹配（最长 100 字符，超长返回 400），兼容逗号等分隔的旧标签及 JSON 标签数组，不把 `math` 匹配为 `mathematics`，`%`、`_` 不作为通配符。标签与搜索、收藏、本人 AC 范围共同生效，先筛选再统计与分页。本人范围默认每页 20、上限 100，默认全站目录仍为 500、上限 500。返回 `items/total/returned/page/page_size/next_cursor/tags_version`；无效 `scope` 或非整数分页参数返回 400。
 
-`GET /api/me/problems/tags?platform=codeforces` 返回 `tags: string[]` 与不透明字符串 `tags_version`，供题库标签下拉框使用，沿用成员登录和首次改密限制。下拉选项、列表展示及标签筛选使用同一份有效标签：按已采集目录 → 推荐目录 → 会话本人的 AC 元数据取第一份非空标签，空字符串和 JSON 空数组均允许回退；不读取其他成员独有的提交标签，也不混入被优先来源替代的旧标签。比赛进度采用相同优先顺序。平台可为空或 `codeforces/atcoder/luogu/nowcoder/cjlu`，无效平台返回 400。按完整标签忽略大小写去重并排序，排除空白和超过 100 字符的标签；列表不受当前题目页码、搜索或收藏筛选限制，不联网或触发采集。
+题目列表和比赛进度的关键词 `tag` 同时匹配 Codeforces 标签的原站名称与网页中文名称，例如 `math` 和「数学」。在 `platform=codeforces` 时，两个接口也支持 `problem_tags=math,dp`。最多 20 个不同标签，每项最长 100 字符，忽略大小写，要求同一道题同时包含全部标签。非空的 `problem_tags` 优先于旧参数 `problem_tag`，这两个精确筛选参数仍使用原站标签值。
+
+`GET /api/me/problems/tags?platform=codeforces` 返回 `tags: string[]` 与不透明字符串 `tags_version`，供题库标签选择器使用，沿用成员登录和首次改密限制。选项、列表展示及标签筛选使用同一份有效标签：按已采集目录 → 推荐目录 → 会话本人的 AC 元数据取第一份非空标签，空字符串和 JSON 空数组均允许回退；不读取其他成员独有的提交标签，也不混入被优先来源替代的旧标签。比赛进度采用相同优先顺序。平台可为空或 `codeforces/atcoder/luogu/nowcoder/cjlu`，无效平台返回 400。按完整标签忽略大小写去重并排序，排除空白和超过 100 字符的标签；列表不受当前题目页码、搜索或收藏筛选限制，不联网或触发采集。
 
 
 题目列表分页兼容原有 page/page_size，并增加可选 cursor：首屏不传；连续下一页将上一响应的 next_cursor 原样传入，同时递增 page。游标绑定当前会话成员、全部筛选参数和每页数量；改条件后从第一页重取，参数不匹配或格式错误返回 400，最后一页返回 next_cursor=null。跳页与旧客户端继续使用原来的页码分页。游标保证按排序键继续读取，不是数据库快照；同步改动题目时间或大量删除记录后，重新加载第一页。比赛进度接口保留原分页规则。
 
-GET /api/problems 和 GET /api/me/problems 的公共列表读取同步时维护的轻量摘要，筛选和精确总数共用条件，页面只批量关联当前成员的当页状态；不读取题面大字段，不在请求时合并全站 submissions。本人 AC 按成员/OJ 的有序索引查找。洛谷多标签筛选及列表分类补充使用预建原生标签关系，补充分类时不读取包含 Markdown 正文的元数据；其它原始算法标签继续使用 problem_tag。题面仍通过原有详情接口按需读取。
+GET /api/problems 和 GET /api/me/problems 的公共列表读取同步时维护的轻量摘要，筛选和精确总数共用条件，页面只批量关联当前成员的当页状态；不读取题面大字段，不在请求时合并全站 submissions。本人 AC 按成员/OJ 的有序索引查找。洛谷多标签筛选及列表分类补充使用预建原生标签关系，补充分类时不读取包含 Markdown 正文的元数据。原站算法标签的单选和 Codeforces 多选使用题库标签索引。题面仍通过原有详情接口按需读取。
 
 tags_version 由公共目录版本与本人私人回退版本组成，客户端应整体比较，不能解析为时间。标签接口在同一个 SQLite 只读事务快照中读取选项和版本：同步即使在两次读取之间提交，响应仍返回同一快照的旧选项与旧版本，下一次请求可读到新选项与新版本，避免旧选项被缓存为新版本。网页按平台复用标签，切换平台时使用 60 秒有效期，并在列表返回版本变化时刷新；另一成员仅修改自己的标签不会使本人的标签缓存失效。标签缓存仅存在于当前页面实例，不跨账号共享。GET /api/problems 同样返回 next_cursor/tags_version，并保持管理员目录忽略 scope 的既有行为；管理员数据维护列表 GET /api/admin/database/problems 保留原返回结构。
 
@@ -435,7 +448,7 @@ print(task["status"], task["progress"], task["result"])
 
 `result.scope=platform` 表示全平台任务；`metadata_count` 是已导入目录题数，`batch_count/completed_batches` 是题面总批次 / 已完成批次。`progress.phase` 为 `catalog/metadata/statements`，目录阶段有 `metadata_done/metadata_total`，题面阶段有当前 `batch`。全平台的 `remaining_count` 表示本任务尚未尝试的题数，失败题数单独统计。任务错误列表最多显示前 100 条，超出时 `failure_details_truncated=true`；完整逐题错误保存在数据库对应行中。
 
-用户平台同步任务的 `result` 按平台返回新增记录数；`-5` 表示该平台同步已暂停，后台显示“已暂停，保留已有记录”。暂停属于跳过操作，不算抓取失败，也不会推进该平台的同步游标。洛谷默认匿名同步公开练习页中 P 开头的 AC 题号集合，其他题号跳过且不阻断 P 题同步，不依赖 Cookie；可用 `ACM_LUOGU_USER_SYNC_ENABLED=false` 显式暂停。管理员在成员资料 `luogu_id` 字段手填数字 UID，沿用绑定确认与版本参数，保存后排队同步对应平台。
+用户平台同步任务的 `result` 按平台返回新增记录数；`-5` 表示该平台同步已暂停，后台显示“已暂停，保留已有记录”。暂停属于跳过操作，不算抓取失败，也不会推进该平台的同步游标。洛谷默认匿名同步公开练习页中 P 开头的 AC 题号集合，其他题号跳过且不阻断 P 题同步，不依赖登录 Cookie；匿名会话 Cookie 只用于原站正常初始化；可用 `ACM_LUOGU_USER_SYNC_ENABLED=false` 显式暂停。管理员在成员资料 `luogu_id` 字段手填数字 UID，沿用绑定确认与版本参数，保存后排队同步对应平台。
 
 洛谷新 AC 若没有可靠时间，沿用非空数据库时间列中的 `submit_time=0` 表示未知，对应已 AC 题目 `ac_at=0`；记录仍属于已 AC，不得以时间真假判断是否通过。保留已有真实时间，不产生虚构的 `submission_attempts`。无时间记录计入累计过题数，排除日期排行榜和活跃天数，该记录本身不作训练任务按期完成证据；训练任务另外保存经绑定版本校验的快照差分或管理员审核，详见上文训练任务契约。洛谷的 `days` 参数不筛掉未知时间记录：每次读取公开已通过列表，仅幂等补入 P 题，保留已有非 P 历史记录；同步状态时间是采集时间。历史 `luogu_` 前缀和大小写别名在成员题库聚合、原生难度/标签筛选、题号搜索、详情与收藏中按同一 P 题识别，读取归一化不改写原始记录或 AC 时间。访问受限、解析异常或账号不符时返回失败，不推进成功游标、不删除原记录。配置与验收方式见 [README.md（洛谷公开 AC 记录同步）](../feat/api/README.md#洛谷公开-ac-记录同步)。
 
@@ -464,7 +477,7 @@ print(task["status"], task["progress"], task["result"])
 {"platform":"luogu","scope":"problems","problem_ids":["P1001","P1002"],"refresh":false}
 ```
 
-公开来源为 `/problem/list?type=P&page=N` 和 `/problem/P题号` 页内 `lentille-context`，字典为 `/_lfe/config` 的 `ProblemDifficulty` 及 `/_lfe/tags`。后端只请求固定 HTTPS 原站，不接受任意 URL，不带 Cookie。所有请求有响应大小限制、超时与共享节流；403/429 或登录跳转停止整批任务，`result.access_limited/retry_after/error` 提供原因和建议等待秒数，冷却后需重新发起。三次连续单题错误也停止任务。
+公开来源为 `/problem/list?type=P&page=N` 和 `/problem/P题号` 页内 `lentille-context`，字典为 `/_lfe/config` 的 `ProblemDifficulty` 及 `/_lfe/tags`。后端只请求固定 HTTPS 原站，不接受任意 URL，不带登录凭据；原站下发的普通匿名会话 Cookie 仅在当前会话内复用。所有请求有响应大小限制、超时与共享节流；403/429、异常跳转或连续网络/服务端失败会进入指数冷却，`result.access_limited/retry_after/error` 提供原因和建议等待秒数。HTTP 200 但内容无法解析也不会解除冷却；冷却结束后由训练调度只发送一个低频恢复探测，完整解析成功后才恢复其他账号。三次连续单题错误也停止任务。
 
 目录逐页、逐批提交；重复题号、不完整页、总数变化或配置页数上限会报告 `catalog_complete=false` 和 partial/failed，保留已写入目录。目录之外的旧题保留，不据此推断删除。指定题号首次失败时保存仅有题号/原站链接的占位目录及失败信息，未验证题目不会有题面。取消后重跑可继续补齐。
 

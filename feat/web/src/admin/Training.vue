@@ -67,6 +67,8 @@ let revision = 0,
   loadedKey = '',
   editorInitialized = false,
   disposed = false,
+  progressPolling = false,
+  progressTimer,
   publishKey = '';
 function address(changes = {}, replace = false) {
   const query = { ...route.query, section: 'training', ...changes };
@@ -135,12 +137,41 @@ function unload(event) {
     event.returnValue = '';
   }
 }
-onMounted(() => window.addEventListener('beforeunload', unload));
+async function pollProgress() {
+  clearTimeout(progressTimer);
+  if (disposed) return;
+  if (
+    !document.hidden &&
+    !loading.value &&
+    !busy.value &&
+    !progressPolling &&
+    !editing.value &&
+    route.query.tab === 'progress' &&
+    task.value?.state === 'published'
+  ) {
+    progressPolling = true;
+    try {
+      await loadProgress(revision, true);
+    } catch {
+      // Keep the last valid progress if a background read fails.
+    } finally {
+      progressPolling = false;
+    }
+  }
+  if (!disposed) progressTimer = setTimeout(pollProgress, 30000);
+}
+onMounted(() => {
+  window.addEventListener('beforeunload', unload);
+  document.addEventListener('visibilitychange', pollProgress);
+  progressTimer = setTimeout(pollProgress, 30000);
+});
 onBeforeUnmount(() => {
   disposed = true;
   revision++;
   unregister();
   window.removeEventListener('beforeunload', unload);
+  document.removeEventListener('visibilitychange', pollProgress);
+  clearTimeout(progressTimer);
 });
 function restoreForm(data, submitted) {
   const persisted = data ? taskForm(data) : newDraft();
@@ -209,10 +240,12 @@ async function load() {
     if (version === revision) loading.value = false;
   }
 }
-async function loadProgress(version = revision) {
-  memberSearch.value = String(route.query.member_search || '');
-  memberStatus.value = String(route.query.status || '');
-  memberIdentity.value = String(route.query.identity || '');
+async function loadProgress(version = revision, background = false) {
+  if (!background) {
+    memberSearch.value = String(route.query.member_search || '');
+    memberStatus.value = String(route.query.status || '');
+    memberIdentity.value = String(route.query.identity || '');
+  }
   const data = await request(
     base +
       '/' +
@@ -221,23 +254,23 @@ async function loadProgress(version = revision) {
       new URLSearchParams({
         page: page.value,
         page_size: 20,
-        search: memberSearch.value,
-        status: memberStatus.value,
-        identity: memberIdentity.value,
+        search: String(route.query.member_search || ''),
+        status: String(route.query.status || ''),
+        identity: String(route.query.identity || ''),
       }),
     {},
     'progress',
   );
-  if (version !== revision) return;
+  if (version !== revision || (background && busy.value)) return;
   progress.value = data;
-  recipient.value = null;
+  if (!background) recipient.value = null;
   if (route.query.recipient_id) {
     const item = await request(
       base + '/' + taskId.value + '/progress/' + route.query.recipient_id,
       {},
       'recipient',
     );
-    if (version === revision) recipient.value = item;
+    if (version === revision && !(background && busy.value)) recipient.value = item;
   }
 }
 watch(() => route.fullPath, load, { immediate: true });
@@ -630,7 +663,7 @@ function lifecycle(kind) {
                 <div class="tt-row">
                   <ProblemDifficulty :problem="p" />
                   <LuoguBadges v-if="p.platform === 'luogu'" :problem="p" :difficulty="false" />
-                  <ProblemTags v-else-if="p.tags != null" :tags="p.tags" />
+                  <ProblemTags v-else-if="p.tags != null" :tags="p.tags" :platform="p.platform" />
                 </div>
               </div>
               <button

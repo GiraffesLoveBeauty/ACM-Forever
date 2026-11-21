@@ -188,7 +188,7 @@ onBeforeUnmount(() => {
               }}
             </p>
             <p>爬虫原始标签：</p>
-            <ProblemTags :tags="data.raw_tags" />
+            <ProblemTags :tags="data.raw_tags" :platform="props.platform" />
           </template>
           <template v-else>
             <p class="muted">本地保留排版，AI 仅按文字 ID 翻译。图片、公式、代码和样例不交给模型重建。仅检查 ID 能否对应回填，不进行翻译准确性审核；防重复请求保护继续生效。</p>

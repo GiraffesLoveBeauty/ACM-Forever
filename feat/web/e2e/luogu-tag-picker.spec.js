@@ -20,16 +20,61 @@ async function openPage(page, owner, selected) {
     [prefix + 'native_tags']: selected.join(','),
   });
   await page.goto((owner === 'member' ? '/problem-bank.html?' : '/admin.html?') + query);
-  await expect(page.getByRole('button', { name: /按算法筛选/ })).toBeVisible();
+  await expect(pickerTrigger(page, owner)).toBeVisible();
 }
 
-async function openPicker(page) {
-  await page.getByRole('button', { name: /按算法筛选/ }).click();
+function pickerTrigger(page, owner) {
+  return page.getByRole('button', { name: owner === 'member' ? /按标签筛选/ : /按算法筛选/ });
+}
+
+async function openPicker(page, owner) {
+  await pickerTrigger(page, owner).click();
   const dialog = page.getByRole('dialog', { name: '选择标签' });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('button', { name: '算法标签 1', exact: true })).toBeVisible();
   return dialog;
 }
+
+test('Codeforces picker shows all groups and submits Chinese choices', async ({ page }) => {
+  const login = await page.request.post('/api/auth/login', {
+    data: { qq_id: '10000001', password: 'Browser-fixture-only!2026' },
+  });
+  expect(login.status()).toBe(200);
+  await page.route('**/api/me/problems/tags?*', (route) =>
+    route.fulfill({ json: { tags: ['implementation', 'math', 'interactive'] } }),
+  );
+  await page.goto('/problem-bank.html?platform=codeforces&problem_tag=Implementation');
+  await expect(page.locator('#problem-list article').first()).toContainText('模拟');
+  await page.getByRole('button', { name: /按标签筛选/ }).click();
+  const dialog = page.getByRole('dialog', { name: '选择标签' });
+  await expect(dialog.getByRole('tablist')).toHaveCount(0);
+  await expect(dialog.getByRole('tab')).toHaveCount(0);
+  const tags = dialog.locator('.luogu-picker-body');
+  await expect(tags.getByRole('button', { name: '模拟', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(tags.getByRole('button', { name: '数学', exact: true })).toBeVisible();
+  await expect(tags.getByRole('button', { name: '交互题', exact: true })).toBeVisible();
+  const search = dialog.getByRole('searchbox', { name: '搜索全部标签' });
+  await search.fill('math');
+  await expect(tags.getByRole('button', { name: '交互题', exact: true })).toHaveCount(0);
+  await tags.getByRole('button', { name: '数学', exact: true }).click();
+  await expect(page).toHaveURL((url) => url.searchParams.get('problem_tag') === 'Implementation');
+  const response = page.waitForResponse((item) => {
+    const url = new URL(item.url());
+    return (
+      url.pathname === '/api/me/problems' &&
+      url.searchParams.get('problem_tags') === 'Implementation,math'
+    );
+  });
+  await dialog.getByRole('button', { name: '确认筛选' }).click();
+  expect((await response).status()).toBe(200);
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText('没有匹配题目，请调整筛选。')).toBeVisible();
+  await page.goBack();
+  await expect(page.locator('#problem-list article').first()).toContainText('模拟');
+});
 
 for (const owner of ['member', 'admin']) {
   test.describe(owner + ' Luogu picker', () => {
@@ -57,7 +102,7 @@ for (const owner of ['member', 'admin']) {
           requests.push(request.url());
       });
       await openPage(page, owner, ['1']);
-      const dialog = await openPicker(page);
+      const dialog = await openPicker(page, owner);
       await dialog.getByRole('button', { name: '算法标签 2', exact: true }).click();
       const input = dialog.getByRole('searchbox', { name: '搜索全部标签' });
       const url = page.url();
@@ -123,7 +168,7 @@ for (const owner of ['member', 'admin']) {
           await page.setViewportSize({ width, height });
           await openPage(page, owner, ids);
           await page.evaluate((value) => (document.body.dataset.theme = value), theme);
-          const dialog = await openPicker(page);
+          const dialog = await openPicker(page, owner);
           const confirm = dialog.getByRole('button', { name: '确认筛选', exact: true });
           const cancel = dialog.getByRole('button', { name: '取消', exact: true });
           const bounds = await dialog.boundingBox();
@@ -147,7 +192,7 @@ for (const owner of ['member', 'admin']) {
           );
 
           const applied = page.url();
-          const reopened = await openPicker(page);
+          const reopened = await openPicker(page, owner);
           await activate(
             reopened.getByRole('button', { name: '移除标签：算法标签 2', exact: true }),
           );

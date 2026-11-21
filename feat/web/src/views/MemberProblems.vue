@@ -6,15 +6,16 @@ import { memberFilters, memberQuery, problemLink } from '../lib/member-problems.
 import Pager from '../components/Pager.vue';
 import LuoguBadges from '../components/LuoguBadges.vue';
 import LuoguFilters from '../components/LuoguFilters.vue';
+import LuoguTagPicker from '../components/LuoguTagPicker.vue';
 import ProblemRangeFilters from '../components/ProblemRangeFilters.vue';
-import { rangeFilters, rangeParams, timeLabel } from '../lib/problem-filters.js';
+import { ratingFilters } from '../lib/problem-filters.js';
 import { nativeFilters } from '../lib/luogu-problems.js';
 import { nativeParams } from '../lib/luogu-problems.js';
 import ProblemTracker from '../components/ProblemTracker.vue';
 import ProblemDifficulty from '../components/ProblemDifficulty.vue';
 import AlgorithmTag from '../components/AlgorithmTag.vue';
 import ProblemTags from '../components/ProblemTags.vue';
-import { filterTaxonomy, reviewLabels, sourceLabels } from '../lib/tag-management.js';
+import { reviewLabels, sourceLabels } from '../lib/tag-management.js';
 const route = useRoute(),
   router = useRouter(),
   request = useRequests();
@@ -23,29 +24,19 @@ const rows = ref([]),
   total = ref(0),
   busy = ref(false),
   error = ref('');
-const facets = ref([]),
-  tagSearch = ref(''),
-  expandedTags = ref(false);
 const canManage = computed(() => ['admin', 'root'].includes(auth.role));
-const selectedLabels = computed(() => (form.labels ? form.labels.split(',') : []));
-const selectedNames = computed(() =>
-  selectedLabels.value.map((id) => ({
-    id,
-    name_zh: facets.value.find((t) => t.id === id)?.name_zh || id,
-  })),
-);
-const visibleTags = computed(() => {
-  const filtered = filterTaxonomy(facets.value, tagSearch.value).filter(
-    (t) => tagSearch.value || expandedTags.value || t.count || selectedLabels.value.includes(t.id),
-  );
-  return tagSearch.value || expandedTags.value ? filtered : filtered.slice(0, 14);
-});
 const tags = ref([]),
   tagsBusy = ref(false),
   tagsError = ref('');
-const availableTags = computed(() => [
-  ...new Set([form.problem_tag, ...tags.value].filter(Boolean)),
-]);
+const selectedProblemTags = computed(() => {
+  if (form.platform !== 'codeforces') {
+    return form.problem_tag ? [form.problem_tag] : [];
+  }
+  return (form.problem_tags || form.problem_tag)
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+});
 const current = computed(() => memberFilters(route.query));
 const isTracker = computed(() => current.value.view === 'tracker');
 const platforms = computed(() => ({
@@ -104,24 +95,17 @@ async function load() {
   const version = ++revision;
   Object.assign(form, current.value);
   rows.value = [];
-  facets.value = [];
   error.value = '';
   busy.value = true;
   try {
-    const { view, ...filters } = current.value;
-    for (const key of Object.keys(filters))
-      if (
-        key.startsWith('native_') ||
-        ['rating_min', 'rating_max', 'start_at', 'end_at', 'time_basis'].includes(key)
-      )
-        delete filters[key];
-    Object.assign(filters, nativeParams(current.value), rangeParams(current.value));
+    const { view, rating_min, rating_max, ...filters } = current.value;
+    for (const key of Object.keys(filters)) if (key.startsWith('native_')) delete filters[key];
+    Object.assign(filters, nativeParams(current.value));
+    if (rating_min) filters.rating_min = rating_min;
+    if (rating_max) filters.rating_max = rating_max;
+    if (!filters.problem_tags) delete filters.problem_tags;
     // The backend treats every nonempty platform as a literal platform name.
     if (filters.platform === 'all') delete filters.platform;
-    if (view === 'tracker') {
-      delete filters.labels;
-      delete filters.match;
-    }
     const pageQuery = { ...filters, page_size: 20 };
     const { page, ...withoutPage } = pageQuery;
     const queryKey = new URLSearchParams(withoutPage).toString();
@@ -153,7 +137,6 @@ async function load() {
     }
     rows.value = data.items;
     total.value = data.total;
-    facets.value = data.tag_facets || [];
   } catch (e) {
     if (version === revision && e.name !== 'AbortError') error.value = e.message;
   } finally {
@@ -165,6 +148,13 @@ function navigate(page = 1) {
 }
 function changePlatform() {
   form.problem_tag = '';
+  form.problem_tags = '';
+  navigate();
+}
+function applyProblemTags(selected) {
+  const multiTag = form.platform === 'codeforces';
+  form.problem_tag = multiTag ? '' : selected[0] || '';
+  form.problem_tags = multiTag ? selected.join(',') : '';
   navigate();
 }
 function scope(value) {
@@ -173,7 +163,10 @@ function scope(value) {
 }
 function changeView(view) {
   const next = memberFilters({ ...current.value, view, page: 1 });
-  if (next.platform !== current.value.platform) next.problem_tag = '';
+  if (next.platform !== current.value.platform) {
+    next.problem_tag = '';
+    next.problem_tags = '';
+  }
   Object.assign(form, next);
   navigate();
 }
@@ -192,31 +185,14 @@ function clear() {
   Object.assign(form, memberFilters({ scope: current.value.scope, view: current.value.view }));
   navigate();
 }
-function toggleLabel(id) {
-  form.labels = (
-    selectedLabels.value.includes(id)
-      ? selectedLabels.value.filter((t) => t !== id)
-      : [...selectedLabels.value, id]
-  )
-    .sort()
-    .join(',');
-  navigate();
-}
-function clearLabels() {
-  form.labels = '';
-  navigate();
-}
 watch(() => route.fullPath, load, { immediate: true });
 watch(
   () => form.platform,
   (platform, previous) => {
     if (previous !== undefined && platform !== current.value.platform) {
       form.problem_tag = '';
-      if (platform === 'luogu') {
-        form.labels = '';
-        form.match = 'all';
-      }
-      Object.assign(form, nativeFilters({ platform }), rangeFilters({ platform }));
+      form.problem_tags = '';
+      Object.assign(form, nativeFilters({ platform }), ratingFilters({ platform }));
     }
     if (platform !== 'luogu') loadTags(platform);
     else {
@@ -233,10 +209,7 @@ watch(
   <main class="community-main member-problems" :class="{ 'member-problems-tracker': isTracker }">
     <RouterLink class="forum-back-link" to="/home.html">← 返回个人中心</RouterLink>
     <h1>题库</h1>
-    <p v-if="current.platform === 'luogu' && !isTracker">
-      浏览洛谷公开 P 题，按原生难度与算法标签寻找练习题，或查看本人已 AC 的题目。
-    </p>
-    <p v-else>按算法标签寻找练习题，或查看本人已 AC 的题目。人工修正后的有效标签会立即用于筛选。</p>
+    <p>按题目标签寻找练习题，或查看本人已 AC 的题目。</p>
     <div class="chips member-problem-views" aria-label="题库视图">
       <button
         class="btn"
@@ -274,11 +247,6 @@ watch(
       </button>
     </div>
     <section class="card">
-      <div v-if="current.platform === 'luogu' && !isTracker" class="luogu-library-intro">
-        <span>LUOGU · P 题库</span>
-        <h2>洛谷题库</h2>
-        <p>保留洛谷原生难度与标签，从熟悉的分类开始练习。</p>
-      </div>
       <form class="filters member-problem-filters" @submit.prevent="navigate()">
         <label
           ><span>平台</span
@@ -288,7 +256,7 @@ watch(
             </option>
           </select></label
         >
-        <label class="member-problem-search"
+        <label
           ><span>搜索</span
           ><input
             v-model="form.tag"
@@ -302,25 +270,44 @@ watch(
           v-model:difficulty-min="form.native_difficulty_min"
           v-model:difficulty-max="form.native_difficulty_max"
           v-model:tags="form.native_tags"
+          bank-layout
           @apply="navigate()"
-        />
-        <label v-else
-          ><span>标签</span
-          ><select v-model="form.problem_tag" :disabled="tagsBusy">
-            <option value="">{{ tagsBusy ? '正在加载标签…' : '全部标签' }}</option>
-            <option v-for="tag in availableTags" :key="tag" :value="tag">{{ tag }}</option>
-          </select></label
         >
-        <label
-          ><span>收藏</span
-          ><select v-model="form.state">
-            <option value="">全部</option>
-            <option value="favorite">已收藏</option>
-          </select></label
-        >
+          <template #after-picker>
+            <label class="member-problem-favorite">
+              <span>收藏</span>
+              <select v-model="form.state">
+                <option value="">全部</option>
+                <option value="favorite">已收藏</option>
+              </select>
+            </label>
+          </template>
+        </LuoguFilters>
+        <template v-else>
+          <LuoguTagPicker
+            :key="form.platform"
+            class="member-problem-tag-slot"
+            :platform="form.platform"
+            :tags="tags"
+            :model-value="selectedProblemTags"
+            :loading="tagsBusy"
+            :error="tagsError"
+            @update:model-value="applyProblemTags"
+            @retry="loadTags()"
+          />
+          <label class="member-problem-favorite">
+            <span>收藏</span>
+            <select v-model="form.state">
+              <option value="">全部</option>
+              <option value="favorite">已收藏</option>
+            </select>
+          </label>
+        </template>
         <ProblemRangeFilters
-          v-if="!isTracker"
+          class="member-problem-difficulty"
+          v-if="!isTracker && ['codeforces', 'atcoder'].includes(form.platform)"
           :filters="form"
+          difficulty-only
           @change="Object.assign(form, $event)"
         />
         <div class="member-problem-filter-actions">
@@ -328,75 +315,11 @@ watch(
           <button type="button" class="btn" @click="clear">清除筛选</button>
         </div>
       </form>
-      <section
-        v-if="!isTracker && form.platform !== 'luogu'"
-        class="bank-label-filter"
-        aria-label="算法标签筛选"
+      <p
+        v-if="tagsError && form.platform !== 'codeforces'"
+        class="member-problem-tags-error"
+        role="alert"
       >
-        <div class="bank-label-heading">
-          <div>
-            <h2>按算法标签筛选</h2>
-            <p>使用最终有效标签，包含人工修正。多个标签可以组合查询。</p>
-          </div>
-          <label class="bank-match-label"
-            >匹配方式<select v-model="form.match" aria-label="标签匹配方式" @change="navigate()">
-              <option value="all">同时包含全部标签</option>
-              <option value="any">包含任意一个标签</option>
-            </select></label
-          >
-        </div>
-        <label class="bank-tag-search"
-          >查找标签<input
-            v-model="tagSearch"
-            type="search"
-            aria-label="查找算法标签"
-            placeholder="中文名称或英文 ID，例如：差分 / dp"
-        /></label>
-        <div class="bank-tag-options">
-          <AlgorithmTag
-            v-for="tag in visibleTags"
-            :key="tag.id"
-            :tag="tag"
-            as="button"
-            type="button"
-            class="bank-tag-option"
-            :class="{ active: selectedLabels.includes(tag.id) }"
-            :aria-pressed="selectedLabels.includes(tag.id)"
-            :title="tag.id"
-            :data-tag-id="tag.id"
-            @click="toggleLabel(tag.id)"
-          >
-            {{ selectedLabels.includes(tag.id) ? '✓ ' : '' }}{{ tag.name_zh }}
-            <small>{{ tag.count }}</small></AlgorithmTag
-          ><span v-if="!visibleTags.length" class="muted">{{
-            tagSearch ? '没有匹配的标准标签' : '当前范围暂无可筛选的算法标签'
-          }}</span>
-        </div>
-        <button
-          v-if="facets.length && !tagSearch"
-          type="button"
-          class="bank-label-more"
-          @click="expandedTags = !expandedTags"
-        >
-          {{ expandedTags ? '收起词表' : `浏览全部 ${facets.length} 个标签` }}
-        </button>
-        <div v-if="selectedLabels.length" class="bank-active-labels" aria-label="已选算法标签">
-          <span>已选：</span
-          ><AlgorithmTag
-            v-for="tag in selectedNames"
-            :key="tag.id"
-            :tag="tag"
-            as="button"
-            class="bank-selected-label"
-            type="button"
-            :aria-label="'取消标签筛选：' + tag.name_zh"
-            @click="toggleLabel(tag.id)"
-          >
-            {{ tag.name_zh }} ×</AlgorithmTag
-          ><button class="bank-label-more" type="button" @click="clearLabels">清空标签</button>
-        </div>
-      </section>
-      <p v-if="tagsError" class="member-problem-tags-error" role="alert">
         标签加载失败：{{ tagsError }}
         <button type="button" class="btn" @click="loadTags()">重试标签</button>
       </p>
@@ -440,12 +363,9 @@ watch(
                 <b>{{ row.platform }} · {{ row.problem_id }}</b
                 ><br />{{ row.problem_name || '未命名题目' }}<br />
                 <ProblemDifficulty :problem="row" class="bank-problem-difficulty" />
-                <small>
-                  · {{ timeLabel(row)
-                  }}<template v-if="row.problem_time">
-                    {{ date(row.problem_time) }}</template
-                  ></small
-                >
+                <small v-if="row.time_basis === 'contest' && row.problem_time">
+                  · 比赛时间 {{ date(row.problem_time) }}
+                </small>
                 <small v-if="row.ac_at"> · AC {{ date(row.ac_at) }}</small>
                 <small v-else-if="current.scope === 'solved'"> · 已 AC，时间未知</small>
                 <div v-if="row.platform === 'luogu'" class="bank-result-tags">
@@ -456,11 +376,8 @@ watch(
                     v-for="tag in row.effective_tags"
                     :key="tag.id"
                     :tag="tag"
-                    as="button"
-                    type="button"
                     class="bank-result-tag"
-                    :title="`${tag.id} · ${sourceLabels[tag.source] || tag.source} · 点击筛选`"
-                    @click="toggleLabel(tag.id)"
+                    :title="`${tag.id} · ${sourceLabels[tag.source] || tag.source}`"
                   >
                     {{ tag.name_zh
                     }}<small v-if="tag.source === 'manual_add'">人工</small></AlgorithmTag
@@ -470,7 +387,8 @@ watch(
                   }}</small>
                 </div>
                 <div v-else class="bank-result-tags">
-                  <small class="muted">原站标签：</small><ProblemTags :tags="row.tags" />
+                  <small class="muted">原站标签：</small
+                  ><ProblemTags :tags="row.tags" :platform="row.platform" />
                   <small class="muted">算法标签待接入</small>
                 </div>
               </div>
@@ -514,114 +432,8 @@ watch(
 </template>
 
 <style scoped>
-.luogu-library-intro {
-  border-bottom: 1px solid var(--line, #dce6df);
-  margin-bottom: 24px;
-  padding-bottom: 22px;
-}
-.luogu-library-intro > span {
-  color: var(--accent, #176c60);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  font-weight: 700;
-}
-.luogu-library-intro h2 {
-  margin: 8px 0;
-  font-size: 24px;
-}
-.luogu-library-intro p {
-  margin: 0;
-  color: var(--muted, #697970);
-  font-size: 13px;
-}
 .bank-problem-difficulty {
   margin-top: 9px;
-}
-.bank-label-filter {
-  padding: 20px;
-  background: #176c6005;
-  border: 1px solid #176c6026;
-  border-radius: 10px;
-  margin-bottom: 24px;
-}
-.bank-label-heading {
-  display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  align-items: center;
-}
-.bank-label-heading h2 {
-  font-size: 16px;
-  margin: 0 0 6px;
-}
-.bank-label-heading p {
-  font-size: 12px;
-  margin: 0;
-  color: #6b7d76;
-}
-.bank-match-label {
-  display: grid;
-  gap: 5px;
-  font-size: 11px;
-  min-width: 180px;
-}
-.bank-match-label select {
-  min-height: 38px;
-}
-.bank-tag-search {
-  display: flex;
-  gap: 14px;
-  align-items: center;
-  font-size: 12px;
-  margin: 16px 0 12px;
-}
-.bank-tag-search input {
-  width: min(440px, 100%);
-  min-width: 0;
-  min-height: 38px;
-}
-.bank-tag-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  max-height: 210px;
-  overflow: auto;
-  padding: 2px;
-}
-.bank-tag-option,
-.bank-selected-label,
-.bank-result-tag {
-  padding: 7px 10px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.bank-tag-option small {
-  font: 10px system-ui;
-  color: inherit;
-  margin-left: 5px;
-}
-.bank-tag-option.active,
-.bank-selected-label {
-  box-shadow: inset 0 0 0 1px currentColor;
-  font-weight: 700;
-}
-.bank-label-more {
-  border: 0;
-  background: transparent;
-  color: #176c60;
-  font-size: 12px;
-  padding: 8px 0;
-  cursor: pointer;
-}
-.bank-active-labels {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  border-top: 1px solid #176c6025;
-  padding-top: 12px;
-  margin-top: 10px;
-  font-size: 12px;
 }
 .bank-problem-info {
   min-width: 0;
@@ -663,26 +475,7 @@ watch(
   align-items: center;
   justify-content: flex-end;
 }
-.bank-tag-option:focus-visible,
-.bank-result-tag:focus-visible,
-.bank-selected-label:focus-visible {
-  outline: 2px solid #176c60;
-  outline-offset: 3px;
-}
 @media (max-width: 640px) {
-  .bank-label-heading {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 14px;
-  }
-  .bank-tag-search {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 6px;
-  }
-  .bank-tag-search input {
-    width: 100%;
-  }
   .member-problems #problem-list > .list-item {
     grid-template-columns: minmax(0, 1fr);
     align-items: start;
@@ -690,9 +483,6 @@ watch(
   .bank-problem-actions {
     flex-wrap: wrap;
     justify-content: flex-start;
-  }
-  .bank-label-filter {
-    padding: 15px;
   }
 }
 .community-main.member-problems-tracker {
@@ -716,21 +506,27 @@ watch(
   margin-bottom: 20px;
 }
 form.member-problem-filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
+  --filter-label-gap: 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.65fr) minmax(168px, 18%);
+  align-items: start;
   gap: 20px 24px;
   margin: 0 0 24px;
 }
-.member-problem-filters > label {
+.member-problem-filters > label,
+.member-problem-favorite {
   display: flex;
-  flex: 1 1 180px;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--filter-label-gap);
   min-width: 0;
 }
-.member-problem-filters > .member-problem-search {
-  flex: 2 1 280px;
+.member-problem-filters :deep(.member-problem-tag-slot) {
+  padding-block-start: calc(1.5em + var(--filter-label-gap));
+}
+.member-problem-favorite,
+.member-problem-filters :deep(.member-problem-difficulty),
+.member-problem-filter-actions {
+  grid-column: 1 / -1;
 }
 .member-problem-filters label > span {
   line-height: 1.5;
@@ -764,8 +560,14 @@ form.member-problem-filters {
   .member-problems-tracker > .card {
     padding: 12px;
   }
-  .member-problem-filters > label,
-  .member-problem-filters > .member-problem-search {
+  form.member-problem-filters {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 16px;
+  }
+  .member-problem-filters :deep(.member-problem-tag-slot) {
+    padding-block-start: 0;
+  }
+  .member-problem-filters :deep(.problem-range-filters > label) {
     flex-basis: 100%;
   }
   .member-problem-filter-actions {

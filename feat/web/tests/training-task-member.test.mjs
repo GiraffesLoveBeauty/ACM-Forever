@@ -133,6 +133,99 @@ test('member lists preserve server progress and history filters in the URL', asy
   assert(textOf(mounted.root).includes('暂无历史任务'));
   assert(calls.every((c) => !c.url.includes('qq_id=')));
 });
+async function pendingBinding(t) {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+  taskOverride = {
+    problems: task().problems.map((problem) => ({ ...problem, verification: 'unbound' })),
+  };
+  let release;
+  const profile = new Promise((resolve) => {
+    release = () =>
+      resolve(
+        json({
+          bindings: [
+            {
+              platform: 'codeforces',
+              label: 'Codeforces',
+              account: '',
+              binding_status: 'unbound',
+              sync_status: 'never',
+              self_service: true,
+              message: '尚未绑定 OJ 账号。',
+            },
+          ],
+        }),
+      );
+  });
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = (url, options) => {
+    if (url !== '/api/me/profile') return previousFetch(url, options);
+    calls.push({ url, options });
+    return profile;
+  };
+  mounted = await mount(Root, routes, '/training-tasks.html?task_id=17');
+  return release;
+}
+const detailReads = () => calls.filter((call) => call.url === '/api/me/training-tasks/17').length;
+
+test('idle polling waits for the binding panel request and resumes afterward', async (t) => {
+  const release = await pendingBinding(t);
+  t.mock.timers.tick(29000);
+  await settle();
+  const opening = click('绑定 Codeforces');
+  try {
+    await settle();
+    assert(calls.some((call) => call.url === '/api/me/profile'));
+    t.mock.timers.tick(1000);
+    await settle();
+    assert.equal(detailReads(), 1, 'background reads must wait for the binding action');
+  } finally {
+    release();
+    await opening;
+  }
+  assert(textOf(mounted.root).includes('为当前任务绑定账号'));
+  t.mock.timers.tick(30000);
+  await settle();
+  assert.equal(detailReads(), 2, 'polling resumes once the binding request settles');
+});
+
+test('visibility polling preserves an in-flight binding panel request', async (t) => {
+  const release = await pendingBinding(t);
+  const opening = click('绑定 Codeforces');
+  try {
+    await settle();
+    Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+    document.dispatchEvent(new window.Event('visibilitychange'));
+    Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+    document.dispatchEvent(new window.Event('visibilitychange'));
+    await settle();
+    assert.equal(detailReads(), 1);
+  } finally {
+    release();
+    await opening;
+  }
+  assert(textOf(mounted.root).includes('为当前任务绑定账号'));
+  document.dispatchEvent(new window.Event('visibilitychange'));
+  await settle();
+  assert.equal(detailReads(), 2);
+});
+
+test('leaving the task still discards a pending binding panel response', async (t) => {
+  const release = await pendingBinding(t);
+  const opening = click('绑定 Codeforces');
+  try {
+    await settle();
+    await mounted.router.push('/home.html');
+    await settle();
+  } finally {
+    release();
+    await opening;
+  }
+  assert(textOf(mounted.root).includes('我的训练安排'));
+  assert(!textOf(mounted.root).includes('为当前任务绑定账号'));
+});
+
 test('detail keeps historical AC separate, surfaces queue errors and clears polling on exit', async () => {
   mounted = await mount(Root, routes, '/training-tasks.html?task_id=17');
   assert(textOf(mounted.root).includes('历史已做'));

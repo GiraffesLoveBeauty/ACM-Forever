@@ -30,7 +30,7 @@ test('Beijing date controls preserve absolute time in any browser timezone', () 
   assert.equal(localTime(''), '');
   assert.equal(timeValue(''), '');
 });
-test('native ranges and multiple tags survive URLs and safe detail returns', () => {
+test('member detail returns preserve Luogu native filters and drop retired dates', () => {
   const query = memberQuery({
     platform: 'luogu',
     native_difficulty_min: '3',
@@ -41,11 +41,19 @@ test('native ranges and multiple tags survive URLs and safe detail returns', () 
     time_basis: 'first_seen',
   });
   assert.equal(query.native_tags, '1,-2');
-  const returned = problemReturn('/problem-bank.html?' + new URLSearchParams(query));
+  assert.equal(query.time_basis, undefined);
+  assert.equal(query.start_at, undefined);
+  assert.equal(query.end_at, undefined);
+  const returned = problemReturn(
+    '/problem-bank.html?platform=luogu&native_difficulty_min=3&native_difficulty_max=4&native_tags=1,-2&time_basis=first_seen&start_at=100&end_at=200',
+  );
   const params = new URL(returned, 'https://example.invalid').searchParams;
   assert.equal(params.get('native_difficulty_min'), '3');
   assert.equal(params.get('native_difficulty_max'), '4');
-  assert.equal(params.get('time_basis'), 'first_seen');
+  assert.equal(params.get('native_tags'), '1,-2');
+  assert.equal(params.get('time_basis'), null);
+  assert.equal(params.get('start_at'), null);
+  assert.equal(params.get('end_at'), null);
   assert.deepEqual(nativeParams({ ...query, platform: 'codeforces' }), {});
 });
 test('numeric ranges use only CF or AtCoder scales and cannot leak to tracker', () => {
@@ -58,13 +66,18 @@ test('numeric ranges use only CF or AtCoder scales and cannot leak to tracker', 
   assert.equal(timeLabel({ time_basis: 'first_seen' }), '首次收录');
 });
 
-test('unknown source time survives URLs and clears incompatible date bounds', () => {
+test('member list links omit retired dates and keep difficulty bounds', () => {
+  const options = { platform: 'codeforces', rating_min: '1200', start_at: '100', end_at: '200' };
+  for (const basis of [undefined, 'first_seen', 'auto', 'contest', 'unknown'])
+    assert.deepEqual(memberQuery({ ...options, time_basis: basis }), {
+      platform: 'codeforces',
+      rating_min: '1200',
+    });
+});
+
+test('shared range filters support unknown source time and clear incompatible date bounds', () => {
   assert.deepEqual(
     rangeParams({ platform: 'codeforces', time_basis: 'unknown', start_at: '100', end_at: '200' }),
     { time_basis: 'unknown' },
-  );
-  assert.equal(
-    memberQuery({ platform: 'codeforces', time_basis: 'unknown' }).time_basis,
-    'unknown',
   );
 });

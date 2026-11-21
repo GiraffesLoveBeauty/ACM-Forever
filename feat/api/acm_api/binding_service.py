@@ -253,6 +253,8 @@ async def bindings_summary(db, qq_id):
             if live_sync
             else active["status"]
             if active and account
+            else "waiting"
+            if state and state["last_status"] == "waiting"
             else "success"
             if state and state["last_status"] in {"success", "backfill"}
             else "failed"
@@ -264,10 +266,27 @@ async def bindings_summary(db, qq_id):
             "queued": "同步已排队。",
             "running": "正在同步，已有记录仍可查看。",
             "success": "同步成功。",
+            "waiting": "正在等待重试，已有记录仍可查看。",
             "disabled": "账号开启了访问限制，洛谷同步已停用，请联系管理员重新开启。",
             "failed": "最近同步失败或任务已中断，可重试；有效历史数据保留。",
         }[status]
-        result.append({"platform": platform, "label": LABELS[platform], "account": account, "binding_status": "pending" if pending else "bound" if account else "unbound", "self_service": platform == "codeforces", "sync_status": status, "sync_enabled": not restricted, "last_success_at": state["last_success_at"] if state else 0, "message": message, "verification": {"account": pending["account"], "verification_id": pending["verification_id"], "code": pending["verification_code"], "expires_at": pending["expires_at"]} if pending else None})
+        if status in {"failed", "waiting"} and platform == "luogu" and state and state["last_error_message"]:
+            message = ("正在等待重试；" if status == "waiting" else "") + state["last_error_message"] + "；已有记录保留。"
+        result.append({
+            "platform": platform,
+            "label": LABELS[platform],
+            "account": account,
+            "binding_status": "pending" if pending else "bound" if account else "unbound",
+            "self_service": platform == "codeforces",
+            "sync_status": status,
+            "sync_enabled": not restricted,
+            "last_success_at": state["last_success_at"] if state else 0,
+            "next_retry_at": state["next_retry_at"] if state else 0,
+            "consecutive_failures": state["consecutive_failures"] if state else 0,
+            "attention_required": bool(state and state["consecutive_failures"] >= 3),
+            "message": message,
+            "verification": {"account": pending["account"], "verification_id": pending["verification_id"], "code": pending["verification_code"], "expires_at": pending["expires_at"]} if pending else None,
+        })
     for item in result:
         provenance = await row(db, "SELECT source,owner_verified_at,existence_status FROM binding_provenance WHERE qq_id=? AND platform=? AND binding_version=? AND account_canonical=?", (qq_id, item["platform"], user[platform_spec(item["platform"])[2]], item["account"].casefold()))
         item["provenance"] = dict(provenance) if provenance else None

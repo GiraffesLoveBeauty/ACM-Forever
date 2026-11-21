@@ -4,6 +4,7 @@ import AlgorithmTag from './AlgorithmTag.vue';
 import { normalizeTags } from '../lib/problem-presentation.js';
 const props = defineProps({
   tags: { type: [Array, String, Object], default: () => [] },
+  platform: { type: String, default: '' },
   neutral: { type: Boolean, default: false },
 });
 const labels = computed(() => normalizeTags(props.tags));
@@ -17,7 +18,7 @@ const labels = computed(() => normalizeTags(props.tags));
         title="原始标签 · 尚未关联原生分类"
         >{{ tag.label }}</span
       >
-      <AlgorithmTag v-else :tag="tag.raw" />
+      <AlgorithmTag v-else :tag="tag.raw" :platform="platform" />
     </template>
     <span v-if="!labels.length" class="problem-tags-empty">无标签</span>
   </span>

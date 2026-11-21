@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue';
-import { useRequests, date, showError } from '../lib/api.js';
+import { useRequests, date, showError, syncFailureMessage } from '../lib/api.js';
 import ProblemTaskProgress from '../components/ProblemTaskProgress.vue';
 
 const request = useRequests();
@@ -12,11 +12,12 @@ const enabling = ref(new Set());
 let timer;
 let disposed = false;
 
-function describe(value) {
+function describe(value, errors) {
+  if (errors?.message) return syncFailureMessage(errors);
   if (value == null) return '';
   if (typeof value === 'object')
     return Object.entries(value)
-      .map(([key, v]) => `${key}：${describe(v)}`)
+      .map(([key, v]) => `${key}：${describe(v, errors?.[key])}`)
       .join('；');
   if (typeof value === 'number')
     return value >= 0
@@ -171,13 +172,13 @@ onBeforeUnmount(() => {
         <ProblemTaskProgress v-if="task.kind === '题目采集'" :task="task" />
         <template v-else
           ><br />成员 {{ task.qq_id || '全部' }}<span v-if="task.member?.name"> · {{ task.member.name }}</span>
-          · 平台 {{ task.platform || '全部' }} · {{ task.status }}<br />
+          · 平台 {{ task.platform || '全部' }} · {{ task.status === 'waiting' ? '等待重试' : task.status }}<br />
           <small v-if="task.member?.status || memberStatus"
             >成员身份：{{ task.member?.status || (memberStatus === '__empty__' ? '未设置' : memberStatus) }}<br
           /></small>
           <small v-if="task.progress"
             >已处理 {{ task.progress.done }} / {{ task.progress.total }} 位成员<br /></small
-          ><small>{{ describe(visibleResult(task)) }}</small></template
+          ><small>{{ describe(visibleResult(task), task.errors) }}</small></template
         >
         <br /><small>{{ date(task.finished_at || task.started_at) }}</small></span
       ><button

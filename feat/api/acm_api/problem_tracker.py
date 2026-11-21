@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 
 from .cf_client import problem_url as cf_problem_url
 from .luogu_problem import canonical_problem_id as luogu_problem_id
-from .problem_tags import has_problem_tag, problem_tags
+from .problem_tags import codeforces_tag_search_keys, problem_tags, selected_problem_tag_keys
 from .atcoder_difficulty import difficulty_metadata
 
 
@@ -20,15 +20,13 @@ def tracker_options(args):
     scope = args.get("scope", "all")
     state = args.get("state", "")
     tag = args.get("tag", "")
-    problem_tag = args.get("problem_tag", "")
     if platform and platform not in PLATFORMS:
         raise ValueError("比赛进度目前支持 Codeforces 和 AtCoder。")
     if scope not in {"all", "solved"} or state not in {"", "favorite"}:
         raise ValueError("无效的题目范围或收藏筛选。")
     if len(tag) > 100:
         raise ValueError("搜索内容最多 100 个字符。")
-    if len(problem_tag) > 100:
-        raise ValueError("题目标签最多 100 个字符。")
+    selected_tags = selected_problem_tag_keys(args, platform)
     values = {}
     for key, default, maximum in (("page", "1", 1000000), ("page_size", "20", 50)):
         raw = args.get(key, default)
@@ -36,7 +34,7 @@ def tracker_options(args):
             raise ValueError(f"{key} 必须为 1–{maximum} 的整数。")
         values[key] = int(raw)
     return {"platform": platform, "scope": scope, "state": state, "tag": tag.strip().casefold(),
-            "problem_tag": problem_tag.strip(), **values}
+            "problem_tags": selected_tags, **values}
 
 
 def natural_key(value):
@@ -280,6 +278,8 @@ async def contest_tracker(db, owner, options):
         group["problems"].append(problem)
 
     keyword = options["tag"]
+    translated = codeforces_tag_search_keys(keyword)
+    selected_tags = set(options["problem_tags"])
     cf_search_key = problem_id_key("codeforces", keyword) if CF_PROBLEM_ID.fullmatch(keyword) else None
 
     def matches(problem, group):
@@ -287,8 +287,13 @@ async def contest_tracker(db, owner, options):
             return False
         if options["state"] == "favorite" and not problem["is_favorite"]:
             return False
-        if options.get("problem_tag") and not has_problem_tag(problem["tags"], options["problem_tag"]):
-            return False
+        translated_tags = translated if problem["platform"] == "codeforces" else ()
+        if selected_tags or translated_tags:
+            tag_keys = {tag.casefold() for tag in problem_tags(problem["tags"])}
+            if not selected_tags.issubset(tag_keys):
+                return False
+            if not tag_keys.isdisjoint(translated_tags):
+                return True
         if (cf_search_key is not None and problem["platform"] == "codeforces"
                 and cf_search_key == problem_id_key("codeforces", problem["problem_id"])):
             return True

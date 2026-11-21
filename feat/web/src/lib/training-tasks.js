@@ -26,6 +26,7 @@ export const verifications = {
   snapshot_conflict: '平台快照与已有 AC 证据不一致，待核验',
   binding_changed: '绑定已变化，待核验',
   sync_failed: '同步失败，已有证据保留',
+  sync_waiting: '等待重试，已有证据保留',
   sync_paused: '平台暂停同步',
   sync_disabled: '账号开启访问限制，已停用同步',
   account_closed: '账号已注销',

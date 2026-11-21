@@ -1,12 +1,18 @@
 <script setup>
 import { computed } from 'vue';
 import { algorithmCategory, normalizeTags } from '../lib/problem-presentation.js';
+import { codeforcesTagName } from '../lib/codeforces-tags.js';
 const props = defineProps({
   tag: { type: [String, Object], default: '' },
   as: { type: String, default: 'span' },
+  platform: { type: String, default: '' },
 });
 const category = computed(() => algorithmCategory(props.tag));
-const label = computed(() => normalizeTags([props.tag])[0]?.label || '无标签');
+const label = computed(() => {
+  const name = normalizeTags([props.tag])[0]?.label;
+  if (!name) return '无标签';
+  return props.platform === 'codeforces' ? codeforcesTagName(name) : name;
+});
 </script>
 <template>
   <component

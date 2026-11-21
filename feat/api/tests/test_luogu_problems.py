@@ -14,7 +14,8 @@ from unittest.mock import AsyncMock, patch
 import aiohttp
 
 from feat.api.acm_api.database import connect_db
-from feat.api.acm_api.luogu_client import LuoguUnavailable, luogu_get, page_context
+from feat.api.acm_api.luogu_client import (LuoguResponseError, LuoguUnavailable,
+    _gate, luogu_get, page_context, recovery_pending, response_failed)
 from feat.api.acm_api.luogu_problem import (classifications, load_taxonomy, metadata,
     normalize_taxonomy, parse_problem, problem_id, render_markdown, save_taxonomy)
 from feat.api.acm_api.luogu_sync import LuoguSync
@@ -332,6 +333,17 @@ class RequestTests(unittest.IsolatedAsyncioTestCase):
         for url in ("http://www.luogu.com.cn/problem/P1", "https://evil.com/problem/P1", "https://www.luogu.com.cn@evil.com/"):
             with self.assertRaises(ValueError):
                 await luogu_get(session, url)
+
+    async def test_http_200_does_not_clear_gate_without_explicit_validation(self):
+        gate = _gate()
+        response_failed(LuoguResponseError("invalid snapshot", status=200))
+        gate["cooldown"] = 0
+        session = SimpleNamespace(get=unittest.mock.Mock(return_value=_Response(raw=b"challenge")))
+        with patch("feat.api.acm_api.luogu_client.asyncio.sleep", new_callable=AsyncMock):
+            self.assertEqual(await luogu_get(session, "https://www.luogu.com.cn/user/1"), b"challenge")
+            self.assertTrue(recovery_pending())
+            await luogu_get(session, "https://www.luogu.com.cn/user/1", recover_on_response=True)
+        self.assertFalse(recovery_pending())
 
 
 class StorageTests(unittest.IsolatedAsyncioTestCase):
