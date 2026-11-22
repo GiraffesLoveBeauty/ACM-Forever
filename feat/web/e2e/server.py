@@ -12,6 +12,8 @@ from unittest.mock import AsyncMock
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 
+SYNC_CENTER_QQ_IDS = ("10000211", "10000212", "10000213")
+
 
 async def run(port):
     with tempfile.TemporaryDirectory(prefix="acm-browser-tests-") as temporary:
@@ -71,6 +73,17 @@ async def run(port):
                      "测试学校甲" if number % 2 else "测试学校乙", "测试现役" if number % 3 else "测试集训",
                      f"ProfileCF_{number}", f"ProfileAC_{number}", str(81000 + number), str(91000 + number), f"ProfileCampus_{number}"),
                 )
+            for index, qq_id in enumerate(SYNC_CENTER_QQ_IDS, 1):
+                await db.execute(
+                    "INSERT INTO users(qq_id,name,status,luogu_id) VALUES(?,?,'同步中心测试组',?)",
+                    (qq_id, f"同步中心测试成员{index}", str(82000 + index)),
+                )
+                await db.execute(
+                    "INSERT INTO user_platform_sync_state(user_qq_id,platform,last_status,sync_enabled,"
+                    "last_error_code,last_error_message,last_attempt_at) "
+                    "VALUES(?,'luogu','disabled',0,'access_restricted','洛谷用户开启了访问限制（HTTP 403）',?)",
+                    (qq_id, now),
+                )
             for number in range(1, 31):
                 body = "## 思路\n\n仅用于自动化测试的内容。"
                 if number == 30:
@@ -95,7 +108,18 @@ async def run(port):
         config = Config()
         config.bind = [f"127.0.0.1:{port}"]
         config.accesslog = None
-        await serve(create_app(), config)
+        app = create_app()
+        sync_account = app.sync_engine.sync_account
+
+        async def fixture_sync_account(qq_id, platforms, task, **kwargs):
+            # Exercise real task submission without making Luogu requests.
+            if qq_id in SYNC_CENTER_QQ_IDS:
+                task.update(status="completed", result=dict.fromkeys(platforms, 0), finished_at=int(time.time()))
+            else:
+                await sync_account(qq_id, platforms, task, **kwargs)
+
+        app.sync_engine.sync_account = fixture_sync_account
+        await serve(app, config)
 
 
 if __name__ == "__main__":
