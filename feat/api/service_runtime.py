@@ -222,11 +222,11 @@ class WebTaskManager:
             if status == "waiting":
                 level, message = "info", "同步正在等待重试，已有记录和训练进度保留"
             elif status == "failed":
-                level, message = "error", "后台任务执行失败，请在同步任务页面查看结果"
+                level, message = "error", "后台任务执行失败，请在任务队列查看结果"
             elif status in {"cancelled", "interrupted"}:
                 level, message = "warning", "后台任务已取消或中断"
             elif status == "completed" and not failed(item.get("result")):
-                level, message = "info", "后台任务已结束，请在同步任务页面查看各平台结果"
+                level, message = "info", "后台任务已结束，请在任务队列查看各平台结果"
             else:
                 level, message = "warning", "后台任务已结束，部分操作未完成，请查看任务结果"
             emit("task.finished", message, level, **fields)

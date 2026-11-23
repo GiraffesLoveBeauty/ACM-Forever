@@ -43,7 +43,7 @@ const Compose = (await import(await loadSfc('src/views/Compose.vue'))).default;
 // Exercise both navigation guards through the real, lazily loaded Admin -> Wiki tree.
 const adminUrl = await loadSfc('src/views/Admin.vue');
 let adminSource = await readFile(new URL(adminUrl), 'utf8');
-for (const name of ['Wiki', 'Tasks']) {
+for (const name of ['Wiki', 'SyncWorkspace']) {
   const url = await loadSfc(`src/admin/${name}.vue`);
   adminSource = adminSource.replace(`import('../admin/${name}.vue')`, `import('${url}')`);
 }
@@ -145,6 +145,7 @@ beforeEach(() => {
     calls.push({ url, body, signal: options.signal });
     if (url === '/api/ui/preferences') return response({ font_scale: 1 });
     if (url === '/api/tasks') return response([]);
+    if (url === '/api/admin/members/options') return response({ statuses: [] });
     if (url === '/api/markdown/assets' || url === '/api/forum/images') {
       if (heldUpload)
         return new Promise((resolve, reject) => {
@@ -762,7 +763,7 @@ test('taxonomy does not discard an edited form when leaving is declined', async 
 
 for (const [name, destination] of [
   ['leaving Admin', '/wiki.html'],
-  ['switching Admin modules', '/admin.html?section=tasks'],
+  ['switching Admin modules', '/admin.html?section=sync-center&tab=queue'],
   ['switching Wiki tabs', '/admin.html?section=wiki&tab=pages'],
   ['switching categories', '/admin.html?section=wiki&tab=categories&category=3'],
 ]) {

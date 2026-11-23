@@ -176,6 +176,6 @@ async def patch(db, identity, qq_id, data, submitter=None):
         except Exception:
             task_id = None
         if not task_id:
-            warnings.append("资料已保存，旧平台证据已清理；同步任务未创建，请在同步任务页手动同步。")
+            warnings.append("资料已保存，旧平台证据已清理；同步任务未创建，请在成员同步中心手动同步。")
     return {"success": True, "member": after, "task_id": task_id, "warnings": warnings,
             "message": "资料已保存。" + (" 已启动对应平台同步。" if task_id else "")}, (202 if task_id else 200)

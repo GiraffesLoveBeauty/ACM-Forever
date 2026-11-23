@@ -7,8 +7,6 @@ const request = useRequests();
 const rows = ref([]);
 const memberStatuses = ref([]);
 const memberStatus = ref('');
-const restrictedLuogu = ref([]);
-const enabling = ref(new Set());
 let timer;
 let disposed = false;
 
@@ -33,7 +31,9 @@ function describe(value, errors) {
 }
 
 function matchesStatus(status) {
-  return memberStatus.value === '__empty__' ? !String(status || '').trim() : status === memberStatus.value;
+  return memberStatus.value === '__empty__'
+    ? !String(status || '').trim()
+    : status === memberStatus.value;
 }
 
 function taskMatches(task) {
@@ -62,10 +62,6 @@ function visibleResult(task) {
 }
 
 const visibleRows = computed(() => rows.value.filter(taskMatches));
-const visibleRestrictedLuogu = computed(() =>
-  restrictedLuogu.value.filter((member) => !memberStatus.value || matchesStatus(member.status)),
-);
-
 async function loadMemberOptions() {
   try {
     const options = await request('/admin/members/options', {}, 'task-member-options');
@@ -75,39 +71,12 @@ async function loadMemberOptions() {
   }
 }
 
-async function loadRestrictedLuogu() {
-  try {
-    const items = await request('/admin/luogu-sync', {}, 'luogu-restricted');
-    restrictedLuogu.value = Array.isArray(items) ? items : [];
-  } catch (e) {
-    if (e.name !== 'AbortError') restrictedLuogu.value = [];
-  }
-}
-
 async function load() {
   try {
     const tasks = await request('/tasks', {}, 'tasks');
     rows.value = (Array.isArray(tasks) ? tasks : []).slice().reverse();
   } catch (e) {
     showError(e);
-    return;
-  }
-  await Promise.all([loadMemberOptions(), loadRestrictedLuogu()]);
-}
-
-async function enableLuogu(qqId) {
-  const next = new Set(enabling.value);
-  next.add(qqId);
-  enabling.value = next;
-  try {
-    await request(`/admin/luogu-sync/${encodeURIComponent(qqId)}/enable`, { method: 'POST' }, `enable-luogu-${qqId}`);
-    await load();
-  } catch (e) {
-    showError(e);
-  } finally {
-    const current = new Set(enabling.value);
-    current.delete(qqId);
-    enabling.value = current;
   }
 }
 
@@ -125,14 +94,19 @@ async function poll() {
   if (!disposed) timer = setTimeout(poll, 5000);
 }
 
-onMounted(poll);
+onMounted(() => {
+  loadMemberOptions();
+  poll();
+});
 onBeforeUnmount(() => {
   disposed = true;
   clearTimeout(timer);
 });
 </script>
 <template>
-  <section class="admin-panel">
+  <section class="admin-panel" aria-labelledby="sync-queue-heading">
+    <h2 id="sync-queue-heading">任务队列</h2>
+    <p class="muted">查看成员同步和题库采集的进度、执行结果，或取消运行中的任务。</p>
     <form class="filters" @submit.prevent="load">
       <label
         >成员身份<select v-model="memberStatus" aria-label="成员身份">
@@ -143,38 +117,24 @@ onBeforeUnmount(() => {
           </option>
         </select></label
       ><button class="btn primary">刷新任务</button
-      ><RouterLink class="btn" to="/admin.html?section=problems">拉取题目</RouterLink
+      ><RouterLink class="btn" to="/admin.html?section=problems&view=collection"
+        >拉取题目</RouterLink
       ><span class="muted">离开此模块停止刷新，后台任务继续执行。</span>
     </form>
-
-    <article v-if="visibleRestrictedLuogu.length" class="list-item">
-      <span>
-        <b>洛谷访问受限 · {{ visibleRestrictedLuogu.length }} 位成员</b><br />
-        <small class="muted">这些账号返回 HTTP 403，已从默认同步中跳过；确认成员解除访问限制后，可由管理员重新开启。</small>
-        <br />
-        <small v-for="member in visibleRestrictedLuogu" :key="member.qq_id" class="task-member-line">
-          {{ member.name }} · QQ {{ member.qq_id }} · 身份 {{ member.status || '未设置' }} · UID {{ member.luogu_id }}
-          <button
-            class="btn"
-            :disabled="enabling.has(member.qq_id)"
-            @click="enableLuogu(member.qq_id)"
-          >
-            {{ enabling.has(member.qq_id) ? '开启中…' : '重新开启' }}
-          </button>
-          <br />
-        </small>
-      </span>
-    </article>
 
     <article v-for="task in visibleRows" :key="task.id" class="list-item">
       <span>
         <b>{{ task.kind }} · #{{ task.id }}</b>
         <ProblemTaskProgress v-if="task.kind === '题目采集'" :task="task" />
         <template v-else
-          ><br />成员 {{ task.qq_id || '全部' }}<span v-if="task.member?.name"> · {{ task.member.name }}</span>
-          · 平台 {{ task.platform || '全部' }} · {{ task.status === 'waiting' ? '等待重试' : task.status }}<br />
+          ><br />成员 {{ task.qq_id || '全部'
+          }}<span v-if="task.member?.name"> · {{ task.member.name }}</span> · 平台
+          {{ task.platform || '全部' }} · {{ task.status === 'waiting' ? '等待重试' : task.status
+          }}<br />
           <small v-if="task.member?.status || memberStatus"
-            >成员身份：{{ task.member?.status || (memberStatus === '__empty__' ? '未设置' : memberStatus) }}<br
+            >成员身份：{{
+              task.member?.status || (memberStatus === '__empty__' ? '未设置' : memberStatus)
+            }}<br
           /></small>
           <small v-if="task.progress"
             >已处理 {{ task.progress.done }} / {{ task.progress.total }} 位成员<br /></small
@@ -190,7 +150,7 @@ onBeforeUnmount(() => {
       </button>
     </article>
     <p v-if="!visibleRows.length" class="empty">
-      {{ memberStatus ? '没有符合该成员身份的同步任务。' : '暂无同步任务。' }}
+      {{ memberStatus ? '没有符合该成员身份的任务。' : '暂无后台任务。' }}
     </p>
   </section>
 </template>

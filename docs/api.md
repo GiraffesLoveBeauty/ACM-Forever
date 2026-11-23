@@ -158,7 +158,7 @@ response.raise_for_status()
 
 ## 统一后台及保留的业务接口
 
-后台唯一入口为 `/admin.html`，通过 `section` 选择 `accounts`（默认）、`members`、`training`、`problems`、`cf-practice`、`contests`、`tasks`、`moderation`、`settings`。CF 使用 `tab=recent/check`，审核使用 `tab=posts/reports`，训练任务使用 `tab=edit/overview/progress` 与 `task_id/step/recipient_id`，成员详情使用 `qq_id`。浏览器刷新、前进后退和登录 / 强制改密均保留模块参数；原管理页地址由服务端转入对应模块，共用的训练 / 题库 / 赛事路径则按 Web 角色分别进入后台或成员前台。
+后台唯一入口为 `/admin.html`，通过 `section` 选择 `accounts`（默认）、`members`、`training`、`problems`、`cf-practice`、`contests`、`sync-center`、`moderation`、`settings`。CF 使用 `tab=recent/check`，审核使用 `tab=posts/reports`，训练任务使用 `tab=edit/overview/progress` 与 `task_id/step/recipient_id`，成员详情使用 `qq_id`。成员同步中心使用 `tab=queue` 查看和取消后台任务；旧 `/tasks.html` 和 `/admin.html?section=tasks` 自动转入任务队列。浏览器刷新、前进后退和登录 / 强制改密均保留模块参数；原管理页地址由服务端转入对应模块，共用的训练 / 题库 / 赛事路径则按 Web 角色分别进入后台或成员前台。
 
 | 方法与路径 | 权限 / 契约 |
 | --- | --- |
@@ -284,7 +284,7 @@ Web 归属验证当前实现 Codeforces：账号存在性使用已有验证器�
 
 成功解绑 / 改绑在同一事务清理该成员该平台的 AC、提交证据、同步状态并结束活动挑战；收藏、历史笔记、复习与计划存档保留。每个平台使用持久绑定版本拦截旧同步批次，包括解绑后重绑同名账号的情况。
 
-管理员同步任务页使用 `GET /api/admin/luogu-sync` 查看被 403 单独停用的洛谷账号，使用 `POST /api/admin/luogu-sync/<qq_id>/enable` 清除停用标记并尝试重新排队该成员的洛谷全量同步。`GET /api/tasks` 的成员任务快照补充 `member` 或 `members/member_statuses`，页面可按成员资料中的 `users.status` 身份筛选；未设置身份使用空值筛选。
+成员同步中心使用 `GET /api/admin/sync/members` 显示各平台同步状态，可按成员资料中的 `users.status` 身份筛选；未设置身份使用 `member_status=__empty__`。洛谷显示已停用时，管理员可使用 `POST /api/admin/luogu-sync/<qq_id>/enable` 清除停用标记并尝试重新排队该成员的洛谷全量同步。`GET /api/admin/luogu-sync` 仍可单独查询被 403 停用的账号。任务队列使用 `GET /api/tasks` 查看执行进度与结果，成员任务快照包含 `member` 或 `members/member_statuses` 供筛选。
 
 管理员 `PUT /api/user`、`POST /api/register` 改动 OJ 绑定时，须附 `confirm_bindings:true`、`expected_bindings`（按字段名，如 `cf_handle`）和 `binding_versions`（按平台名，如 `codeforces`）。版本来自成员详情中的 `cf_binding_version/luogu_binding_version/nowcoder_binding_version/atcoder_binding_version/cjlu_binding_version`；新成员的预期账号为空、版本为 0。资料编辑省略的绑定字段不会被清空。成功与确认失败均记录操作者、目标、平台、动作、结果和时间，不保存提交的密码。
 

@@ -329,7 +329,11 @@ def create_app(*, daily_problem_sync=False, member_sync=False, training_sync=Fal
         identity = await _session_identity()
         target = request.full_path.rstrip("?")
         legacy = _LEGACY_ADMIN_PAGES.get(filename)
-        if legacy and (filename in _ADMIN_PAGES or identity and identity["role"] in {"admin", "root"}):
+        if filename == "tasks.html" or (filename == "admin.html" and request.args.get("section") == "tasks"):
+            params = request.args.to_dict()
+            params.update(section="sync-center", tab="queue")
+            target = "/admin.html?" + urlencode(params)
+        elif legacy and (filename in _ADMIN_PAGES or identity and identity["role"] in {"admin", "root"}):
             params = request.args.to_dict()
             params["section"] = legacy
             target = "/admin.html?" + urlencode(params)
@@ -432,7 +436,7 @@ _PUBLIC_PAGES = {
 _ANONYMOUS_PAGES = {"account-closure.html", "wiki.html", "index.html", "login.html", "post.html", "leaderboard.html", "auth-unavailable.html", "forbidden.html"}
 _ADMIN_PAGES = {"admin.html", "member.html", "tasks.html", "settings.html", "forum-moderation.html", "cf-practice.html"}
 _RETIRED_PAGES = {"reviews.html", "submissions.html", "workspace.html"}
-_LEGACY_ADMIN_PAGES = {"member.html": "members", "problem-bank.html": "problems", "tasks.html": "tasks", "settings.html": "settings", "forum-moderation.html": "moderation", "cf-practice.html": "cf-practice"}
+_LEGACY_ADMIN_PAGES = {"member.html": "members", "problem-bank.html": "problems", "settings.html": "settings", "forum-moderation.html": "moderation", "cf-practice.html": "cf-practice"}
 
 
 app = create_app(

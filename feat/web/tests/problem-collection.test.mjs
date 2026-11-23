@@ -5,7 +5,7 @@ import { problemMemory } from '../src/lib/admin.js';
 import { cleanupCompiled, find, loadSfc, mount, settle, textOf } from './helpers/vue-harness.mjs';
 
 const Problems = (await import(await loadSfc('src/admin/Problems.vue'))).default;
-const Tasks = (await import(await loadSfc('src/admin/Tasks.vue'))).default;
+const SyncTaskQueue = (await import(await loadSfc('src/admin/SyncTaskQueue.vue'))).default;
 const originals = {
   Document: globalThis.Document,
   ShadowRoot: globalThis.ShadowRoot,
@@ -96,6 +96,7 @@ beforeEach(() => {
       return response({ ...dbStatus, message: '数据库初始化完成，已有数据已保留。' });
     if (url.startsWith('/api/admin/database/problems?'))
       return response({ items: [], total: 0, page: 1 });
+    if (url === '/api/admin/members/options') return response({ statuses: ['现役', '集训'] });
     if (url === '/api/tasks') {
       if (holdTasks)
         return new Promise((resolve) => delayedTasks.push(() => resolve(response(jobs))));
@@ -413,14 +414,14 @@ test('leaving aborts an outstanding task GET and stops its polling', async () =>
   await settle();
   assert.equal(polls.size, 0);
 });
-test('the task page renders collector progress as problem counts and preserves cancellation', async () => {
+test('the task queue renders collector progress as problem counts and preserves cancellation', async () => {
   jobs = [
     running({
       result: { scope: 'platform', success_count: 8, sample_count: 20 },
       progress: { done: 8, total: 100, phase: 'statements' },
     }),
   ];
-  await page(Tasks);
+  await page(SyncTaskQueue);
   assert.match(textOf(mounted.root), /成功 8 题/);
   assert.doesNotMatch(textOf(mounted.root), /新增 8 条/);
   const cancel = find(
@@ -432,7 +433,7 @@ test('the task page renders collector progress as problem counts and preserves c
   assert.match(textOf(mounted.root), /已取消/);
 });
 
-test('the task page explains paused user crawling alongside other platform results', async () => {
+test('the task queue explains paused user crawling alongside other platform results', async () => {
   jobs = [
     {
       id: 'account-sync',
@@ -449,7 +450,7 @@ test('the task page explains paused user crawling alongside other platform resul
       result: { 87654321: { luogu: -5 } },
     },
   ];
-  await page(Tasks);
+  await page(SyncTaskQueue);
   const content = textOf(mounted.root);
   assert.match(content, /luogu：已暂停，保留已有记录；atcoder：新增 2 条/);
   assert.match(content, /87654321：luogu：已暂停，保留已有记录/);
@@ -508,7 +509,7 @@ test('successful explicit Luogu collection does not report an incomplete directo
       progress: { phase: 'statements', done: 1, total: 1, problem_id: 'P1001' },
     }),
   ];
-  await page(Tasks);
+  await page(SyncTaskQueue);
   const content = textOf(mounted.root);
   assert.match(content, /拉取完成/);
   assert.match(content, /成功 1 题/);
@@ -526,7 +527,7 @@ test('Luogu directory warnings remain visible after failed or cancelled director
           progress: { phase: 'catalog', done: 3, total: 6 },
         }),
       ];
-      await page(Tasks);
+      await page(SyncTaskQueue);
       const content = textOf(mounted.root);
       assert.match(content, /目录尚未完整同步/);
       assert.match(content, /已读取 1 页 · 已导入 3 道题目/);
@@ -546,7 +547,7 @@ test('completed Luogu directory collection shows saved counts without ongoing ph
       progress: { phase: 'catalog', done: 3, total: 3 },
     }),
   ];
-  await page(Tasks);
+  await page(SyncTaskQueue);
   const content = textOf(mounted.root);
   assert.match(content, /拉取完成/);
   assert.match(content, /已读取 1 页 · 已导入 3 道题目/);
@@ -569,7 +570,7 @@ test('Luogu tasks that skip saved statements show final statistics after the las
         progress: { phase: scope === 'platform' ? 'catalog' : 'taxonomy', done: 0, total: 0 },
       }),
     ];
-    await page(Tasks);
+    await page(SyncTaskQueue);
     const content = textOf(mounted.root);
     assert.match(content, /拉取完成/);
     assert.match(content, /跳过 1 题/);
@@ -603,7 +604,7 @@ test('active collection phases keep their progress wording for each platform', a
         },
       }),
     ];
-    await page(Tasks);
+    await page(SyncTaskQueue);
     const content = textOf(mounted.root);
     assert.match(content, expected);
     assert.doesNotMatch(content, /目录尚未完整同步|目录同步结果/);
@@ -626,7 +627,7 @@ test('terminal legacy discovery phases show final counts instead of ongoing word
           progress: { phase, done: 1, total: 4, metadata_done: 3, metadata_total: 5 },
         }),
       ];
-      await page(Tasks);
+      await page(SyncTaskQueue);
       const content = textOf(mounted.root);
       assert.match(content, /跳过 2 题/);
       assert.match(content, phase === 'metadata' ? /已处理 3 \/ 5 题/ : /已处理 1 \/ 4 题/);
@@ -651,7 +652,7 @@ test('Luogu platform collection reports completed batches while running and afte
         progress: { phase: 'statements', done: completed, total: 3 },
       }),
     ];
-    await page(Tasks);
+    await page(SyncTaskQueue);
     assert.ok(textOf(mounted.root).includes('已完成批次 ' + completed + ' / 2'));
     mounted.unmount();
     mounted = null;
@@ -667,7 +668,7 @@ test('Codeforces and AtCoder retain their current batch number display', async (
         progress: { phase: 'statements', done: 3, total: 5, batch: 2 },
       }),
     ];
-    await page(Tasks);
+    await page(SyncTaskQueue);
     const content = textOf(mounted.root);
     assert.match(content, /批次 2 \/ 3/);
     assert.doesNotMatch(content, /已完成批次/);
