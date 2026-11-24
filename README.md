@@ -59,7 +59,7 @@ $env:ACM_WEBUI_SECRET_KEY = & $python -c "import secrets; print(secrets.token_ur
 | --- | --- | --- |
 | [`feat/web/`](feat/web/) | Vue 3 + Vite Web 前端 | [前端开发](feat/web/README.md) |
 | [`feat/api/`](feat/api/) | Python / Quart API、SQLite 数据访问与 Web 静态资源服务 | [API 文档](docs/api.md) |
-| [`Android_APP/`](Android_APP/) | 原生 Android 客户端 | [构建与发布](docs/android-app.md) |
+| [`Android_APP/`](Android_APP/) | 原生 Android 客户端 | [构建与发布](docs/android-app.md) · [android-v1.0.2-compact-ranking.md（排名小屏布局）](docs/android-v1.0.2-compact-ranking.md) |
 | [`tools/crawlers/`](tools/crawlers/) | 题目元数据、题面与样例采集 | [采集说明](docs/crawler-samples.md) |
 | [`local_demo/`](local_demo/) · [`experiments/`](experiments/) | 算法标签与翻译实验、本地验收 | [交付说明](docs/algorithm-tagging-delivery.md) |
 
