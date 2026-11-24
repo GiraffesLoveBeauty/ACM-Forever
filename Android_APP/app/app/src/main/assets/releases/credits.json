@@ -131,7 +131,7 @@
   ],
   "versions": {
     "1.0.3": {
-      "pr": 0,
+      "pr": 175,
       "status": "development",
       "uploaders": [
         "MiaoJJ13445"
@@ -139,8 +139,10 @@
       "reviewRequesters": [],
       "reviewers": [],
       "publishers": [],
-      "evidence": [],
-      "scope": "1.0.3 题单计分板姓名、首次已核验 AC 与罚时详情；开发候选，尚未完成本轮 Review 或发布。"
+      "evidence": [
+        "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/175"
+      ],
+      "scope": "1.0.3 社团题单 XCPC 计分板、每题 AC 汇总与总用时；普通排行榜恢复旧版。开发候选，首轮问题已修改，当前修订待复审与发布。"
     },
     "0.2.27": {
       "uploaders": [
