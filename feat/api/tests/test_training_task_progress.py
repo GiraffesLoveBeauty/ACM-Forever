@@ -88,7 +88,7 @@ class TrainingProgressTests(unittest.IsolatedAsyncioTestCase):
         member = dict(id=1, task_id=task['id'], name='Member 1', qq_id='22345678', real_name=None,
                       status_snapshot='训练组', completed_problems=1, problem_count=1,
                       completion='on_time', pending=False, account_status='active', rank=1)
-        async def fake_problem_progress(db, recipient, *, now=None):
+        async def fake_problem_progress(db, recipient, *, now=None, **kwargs):
             return [{'id': 1, 'problem_id': 'cf_1A', 'problem_name': 'A', 'platform': 'codeforces',
                      'status': 'on_time', 'is_ac': True,
                      'evidence': {'accepted_at': task['starts_at'] + 120}}]
@@ -101,7 +101,7 @@ class TrainingProgressTests(unittest.IsolatedAsyncioTestCase):
         board = (await response.get_json())['scoreboard']
         self.assertEqual((board['columns'][0]['label'], board['rows'][0]['completed_problems']), ('A', 1))
         self.assertEqual((board['rows'][0]['cells'][0]['state'], board['rows'][0]['penalty_minutes']), ('solved', 2))
-        self.assertIn('历史 AC 不计罚时', board['penalty_definition'])
+        self.assertIn('历史 AC 不计用时', board['penalty_definition'])
 
     async def test_xcpc_view_accepts_historical_luogu_ac_without_penalty(self):
         task = await self.create()
@@ -110,7 +110,7 @@ class TrainingProgressTests(unittest.IsolatedAsyncioTestCase):
                       status_snapshot='训练组', completed_problems=1, problem_count=1,
                       completion='on_time', pending=False, account_status='active', rank=1)
 
-        async def fake_problem_progress(db, recipient, *, now=None):
+        async def fake_problem_progress(db, recipient, *, now=None, **kwargs):
             return [{'id': 1, 'problem_id': 'luogu_P1000', 'problem_name': 'A', 'platform': 'luogu',
                      'status': 'history_ac', 'is_ac': True,
                      'evidence': {'accepted_at': None, 'evidence_type': 'historical_ac'}}]
@@ -132,7 +132,7 @@ class TrainingProgressTests(unittest.IsolatedAsyncioTestCase):
                       status_snapshot='训练组', completed_problems=0, problem_count=1,
                       completion='timing_unknown', pending=True, account_status='active', rank=1)
 
-        async def fake_problem_progress(db, recipient, *, now=None):
+        async def fake_problem_progress(db, recipient, *, now=None, **kwargs):
             return [{'id': 1, 'problem_id': 'cf_1A', 'problem_name': 'A', 'platform': 'codeforces',
                      'status': 'timing_unknown', 'is_ac': True,
                      'evidence': {'accepted_at': task['starts_at'] + 120, 'evidence_type': 'uncertain'}}]
@@ -145,6 +145,86 @@ class TrainingProgressTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200, await response.get_json())
         cell = (await response.get_json())['scoreboard']['rows'][0]['cells'][0]
         self.assertEqual((cell['state'], cell['label']), ('pending', '?'))
+
+    async def test_xcpc_problem_totals_cover_entire_task_across_pages_and_filters(self):
+        task = await self.create()
+        await self.publish(task)
+        members = [dict(id=i, task_id=task['id'], name=f'Member {i}', qq_id=str(80000000+i),
+                        real_name=None, status_snapshot='A' if i % 2 else 'B',
+                        completed_problems=i % 2, problem_count=1, completion='incomplete',
+                        pending=False, account_status='active') for i in range(1, 26)]
+        async def details(db, recipient, *, now=None, _records=None, _enrich=True):
+            self.assertFalse(_enrich)
+            self.assertEqual(_records, [])
+            solved = bool(recipient['id'] % 2)
+            return [{'id': task['problems'][0]['id'], 'status': 'on_time' if solved else 'pending',
+                     'is_ac': solved, 'evidence': {'accepted_at': task['starts_at'] + 60} if solved else None}]
+        base = f'/api/admin/training-tasks/{task["id"]}/progress'
+        with patch.object(progress, 'recipient_summaries', AsyncMock(return_value=members)), \
+             patch.object(progress, 'summary', return_value={'recipient_count': 25}), \
+             patch.object(progress, 'problem_records', AsyncMock(return_value=[])) as records, \
+             patch.object(progress, 'problem_progress', side_effect=details):
+            for query, visible in [({'page': 1}, 20), ({'page': 2}, 5),
+                                   ({'identity': 'B'}, 12), ({'search': 'no such member'}, 0)]:
+                response = await self.client.get(base, query_string={'view': 'xcpc', **query})
+                self.assertEqual(response.status_code, 200, await response.get_json())
+                board = (await response.get_json())['scoreboard']
+                self.assertEqual(len(board['rows']), visible)
+                self.assertEqual(board['totals_scope'], 'task')
+                self.assertEqual(board['participant_count'], 25)
+                self.assertEqual(board['columns'][0]['accepted_count'], 13)
+            self.assertEqual(records.await_count, 4, 'One batched evidence read per request, not per recipient')
+
+    async def test_xcpc_ranking_sorts_full_filtered_set_by_count_then_total_time(self):
+        task = await self.create()
+        await self.publish(task)
+        members = [dict(id=i, task_id=task['id'], name=f'Member {i}', qq_id=str(80000000+i),
+                        real_name=None, status_snapshot='A' if i % 2 else 'B',
+                        completed_problems=int(i > 1), problem_count=1, completion='incomplete',
+                        pending=False, account_status='active') for i in range(1, 26)]
+        async def details(db, recipient, **kwargs):
+            solved = recipient['id'] > 1
+            return [{'id': task['problems'][0]['id'], 'status': 'on_time' if solved else 'pending',
+                     'is_ac': solved, 'evidence': {'accepted_at': task['starts_at'] + (25-recipient['id'])//2*60} if solved else None}]
+        base = f'/api/admin/training-tasks/{task["id"]}/progress'
+        with patch.object(progress, 'recipient_summaries', AsyncMock(return_value=members)), \
+             patch.object(progress, 'summary', return_value={'recipient_count': 25}), \
+             patch.object(progress, 'problem_records', AsyncMock(return_value=[])), \
+             patch.object(progress, 'problem_progress', side_effect=details):
+            boards = []
+            for page in (1, 2):
+                response = await self.client.get(base, query_string={'view': 'xcpc', 'order': 'xcpc', 'page': page})
+                self.assertEqual(response.status_code, 200, await response.get_json())
+                result = await response.get_json()
+                self.assertEqual(result['order'], 'xcpc')
+                boards.append(result['scoreboard'])
+            rows = boards[0]['rows'] + boards[1]['rows']
+            self.assertEqual([r['id'] for r in rows[:4]], [24, 25, 22, 23])
+            self.assertEqual([r['rank'] for r in rows[:4]], [1, 1, 3, 3])
+            self.assertEqual([r['rank'] for r in boards[1]['rows']], [21, 21, 23, 23, 25])
+            self.assertEqual(rows[-1]['completed_problems'], 0)
+            filtered = await (await self.client.get(base, query_string={'view': 'xcpc', 'order': 'xcpc', 'identity': 'A'})).get_json()
+            self.assertEqual(filtered['total'], 13)
+            self.assertEqual([r['rank'] for r in filtered['scoreboard']['rows']], list(range(1, 14)))
+            self.assertEqual(filtered['scoreboard']['columns'][0]['accepted_count'], 24)
+            self.assertEqual((await self.client.get(base, query_string={'order': 'xcpc'})).status_code, 400)
+
+    async def test_xcpc_totals_use_real_progress_and_read_only_shared_classification(self):
+        task = await self.create()
+        await self.publish(task)
+        evidence = json.dumps({'accepted_at': task['starts_at'] + 60, 'external_submission_id': 'synthetic'})
+        await self.sql('UPDATE training_task_progress SET on_time_json=? WHERE problem_id=?',
+                       (evidence, task['problems'][0]['id']))
+        before = await self.sql('SELECT * FROM training_task_progress')
+        response = await self.client.get(f'/api/admin/training-tasks/{task["id"]}/progress',
+                                         query_string={'view': 'xcpc', 'page_size': 1})
+        self.assertEqual(response.status_code, 200, await response.get_json())
+        board = (await response.get_json())['scoreboard']
+        self.assertEqual(board['participant_count'], 1)
+        self.assertEqual(board['columns'][0]['accepted_count'], 1)
+        self.assertEqual(board['rows'][0]['cells'][0]['state'], 'solved')
+        self.assertEqual(board['rows'][0]['penalty_minutes'], 1)
+        self.assertEqual(await self.sql('SELECT * FROM training_task_progress'), before)
 
     async def test_real_name_isolation_for_changed_closed_and_reused_accounts(self):
         await self.sql("UPDATE users SET real_name='合成旧姓名' WHERE qq_id='22345678'")

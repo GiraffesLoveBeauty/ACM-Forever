@@ -290,19 +290,27 @@ async def personal_detail(db, task_id, identity):
     return task
 
 
-async def problem_progress(db, recipient, *, now=None):
-    now = int(time.time()) if now is None else now
-    records = await tasks.rows(db, """
-      SELECT p.*,x.history_json,x.on_time_json,x.late_json,x.uncertain_json,x.snapshot_json,x.review_json,
+async def problem_records(db, task_id, recipient_id=None):
+    """One task-wide query for the scoreboard; personal detail still restricts its recipient."""
+    condition = "p.task_id=?" + (" AND x.recipient_id=?" if recipient_id is not None else "")
+    values = (task_id, recipient_id) if recipient_id is not None else (task_id,)
+    return await tasks.rows(db, """
+      SELECT p.*,x.recipient_id,x.history_json,x.on_time_json,x.late_json,x.uncertain_json,x.snapshot_json,x.review_json,
       x.evidence_version AS progress_version,x.checked_at,x.sync_success_at,x.binding_key,x.binding_version,
       r.bindings_json,r.account_epoch,r.closed,t.due_at,t.starts_at,t.rule,t.luogu_snapshot,t.state,u.account_state,u.account_epoch AS current_epoch,a.is_active,
       u.cf_handle,u.cf_binding_version,u.luogu_id,u.luogu_binding_version,s.binding_key AS sync_binding,s.full_history_at,s.last_status AS sync_status,s.coverage_through_at
-      FROM training_task_problems p JOIN training_task_progress x ON x.problem_id=p.id AND x.recipient_id=?
+      FROM training_task_problems p JOIN training_task_progress x ON x.problem_id=p.id
       JOIN training_task_recipients r ON r.id=x.recipient_id JOIN training_tasks t ON t.id=r.task_id
       LEFT JOIN users u ON u.qq_id=r.qq_id LEFT JOIN web_accounts a ON a.qq_id=r.qq_id
       LEFT JOIN user_platform_sync_state s ON s.user_qq_id=r.qq_id AND s.platform=p.platform
-      WHERE p.task_id=? ORDER BY p.position""", (recipient["id"], recipient["task_id"]))
+      WHERE """ + condition + " ORDER BY p.position,x.recipient_id", values)
+
+
+async def problem_progress(db, recipient, *, now=None, _records=None, _enrich=True):
+    now = int(time.time()) if now is None else now
+    records = await problem_records(db, recipient["task_id"], recipient["id"]) if _records is None else _records
     for row in records:
+        row.pop("recipient_id", None)
         _, _, valid, row["verification"] = live_state(row, now)
         row["tags"] = json.loads(row.pop("tags_json"))
         historical, timely, late, uncertain = [evidence(row.pop(key)) for key in ("history_json", "on_time_json", "late_json", "uncertain_json")]
@@ -321,11 +329,12 @@ async def problem_progress(db, recipient, *, now=None):
         row.pop("snapshot_json", None)
         for key in ("cf_handle", "cf_binding_version", "luogu_id", "luogu_binding_version", "rule", "state", "starts_at", "binding_key", "binding_version", "bindings_json", "account_epoch", "closed", "due_at", "account_state", "current_epoch", "is_active", "sync_binding", "full_history_at"):
             row.pop(key, None)
-    await tasks.attach_problem_state(db, records, recipient)
+    if _enrich:
+        await tasks.attach_problem_state(db, records, recipient)
     return records
 
 
-async def xcpc_scoreboard(db, task, recipients, *, now=None):
+async def xcpc_scoreboard(db, task, recipients, *, all_recipients=None, now=None):
     """Build one batched presentation payload for the admin XCPC-style table.
 
     The recipient list has already been filtered and ordered by the API handler. Cells
@@ -341,10 +350,19 @@ async def xcpc_scoreboard(db, task, recipients, *, now=None):
                         "problem_id": problem.get("problem_id", ""),
                         "problem_name": problem.get("problem_name", ""),
                         "platform": problem.get("platform", "")})
-    rows = []
+    # The visible rows are paginated, but per-problem AC counts cover the whole task.
+    # Reuse the same evidence classifier without per-member SQL or catalogue enrichment.
+    members = recipients if all_recipients is None else all_recipients
+    grouped = defaultdict(list)
+    for record in await problem_records(db, task["id"]):
+        grouped[record["recipient_id"]].append(record)
+    for column in columns:
+        column["accepted_count"] = 0
+    rows = {}
     starts = int(task.get("starts_at") or 0)
-    for recipient in recipients:
-        details = await problem_progress(db, recipient, now=now)
+    visible = {r["id"] for r in recipients}
+    for recipient in members:
+        details = await problem_progress(db, recipient, now=now, _records=grouped[recipient["id"]], _enrich=False)
         by_key = {str(item.get("id", item.get("problem_id", ""))): item for item in details}
         cells = []
         penalty = 0
@@ -367,6 +385,7 @@ async def xcpc_scoreboard(db, task, recipients, *, now=None):
                 cells.append({"state": "pending", "label": "?"})
             elif is_ac:
                 solved += 1
+                column["accepted_count"] += 1
                 if accepted and starts and accepted >= starts:
                     penalty += max(0, (accepted - starts) // 60)
                 cells.append({"state": "solved", "label": "+1", "accepted_at": accepted})
@@ -374,8 +393,12 @@ async def xcpc_scoreboard(db, task, recipients, *, now=None):
                 cells.append({"state": "pending", "label": "?"})
             else:
                 cells.append({"state": "empty", "label": "—"})
-        rows.append({"id": recipient.get("id"), "rank": recipient.get("rank"),
+        if recipient["id"] not in visible:
+            continue
+        rows[recipient["id"]] = {"id": recipient.get("id"), "rank": recipient.get("rank"),
                      "name": recipient.get("name", ""), "real_name": recipient.get("real_name"),
                      "completed_problems": solved, "problem_count": len(columns),
-                     "penalty_minutes": penalty, "cells": cells})
-    return {"columns": columns, "rows": rows, "penalty_definition": "按时段内首次已核验 AC 的分钟数；历史 AC 不计罚时，未知尝试显示为状态，不伪造次数。"}
+                     "penalty_minutes": penalty, "cells": cells}
+    return {"columns": columns, "rows": [rows[r["id"]] for r in recipients],
+            "participant_count": len(members), "totals_scope": "task",
+            "penalty_definition": "总用时为自题单开始至各题首次已核验 AC 的分钟数之和；历史 AC 不计用时。"}

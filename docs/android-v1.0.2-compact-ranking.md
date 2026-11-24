@@ -1,5 +1,7 @@
 # Android 1.0.2：排名小屏布局
 
+> 范围纠正（2026-11-24）：此版本误将用户的题单计分板需求应用到普通排行榜。按用户澄清，PR #175 的 1.0.3 恢复普通排行榜旧布局，实际题单优化见 [android-xcpc-scoreboard.md（当前候选）](android-xcpc-scoreboard.md)。下文保留 1.0.2 当时的实施与发布记录，不代表当前需求范围。
+
 日期：2026-11-24。基于 main `4e82bd5`，上一公开版本为 1.0.1/code46，本轮为 **1.0.2/code47**。源码已提交 [PR #173](https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/173)，独立窗口辅助的本地代码Review未发现P0/P1/P2。用户已授权合并并先由Tag发布GitHub制品；Gitee等待用户手动同步后再发布。此处记录发布准备阶段，实际完成状态以Release和回读证据为准。
 
 ## 问题与行为

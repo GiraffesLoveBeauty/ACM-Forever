@@ -139,11 +139,13 @@ async def admin_progress(db, identity, task_id):
         raise service.TaskError("完成状态筛选无效。")
     search = request.args.get("search", "").strip().casefold()[:100]
     order = request.args.get("order", "none")
-    if order not in {"none", "completed"}:
+    if order not in {"none", "completed", "xcpc"}:
         raise service.TaskError("排列方式无效。")
     view = request.args.get("view", "list")
     if view not in {"list", "xcpc"}:
         raise service.TaskError("进度展示方式无效。")
+    if order == "xcpc" and view != "xcpc":
+        raise service.TaskError("XCPC 排名需要使用计分板展示。")
     selected = [r for r in members if (not cohort or r["status_snapshot"] == cohort)
                 and (not search or search in (r["real_name"] or "").casefold() or search in r["name"].casefold() or search in str(r["qq_id"] or ""))
                 and (not status or (r["pending"] if status == "pending" else r["account_status"] != "active" if status == "abnormal" else r["completion"] == status))]
@@ -157,11 +159,31 @@ async def admin_progress(db, identity, task_id):
                 rank = position
                 previous = row["completed_problems"]
             row["rank"] = rank
+    board = None
+    if view == "xcpc" and order == "xcpc":
+        task = await service.detail(db, task_id)
+        board = await progress.xcpc_scoreboard(db, task, selected, all_recipients=members)
+        scores = {r["id"]: r for r in board["rows"]}
+        def score_key(row):
+            score = scores[row["id"]]
+            return (-score["completed_problems"], score["penalty_minutes"])
+        selected.sort(key=score_key)
+        previous = None
+        rank = 0
+        for position, row in enumerate(selected, 1):
+            key = score_key(row)
+            if key != previous:
+                rank = position
+                previous = key
+            row["rank"] = scores[row["id"]]["rank"] = rank
+        board["rows"] = [scores[r["id"]] for r in selected[(page - 1) * size:page * size]]
     page_items = selected[(page - 1) * size:page * size]
     result = {"summary": overview, "items": page_items, "total": len(selected), "page": page, "page_size": size, "order": order}
     if view == "xcpc":
-        task = await service.detail(db, task_id)
-        result["scoreboard"] = await progress.xcpc_scoreboard(db, task, page_items)
+        if board is None:
+            task = await service.detail(db, task_id)
+            board = await progress.xcpc_scoreboard(db, task, page_items, all_recipients=members)
+        result["scoreboard"] = board
     return jsonify(result)
 
 

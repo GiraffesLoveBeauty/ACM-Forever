@@ -782,23 +782,19 @@ public final class MainActivity extends Activity {
     }
 
     private void chips(String[] labels, String[] values, String selected, java.util.function.Consumer<String> onChoose) {
-        chips(labels,values,selected,onChoose,false);
-    }
-
-    private void chips(String[] labels, String[] values, String selected, java.util.function.Consumer<String> onChoose,boolean compact) {
         WrapLayout line = new WrapLayout(this);
         line.setContentDescription("筛选选项，自动换行");
         for (int i = 0; i < labels.length; i++) {
             String value = values[i];
-            TextView chip = label(labels[i], compact?11:12, TEXT, selected.equals(value));
+            TextView chip = label(labels[i], 12, TEXT, selected.equals(value));
             MobileStyle.control(chip,false,selected.equals(value),20);
             chip.setGravity(Gravity.CENTER);
-            chip.setPadding(dp(compact?9:13), 0, dp(compact?9:13), 0);
+            chip.setPadding(dp(13), 0, dp(13), 0);
             chip.setOnClickListener(view -> onChoose.accept(value));
             line.addView(chip, new ViewGroup.LayoutParams(-2, dp(44)));
         }
         content.addView(line,new LinearLayout.LayoutParams(-1,-2));
-        space(content, compact?6:12);
+        space(content, 12);
     }
 
     private void renderForum(int serial) {
@@ -1159,14 +1155,13 @@ public final class MainActivity extends Activity {
     }
 
     private void rankHeader(){
-        LinearLayout title=row();title.addView(label("排名",18,TEXT,true),new LinearLayout.LayoutParams(0,-2,1));
-        ImageButton filter=new ImageButton(this);MobileStyle.flat(filter);filter.setImageDrawable(AppIcons.get(this,"filter",BRAND));filter.setPadding(dp(12),dp(12),dp(12),dp(12));filter.setBackground(MobileStyle.panel(this,MobileStyle.controlFill(PANEL),10,MobileStyle.controlFill(LINE)));filter.setContentDescription("排名筛选：平台组合、排序、每页数量");filter.setOnClickListener(v->showRankFilter());title.addView(filter,new LinearLayout.LayoutParams(dp(44),dp(44)));content.addView(title);
-        if(!query.isEmpty())content.addView(label("关键词："+query,11,MUTED,false));
+        heading("ACMFOREVER / RANKING", "每一题，都算数", "社区排行榜\n仅展示所选平台合计通过数大于 0 的成员");
         chips(new String[]{"近7日","近30日","近90日","近1年","生涯"},new String[]{"7","30","90","365","all"},days,
-            value->{if(days.equals(value))return;days=value;page=1;loadScreen();},true);
-        String[] names={"CF","洛谷","AT","牛客","校 OJ"}, keys={"codeforces","luogu","atcoder","nowcoder","cjlu"};
+            value->{if(days.equals(value))return;days=value;page=1;loadScreen();});
+        Button filter=action("平台组合 · 排序 · 每页数量",false);filter.setOnClickListener(v->showRankFilter());content.addView(filter);
+        String[] names={"Codeforces","洛谷","AtCoder","牛客","校 OJ"}, keys={"codeforces","luogu","atcoder","nowcoder","cjlu"};
         java.util.List<String> selected=new java.util.ArrayList<>();for(int i=0;i<keys.length;i++)if(rankPlatforms.contains(keys[i]))selected.add(names[i]);
-        TextView summary=label(String.join(" · ",selected)+" · "+rankPageSize+"人/页",11,MUTED,false);summary.setPadding(0,dp(4),0,dp(6));content.addView(summary);
+        TextView summary=label(String.join(" / ",selected)+" · 每页"+rankPageSize+"人",12,MUTED,false);summary.setPadding(0,dp(10),0,dp(10));content.addView(summary);
     }
 
     private void showRank(JSONObject result) {
@@ -1180,22 +1175,20 @@ public final class MainActivity extends Activity {
             JSONObject user = rows.optJSONObject(i);
             if (user == null||user.optInt("total_count")<=0) continue;
             LinearLayout box = card();
-            box.setPadding(dp(12),dp(10),dp(12),dp(10));
-            ((LinearLayout.LayoutParams)box.getLayoutParams()).bottomMargin=dp(8);
             LinearLayout identity = row();
-            int position=(page-1)*rankPageSize+i+1;TextView number=label(String.format(java.util.Locale.ROOT,"%02d",position),15,position<=3?BRAND:MUTED,true);number.setMinWidth(dp(24));number.setPadding(0,0,dp(8),0);identity.addView(number,new LinearLayout.LayoutParams(-2,-2));
-            ImageButton avatar = avatarButton(32);
+            int position=(page-1)*rankPageSize+i+1;TextView number=label(String.format(java.util.Locale.ROOT,"%02d",position),20,position<=3?BRAND:MUTED,true);identity.addView(number,new LinearLayout.LayoutParams(dp(40),-2));
+            ImageButton avatar = avatarButton(36);
             avatar.setContentDescription("查看" + value(user, "name", "ACM 成员") + "的公开主页");
             avatar.setOnClickListener(view -> openMember(user, "rank"));
             loadAvatar(avatar, value(user, "avatar_url", ""));
-            identity.addView(avatar, new LinearLayout.LayoutParams(dp(32), dp(32)));
-            LinearLayout person=column();person.setPadding(dp(8),0,0,0);TextView nickname=label(user.optString("name", "ACM 成员"),14,TEXT,true);nickname.setMaxLines(1);nickname.setEllipsize(android.text.TextUtils.TruncateAt.END);person.addView(nickname);String memberStatus=user.optString("status","");if(!memberStatus.isEmpty()){TextView status=label(memberStatus,10,MUTED,false);status.setMaxLines(1);status.setEllipsize(android.text.TextUtils.TruncateAt.END);person.addView(status);}identity.addView(person,new LinearLayout.LayoutParams(0,-2,1));
+            identity.addView(avatar, new LinearLayout.LayoutParams(dp(36), dp(36)));
+            LinearLayout person=column();person.setPadding(dp(10),0,dp(6),0);TextView nickname=label(user.optString("name", "ACM 成员"),15,TEXT,true);nickname.setMaxLines(1);nickname.setEllipsize(android.text.TextUtils.TruncateAt.END);person.addView(nickname);person.addView(label(user.optString("status",""),10,MUTED,false));identity.addView(person,new LinearLayout.LayoutParams(0,-2,1));
+            LinearLayout total=column();TextView ac=label(String.valueOf(user.optInt("total_count")),25,TEXT,true);ac.setGravity(Gravity.RIGHT);total.addView(ac);total.addView(label("AC / 通过",9,BRAND,true));identity.addView(total);
             box.addView(identity);
-            WrapLayout counts=new WrapLayout(this);counts.setContentDescription("各平台通过数，自动换行");
-            TextView total=label("AC "+user.optInt("total_count"),13,BRAND,true);total.setPadding(0,dp(1),dp(2),dp(1));counts.addView(total,new ViewGroup.LayoutParams(-2,-2));
-            String[] platformNames={"CF","洛谷","AtCoder","牛客","校 OJ"},fields={"cf_count","luogu_count","atcoder_count","nowcoder_count","cjlu_count"};
-            for(int p=0;p<fields.length;p++){TextView count=label(platformNames[p]+" "+user.optInt(fields[p]),11,MUTED,false);count.setPadding(0,dp(1),dp(2),dp(1));counts.addView(count,new ViewGroup.LayoutParams(-2,-2));}
-            box.addView(counts,new LinearLayout.LayoutParams(-1,-2));
+            space(box, 5);
+            box.addView(label("CF " + user.optInt("cf_count")
+                    + "  ·  洛谷 " + user.optInt("luogu_count"), 12, MUTED, false));
+            box.addView(label("AtCoder " + user.optInt("atcoder_count") + " · 牛客 " + user.optInt("nowcoder_count") + " · 校 OJ " + user.optInt("cjlu_count"), 12, MUTED, false));
             box.setOnClickListener(view -> openMember(user, "rank"));
         }
         addRankPager(result.optInt("total"));
