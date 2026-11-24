@@ -29,8 +29,66 @@ public final class AdminTrainingActivity extends AdminPageActivity {
     private void preview(){LinearLayout b=card(body);b.addView(text("步骤 3 / 3 · 发布确认",20));if(preview==null){b.addView(button("重新预览名单",()->audience(1)));return;}b.addView(text("接收 "+preview.optInt("recipient_count")+" 人 · 排除 "+preview.optInt("excluded_count")+" 人 · 未绑定 "+preview.optInt("unbound_count")+" 人",15));b.addView(text("预览10分钟有效。名单、账号或绑定变化后须重新预览。发布结果未知时，请用相同发布按钮重试，不要重新创建。",12));JSONArray members=preview.optJSONArray("items");if(members!=null)for(int i=0;i<members.length();i++){JSONObject r=members.optJSONObject(i);if(r==null)continue;b.addView(text(r.optString("name")+" · "+r.optString("qq_id")+" · "+r.optString("status")+(r.isNull("excluded_reason")?"":" · 排除："+r.optString("excluded_reason"))+(r.optBoolean("unbound")?" · 未绑定":""),13));}equalButtons(b,button("上一页",()->{if(previewPage>1)audience(previewPage-1);}),button("下一页",()->{if(previewPage*20<preview.optInt("total"))audience(previewPage+1);}));CheckBox exclusions=new CheckBox(this);exclusions.setText("已核对名单与排除原因，同意排除上述账号");b.addView(exclusions);b.addView(button("确认发布",()->{if(preview.optInt("excluded_count")>0&&!exclusions.isChecked()){notice.show("发布",new IllegalArgumentException("请先确认排除名单"));return;}try{JSONObject payload=new JSONObject().put("version",task.getInt("version")).put("preview_token",preview.getString("preview_token")).put("confirm_exclusions",exclusions.isChecked());writeRequest(()->api.publishTraining(id,payload,key),true,result->{task=(JSONObject)result;preview=null;key="";go("detail");});}catch(Exception e){notice.show("发布",e);}}));b.addView(button("重新预览",()->audience(1)));}
     private void lifecycle(boolean cancel){LinearLayout form=column();EditText due=cancel?null:input(form,"新截止（北京时间 yyyy-MM-dd HH:mm）",dateInput(task.optLong("due_at")));EditText why=input(form,"原因（必填）","");new ModalDialogs.Builder(this).setTitle(cancel?"确认取消题单？":"延长截止时间").setView(form).setNegativeButton("返回",null).setPositiveButton("确认",(d,w)->{try{String reason=why.getText().toString().trim();if(reason.isEmpty())throw new IllegalArgumentException("原因必填");JSONObject data=new JSONObject().put("version",task.getInt("version")).put("reason",reason);if(!cancel)data.put("due_at",parseDate(due.getText().toString()));write("POST",API+"/"+id+(cancel?"/cancel":"/extend-deadline"),data,true,this::renderAdmin);}catch(Exception e){notice.show("维护题单",e);}}).show();}
     private void progress(){LinearLayout form=card(body);EditText who=input(form,"姓名、QQ",search),cohort=input(form,"业务身份（空为全部）",identity);String[] keys={"","on_time","late","incomplete","not_started","pending","abnormal"};Spinner filter=spinner(form,new String[]{"全部","按时完成","逾期完成","未完成","未开始","待核验","账号异常"});filter.setSelection(Arrays.asList(keys).indexOf(completion));form.addView(text("排列方式",14));Spinner ordering=spinner(form,new String[]{"不排名（默认）","按完成数量排名"});ordering.setContentDescription("完成情况排列方式");ordering.setSelection("completed".equals(order)?1:0);form.addView(button("筛选",()->{search=who.getText().toString().trim();identity=cohort.getText().toString().trim();completion=keys[filter.getSelectedItemPosition()];order=ordering.getSelectedItemPosition()==1?"completed":"none";page=1;renderAdmin();}));LinearLayout slot=card(body);read(API+"/"+id+"/progress?page="+page+"&page_size=20&search="+UrlEncoding.form(search)+"&identity="+UrlEncoding.form(identity)+"&status="+completion+"&order="+order+"&view=xcpc",slot,true,result->{JSONObject data=(JSONObject)result;if("completed".equals(order)&&!"completed".equals(data.optString("order")))throw new ApiClient.UnavailableEndpointException("当前服务器不支持全体完成数量排名");overview(slot,data.optJSONObject("summary"));JSONObject scoreboard=data.optJSONObject("scoreboard");if(scoreboard!=null&&scoreboard.has("columns")){xcpc(slot,scoreboard);}else{JSONArray rows=data.getJSONArray("items");for(int i=0;i<rows.length();i++){JSONObject r=rows.getJSONObject(i);LinearLayout b=card(slot);if("completed".equals(order)){if(!r.has("rank"))throw new IllegalArgumentException("服务器未返回全体名次");b.addView(text("第 "+r.getInt("rank")+" 名 · 完成 "+r.optInt("completed_problems")+" / "+r.optInt("problem_count"),17));}b.addView(text(r.optString("name")+" · 姓名："+(r.isNull("real_name")?"未填写":r.optString("real_name"))+" · "+r.optString("status_snapshot"),16));TrainingUi.progress(this,b,r);b.addView(button("逐题证据",()->startActivity(new Intent(this,AdminTrainingActivity.class).putExtra("task_id",id).putExtra("recipient_id",r.optLong("id")))));}}pager(slot,data.optInt("total"),this::renderAdmin);});}
-    private TextView scoreCell(String value,int width,int height,int fill,int ink,boolean header){TextView cell=text(value,header?12:13);cell.setGravity(android.view.Gravity.CENTER);cell.setTextColor(ink);cell.setPadding(dp(6),dp(4),dp(6),dp(4));cell.setBackground(MobileStyle.panel(this,fill,10,0));cell.setMinHeight(dp(height));cell.setContentDescription(value);cell.setLayoutParams(new LinearLayout.LayoutParams(dp(width),dp(height)));return cell;}
-    private void xcpc(LinearLayout parent,JSONObject board){JSONArray columns=board.optJSONArray("columns"),rows=board.optJSONArray("rows");if(columns==null||rows==null)return;parent.addView(text("XCPC 计分板 · 左侧成员与右侧成绩固定，中间题目列可横向滑动",13));LinearLayout table=row();LinearLayout left=column(),right=column(),middle=column();left.setContentDescription("计分板固定左侧");right.setContentDescription("计分板固定右侧");android.widget.HorizontalScrollView horizontal=new android.widget.HorizontalScrollView(this);horizontal.setHorizontalScrollBarEnabled(true);horizontal.setContentDescription("计分板题目列横向滑动区域");horizontal.addView(middle);table.addView(left,new LinearLayout.LayoutParams(dp(172),-2));table.addView(horizontal,new LinearLayout.LayoutParams(0,-2,1));table.addView(right,new LinearLayout.LayoutParams(dp(108),-2));int head=60,rowHeight=72;left.addView(scoreCell("# / 成员",172,head,MobileStyle.controlFill(MobileStyle.PANEL),MobileStyle.MUTED,true));right.addView(scoreCell("通过\n罚时",108,head,MobileStyle.controlFill(MobileStyle.PANEL),MobileStyle.MUTED,true));LinearLayout mh=row();for(int i=0;i<columns.length();i++){JSONObject c=columns.optJSONObject(i);if(c!=null)mh.addView(scoreCell(c.optString("label",String.valueOf(i+1)),50,head,MobileStyle.controlFill(MobileStyle.PANEL),MobileStyle.MUTED,true));}middle.addView(mh,new LinearLayout.LayoutParams(-2,dp(head)));for(int i=0;i<rows.length();i++){JSONObject r=rows.optJSONObject(i);if(r==null)continue;String name=r.optString("name","未命名");String rank=r.isNull("rank")?"—":String.valueOf(r.optInt("rank"));left.addView(scoreCell(rank+"\n"+name,172,rowHeight,i%2==0?MobileStyle.PANEL:MobileStyle.BACKGROUND,MobileStyle.TEXT,false));JSONArray cells=r.optJSONArray("cells");LinearLayout mr=row();for(int c=0;c<columns.length();c++){JSONObject cell=cells==null?null:cells.optJSONObject(c);String state=cell==null?"empty":cell.optString("state","empty"),label=cell==null?"—":cell.optString("label","—");int fill="solved".equals(state)?0xfffff4c7:"pending".equals(state)?0xffffe7df:MobileStyle.BACKGROUND;int ink="solved".equals(state)?0xff8a6212:"pending".equals(state)?0xffae3d3d:MobileStyle.MUTED;mr.addView(scoreCell(label,50,rowHeight,fill,ink,false));}middle.addView(mr,new LinearLayout.LayoutParams(-2,dp(rowHeight)));right.addView(scoreCell(r.optInt("completed_problems")+" / "+r.optInt("problem_count")+"\n"+r.optInt("penalty_minutes"),108,rowHeight,i%2==0?MobileStyle.PANEL:MobileStyle.BACKGROUND,MobileStyle.BRAND,false));}parent.addView(table);String definition=board.optString("penalty_definition","");if(!definition.isEmpty())parent.addView(text(definition,12));}
+    private TextView scoreCell(String value,int width,int height,int fill,int ink,boolean header){
+        TextView cell=text(value,header?12:13);cell.setGravity(android.view.Gravity.CENTER);cell.setTextColor(ink);
+        cell.setPadding(dp(4),dp(4),dp(4),dp(4));cell.setBackground(MobileStyle.panel(this,fill,8,0));
+        cell.setContentDescription(value);cell.setMaxLines(2);cell.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        cell.setLayoutParams(new LinearLayout.LayoutParams(dp(width),dp(height)));return cell;
+    }
+    private LinearLayout scoreMember(JSONObject member,int width,int height,int fill){
+        LinearLayout box=row();box.setPadding(dp(4),dp(4),dp(4),dp(4));box.setBackground(MobileStyle.panel(this,fill,8,0));
+        TextView rank=scoreCell(TrainingScoreboardData.rank(member),24,height-8,fill,MobileStyle.MUTED,false);box.addView(rank);
+        LinearLayout names=column();
+        TextView name=text(TrainingScoreboardData.name(member),13),real=text(TrainingScoreboardData.realName(member),11);
+        name.setTextColor(MobileStyle.TEXT);real.setTextColor(MobileStyle.MUTED);
+        for(TextView line:new TextView[]{name,real}){line.setPadding(0,dp(2),0,dp(2));line.setSingleLine(true);line.setEllipsize(android.text.TextUtils.TruncateAt.END);names.addView(line);}
+        box.addView(names,new LinearLayout.LayoutParams(0,-2,1));
+        box.setContentDescription("名次 "+TrainingScoreboardData.rank(member)+" · "+TrainingScoreboardData.name(member)+" · 姓名："+TrainingScoreboardData.realName(member));
+        box.setLayoutParams(new LinearLayout.LayoutParams(dp(width),dp(height)));return box;
+    }
+    private void xcpc(LinearLayout parent,JSONObject board){
+        JSONArray columns=board.optJSONArray("columns"),rows=board.optJSONArray("rows");if(columns==null||rows==null)return;
+        parent.addView(text("XCPC 计分板 · 两侧固定，题目列可横向滑动；点题查看首次 AC 时间与罚时",13));
+        LinearLayout table=row(),left=column(),right=column(),middle=column();
+        left.setContentDescription("计分板固定左侧");right.setContentDescription("计分板固定右侧");
+        HorizontalScrollView horizontal=new HorizontalScrollView(this);horizontal.setHorizontalScrollBarEnabled(true);
+        horizontal.setContentDescription("计分板题目列横向滑动区域");horizontal.addView(middle);
+        int memberWidth=124,scoreWidth=88,problemWidth=50,head=52;
+        int rowHeight=Math.max(76,(int)Math.ceil(56*getResources().getConfiguration().fontScale));
+        table.addView(left,new LinearLayout.LayoutParams(dp(memberWidth),-2));
+        table.addView(horizontal,new LinearLayout.LayoutParams(0,-2,1));table.addView(right,new LinearLayout.LayoutParams(dp(scoreWidth),-2));
+        left.addView(scoreCell("# / 用户名\n真实姓名",memberWidth,head,MobileStyle.controlFill(MobileStyle.PANEL),MobileStyle.MUTED,true));
+        right.addView(scoreCell("通过 / 总题数\n罚时（分）",scoreWidth,head,MobileStyle.controlFill(MobileStyle.PANEL),MobileStyle.MUTED,true));
+        LinearLayout mh=row();
+        for(int i=0;i<columns.length();i++){
+            JSONObject column=columns.optJSONObject(i);
+            mh.addView(scoreCell(column==null?String.valueOf(i+1):column.optString("label",String.valueOf(i+1)),problemWidth,head,MobileStyle.controlFill(MobileStyle.PANEL),MobileStyle.MUTED,true));
+        }
+        middle.addView(mh,new LinearLayout.LayoutParams(-2,dp(head)));
+        for(int i=0;i<rows.length();i++){
+            JSONObject member=rows.optJSONObject(i);if(member==null)continue;
+            int stripe=i%2==0?MobileStyle.PANEL:MobileStyle.BACKGROUND;
+            left.addView(scoreMember(member,memberWidth,rowHeight,stripe));
+            JSONArray cells=member.optJSONArray("cells");LinearLayout mr=row();
+            for(int c=0;c<columns.length();c++){
+                JSONObject column=columns.optJSONObject(c),cell=cells==null?null:cells.optJSONObject(c);
+                String state=TrainingScoreboardData.state(cell);
+                int fill="solved".equals(state)?MobileStyle.SELECTED:stripe;
+                int ink="solved".equals(state)?MobileStyle.ON_SELECTED:MobileStyle.MUTED;
+                TextView problem=scoreCell(TrainingScoreboardData.cellLabel(cell),problemWidth,rowHeight,fill,ink,false);
+                problem.setContentDescription(TrainingScoreboardData.description(member,column,cell));
+                problem.setOnClickListener(v->{if(access())new ModalDialogs.Builder(this).setTitle("题目完成详情")
+                    .setMessage(TrainingScoreboardData.details(task,member,column,cell)).setPositiveButton("确认",null).show();});
+                mr.addView(problem);
+            }
+            middle.addView(mr,new LinearLayout.LayoutParams(-2,dp(rowHeight)));
+            TextView total=scoreCell(member.optInt("completed_problems")+" / "+member.optInt("problem_count")+"\n"+TrainingScoreboardData.penalty(member),scoreWidth,rowHeight,stripe,MobileStyle.BRAND,false);
+            total.setTextSize(11);right.addView(total);
+        }
+        parent.addView(table);String definition=board.optString("penalty_definition","");
+        if(!definition.isEmpty())parent.addView(text(definition,12));
+        parent.addView(text("罚时不含错误提交加罚：当前接口未提供错误提交次数。",12));
+    }
     private void recipient(){LinearLayout slot=card(body);read(API+"/"+id+"/progress/"+recipient,slot,true,result->{JSONObject data=(JSONObject)result;TrainingUi.progress(this,slot,data.optJSONObject("recipient"));TrainingUi.problems(this,slot,data.optJSONArray("problems"));});}
     private void overview(LinearLayout b,JSONObject s){if(s!=null)b.addView(text("人数 "+s.optInt("recipient_count")+" · 按时 "+s.optInt("on_time_count")+" · 逾期 "+s.optInt("late_count")+" · 待核验 "+s.optInt("pending_count")+" · 异常 "+s.optInt("abnormal_count"),13));}
     private Spinner spinner(LinearLayout b,String[] names){Spinner s=new Spinner(this);s.setAdapter(MobileStyle.options(this,names));s.setBackground(MobileStyle.panel(this,MobileStyle.PANEL,12,MobileStyle.LINE));b.addView(s,new LinearLayout.LayoutParams(-1,dp(52)));return s;}

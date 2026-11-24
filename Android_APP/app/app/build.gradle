@@ -24,8 +24,8 @@ android {
         applicationId 'com.giraffeslovebeauty.acmforever'
         minSdk 26
         targetSdk 35
-        versionCode 47
-        versionName '1.0.2'
+        versionCode 48
+        versionName '1.0.3'
         manifestPlaceholders = [updateDistribution: 'release', previewRevision: '0', releaseVersionCode: versionCode.toString()]
         testInstrumentationRunner 'com.giraffeslovebeauty.acmforever.ReaderSmoke'
     }
