@@ -1,6 +1,6 @@
 # Android 1.0.2：排名小屏布局
 
-日期：2026-11-24。基于最新 main `4e82bd5`，上一公开版本为 1.0.1/code46，本轮候选为 **1.0.2/code47**。源码提请外部 Review；本轮未合并、创建 Tag 或发布 APK。
+日期：2026-11-24。基于 main `4e82bd5`，上一公开版本为 1.0.1/code46，本轮候选为 **1.0.2/code47**。源码已提交 [PR #173](https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/173)，待外部 Review；本轮未合并、创建 Tag 或发布 APK。
 
 ## 问题与行为
 
