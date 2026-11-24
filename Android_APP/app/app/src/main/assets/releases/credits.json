@@ -1027,12 +1027,12 @@
     },
     "1.0.2": {
       "uploaders": ["MiaoJJ13445"],
-      "reviewRequesters": [],
-      "reviewers": [],
+      "reviewRequesters": ["MiaoJJ13445"],
+      "reviewers": ["MiaoJJ13445"],
       "publishers": [],
       "pr": 173,
-      "status": "development",
-      "scope": "开发与提交：MiaoJJ13445，PR #173排名页紧凑布局。当前未收录本轮Review和发布记录，完成后依据实际证据补录。",
+      "status": "reviewed",
+      "scope": "开发与提交：MiaoJJ13445；Review：MiaoJJ13445（独立窗口辅助的本地代码审查，2026-11-24，审查提交a91a24b13bc2cc1afcc6ba683666f8c9b478b4f8）。未发现P0/P1/P2，同提交Android CI重跑通过，用户已授权合并发布。Review署名不等同于GitHub人工APPROVED；自动发布账号在公开完成后据实补录。",
       "evidence": ["https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/173"]
     }
   },
