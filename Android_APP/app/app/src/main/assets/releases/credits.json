@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "capturedOn": "2026-11-24",
+  "capturedOn": "2026-11-25",
   "repository": "GiraffesLoveBeauty/ACM-Forever",
   "maintainers": [
     "MiaoJJ13445"
@@ -132,17 +132,21 @@
   "versions": {
     "1.0.3": {
       "pr": 175,
-      "status": "development",
+      "status": "reviewed",
       "uploaders": [
         "MiaoJJ13445"
       ],
-      "reviewRequesters": [],
-      "reviewers": [],
+      "reviewRequesters": [
+        "MiaoJJ13445"
+      ],
+      "reviewers": [
+        "MiaoJJ13445"
+      ],
       "publishers": [],
       "evidence": [
         "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/175"
       ],
-      "scope": "1.0.3 社团题单 XCPC 计分板、每题 AC 汇总与总用时；普通排行榜恢复旧版。开发候选，首轮问题已修改，当前修订待复审与发布。"
+      "scope": "开发与提交：MiaoJJ13445；Review：MiaoJJ13445（独立窗口辅助的本地第二轮审查，2026-11-25，审查提交4959b2fbefa7973a60cf40d488382ce53b1e44aa）。上轮P2确认修复，无新增P0/P1/P2，同提交Android、Browser、Test CI通过。用户已授权合并与GitHub发布，Gitee等待后续通知；Review署名不等同GitHub人工APPROVED。"
     },
     "0.2.27": {
       "uploaders": [
