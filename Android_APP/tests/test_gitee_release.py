@@ -54,6 +54,7 @@ class FakeGitee:
 
     def release(self, tag): return self.current
     def files(self, rid): return [dict(name=n, id=i+1) for i,n in enumerate(self.assets)]
+    def formal_releases(self): return [] if self.latest is None else [self.latest]
     def readback(self, tag, name, size, expected_hash):
         self.operations.append('read:' + name)
         data = self.assets[name] + (b'corrupt' if name == self.corrupt else b'')

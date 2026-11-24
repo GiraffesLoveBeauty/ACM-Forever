@@ -1,0 +1,41 @@
+name: Recover Gitee Android mirror
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing published formal Tag, for example v1.0.2
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Shared with the Tag workflow, including historical versions of that workflow.
+concurrency:
+  group: android-tag-release
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Recover and verify the immutable published originals
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITEE_RELEASE_TOKEN: ${{ secrets.GITEE_RELEASE_TOKEN }}
+          MIRROR_TAG: ${{ inputs.tag }}
+        run: python Android_APP/tools/gitee_mirror.py --tag "$MIRROR_TAG"

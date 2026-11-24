@@ -6,6 +6,7 @@ on:
       - Android_APP/**
       - .github/workflows/android-ci.yml
       - .github/workflows/android-release.yml
+      - .github/workflows/android-gitee-mirror.yml
   workflow_dispatch:
 
 permissions:
