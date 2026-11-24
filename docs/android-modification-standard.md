@@ -1,6 +1,6 @@
 # Android 修改标准与模块关联（v1.0.0）
 
-2026-11-24 范围纠正：用户两次所说的排名优化均为管理员社团题单 XCPC 计分板。1.0.2 曾误改普通排行榜，1.0.3 将其恢复为 `140bf49` 前的版本；紧凑筛选、列宽、姓名、每题总 AC 与总用时只作用于题单。默认不排名，选择排名使用服务端 `order=xcpc`，先比题数再比总用时，不能仅排当前页；`columns[].accepted_count` 必须为全题单汇总。原 `order=completed` 继续兼容旧客户端。现行行为、接口及后端部署边界见 [android-xcpc-scoreboard.md（题单计分板）](android-xcpc-scoreboard.md)，[1.0.2 布局说明](android-v1.0.2-compact-ranking.md)仅为历史记录。当前修订待独立复审，不合并或发布。
+2026-11-24 范围纠正：用户两次所说的排名优化均为管理员社团题单 XCPC 计分板。1.0.2 曾误改普通排行榜，1.0.3 将其恢复为 `140bf49` 前的版本；紧凑筛选、列宽、姓名、每题总 AC 与总用时只作用于题单。默认不排名，选择排名使用服务端 `order=xcpc`，先比题数再比总用时，不能仅排当前页；`columns[].accepted_count` 必须为全题单汇总。原 `order=completed` 继续兼容旧客户端。现行行为、接口及后端部署边界见 [android-xcpc-scoreboard.md（题单计分板）](android-xcpc-scoreboard.md)，[1.0.2 布局说明](android-v1.0.2-compact-ranking.md)仅为历史记录。2026-11-25 第二轮本地 Review 对 `4959b2fb` 无新增 P0/P1/P2，上轮 P2确认修复；该提交三项CI成功。已按实际证据补录 `reviewed`，用户授权合并及先发 GitHub，Gitee等待通知；补录增量与最终head CI需核对，运行代码不再变更。
 
 ## 1.0.0 发布、署名与管理员测试渠道约束
 

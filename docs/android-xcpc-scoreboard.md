@@ -1,6 +1,6 @@
 # 管理员题单 XCPC 计分板
 
-状态：1.0.3/code48，提请 [PR #175](https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/175) 复审，尚未合并或发布。本轮包括 Android 展示和既有管理员进度接口的加法字段；`feat/**` 合并后会触发现有后端部署，须在合并前确认当前提交的 Review、测试及运维发布条件。不创建新接口、数据库表或迁移。
+状态：1.0.3/code48，[PR #175](https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/175) 第二轮本地 Review 已通过（2026-11-25，审查提交 `4959b2fbefa7973a60cf40d488382ce53b1e44aa`）。用户在知悉后端自动部署及设备验收边界后授权合并、创建新 Tag 并先发布 GitHub；Gitee 等待用户通知。本次补录仅更新真实署名、日志和发布说明，不修改已审查的运行代码或接口。本轮包括 Android 展示和既有管理员进度接口的加法字段；`feat/**` 合并后会触发现有后端部署，须在合并前确认当前提交的 Review、测试及运维发布条件。不创建新接口、数据库表或迁移。
 
 ## 页面范围
 
@@ -49,7 +49,7 @@ GET /api/admin/training-tasks/{id}/progress
 - `AdminAccessLifecycleTest` 使用真实基类源码和最小 UI 替身，覆盖正常权限、降权、换号、强制改密、网络失败和写入中返回。旧实现六项均因弹窗残留失败，修复后六项通过。
 - `TrainingTasksUiSmoke` 补充真实页面后台降权、弹窗/姓名/快照清理、保存状态和旧格子点击回归。此为待设备执行的仪器测试，不用 JVM 替身冒充真机。
 
-首轮报告及其旧 head 的成功 CI 不能证明当前修订已通过复审。本轮评审与发布署名保持未完成状态。
+第二轮报告确认上述 P2 已修复、无新增 P0/P1/P2；同一提交的 Android、Browser、Test CI 均成功。已据实际记录将本版标为 `reviewed`，评审发起者和 Review 署名为 MiaoJJ13445，发布者保持空数组，公开成功后在下一版据实补录。该署名不等同 GitHub 人工 APPROVED。补录增量需核对且最终 head 必须通过 CI，才能按授权合并。
 
 ## 本地验证
 
@@ -63,3 +63,14 @@ GET /api/admin/training-tasks/{id}/progress
 - `git diff --check` 通过，普通排行榜源码与 `140bf49^` 精确一致。
 
 测试使用合成账号及隔离数据库，无生产写入；当前尚未执行设备仪器测试、窄屏实机或鸿蒙验收。本地 Android 离线构建使用缓存的 AGP 对应 AAPT2 可执行文件覆盖 Maven 查找，未修改仓库构建配置。
+
+
+## 本轮 GitHub 发布顺序
+
+1. 核对补录增量仅限两份 releases JSON 和本文、修改标准，版本保持 1.0.3/code48；验证署名、头像、日志、链接与发布门禁。
+2. 将 `GITEE_MIRROR_MODE` 设为 `manual` 并回读，保留 App 的 Gitee 优先设置；本轮不向 Gitee 发布附件。
+3. 最终 head 的 Android、Browser、Test CI 成功后，按用户授权合并 PR。该合并会触发后端同步部署；本次无数据库迁移或新增服务器配置，仍需检查部署结果，不能把 CI 当生产验收。
+4. 从准确合并提交创建新的不可变 `v1.0.3` Tag，交既有 Actions 编译、签名、八附件校验后发布 GitHub Release，不上传本机 APK。
+5. 匿名回读八附件，核对版本、签名、哈希、清单、四个可选模块与包内日志/署名；Gitee 等待用户另行通知。
+
+本节记录获授权的发布安排；实际合并、部署、公开及回读结果以运行状态和本地制品验证记录为准。
