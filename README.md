@@ -65,7 +65,7 @@ $env:ACM_WEBUI_SECRET_KEY = & $python -c "import secrets; print(secrets.token_ur
 
 `feat/` 的变更合并到 `main` 后，[部署工作流](.github/workflows/sync-feat-to-server.yml) 会构建前端并同步应用。数据库、上传文件与环境配置应独立于代码部署目录。操作前请阅读 [部署与迁移](docs/public-server-deployment.md) 和 [备份与恢复](docs/backup-and-diagnostics.md)。
 
-更多文档：[训练任务管理](docs/training-tasks/admin.md) · [Wiki 维护](docs/wiki.md) · [浏览器回归测试](docs/browser-regression.md) · [全部工程文档与历史记录](docs/)。
+更多文档：[训练任务管理](docs/training-tasks/admin.md) · [Wiki 维护](docs/wiki.md) · [浏览器回归测试](docs/browser-regression.md) · [android-gitee-mirror-recovery.md（Gitee 发布诊断与恢复）](docs/android-gitee-mirror-recovery.md) · [全部工程文档与历史记录](docs/)。
 
 ## 参与贡献
 
