@@ -999,9 +999,9 @@
       "reviewers": [
         "MiaoJJ13445"
       ],
-      "publishers": [],
-      "status": "reviewed",
-      "scope": "开发与提交：MiaoJJ13445；Review：MiaoJJ13445（独立窗口辅助的本地审查，2026-11-16第二轮通过，审查提交04f35c80f737a659148cb5203a446dbbdeb9d395）。Review署名不等同于GitHub人工APPROVED；自动发布账号在公开Release完成后据实补录。",
+      "publishers": ["github-actions[bot]"],
+      "status": "published",
+      "scope": "开发与提交：MiaoJJ13445；Review：MiaoJJ13445（独立窗口辅助的本地审查，2026-11-16第二轮通过，审查提交04f35c80f737a659148cb5203a446dbbdeb9d395）。Review署名不等同于GitHub人工APPROVED；公开Release由github-actions[bot]发布，下轮据实补录。",
       "evidence": [
         "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/150"
       ],
@@ -1017,13 +1017,23 @@
       "reviewers": [
         "MiaoJJ13445"
       ],
-      "publishers": [],
+      "publishers": ["github-actions[bot]"],
       "pr": 170,
-      "status": "reviewed",
-      "scope": "开发与提交：MiaoJJ13445；Review：MiaoJJ13445（本地审查，确认版本递增、署名状态与发布约束）。自动发布账号在公开 Release 完成后据实补录。",
+      "status": "published",
+      "scope": "开发与提交：MiaoJJ13445；Review：MiaoJJ13445（本地审查，确认版本递增、署名状态与发布约束）。GitHub Release由github-actions[bot]于2026-11-21发布，Gitee同版镜像于2026-11-22完成。",
       "evidence": [
         "https://github.com/GiraffesLoveBeauty/ACM-Forever/pull/170"
       ]
+    },
+    "1.0.2": {
+      "uploaders": ["MiaoJJ13445"],
+      "reviewRequesters": [],
+      "reviewers": [],
+      "publishers": [],
+      "pr": 0,
+      "status": "development",
+      "scope": "开发快照：MiaoJJ13445维护的App排名页紧凑布局。当前未收录本轮Review和发布记录，完成后依据实际证据补录。",
+      "evidence": []
     }
   },
   "sources": [
