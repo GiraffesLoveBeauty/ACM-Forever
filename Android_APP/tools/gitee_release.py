@@ -14,6 +14,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from gitee_transport import CurlTransport, TransferError, event, retry_after
 from tag_release import GitHub, digest, module_assets, read_manifest, validate_manifest, validate_source, manifest_channel
 
 GITHUB_REPOSITORY = 'GiraffesLoveBeauty/ACM-Forever'
@@ -117,62 +118,76 @@ def check_public_url(url):
 
 
 class Gitee:
-    def __init__(self, token):
+    def __init__(self, token, transport=None):
         if not token:
             raise ValueError('Configure GITEE_RELEASE_TOKEN in GitHub Actions Secrets before publishing')
+        if any(ord(c)<32 for c in token):
+            raise ValueError('Invalid Gitee credential')
         self.token = token
-        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), PublicRedirect())
+        self.transport = transport or CurlTransport()
+        self.budget = self.transport.budget
 
     def api(self, method, suffix, data=None, missing=False, multipart=None):
         headers = {'User-Agent': 'ACMforever-Gitee-mirror/1', 'Accept': 'application/json'}
         payload = None
-        if multipart is not None:
-            # The documented Gitee endpoint accepts multipart access_token and file fields.
-            boundary = 'acmforever-' + uuid.uuid4().hex
-            payload = (('--' + boundary + '\r\nContent-Disposition: form-data; name="access_token"\r\n\r\n' + self.token
-                + '\r\n--' + boundary + '\r\nContent-Disposition: form-data; name="file"; filename="' + multipart.name
-                + '"\r\nContent-Type: application/octet-stream\r\n\r\n').encode() + multipart.read_bytes() + ('\r\n--' + boundary + '--\r\n').encode())
-            headers['Content-Type'] = 'multipart/form-data; boundary=' + boundary
-        elif method != 'GET':
+        if multipart is None and method != 'GET':
             payload = json.dumps(dict(data or {}, access_token=self.token)).encode()
             headers['Content-Type'] = 'application/json'
-        request = urllib.request.Request(API + suffix, data=payload, headers=headers, method=method)
-        try:
-            # Credentialed API requests never follow a redirect, including to a CDN.
-            opener = self.opener if method == 'GET' else urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
-            with opener.open(request, timeout=60) as response:
-                return json.loads(response.read(1024 * 1024))
-        except urllib.error.HTTPError as error:
-            if missing and error.code == 404:
-                return None
-            raise RuntimeError('Gitee API operation failed (HTTP ' + str(error.code) + '); no credentials logged') from None
-        except (OSError, urllib.error.URLError):
-            raise RuntimeError('Gitee API connection failed; inspect connectivity and rerun the unchanged Tag workflow') from None
+        for attempt in range(1,4):
+            try:
+                reply=self.transport.request(method,API+suffix,headers=headers,data=payload,upload=multipart,
+                                             token=self.token,timeout=180 if multipart else 60)
+                if missing and reply.status==404:return None
+                if not 200<=reply.status<300:
+                    raise TransferError('http_response',status=reply.status,retryable=reply.status in (408,429,500,502,503,504),
+                                        safe_to_retry=reply.status==429,retry_after=retry_after(reply.headers.get('retry-after','')))
+                try:return json.loads(reply.body)
+                except (ValueError,UnicodeError):raise TransferError('invalid_json',status=reply.status) from None
+            except TransferError as failure:
+                if method!='GET' or not failure.retryable or attempt==3:raise
+                self.budget.backoff(max(failure.retry_after,attempt*3))
+
+    def formal_releases(self):
+        result=[]
+        for page in range(1,11):
+            rows=self.api('GET','/releases?per_page=100&page='+str(page)+'&direction=desc')
+            if not isinstance(rows,list) or any(not isinstance(row,dict) or type(row.get('prerelease')) is not bool for row in rows):raise ValueError('Invalid Gitee release list')
+            result.extend(row for row in rows if row.get('prerelease') is False)
+            if len(rows)<100:return result
+        raise ValueError('Gitee release list exceeds bounded verification limit')
 
     def release(self, tag):
         return self.api('GET', '/releases/tags/' + tag, missing=True)
 
     def files(self, release_id):
         rows = self.api('GET', '/releases/' + str(release_id) + '/attach_files?per_page=100')
-        if len(rows) >= 100:
+        if not isinstance(rows,list) or len(rows) >= 100 or any(not isinstance(row,dict) or not isinstance(row.get('name'),str) for row in rows):
             raise ValueError('Unexpected attachment count')
         return rows
 
     def readback(self, tag, name, size, expected_hash):
+        deadline=self.budget.clock()+60
+        for attempt in range(1,4):
+            try:return self._readback(tag,name,size,expected_hash,deadline)
+            except TransferError as failure:
+                delay=max(failure.retry_after,attempt*3)
+                if not failure.retryable or attempt==3 or self.budget.clock()+delay+1>=deadline:raise
+                self.budget.backoff(delay)
+
+    def _readback(self,tag,name,size,expected_hash,deadline):
         url = asset_url(tag, name)
-        check_public_url(url)
-        try:
-            with self.opener.open(urllib.request.Request(url, headers={'User-Agent': 'ACMforever-anonymous-readback'}), timeout=60) as response:
-                count, result = 0, hashlib.sha256()
-                for block in iter(lambda: response.read(65536), b''):
-                    count += len(block)
-                    if count > size:
-                        raise ValueError('Gitee attachment exceeds expected size')
-                    result.update(block)
-            if count != size or result.hexdigest() != expected_hash:
-                raise ValueError('Gitee anonymous read-back differs from verified release artifact')
-        except (OSError, urllib.error.URLError):
-            raise RuntimeError('Gitee attachment is not anonymously downloadable; release remains a prerelease') from None
+        for hop in range(6):
+            check_public_url(url)
+            remaining=deadline-self.budget.clock()
+            if remaining<1:raise TransferError('readback_budget_exhausted',retryable=True)
+            reply=self.transport.request('GET',url,headers={'User-Agent':'ACMforever-anonymous-readback'},maximum=size,binary=True,timeout=remaining)
+            if reply.status in (301,302,303,307,308):
+                url=urllib.parse.urljoin(url,reply.headers.get('location',''))
+                continue
+            if reply.status!=200:raise TransferError('readback_http',status=reply.status,retryable=reply.status in (404,408,429,500,502,503,504),retry_after=retry_after(reply.headers.get('retry-after','')))
+            if reply.size!=size or reply.sha256!=expected_hash:raise ValueError('Gitee anonymous read-back differs from verified release artifact')
+            return
+        raise ValueError('Too many Gitee public redirects')
 
     def ensure_tag(self, tag, source_commit):
         local = subprocess.run(['git', 'rev-parse', 'refs/tags/' + tag + '^{}'], capture_output=True, text=True)
@@ -206,6 +221,49 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def ensure_not_newer(client,tag):
+    rows=client.formal_releases()
+    for row in rows:
+        version=row.get('tag_name','')
+        if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+',version) or tuple(map(int,version[1:].split('.')))>tuple(map(int,tag[1:].split('.'))):
+            raise ValueError('A newer or unknown Gitee formal release is already published')
+
+
+def upload_missing(client,rid,tag,path):
+    """Reconcile an ambiguous POST; never automatically resend a possibly accepted upload."""
+    for attempt in range(1,4):
+        rows=client.files(rid)
+        names=[row['name'] for row in rows]
+        if len(names)!=len(set(names)):raise ValueError('Duplicate Gitee attachments; keep prerelease')
+        if path.name in names:
+            client.readback(tag,path.name,path.stat().st_size,digest(path))
+            event('asset_reused',filename=path.name)
+            return
+        event('asset_upload_started',filename=path.name,size=path.stat().st_size,attempt=attempt)
+        try:
+            result=client.api('POST','/releases/'+str(rid)+'/attach_files',multipart=path)
+            if (not isinstance(result,dict) or result.get('name')!=path.name
+                    or type(result.get('id')) is not int or result['id']<=0):
+                raise ValueError('Unexpected Gitee attachment response; inspect before another upload')
+            return
+        except TransferError as failure:
+            event('asset_upload_failed',filename=path.name,attempt=attempt,kind=failure.kind,status=failure.status,
+                  safe_to_retry=failure.safe_to_retry)
+            if not failure.retryable:raise
+            for delay in (2,5,10):
+                client.budget.pause(delay)
+                found=[row for row in client.files(rid) if row['name']==path.name]
+                if len(found)>1:raise ValueError('Duplicate Gitee attachments; keep prerelease')
+                if found:
+                    client.readback(tag,path.name,path.stat().st_size,digest(path))
+                    event('asset_reconciled',filename=path.name)
+                    return
+            if not failure.safe_to_retry:
+                raise TransferError('upload_result_unknown; inspect attachment state before another run') from None
+            if attempt==3:raise
+            client.budget.backoff(max(failure.retry_after,attempt*5))
+
+
 def publish(client, directory, tag, source_commit):
     with tempfile.TemporaryDirectory() as temp:
         expected_tag, manifest, paths = mirror_files(directory, Path(temp))
@@ -214,11 +272,7 @@ def publish(client, directory, tag, source_commit):
         repo = client.api('GET', '')
         if repo.get('private') is not False or repo.get('full_name') != GITEE_REPOSITORY:
             raise ValueError('Gitee mirror must be the selected public repository')
-        latest = client.api('GET', '/releases/latest', missing=True)
-        if latest is not None and latest['tag_name'] != tag:
-            version = latest['tag_name']
-            if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+', version) or tuple(map(int, version[1:].split('.'))) > tuple(map(int, tag[1:].split('.'))):
-                raise ValueError('A newer or unknown Gitee version is already published')
+        ensure_not_newer(client,tag)
         client.ensure_tag(tag, source_commit)
         current = client.release(tag)
         if current is None:
@@ -240,14 +294,21 @@ def publish(client, directory, tag, source_commit):
             if path.name not in names:
                 if published:
                     raise ValueError('Published Gitee release is incomplete; never modify published attachments')
-                client.api('POST', '/releases/' + str(rid) + '/attach_files', multipart=path)
+                upload_missing(client,rid,tag,path)
+            event('asset_readback_started',filename=path.name)
             client.readback(tag, path.name, path.stat().st_size, digest(path))
-        if {r['name'] for r in client.files(rid)} != {p.name for p in paths}:
+            event('asset_verified',filename=path.name,size=path.stat().st_size)
+        final_names=[row['name'] for row in client.files(rid)]
+        if len(final_names)!=len(set(final_names)) or set(final_names) != {p.name for p in paths}:
             raise ValueError('Gitee release incomplete; keep prerelease')
         if not published:
+            ensure_not_newer(client,tag)
             # Gitee PATCH requires all three fields even when only prerelease changes.
             fields = {k: current[k] for k in ('tag_name', 'name', 'body')}
-            result = client.api('PATCH', '/releases/' + str(rid), dict(fields, prerelease=False))
+            try:result = client.api('PATCH', '/releases/' + str(rid), dict(fields, prerelease=False))
+            except TransferError:
+                result=client.release(tag)
+                if not result or result.get('prerelease') is not False:raise
             if result.get('prerelease') is not False or result.get('tag_name') != tag:
                 raise ValueError('Gitee publication was not confirmed')
         confirmed = client.release(tag)
