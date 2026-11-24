@@ -1,5 +1,7 @@
 # Android 修改标准与模块关联（v1.0.0）
 
+2026-11-24 1.0.2 候选：排名页使用独立短标题与图标筛选，统计区域按内容换行，不能通过收缩字号后继续把昵称与总数挤在同一横行。通用 `HomeBanner` 及其他页面不随排名收缩；既有筛选、搜索关键词提示、主题配色、零 AC 过滤、分页与公开主页跳转继续联查。范围见 [android-v1.0.2-compact-ranking.md（排名小屏布局）](android-v1.0.2-compact-ranking.md)。源码提请 Review，合并与发布另行确认。
+
 ## 1.0.0 发布、署名与管理员测试渠道约束
 
 本轮为1.0.0/code45正式发布准备，恢复延期的同包名测试渠道；PR #150第二轮本地Review通过（04f35c8），已补录实际人员记录，用户授权合并与Tag发布。当前验证与上线边界见[android-v1.0.0-verification.md（本轮验收）](android-v1.0.0-verification.md)，契约见[android-v1.0.0-release-channels.md（双渠道）](android-v1.0.0-release-channels.md)；实际公开状态以Release及后续验收为准。

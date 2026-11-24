@@ -1,7 +1,23 @@
 {
   "schemaVersion": 1,
-  "currentVersionCode": 46,
+  "currentVersionCode": 47,
   "entries": [
+    {
+      "versionName": "1.0.2",
+      "versionCode": 47,
+      "recordDate": "2026-11-24",
+      "summary": "排名页紧凑布局，改善手机小屏浏览。",
+      "changes": [
+        "排名页使用短标题与图标筛选，移除占据小屏空间的装饰横幅。",
+        "缩小名次、头像、昵称与总 AC 字号，减少成员卡片内边距；统计放在昵称下方。",
+        "平台通过数按内容自动换行，长数字不再挤在固定两行文字中。",
+        "缩短日期筛选与平台摘要的间距，保留筛选、分页和成员主页入口。"
+      ],
+      "notes": [
+        "本版已收录本地代码 Review；Android CI通过。小屏、大字体及真机显示效果仍待实际验收。",
+        "GitHub先发布；Gitee等待维护者手动同步后再发布相同版本的制品。"
+      ]
+    },
     {
       "versionName": "1.0.1",
       "versionCode": 46,
