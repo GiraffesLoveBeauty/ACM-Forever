@@ -290,6 +290,61 @@ async def personal_detail(db, task_id, identity):
     return task
 
 
+def problem_completion(row, task, now):
+    """Use the same evidence rules for detail, ordered cells and exports."""
+    supported = tasks.supports_ac(row, task)
+    historical, timely, late, uncertain = (
+        evidence(row.get(key)) if supported else None
+        for key in ("history_json", "on_time_json", "late_json", "uncertain_json")
+    )
+    accepted = timely or (historical if row["platform"] == "luogu" or task["rule"] == "historical_ac" else None)
+    upcoming = now < task["starts_at"]
+    if not supported:
+        status = "unverified"
+    elif upcoming and task["state"] == "published":
+        status = "not_started"
+    elif accepted:
+        status = "on_time"
+    elif late:
+        status = "late"
+    elif historical:
+        status = "history_ac"
+    elif uncertain:
+        status = "timing_unknown"
+    else:
+        status = "pending"
+    proof = accepted or late or historical or uncertain
+    # Luogu historical AC counts immediately; CF evidence only counts after start.
+    completed = bool(historical) if upcoming and row["platform"] == "luogu" else bool(not upcoming and (accepted or late))
+    return {"supported": supported, "status": status, "evidence": proof,
+            "is_ac": bool(proof), "completed": completed}
+
+
+async def add_problem_cells(db, task, recipients, *, now=None):
+    """Attach ordered per-problem cells in batches, not one query per member."""
+    now = int(time.time()) if now is None else now
+    by_recipient = {r["id"]: r for r in recipients}
+    for recipient in recipients:
+        recipient["problem_cells"] = []
+    ids = list(by_recipient)
+    # Stay below SQLite's variable limit even for an all-member export.
+    for offset in range(0, len(ids), 500):
+        batch = ids[offset:offset + 500]
+        records = await tasks.rows(db, """
+            SELECT p.id,p.position,p.platform,p.problem_id,p.problem_name,x.recipient_id,
+                   x.history_json,x.on_time_json,x.late_json,x.uncertain_json
+            FROM training_task_progress x JOIN training_task_problems p ON p.id=x.problem_id
+            WHERE p.task_id=? AND x.recipient_id IN (""" + ",".join("?" for _ in batch) + ") ORDER BY x.recipient_id,p.position", [task["id"], *batch])
+        for row in records:
+            result = problem_completion(row, task, now)
+            proof = result["evidence"] or {}
+            by_recipient[row["recipient_id"]]["problem_cells"].append({
+                **{key: row[key] for key in ("id", "position", "platform", "problem_id", "problem_name")},
+                "completed": result["completed"], "status": result["status"],
+                "accepted_at": proof.get("accepted_at") if result["completed"] else None,
+            })
+
+
 async def problem_records(db, task_id, recipient_id=None):
     """One task-wide query for the scoreboard; personal detail still restricts its recipient."""
     condition = "p.task_id=?" + (" AND x.recipient_id=?" if recipient_id is not None else "")
@@ -313,19 +368,15 @@ async def problem_progress(db, recipient, *, now=None, _records=None, _enrich=Tr
         row.pop("recipient_id", None)
         _, _, valid, row["verification"] = live_state(row, now)
         row["tags"] = json.loads(row.pop("tags_json"))
-        historical, timely, late, uncertain = [evidence(row.pop(key)) for key in ("history_json", "on_time_json", "late_json", "uncertain_json")]
-        row["supported"] = tasks.supports_ac(row, row)
-        if not row["supported"]:
-            historical = timely = late = uncertain = None
-        accepted = timely or (historical if row["platform"] == "luogu" or recipient["rule"] == "historical_ac" else None)
-        row["status"] = "unverified" if not row["supported"] else "not_started" if recipient["phase"] == "upcoming" else "on_time" if accepted else "late" if late else "history_ac" if historical else "timing_unknown" if uncertain else "pending"
-        row["evidence"] = accepted or late or historical or uncertain
-        row["is_ac"] = bool(row["evidence"])
+        row.update(problem_completion(row, recipient, now))
+        has_qualified_ac = row["supported"] and any(row.get(key) for key in ("history_json", "on_time_json", "late_json"))
+        for key in ("history_json", "on_time_json", "late_json", "uncertain_json"):
+            row.pop(key)
         row.pop("review_json")
         row["review"] = None
         row["can_review"] = False
         row["can_clear_review"] = False
-        row["can_reset_binding"] = row["platform"] == "luogu" and row["state"] == "published" and row["verification"] == "binding_changed" and bool(row["luogu_id"]) and not (accepted or late)
+        row["can_reset_binding"] = row["platform"] == "luogu" and row["state"] == "published" and row["verification"] == "binding_changed" and bool(row["luogu_id"]) and not has_qualified_ac
         row.pop("snapshot_json", None)
         for key in ("cf_handle", "cf_binding_version", "luogu_id", "luogu_binding_version", "rule", "state", "starts_at", "binding_key", "binding_version", "bindings_json", "account_epoch", "closed", "due_at", "account_state", "current_epoch", "is_active", "sync_binding", "full_history_at"):
             row.pop(key, None)

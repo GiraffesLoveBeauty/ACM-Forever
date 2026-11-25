@@ -4,7 +4,7 @@ import { after, afterEach, beforeEach, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import { h } from 'vue';
 import { RouterView } from 'vue-router';
-import { setAuth } from '../src/lib/api.js';
+import { notification, setAuth } from '../src/lib/api.js';
 import { localTime, utcTime, trainingReturn } from '../src/lib/training-tasks.js';
 import { cleanupCompiled, find, loadSfc, mount, settle, textOf } from './helpers/vue-harness.mjs';
 const Training = (await import(await loadSfc('src/admin/Training.vue'))).default;
@@ -384,7 +384,7 @@ test('edits made while a preview response is pending must be saved and previewed
   assert.equal(stored.due_at, utcTime(laterDue));
 });
 
-test('completion rows use real names and proportional progress without QQ or status columns', async () => {
+test('completion rows use real names and ordered AC cells without QQ or status columns', async () => {
   stored = {
     id: 17,
     title: '合成任务',
@@ -435,7 +435,19 @@ test('completion rows use real names and proportional progress without QQ or sta
       completed_problems: 0,
       account_status: 'changed',
     },
-  ].map((m) => ({ ...m, problem_count: 8, status_snapshot: '动态实验组' }));
+  ].map((m) => ({
+    ...m,
+    problem_count: 8,
+    status_snapshot: '动态实验组',
+    problem_cells: Array.from({ length: 8 }, (_, index) => ({
+      id: index + 1,
+      problem_id: `cf_${index + 1}A`,
+      problem_name: `题目${index + 1}`,
+      platform: 'codeforces',
+      status: 'pending',
+      completed: m.completed_problems === 8 || (m.completed_problems === 4 && index % 2 === 1),
+    })),
+  }));
   mounted = await mount(
     Root,
     [{ path: '/admin.html', component: Training }],
@@ -476,9 +488,17 @@ test('completion rows use real names and proportional progress without QQ or sta
     ],
   );
   assert.deepEqual(
-    bars.slice(0, 3).map((n) => n.children[0].props.style.width),
-    ['0%', '50%', '100%'],
+    bars.slice(0, 3).map((bar) => find(bar, (n) => n.props.class?.includes('is-ac')).length),
+    [0, 4, 8],
   );
+  const cells = find(bars[1], (n) => n.props.class?.includes('tt-problem-cell'));
+  assert.deepEqual(cells.map(textOf), ['1', '2', '3', '4', '5', '6', '7', '8']);
+  assert.deepEqual(
+    cells.map((cell) => cell.props.class.includes('is-ac')),
+    [false, true, false, true, false, true, false, true],
+  );
+  assert.equal(cells[0].props.title, '第 1 题 · cf_1A 题目1：未确认 AC');
+  assert.equal(cells[1].props.title, '第 2 题 · cf_2A 题目2：AC');
   assert.equal(bars[1].props['aria-label'], '合成实名乙的做题进度');
   assert.equal(bars[1].props['aria-valuetext'], '已完成 4 / 8 题');
   await click('逐题证据');
@@ -600,4 +620,95 @@ test('historical Luogu credit has no date review panel after rebinding', async (
   await settle();
   assert(!textOf(mounted.root).includes('P1001 · 管理员核验'));
   assert(textOf(mounted.root).includes('已完成 · 历史 AC'));
+});
+
+test('single-training Excel export ignores filters and downloads the returned workbook', async (t) => {
+  stored = {
+    id: 17,
+    title: '合成:训练/任务',
+    version: 2,
+    state: 'published',
+    statuses: [],
+    audit: [],
+    problems: [],
+  };
+  const originalFetch = globalThis.fetch;
+  let blob, anchor;
+  t.mock.method(URL, 'createObjectURL', (value) => {
+    blob = value;
+    return 'blob:training-export';
+  });
+  t.mock.method(dom.window.HTMLAnchorElement.prototype, 'click', function () {
+    anchor = this;
+  });
+  globalThis.fetch = async (url, options) => {
+    if (url === '/api/admin/training-tasks/17/export') {
+      calls.push({ url, options });
+      return new Response('synthetic xlsx bytes', {
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        },
+      });
+    }
+    return originalFetch(url, options);
+  };
+  mounted = await mount(
+    Root,
+    [{ path: '/admin.html', component: Training }],
+    '/admin.html?section=training&task_id=17&tab=progress&page=2&member_search=合成姓名&status=pending&identity=合成组',
+  );
+  await settle();
+  assert(textOf(mounted.root).includes('不受筛选和分页影响'));
+  await click('导出 Excel');
+  assert.equal(await blob.text(), 'synthetic xlsx bytes');
+  assert.equal(anchor.download, '合成_训练_任务-完成情况.xlsx');
+  assert.equal(anchor.href, 'blob:training-export');
+  assert(!document.body.contains(anchor));
+  assert.equal(calls.filter((c) => c.url.endsWith('/export')).length, 1);
+  assert.equal(buttons('导出 Excel')[0].props.disabled, false);
+});
+
+test('Excel export prevents duplicate requests and allows retry after a failure', async () => {
+  stored = {
+    id: 17,
+    title: '合成任务',
+    version: 2,
+    state: 'published',
+    statuses: [],
+    audit: [],
+    problems: [],
+  };
+  const originalFetch = globalThis.fetch;
+  let resolveExport,
+    exportCalls = 0;
+  globalThis.fetch = (url, options) => {
+    if (url.endsWith('/export')) {
+      exportCalls++;
+      return new Promise((resolve) => {
+        resolveExport = resolve;
+      });
+    }
+    return originalFetch(url, options);
+  };
+  mounted = await mount(
+    Root,
+    [{ path: '/admin.html', component: Training }],
+    '/admin.html?section=training&task_id=17&tab=progress',
+  );
+  await settle();
+  const exporting = buttons('导出 Excel')[0].props.onClick();
+  await settle();
+  assert.equal(buttons('正在导出')[0].props.disabled, true);
+  await buttons('正在导出')[0].props.onClick();
+  assert.equal(exportCalls, 1);
+  resolveExport(response({ message: '合成导出错误' }, 503));
+  await exporting;
+  await settle();
+  assert.equal(notification.value, '导出失败：合成导出错误');
+  assert.equal(buttons('导出 Excel')[0].props.disabled, false);
+  const retry = buttons('导出 Excel')[0].props.onClick();
+  await settle();
+  assert.equal(exportCalls, 2);
+  resolveExport(response({ message: '仍不可用' }, 503));
+  await retry;
 });
