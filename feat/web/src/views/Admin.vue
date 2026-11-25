@@ -19,6 +19,53 @@ const modules = {
 const section = computed(() =>
   Object.hasOwn(sections, route.query.section) ? route.query.section : 'accounts',
 );
+
+/* 管理导航（方案 C）：分区 Tab + 组内横向入口，取代原来的纵向侧栏 */
+const ICONS = {
+  accounts: '▤',
+  members: '◉',
+  training: '◎',
+  problems: '▦',
+  'cf-practice': '⌘',
+  contests: '◈',
+  'sync-center': '⇄',
+  moderation: '☷',
+  settings: '⚙',
+  wiki: '▧',
+};
+const GROUP_TITLES = {
+  accounts: '账户与成员',
+  members: '账户与成员',
+  training: '训练与题目',
+  problems: '训练与题目',
+  'cf-practice': '训练与题目',
+  contests: '训练与题目',
+  'sync-center': '训练与题目',
+  moderation: '社区与系统',
+  settings: '社区与系统',
+  wiki: '社区与系统',
+};
+const groups = computed(() => {
+  const out = [];
+  for (const [key, label] of Object.entries(sections)) {
+    const title = GROUP_TITLES[key] || '其他';
+    let group = out.find((item) => item.title === title);
+    if (!group) {
+      group = { title, items: [] };
+      out.push(group);
+    }
+    group.items.push({ key, label, icon: ICONS[key] || '·' });
+  }
+  const training = out.find((group) => group.title === '训练与题目');
+  if (training) {
+    training.items.push({ key: 'tag-management', label: '标签管理', icon: '▧', to: '/tag-management.html' });
+  }
+  return out;
+});
+const activeGroup = computed(() => GROUP_TITLES[section.value] || '其他');
+const currentItems = computed(
+  () => groups.value.find((group) => group.title === activeGroup.value)?.items || [],
+);
 let leaveGuard = () => true;
 provide('registerLeaveGuard', (handler) => {
   leaveGuard = handler;
@@ -58,43 +105,20 @@ onMounted(async () => {
         <span>管理工作台</span><span>学习 / 训练 / 社区</span>
       </div>
     </header>
-    <aside class="admin-module-sidebar" aria-label="管理后台导航">
-      <div class="forum-rail-card admin-module-card">
-        <p class="admin-module-title">管理功能</p>
-        <nav class="admin-module-nav" aria-label="功能模块">
-          <template v-for="(label, key) in sections" :key="key">
-            <div
-              v-if="['accounts', 'training', 'moderation'].includes(key)"
-              class="admin-module-group"
-            >
-              {{
-                { accounts: '账户与成员', training: '训练与题目', moderation: '社区与系统' }[key]
-              }}
-            </div>
-            <RouterLink
-              :to="key === 'accounts' ? '/admin.html' : `/admin.html?section=${key}`"
-              :class="{ active: section === key }"
-              ><span class="admin-module-nav-icon">{{
-                {
-                  accounts: '▤',
-                  members: '◉',
-                  training: '◎',
-                  problems: '▦',
-                  'cf-practice': '⌘',
-                  contests: '◈',
-                  'sync-center': '⇄',
-                  moderation: '☷',
-                  settings: '⚙',
-                  wiki: '▧',
-                }[key]
-              }}</span
-              >{{ label }}</RouterLink
-            >
-          </template>
-        </nav>
-        <p class="admin-module-note"><span aria-hidden="true">●</span> 管理操作即时生效</p>
-      </div>
-    </aside>
+    <div class="admin-nav-row">
+      <nav class="admin-subtabs" aria-label="功能模块">
+        <RouterLink
+          v-for="item in currentItems"
+          :key="item.key"
+          :to="item.to || (item.key === 'accounts' ? '/admin.html' : `/admin.html?section=${item.key}`)"
+          class="admin-subtab"
+          :class="{ active: section === item.key }"
+          :aria-current="section === item.key ? 'page' : undefined"
+          ><span class="admin-subtab-icon" aria-hidden="true">{{ item.icon }}</span
+          >{{ item.label }}</RouterLink
+        >
+      </nav>
+    </div>
     <section class="admin-workspace">
       <div class="admin-module">
         <component :is="modules[section]" :key="section" />

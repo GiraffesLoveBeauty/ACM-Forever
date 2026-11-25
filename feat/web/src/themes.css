@@ -1,0 +1,980 @@
+/* =========================================================================
+   主题（2026-11 重新设计）
+   四套主题，全部由令牌驱动；切换只改 <html> 上的类名，页面结构/接口不变。
+     theme-mist   晨雾：冷灰蓝 + 靛蓝强调（浅色，默认）
+     theme-forest 林绿：深林绿 + 黄绿强调（浅色）
+     theme-sand   暖砂：米沙 + 陶土强调（浅色暖调）
+     theme-ink    墨夜：近黑 + 琥珀强调（深色）
+   ========================================================================= */
+
+/* ---------- 晨雾 · 冷灰蓝 + 靛蓝 ---------- */
+html.theme-mist body {
+  --bg: #edeff3 !important;
+  --panel: #ffffff !important;
+  --panel-raised: #ffffff !important;
+  --text: #1b2432 !important;
+  --muted: #5b6678 !important;
+  --line: #d8dee7 !important;
+  --brand: #23314a !important;
+  --brand-strong: #182338 !important;
+  --brand2: #4c6ef5 !important;
+  --accent: #4c6ef5 !important;
+  --on-brand: #ffffff !important;
+  --on-accent: #ffffff !important;
+  --hero-bg: #ffffff !important;
+  --hero-text: #1b2432 !important;
+  --hero-muted: #5b6678 !important;
+  --subtle-bg: #eef1f6;
+  --page-backdrop: #e6e9f0;
+
+  --gh-canvas: #edeff3;
+  --gh-canvas-inset: #e4e8ef;
+  --gh-panel: #ffffff;
+  --gh-overlay: #f3f5f9;
+  --gh-btn-bg: #eaeef4;
+  --gh-hover-bg: #e6eaf1;
+  --gh-border: #d8dee7;
+  --gh-border-strong: #c2cad6;
+  --gh-border-muted: #e6eaf1;
+  --gh-fg: #1b2432;
+  --gh-fg-muted: #5b6678;
+  --gh-fg-subtle: #8a94a6;
+  --gh-link: #2f5fd0;
+  --gh-underline: #e8590c;
+  --gh-success-emphasis: #4c6ef5;
+  --gh-success-hover: #3b5bdb;
+  --gh-attention: #d9480f;
+  --gh-hover-rgb: 35, 49, 74;
+  --gh-accent-rgb: 76, 110, 245;
+  --gh-fg-rgb: 27, 36, 50;
+}
+
+/* ---------- 林绿 · 深林绿 + 黄绿 + 暗红 ---------- */
+html.theme-forest body {
+  --bg: #e5e3da !important;
+  --panel: #fbfaf6 !important;
+  --panel-raised: #ffffff !important;
+  --text: #1d2a16 !important;
+  --muted: #5c6156 !important;
+  --line: #c9c8c3 !important;
+  --brand: #0c4500 !important;
+  --brand-strong: #083300 !important;
+  --brand2: #9ebd00 !important;
+  --accent: #9ebd00 !important;
+  --on-brand: #ffffff !important;
+  --on-accent: #0c4500 !important;
+  --hero-bg: #fbfaf6 !important;
+  --hero-text: #1d2a16 !important;
+  --hero-muted: #5c6156 !important;
+  --subtle-bg: #eeece5;
+  --page-backdrop: #dbd8ce;
+
+  --gh-canvas: #e5e3da;
+  --gh-canvas-inset: #dbd8cd;
+  --gh-panel: #fbfaf6;
+  --gh-overlay: #f1efe8;
+  --gh-btn-bg: #eeece5;
+  --gh-hover-bg: #eae8e0;
+  --gh-border: #c9c8c3;
+  --gh-border-strong: #b3b2ac;
+  --gh-border-muted: #dedcd5;
+  --gh-fg: #1d2a16;
+  --gh-fg-muted: #5c6156;
+  --gh-fg-subtle: #8a8f84;
+  --gh-link: #0c4500;
+  --gh-underline: #951021;
+  --gh-success-emphasis: #9ebd00;
+  --gh-success-hover: #8ca800;
+  --gh-attention: #b47236;
+  --gh-hover-rgb: 60, 70, 50;
+  --gh-accent-rgb: 158, 189, 0;
+  --gh-fg-rgb: 29, 42, 22;
+}
+
+/* ---------- 暖砂 · 米沙 + 陶土 ---------- */
+html.theme-sand body {
+  --bg: #f2ece1 !important;
+  --panel: #fffdf8 !important;
+  --panel-raised: #ffffff !important;
+  --text: #2c241c !important;
+  --muted: #6b5f51 !important;
+  --line: #e2d8c8 !important;
+  --brand: #6b4a2f !important;
+  --brand-strong: #573a23 !important;
+  --brand2: #c4703c !important;
+  --accent: #c4703c !important;
+  --on-brand: #fffaf2 !important;
+  --on-accent: #ffffff !important;
+  --hero-bg: #fffdf8 !important;
+  --hero-text: #2c241c !important;
+  --hero-muted: #6b5f51 !important;
+  --subtle-bg: #f7f1e7;
+  --page-backdrop: #ece4d6;
+
+  --gh-canvas: #f2ece1;
+  --gh-canvas-inset: #eae2d4;
+  --gh-panel: #fffdf8;
+  --gh-overlay: #f7f1e7;
+  --gh-btn-bg: #efe7da;
+  --gh-hover-bg: #eae1d2;
+  --gh-border: #e2d8c8;
+  --gh-border-strong: #cdbfaa;
+  --gh-border-muted: #ede5d8;
+  --gh-fg: #2c241c;
+  --gh-fg-muted: #6b5f51;
+  --gh-fg-subtle: #9a8c7b;
+  --gh-link: #8c4a22;
+  --gh-underline: #7a3e12;
+  --gh-success-emphasis: #5f7f3a;
+  --gh-success-hover: #4f6c2f;
+  --gh-attention: #b4602f;
+  --gh-hover-rgb: 44, 36, 28;
+  --gh-accent-rgb: 196, 112, 60;
+  --gh-fg-rgb: 44, 36, 28;
+}
+
+/* ---------- 墨夜 · 近黑 + 琥珀 ---------- */
+html.theme-ink body {
+  --bg: #101113 !important;
+  --panel: #181a1d !important;
+  --panel-raised: #212427 !important;
+  --text: #e9e6e0 !important;
+  --muted: #9d9a93 !important;
+  --line: #2a2d32 !important;
+  --brand: #1a1c20 !important;
+  --brand-strong: #121417 !important;
+  --brand2: #c9a227 !important;
+  --accent: #c9a227 !important;
+  --on-brand: #f2efe8 !important;
+  --on-accent: #16140b !important;
+  --hero-bg: #181a1d !important;
+  --hero-text: #e9e6e0 !important;
+  --hero-muted: #9d9a93 !important;
+  --subtle-bg: #202327;
+  --page-backdrop: #0b0c0e;
+
+  --gh-canvas: #101113;
+  --gh-canvas-inset: #0b0c0e;
+  --gh-panel: #181a1d;
+  --gh-overlay: #212427;
+  --gh-btn-bg: #212427;
+  --gh-hover-bg: #232629;
+  --gh-border: #2a2d32;
+  --gh-border-strong: #3a3e44;
+  --gh-border-muted: #202327;
+  --gh-fg: #e9e6e0;
+  --gh-fg-muted: #9d9a93;
+  --gh-fg-subtle: #6e6c67;
+  --gh-link: #e0b15a;
+  --gh-underline: #c9a227;
+  --gh-success-emphasis: #c9a227;
+  --gh-success-hover: #b8941f;
+  --gh-attention: #d98e3d;
+  --gh-hover-rgb: 233, 230, 224;
+  --gh-accent-rgb: 201, 162, 39;
+  --gh-fg-rgb: 233, 230, 224;
+}
+
+/* ---------- 原版 · 站点最初的墨绿 + 荧光黄 ---------- */
+html.theme-original body {
+  --bg: #e8e9e4 !important;
+  --panel: #fffefa !important;
+  --panel-raised: #ffffff !important;
+  --text: #1d3738 !important;
+  --muted: #566b6a !important;
+  --line: #d5dfda !important;
+  --brand: #ffffff !important;
+  --brand-strong: #286b61 !important;
+  --brand2: #abc94f !important;
+  --accent: #d9e65a !important;
+  --on-brand: #1d3738 !important;
+  --on-accent: #1d3738 !important;
+  --hero-bg: #fffefa !important;
+  --hero-text: #1d3738 !important;
+  --hero-muted: #566b6a !important;
+  --subtle-bg: #dfe0db;
+  --page-backdrop: #e2e3de;
+
+  --gh-canvas: #e8e9e4;
+  --gh-canvas-inset: #dfe0db;
+  --gh-panel: #fffefa;
+  --gh-overlay: #eef2ee;
+  --gh-btn-bg: #e9efea;
+  --gh-hover-bg: #dfe0db;
+  --gh-border: #d5dfda;
+  --gh-border-strong: #c3cfc8;
+  --gh-border-muted: #e4ebe6;
+  --gh-fg: #1d3738;
+  --gh-fg-muted: #566b6a;
+  --gh-fg-subtle: #7c8f8a;
+  --gh-link: #286b61;
+  --gh-underline: #d9e65a;
+  --gh-success-emphasis: #abc94f;
+  --gh-success-hover: #9dbb42;
+  --gh-attention: #c9762c;
+  --gh-hover-rgb: 29, 55, 56;
+  --gh-accent-rgb: 217, 230, 90;
+  --gh-fg-rgb: 29, 55, 56;
+}
+
+/* 原版的方格纸底纹（纯背景装饰，不影响排版） */
+html.theme-original body {
+  background-color: var(--gh-canvas) !important;
+  background-image:
+    linear-gradient(#dedfda 1px, transparent 1px),
+    linear-gradient(90deg, #dedfda 1px, transparent 1px) !important;
+  background-size: 28px 28px !important;
+  background-attachment: fixed !important;
+}
+
+/* ---------- 顶栏上的主题选择器 ---------- */
+.gh-theme-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--gh-border, #d8dee7);
+  border-radius: 999px;
+  background: rgba(var(--gh-fg-rgb, 27, 36, 50), .06);
+}
+.gh-theme-switch__label {
+  font-size: 11px;
+  letter-spacing: .08em;
+  color: var(--gh-fg-muted, #5b6678);
+  margin-right: 2px;
+}
+.gh-theme-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  /* 浅色内描边保证深色点在深色顶栏上依然可辨 */
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .34), inset 0 0 0 2px rgba(0, 0, 0, .16);
+  cursor: pointer;
+  padding: 0;
+  transition: transform .12s ease, border-color .12s ease;
+}
+.gh-theme-swatch:hover { transform: scale(1.12); }
+.gh-theme-swatch.is-active {
+  border-color: var(--gh-fg, #1b2432);
+  transform: scale(1.06);
+}
+.gh-theme-swatch:focus-visible { outline: 2px solid var(--gh-link, #2f5fd0); outline-offset: 2px; }
+
+/* 顶栏底色跟随主题：深浅主题下按钮/文字的对比也随之切换 */
+html.github-design body .forum-header {
+  background: var(--brand) !important;
+  border-bottom-color: var(--gh-border-strong) !important;
+  color: var(--on-brand) !important;
+}
+html.github-design body .forum-header .forum-brand,
+html.github-design body .forum-header .forum-brand b { color: var(--on-brand) !important; }
+html.github-design body .forum-header .forum-brand small { color: var(--on-brand) !important; opacity: .72; }
+html.github-design body .forum-header .btn {
+  background: rgba(255, 255, 255, .1) !important;
+  border-color: rgba(255, 255, 255, .28) !important;
+  color: var(--on-brand) !important;
+}
+html.github-design body .forum-header .btn:hover {
+  background: rgba(255, 255, 255, .2) !important;
+  border-color: rgba(255, 255, 255, .5) !important;
+}
+html.github-design body .forum-header .icpc-brand-logo { filter: brightness(0) invert(1); opacity: .92; }
+/* 顶栏上的主题选择器文字跟随顶栏前景色，避免深底上看不清 */
+html.github-design body .forum-header .gh-theme-switch__label {
+  color: var(--on-brand) !important;
+  opacity: .75;
+}
+
+
+/* ---------- 与主题无关的通用布局 ---------- */
+/* 首页：去掉左侧宣传栏与欢迎横幅，只留「话题流 + 右栏」，避免横向溢出 */
+html.github-design body :is(.forum-home, .forum-home-layout) {
+  grid-template-columns: minmax(0, 1fr) 280px !important;
+  grid-template-areas: "feed right" !important;
+  gap: 24px !important;
+}
+html.github-design body .forum-left-rail { display: none !important; }
+html.github-design body .forum-welcome { display: none !important; }
+html.github-design body .forum-right-rail { grid-area: right !important; min-width: 0; }
+html.github-design body .forum-feed { grid-area: feed !important; min-width: 0; }
+
+/* 版块卡片：固定三列，选中项用强调色描边 */
+html.github-design body .forum-directory-grid {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+}
+html.github-design body .forum-directory-card {
+  background: var(--gh-canvas) !important;
+  border: 1px solid var(--gh-border) !important;
+  color: var(--gh-fg) !important;
+}
+html.github-design body .forum-directory-card:hover { background: var(--gh-hover-bg) !important; }
+html.github-design body .forum-directory-card.active {
+  background: rgba(var(--gh-accent-rgb), .12) !important;
+  border-color: rgb(var(--gh-accent-rgb)) !important;
+}
+html.github-design body .forum-directory-card.active :is(b, strong) { color: var(--gh-fg) !important; }
+
+
+/* 首页容器：宽度跟随侧栏之外的可用空间，避免横向溢出 */
+html.github-design body .forum-home-layout {
+  width: auto !important;
+  /* 左右都保留 24px 余量：容器永远不会贴到侧栏或屏幕边缘 */
+  max-width: calc(100% - 48px) !important;
+  margin: 24px auto 48px !important;
+  padding: 0 !important;
+}
+html.github-design body { overflow-x: hidden; }
+
+
+/* =========================================================================
+   响应式：27 英寸 / 笔记本 / 平板 / 手机
+   ========================================================================= */
+
+/* 大屏（27 英寸及以上）：内容居中并放宽，右栏略加宽 */
+@media (min-width: 1600px) {
+  html.github-design body .forum-home-layout {
+    max-width: min(1560px, calc(100% - 48px)) !important;
+    margin: 28px auto 56px !important;
+    grid-template-columns: minmax(0, 1fr) 320px !important;
+  }
+  html.github-design body .forum-directory-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+  html.github-design body .forum-post-card { padding: 20px 22px !important; }
+}
+
+/* 中等宽度：右栏收窄，版块两列 */
+@media (max-width: 1360px) {
+  html.github-design body .forum-home-layout {
+    grid-template-columns: minmax(0, 1fr) 264px !important;
+    gap: 20px !important;
+  }
+}
+@media (max-width: 1180px) {
+  html.github-design body .forum-directory-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+/* 平板竖屏 / 小笔记本：单列，右栏移到下方 */
+@media (max-width: 1024px) {
+  html.github-design body :is(.forum-home, .forum-home-layout) {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-areas: "feed" "right" !important;
+    gap: 18px !important;
+  }
+  html.github-design body .forum-right-rail {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+  html.github-design body .forum-right-rail > * { width: auto !important; }
+}
+
+/* 平板 / 手机：侧栏变成顶部横向导航条，顶栏压缩 */
+@media (max-width: 900px) {
+  html.github-design body .gh-sidebar {
+    display: flex !important;
+    position: static !important;
+    width: 100% !important;
+    height: auto !important;
+    flex-direction: row !important;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 10px !important;
+    border-right: 0 !important;
+    border-bottom: 1px solid var(--gh-border) !important;
+    background: var(--gh-panel) !important;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    z-index: 30;
+  }
+  html.github-design body .gh-sidebar::-webkit-scrollbar { display: none; }
+  html.github-design body .gh-sidebar-brand,
+  html.github-design body .gh-sidebar-group-title,
+  html.github-design body .gh-sidebar-footer,
+  html.github-design body .gh-sidebar-signout { display: none !important; }
+  html.github-design body .gh-sidebar-nav {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+  }
+  html.github-design body .gh-sidebar-group {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center;
+    gap: 4px;
+    margin: 0 !important;
+  }
+  html.github-design body .gh-sidebar-item {
+    white-space: nowrap;
+    padding: 6px 9px !important;
+    border-radius: 6px;
+    font-size: 12.5px;
+  }
+  html.github-design body .gh-sidebar-icon { width: 15px; height: 15px; }
+
+  html.github-design body .forum-header {
+    flex-wrap: nowrap;
+    gap: 8px;
+    padding: 0 10px !important;
+    min-height: 52px;
+  }
+  html.github-design body .forum-brand { font-size: 14px; gap: 6px; }
+  html.github-design body .forum-brand small { display: none; }
+  html.github-design body .gh-theme-switch { padding: 3px 6px; gap: 4px; }
+  html.github-design body .gh-theme-switch__label { display: none; }
+  html.github-design body .forum-header .btn { padding: 6px 9px; font-size: 12px; }
+  html.github-design body .forum-home-layout {
+    margin: 14px auto 40px !important;
+    max-width: calc(100% - 24px) !important;
+  }
+}
+
+/* 手机 */
+@media (max-width: 640px) {
+  html.github-design body .forum-directory-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+  html.github-design body .forum-right-rail {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  html.github-design body :is(.forum-directory, .forum-post-card) { padding: 14px !important; }
+  html.github-design body .forum-post-card h2 { font-size: 16px; }
+  /* 话题工具栏：标题独占一行，其余控件在第二行按顺序排列 */
+  html.github-design body .forum-feed-toolbar {
+    flex-wrap: wrap !important;
+    overflow: visible;
+    gap: 8px 10px !important;
+  }
+  html.github-design body .forum-feed-toolbar > :first-child { flex: 1 0 100%; }
+  html.github-design body .forum-tabs {
+    margin-left: 0 !important;
+    overflow-x: auto;
+    max-width: 100%;
+    scrollbar-width: none;
+  }
+  html.github-design body .forum-tabs::-webkit-scrollbar { display: none; }
+  html.github-design body .forum-tabs > * { white-space: nowrap; }
+  html.github-design body .forum-search { flex-wrap: wrap; }
+  html.github-design body .forum-search input { min-width: 0; flex: 1 1 100%; }
+  html.github-design body .forum-search .btn { margin-top: 6px; }
+}
+
+@media (max-width: 340px) {
+  html.github-design body .forum-directory-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 480px) {
+  html.github-design body .forum-header { padding: 0 8px !important; }
+  html.github-design body .forum-brand b { font-size: 14px; }
+  html.github-design body .forum-brand small { display: none; }
+  html.github-design body .icpc-brand-logo { width: 26px; }
+  html.github-design body .gh-theme-swatch { width: 14px; height: 14px; }
+  html.github-design body .forum-home-layout {
+    margin: 10px auto 32px !important;
+    max-width: calc(100% - 16px) !important;
+  }
+  html.github-design body .forum-directory-card { padding: 12px !important; }
+  html.github-design body .forum-post-actions { flex-wrap: wrap; gap: 8px; }
+}
+
+
+/* 各页主容器统一按可用宽度收缩，避免顶栏之外出现横向滚动 */
+/* 其余页面容器：按可用宽度收缩（首页 .forum-home-layout 有独立的外边距规则，不在此列） */
+html.github-design body #app > :is(.community-main, .wiki-shell, .admin-home-layout, .compose-main) {
+  width: auto !important;
+  max-width: 1560px !important;
+  margin-inline: auto !important;
+  box-sizing: border-box;
+}
+html.github-design body #app > :is(.community-main, .wiki-shell, .admin-home-layout, .compose-main) {
+  padding-inline: 24px;
+}
+@media (max-width: 900px) {
+  html.github-design body #app > :is(.community-main, .wiki-shell, .admin-home-layout, .compose-main) { padding-inline: 12px; }
+}
+@media (max-width: 480px) {
+  html.github-design body #app > :is(.community-main, .wiki-shell, .admin-home-layout, .compose-main) { padding-inline: 8px; }
+}
+
+
+/* 面板内部留白：标题/正文不再贴到卡片描边（含表格的面板保持通边） */
+html.github-design body .community-panel {
+  padding: 22px 24px;
+}
+html.github-design body .community-panel:has(> table, > .table-wrap, > .forum-table-wrap) {
+  padding: 0;
+}
+@media (max-width: 900px) {
+  html.github-design body .community-panel { padding: 16px 16px; }
+  html.github-design body .community-panel:has(> table, > .table-wrap, > .forum-table-wrap) { padding: 0; }
+}
+@media (max-width: 480px) {
+  html.github-design body .community-panel { padding: 14px; }
+}
+
+
+/* 个人中心欢迎区：右侧排行入口与边框留出余量，插画文字不再互相压字 */
+html.github-design body .personal-welcome {
+  padding-right: 24px !important;
+}
+html.github-design body .personal-rank-link { margin-right: 0 !important; }
+/* 插画里自带的标语与 caption 重复：只隐藏那句 note，保留 think/code/AC 标签 */
+html.github-design body .personal-welcome .community-header-art .header-art-note {
+  display: none;
+}
+html.github-design body .personal-welcome .header-art-caption {
+  right: 10px;
+  bottom: 8px;
+  font-size: 10.5px;
+  letter-spacing: .1em;
+}
+@media (max-width: 900px) {
+  html.github-design body .personal-welcome { padding-right: 16px !important; }
+}
+
+
+/* 顶栏头像：按钮内边距清掉，图片固定成正方并裁切，避免被挤成一条 */
+html.github-design body .forum-header .account-avatar-button {
+  padding: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+html.github-design body .forum-header .account-avatar-button .header-account-avatar {
+  width: 32px !important;
+  height: 32px !important;
+  flex: 0 0 auto;
+  display: block;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: center;
+}
+@media (max-width: 900px) {
+  html.github-design body .forum-header .account-avatar-button .header-account-avatar {
+    width: 28px !important;
+    height: 28px !important;
+  }
+}
+
+
+/* 侧栏小卡片内部留白（我的草稿 / 让讨论更清楚 等） */
+html.github-design body .forum-rail-card {
+  padding: 14px 16px;
+}
+html.github-design body .forum-rail-card > :is(h2, h3, p, a) {
+  padding: 0 !important;
+}
+html.github-design body .forum-rail-card > a { display: block; }
+html.github-design body .forum-rail-card > * + * { margin-top: 10px; }
+@media (max-width: 480px) {
+  html.github-design body .forum-rail-card { padding: 12px 13px; }
+}
+
+/* right-rail cards: inner padding (drafts / tips cards) */
+html.github-design body .forum-rail-card {
+  padding: 14px 16px !important;
+}
+html.github-design body .forum-rail-card > :is(h2, h3, p, a) {
+  padding: 0 !important;
+}
+html.github-design body .forum-rail-card > a { display: block; }
+html.github-design body .forum-rail-card > * + * { margin-top: 10px; }
+@media (max-width: 480px) {
+  html.github-design body .forum-rail-card { padding: 12px 13px !important; }
+}
+
+
+/* sidebar brand is now a button: keep the original look (no default button chrome) */
+html.github-design body button.gh-sidebar-brand {
+  appearance: none;
+  border: 0 !important;
+  background: transparent !important;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+html.github-design body button.gh-sidebar-brand:hover .gh-sidebar-title { color: var(--gh-link); }
+html.github-design body button.gh-sidebar-brand:focus-visible {
+  outline: 2px solid var(--gh-link);
+  outline-offset: 2px;
+  border-radius: var(--gh-radius);
+}
+
+
+/* brand mark shows the uploaded avatar (falls back to the ACM letters) */
+html.github-design body .gh-sidebar-mark.has-avatar {
+  padding: 0;
+  overflow: hidden;
+  background: var(--gh-canvas-inset) !important;
+}
+html.github-design body .gh-sidebar-mark.has-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+
+/* topic toolbar: the "+" that opens the composer sits right next to the title */
+html.github-design body .forum-feed-toolbar .industrial-feed-title {
+  margin-right: 0 !important;
+}
+html.github-design body .gh-new-topic {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  /* 工具栏本身有 12px 间距，这里抵消一部分，视觉间距约 6px */
+  margin-left: -6px;
+  border: 1px solid var(--gh-border-strong);
+  border-radius: 50%;
+  background: var(--gh-btn-bg);
+  color: var(--gh-fg);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+  text-decoration: none;
+}
+html.github-design body .gh-new-topic:hover {
+  background: var(--gh-hover-bg);
+  border-color: var(--gh-link);
+  color: var(--gh-link);
+}
+html.github-design body .gh-new-topic:focus-visible {
+  outline: 2px solid var(--gh-link);
+  outline-offset: 2px;
+}
+
+
+/* ===== explore section: interactive shortest-path graph ===== */
+html.github-design body .forum-graph-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 20px 26px;
+  margin: 0 0 14px;
+  padding: 22px 24px 14px;
+  border-radius: var(--gh-radius, 8px);
+  background-color: #0f1512;
+  background-image: radial-gradient(rgba(255, 255, 255, .1) 1px, transparent 1px);
+  background-size: 18px 18px;
+  color: #eef3ea;
+}
+html.github-design body .forum-graph-copy {
+  display: grid;
+  gap: 10px;
+  align-content: center;
+}
+html.github-design body .forum-graph-kicker {
+  font-size: 11px;
+  letter-spacing: .14em;
+  color: rgba(238, 243, 234, .66);
+}
+html.github-design body .forum-graph-copy h2 {
+  margin: 12px 0 10px;
+  /* 与线上原图一致：900 字重 + 收紧字距 + 更紧凑行高 */
+  font-family: var(--font-body);
+  font-size: clamp(32px, 3.2vw, 46px);
+  font-weight: 900;
+  line-height: 1.12;
+  letter-spacing: -.06em;
+  color: #ffffff !important;
+}
+html.github-design body .forum-graph-copy p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(238, 243, 234, .78) !important;
+}
+html.github-design body .forum-graph-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  justify-self: start;
+  margin-top: 4px;
+  padding: 10px 16px;
+  border-radius: var(--gh-radius, 6px);
+  background: rgb(var(--gh-accent-rgb));
+  color: var(--on-accent, #14200a) !important;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+html.github-design body .forum-graph-cta:hover { filter: brightness(1.06); }
+html.github-design body .forum-graph-canvas {
+  position: relative;
+  min-height: 236px;
+  border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: var(--gh-radius, 6px);
+  overflow: hidden;
+}
+html.github-design body .forum-graph-canvas .forum-algorithm-art {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  background: transparent !important;
+  opacity: 1;
+}
+html.github-design body .forum-graph-foot {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, .12);
+  font-size: 11px;
+  letter-spacing: .1em;
+  color: rgba(238, 243, 234, .62);
+}
+@media (max-width: 900px) {
+  html.github-design body .forum-graph-hero {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 16px 16px 12px;
+  }
+  html.github-design body .forum-graph-canvas { min-height: 210px; }
+}
+@media (max-width: 480px) {
+  html.github-design body .forum-graph-hero { padding: 14px 13px 10px; gap: 14px; }
+  html.github-design body .forum-graph-canvas { min-height: 190px; }
+}
+
+
+/* graph colors inside the explore block (gradients defined for the old banner are missing here) */
+html.github-design body .forum-graph-canvas .graph-edge { stroke: rgba(255, 255, 255, .2) !important; }
+html.github-design body .forum-graph-canvas .graph-floor-edge { stroke: rgba(255, 255, 255, .1) !important; }
+html.github-design body .forum-graph-canvas .graph-node-front {
+  fill: rgb(var(--gh-accent-rgb)) !important;
+  stroke: rgba(255, 255, 255, .5) !important;
+}
+html.github-design body .forum-graph-canvas .graph-node-back {
+  fill: rgba(255, 255, 255, .16) !important;
+  stroke: rgba(255, 255, 255, .5) !important;
+}
+html.github-design body .forum-graph-canvas .graph-node-ring { stroke: rgba(255, 255, 255, .28) !important; }
+html.github-design body .forum-graph-canvas .graph-node-label { fill: #0f1512 !important; }
+html.github-design body .forum-graph-canvas .graph-node-label-secondary { fill: rgba(238, 243, 234, .82) !important; }
+html.github-design body .forum-graph-canvas .graph-path-core { stroke: rgb(var(--gh-accent-rgb)) !important; }
+html.github-design body .forum-graph-canvas .graph-path-haze { stroke: rgba(var(--gh-accent-rgb), .38) !important; }
+html.github-design body .forum-graph-canvas .graph-weight { fill: rgba(238, 243, 234, .8) !important; stroke: #0f1512 !important; }
+html.github-design body .forum-graph-canvas .graph-callout-surface {
+  fill: rgba(255, 255, 255, .1) !important;
+  stroke: rgba(255, 255, 255, .3) !important;
+}
+html.github-design body .forum-graph-canvas .graph-callout-text { fill: #eef3ea !important; }
+html.github-design body .forum-graph-canvas .graph-callout-line { stroke: rgba(255, 255, 255, .3) !important; }
+html.github-design body .forum-graph-canvas .algorithm-code { color: rgba(238, 243, 234, .72) !important; }
+html.github-design body .forum-graph-canvas figcaption { color: rgba(238, 243, 234, .68) !important; }
+html.github-design body .forum-graph-canvas .graph-trace-caption { fill: rgba(238, 243, 234, .68) !important; }
+
+
+/* 原版：选中态用荧光黄下划线 / 黄底深字，贴近站点最初的样子 */
+html.theme-original body :is(.forum-tabs .active, .forum-tab.active, .forum-tabs [aria-selected="true"]) {
+  color: var(--gh-fg) !important;
+  box-shadow: inset 0 -2px 0 var(--gh-underline) !important;
+  border-bottom-color: var(--gh-underline) !important;
+}
+html.theme-original body .gh-sidebar-item.is-active {
+  background: var(--subtle-bg) !important;
+  color: var(--gh-fg) !important;
+}
+html.theme-original body .gh-sidebar-item.is-active::before { background: var(--gh-underline) !important; }
+/* 原版：白底顶栏 + 深色文字 + 黄色主按钮 */
+html.theme-original body .forum-header {
+  background: #ffffff !important;
+  border-bottom: 1px solid var(--gh-border) !important;
+  color: var(--gh-fg) !important;
+}
+html.theme-original body .forum-header :is(.forum-brand, .forum-brand b) {
+  color: var(--gh-fg) !important;
+}
+html.theme-original body .forum-header .forum-brand small {
+  color: var(--gh-fg-muted) !important;
+  opacity: 1;
+}
+html.theme-original body .forum-header .icpc-brand-logo {
+  filter: none !important;
+  opacity: .92;
+}
+html.theme-original body .forum-header .btn {
+  background: #ffffff !important;
+  border-color: var(--gh-border) !important;
+  color: var(--gh-fg) !important;
+}
+html.theme-original body .forum-header .btn:hover {
+  background: var(--subtle-bg) !important;
+  border-color: var(--gh-border-strong) !important;
+}
+html.theme-original body .forum-header .gh-theme-switch {
+  background: #ffffff;
+  border-color: var(--gh-border);
+}
+html.theme-original body .forum-header .gh-theme-switch__label {
+  color: var(--gh-fg-muted) !important;
+  opacity: 1;
+}
+html.theme-original body .forum-header .btn.primary {
+  background: var(--gh-accent) !important;
+  border-color: #c7d54a !important;
+  color: var(--gh-fg) !important;
+  font-weight: 700;
+}
+
+/* 列表/网格切换与主按钮：原版用深墨绿实底或荧光黄 */
+html.theme-original body .forum-view-switch .is-active {
+  background: var(--gh-fg) !important;
+  border-color: var(--gh-fg) !important;
+  color: #ffffff !important;
+}
+html.theme-original body .btn.primary {
+  background: var(--gh-accent) !important;
+  border-color: #c7d54a !important;
+  color: var(--gh-fg) !important;
+}
+
+
+/* 原版：默认卡片是浅色面板，选中卡片压成画布灰 + 荧光黄下边线 */
+html.theme-original body .forum-directory-card {
+  background: var(--gh-panel) !important;
+  border-color: var(--gh-border) !important;
+}
+html.theme-original body .forum-directory-card.active {
+  background: var(--gh-canvas-inset) !important;
+  border-color: var(--gh-border) !important;
+  box-shadow: inset 0 -4px 0 rgb(var(--gh-accent-rgb)) !important;
+  color: #000000 !important;
+}
+html.theme-original body .forum-directory-card.active :is(b, strong) {
+  color: var(--gh-fg) !important;
+}
+html.theme-original body .forum-directory-card.active
+  :is(.forum-directory-count, [class*="count"], [class*="count"] span) {
+  color: var(--gh-fg-subtle) !important;
+}
+
+
+/* 原版：分区卡片的文字与图标用纯黑 */
+html.theme-original body .forum-directory-card {
+  color: #000000 !important;
+}
+html.theme-original body .forum-directory-card
+  :is(b, strong, span, small, .forum-directory-icon, .forum-directory-copy, [class*="count"], [class*="count"] span) {
+  color: #000000 !important;
+}
+
+
+/* 原版：侧栏条目悬浮时用当前选中项的同款底色 */
+html.theme-original body .gh-sidebar-item:hover,
+html.theme-original body .gh-sidebar-item:focus-visible {
+  background: var(--subtle-bg) !important;
+  color: var(--gh-fg) !important;
+}
+
+
+/* 原版：分区卡片悬浮效果与选中一致（同底色 + 同款荧光黄下边线） */
+html.theme-original body .forum-directory-card:hover {
+  background: var(--gh-canvas-inset) !important;
+  border-color: var(--gh-border) !important;
+  box-shadow: inset 0 -4px 0 rgb(var(--gh-accent-rgb)) !important;
+  color: #000000 !important;
+}
+
+
+/* original theme: every hover / selected surface uses #DFE0DB */
+html.theme-original body {
+  --gh-select-bg: #dfe0db;
+}
+html.theme-original body .gh-sidebar-item:hover,
+html.theme-original body .gh-sidebar-item:focus-visible,
+html.theme-original body .gh-sidebar-item.is-active {
+  background: var(--gh-select-bg) !important;
+}
+html.theme-original body .forum-directory-card:hover,
+html.theme-original body .forum-directory-card.active {
+  background: var(--gh-select-bg) !important;
+}
+html.theme-original body .forum-post-card:hover,
+html.theme-original body .forum-post-card:focus-within {
+  background: var(--gh-select-bg) !important;
+}
+html.theme-original body .forum-tab:hover,
+html.theme-original body .forum-tabs a:hover,
+html.theme-original body .forum-tabs button:hover {
+  background: var(--gh-select-bg) !important;
+}
+html.theme-original body :is(.hot-topic-list a, .forum-side-links a, .forum-rail-card a):hover,
+html.theme-original body .forum-rail-card li:hover {
+  background: var(--gh-select-bg) !important;
+}
+html.theme-original body .btn:hover,
+html.theme-original body .forum-view-switch button:hover {
+  background: var(--gh-select-bg) !important;
+}
+html.theme-original body tr:hover,
+html.theme-original body .list-item:hover,
+html.theme-original body .admin-subtab:hover,
+html.theme-original body .admin-subtab.active {
+  background: var(--gh-select-bg) !important;
+}
+
+
+/* right rail card titles: match the shipped 15px / 800 weight */
+html.github-design body .forum-rail-card .forum-side-title {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: .01em;
+  line-height: 1.5;
+}
+
+
+/* rail card titles sit flush with the card content edge (they carried 16px of their own) */
+html.github-design body .forum-rail-card .forum-side-title {
+  padding-left: 4px;
+  padding-right: 0;
+}
+
+
+/* graph block: wider canvas and larger labels */
+html.github-design body .forum-graph-hero {
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  padding: 24px 26px 16px;
+}
+/* 画布比例对齐原图（约 1.68:1 的横向长方形） */
+html.github-design body .forum-graph-canvas {
+  min-height: 190px;
+  aspect-ratio: 1.68 / 1;
+}
+html.github-design body .forum-graph-canvas .graph-node-label { font-size: 16px; }
+html.github-design body .forum-graph-canvas .graph-node-label-secondary { font-size: 14.5px; }
+html.github-design body .forum-graph-canvas .graph-weight { font-size: 12.5px; }
+html.github-design body .forum-graph-canvas .graph-callout-text { font-size: 12.5px; }
+html.github-design body .forum-graph-canvas .graph-trace-caption { font-size: 12.5px; }
+html.github-design body .forum-graph-canvas .algorithm-code { font-size: 14px; }
+html.github-design body .forum-graph-canvas figcaption { font-size: 12.5px; }
+
+
+/* ink theme: directory card icons and titles are white (they inherited the dark brand ink) */
+html.theme-ink body .forum-directory-card :is(.forum-directory-icon, b, strong, .forum-directory-copy) {
+  color: #ffffff !important;
+}
+html.theme-ink body .forum-directory-card :is([class*="count"], [class*="count"] span) {
+  color: rgba(255, 255, 255, .82) !important;
+}

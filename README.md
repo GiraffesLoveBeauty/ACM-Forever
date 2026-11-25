@@ -59,13 +59,13 @@ $env:ACM_WEBUI_SECRET_KEY = & $python -c "import secrets; print(secrets.token_ur
 | --- | --- | --- |
 | [`feat/web/`](feat/web/) | Vue 3 + Vite Web 前端 | [前端开发](feat/web/README.md) |
 | [`feat/api/`](feat/api/) | Python / Quart API、SQLite 数据访问与 Web 静态资源服务 | [API 文档](docs/api.md) |
-| [`Android_APP/`](Android_APP/) | 原生 Android 客户端 | [构建与发布](docs/android-app.md) |
+| [`Android_APP/`](Android_APP/) | 原生 Android 客户端 | [构建与发布](docs/android-app.md) · [android-v1.0.2-compact-ranking.md（排名小屏布局）](docs/android-v1.0.2-compact-ranking.md) |
 | [`tools/crawlers/`](tools/crawlers/) | 题目元数据、题面与样例采集 | [采集说明](docs/crawler-samples.md) |
 | [`local_demo/`](local_demo/) · [`experiments/`](experiments/) | 算法标签与翻译实验、本地验收 | [交付说明](docs/algorithm-tagging-delivery.md) |
 
 `feat/` 的变更合并到 `main` 后，[部署工作流](.github/workflows/sync-feat-to-server.yml) 会构建前端并同步应用。数据库、上传文件与环境配置应独立于代码部署目录。操作前请阅读 [部署与迁移](docs/public-server-deployment.md) 和 [备份与恢复](docs/backup-and-diagnostics.md)。
 
-更多文档：[训练任务管理](docs/training-tasks/admin.md) · [Wiki 维护](docs/wiki.md) · [浏览器回归测试](docs/browser-regression.md) · [全部工程文档与历史记录](docs/)。
+更多文档：[训练任务管理](docs/training-tasks/admin.md) · [android-xcpc-scoreboard.md（管理员题单计分板）](docs/android-xcpc-scoreboard.md) · [Wiki 维护](docs/wiki.md) · [浏览器回归测试](docs/browser-regression.md) · [全部工程文档与历史记录](docs/)。
 
 ## 参与贡献
 

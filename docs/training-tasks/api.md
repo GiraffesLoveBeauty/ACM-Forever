@@ -1,5 +1,7 @@
 # 训练任务存储与发布契约
 
+1.0.3 / PR #175 候选：管理进度的 `view=xcpc` 增加 `scoreboard.columns[].accepted_count`、`participant_count` 和 `totals_scope=task`，按整份题单统计每题 AC 人数，分页与筛选不缩小其范围。`order=xcpc` 仅用于该 view，在全体筛选结果中按过题数降序、总用时升序排序，完全相同者并列，再分页。保留 `order=none` 默认不排名与原 `completed` 行为；非法组合返回 400。总用时继续使用兼容字段 `penalty_minutes`，仅累加从题单开始到各题首次已核验 AC 的分钟数，历史 AC 不计时，不做错误提交加罚。证据一次批量读取，GET 无写入或外部同步；管理员鉴权、私有 no-store 和普通成员 403 不变。该后端修改合并将触发部署，须先完成当前提交 Review 与运维确认；详情见 [题单计分板](../android-xcpc-scoreboard.md)。
+
 0.2.30候选扩展（待本轮PR评审）：管理进度列表可选 `order=none|completed`，缺省为 `none`，保持原顺序；响应增加 `order` 确认值。`completed` 在 identity/status/search 筛选全体后按 `completed_problems` 降序、同分保持原接收人顺序并列排名，再按 page/page_size 分页；每项增加 `rank`（例如1、1、3），不是按当前页重新从1开始。summary和冻结分母不受筛选/排序影响；非法order返回400。权限、no-store及数据库schema不变，旧客户端可忽略加法字段。范围与发布约束见[本轮说明](../android-v0.2.30-network-training.md)。以下状态行保留原阶段记录。
 
 状态：Issue #118 / #119–#123 已实现并完成本地联调，2026-11-11；PR #124–#128 待评审，未合并、未部署。所有 PR 目标均为 main，按 #124 → #125 → #126 → #127 → #128 依次合入；涉及 feat 的合入会触发部署，前置合入期间保持能力开关关闭。

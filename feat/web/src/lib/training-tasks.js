@@ -28,7 +28,6 @@ export const verifications = {
   sync_failed: '同步失败，已有证据保留',
   sync_waiting: '等待重试，已有证据保留',
   sync_paused: '平台暂停同步',
-  sync_disabled: '账号开启访问限制，已停用同步',
   account_closed: '账号已注销',
   account_changed: '账号代际已变化',
   account_disabled: '账号已停用',

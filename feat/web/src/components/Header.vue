@@ -1,16 +1,9 @@
 <script setup>
-import { computed, inject, ref } from 'vue';
+import { computed } from 'vue';
 import { useRouter, isNavigationFailure, NavigationFailureType } from 'vue-router';
-import { auth, logoutSession, avatar, showError, safeNext } from '../lib/api.js';
-import TemplateLibrary from './TemplateLibrary.vue';
+import { auth, logoutSession, showError, safeNext } from '../lib/api.js';
+import ThemeSwitcher from './ThemeSwitcher.vue';
 import NotificationBell from './NotificationBell.vue';
-import { normalizeTemplate, templateLabel } from '../lib/design-template.js';
-const templateLibrary = ref();
-const setDesignTemplate = inject('setDesignTemplate');
-const getDesignTemplate = inject('getDesignTemplate', () => 'original');
-const designTemplate = computed(() => normalizeTemplate(getDesignTemplate()));
-const openTheme = inject('openTheme');
-const toggleTheme = inject('toggleTheme');
 const router = useRouter();
 const loginTarget = computed(() => ({
   path: '/login.html',
@@ -51,33 +44,10 @@ async function logout() {
     </nav>
     <div class="forum-header-actions">
       <NotificationBell />
-      <button
-        class="btn"
-        :title="`当前：${templateLabel(designTemplate)}`"
-        aria-haspopup="dialog"
-        @click="templateLibrary.open()"
-      >
-        主题库
-      </button>
-      <button class="btn" aria-label="切换主题" @click="toggleTheme">◐</button>
-      <button class="btn" @click="openTheme">自助调色</button
-      ><RouterLink v-if="!auth.authenticated" class="btn primary" :to="loginTarget"
+      <ThemeSwitcher />
+      <RouterLink v-if="!auth.authenticated" class="btn primary" :to="loginTarget"
         >登录社区</RouterLink
-      ><RouterLink
-        v-else
-        class="btn account-avatar-button"
-        :to="canManage ? '/admin.html' : '/home.html'"
-        aria-label="账户中心"
-        ><img
-          class="header-account-avatar"
-          :src="avatar(auth.avatar_url)"
-          alt="我的头像" /></RouterLink
       ><button v-if="auth.authenticated" class="btn" @click="logout">退出</button>
     </div>
   </header>
-  <TemplateLibrary
-    ref="templateLibrary"
-    :current="designTemplate"
-    @select="(id) => setDesignTemplate?.(id)"
-  />
 </template>

@@ -495,7 +495,7 @@ function lifecycle(kind) {
 </script>
 <template>
   <div class="training-tasks" :aria-busy="loading || busy">
-    <nav class="tt-row tt-muted" aria-label="面包屑">
+    <nav v-if="taskId" class="tt-row tt-muted" aria-label="面包屑">
       <button class="tt-title-button" @click="goList">训练管理</button
       ><template v-if="taskId">
         /

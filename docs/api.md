@@ -2,6 +2,8 @@
 
 本文面向 Web、机器人和其他需要读取 ACM-Forever 数据的程序调用者。代码实现是当前行为的最终依据；接口有变化时，应在同一个 PR 中更新本文和自动化测试。
 
+1.0.3 / PR #175 计分板候选扩展：管理员进度 `view=xcpc` 新增整份题单的每题 AC 人数及接收人数，并允许 `order=xcpc` 按全体筛选后的过题数、总用时排序和并列后分页。只累加已核验 AC 用时，不增加提交次数项；普通成员权限、旧 `none/completed` 排序、GET 只读及数据库 schema 不变。字段及部署边界见 [训练任务契约](training-tasks/api.md)和 [Android 题单计分板](android-xcpc-scoreboard.md)。当前仅源码候选，不能当作生产已部署。
+
 0.2.30候选兼容扩展见 [android-v0.2.30-network-training.md（弱网与题单排名）](android-v0.2.30-network-training.md)：管理员进度 `GET /api/admin/training-tasks/<id>/progress` 可选 `order=none|completed`（默认 none），响应确认 `order`；completed 在全体筛选后按完成题数降序、同分并列并增加 `rank`，再分页。非法值返回400。移动论坛最小 page_size=2，Web仍为5。能力清单新增 `forum_small_pages/training_progress_order`；公开能力与Wiki支持ETag条件读取，公开白名单JSON协商gzip；不改变私有响应no-store及现有鉴权。
 
 作者修改帖子、驳回后重投、私有文字历史及审核版本参数见 [forum-post-revisions.md（帖子修改与重新投稿接口）](forum-post-revisions.md)。
