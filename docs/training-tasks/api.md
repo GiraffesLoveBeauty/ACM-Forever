@@ -50,9 +50,14 @@ PATCH 只更新提供的白名单字段；省略字段保留，修改后版本�
 | `POST /{task_id}/extend-deadline` | `{version,due_at,reason}`；新截止时间须更晚，原因 1–500 字；重算既有证据 |
 | `POST /{task_id}/cancel` | `{version,reason}`；取消已发布任务，保留题单与证据 |
 | `GET /{task_id}/progress` | 分页、identity、status、search（当前真实姓名、发布时昵称或 QQ）；返回不受筛选影响的 summary 与筛选后的成员 items/total |
+| `GET /{task_id}/export` | 管理员下载本次训练全部固定成员的 Excel（`.xlsx`），不受筛选、分页影响；草稿返回 409，已取消任务可导出；只读本地证据 |
 | `GET /{task_id}/progress/{recipient_id}` | 仅管理权限，返回 recipient 与逐题 problems 证据 |
 
 管理员进度列表 items 和逐题详情 recipient 新增 `real_name`（字符串或 null），读取当前成员资料，不改变发布时冻结的 `name`。仅未注销且账号代际匹配时返回真实姓名；未填写、注销或账号代际变化时返回 null，避免同 QQ 新账号姓名串入旧任务。该字段只在上述两个管理员接口返回，成员前台的列表/详情不新增此字段。后台完成情况使用真实姓名和题目完成进度条，未填姓名有明确提示；原有完成、核验和账号状态字段继续保留供筛选与统计使用。
+
+管理员进度列表的每个 `items[]` 另含 `problem_cells[]`，按冻结题单 `position` 排序。格子字段为 `id`（训练题目行 ID）、`position`、`platform`、`problem_id`（平台题号）、`problem_name`、`completed`（布尔值）、`status`、`accepted_at`（仅计入完成的证据时间，未知为 null）。`completed` 与该成员的 `completed_problems` 使用相同规则，前端按此字段逐题点亮，不按完成数量推断位置。逐题详情的 `problems[]` 也返回相同含义的 `completed`；原有 `is_ac` 表示发现 AC 证据，不等于符合本训练完成规则。
+
+Excel 接口返回 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`，附 `Content-Disposition: attachment` 及 `Cache-Control: no-store`。工作表包括训练概况、完整成员进度矩阵和顺序题单。一次读取事务获取固定名单及证据快照，成员题目分批读取；不请求外部 OJ、不入同步队列、不修改证据。文本以字符串写入，防止题名、姓名、训练说明等被 Excel 解释为公式；真实姓名仍执行账号代际与注销检查。
 
 预览列出未开户、停用、注销和临时凭据过期等排除原因；有效未绑定成员仍可接收。有排除项必须显式提交 `confirm_exclusions:true`。发布时事务内重新计算名单指纹，名单、绑定或账号状态变化、预览超时、版本变化均须重新确认；零题目、零有效接收人或能力不足不能发布。
 

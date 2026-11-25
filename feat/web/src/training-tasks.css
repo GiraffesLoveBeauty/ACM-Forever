@@ -321,38 +321,43 @@
   white-space: nowrap;
 }
 .tt-member-progress {
-  position: relative;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(24px, 1fr));
+  gap: 3px;
   flex: 1;
   min-width: 0;
-  height: 10px;
-  border-radius: 999px;
-  overflow: hidden;
+}
+.tt-problem-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: 22px;
+  border-radius: 3px;
   background: color-mix(in srgb, var(--text) 14%, var(--panel));
+  color: var(--text);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
-.tt-member-progress > span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: light-dark(#8250df, #a982ff);
+html.theme-ink .training-tasks {
+  --tt-ac-bg: #a982ff;
+  --tt-ac-color: #17121f;
 }
-.tt-member-progress::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(to right, transparent calc(100% - 2px), var(--panel) 0);
-  background-size: calc(100% / var(--tt-progress-steps, 1)) 100%;
+.tt-problem-cell.is-ac {
+  background: var(--tt-ac-bg, light-dark(#8250df, #a982ff));
+  color: var(--tt-ac-color, light-dark(#fff, #17121f));
+  font-weight: 700;
 }
 @media (forced-colors: active) {
-  .tt-member-progress {
+  .tt-problem-cell {
     outline: 1px solid CanvasText;
     forced-color-adjust: none;
     background: Canvas;
+    color: CanvasText;
   }
-  .tt-member-progress > span {
+  .tt-problem-cell.is-ac {
     background: Highlight;
-  }
-  .tt-member-progress::after {
-    display: none;
+    color: HighlightText;
   }
 }
 @media (max-width: 640px) {

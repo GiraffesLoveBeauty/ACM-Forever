@@ -2,8 +2,13 @@ import { test, expect } from '@playwright/test';
 const password = 'Browser-fixture-only!2026';
 const local = (stamp) => new Date(stamp + 8 * 3600000).toISOString().slice(0, 16);
 async function login(context, qq) {
-  // Stop the previous account's page requests before replacing its session cookie.
-  await Promise.all(context.pages().map((page) => page.goto('about:blank')));
+  // Stop fixture requests, not Edge's transient browser-owned download page.
+  await Promise.all(
+    context
+      .pages()
+      .filter((page) => page.url().startsWith('http://127.0.0.1:'))
+      .map((page) => page.goto('about:blank')),
+  );
   const response = await context.request.post('/api/auth/login', { data: { qq_id: qq, password } });
   expect(response.status()).toBe(200);
   const identity = await context.request.get('/api/auth/me');
@@ -24,7 +29,7 @@ test('assigned task publish, frozen progress, member entry and statement round t
   const title = '端到端题单 ' + testInfo.project.name + ' ' + Date.now();
   await page.getByLabel('任务标题', { exact: true }).fill(title);
   await page.getByLabel('训练说明', { exact: true }).fill('合成数据验收：所有题均为必做题。');
-  await page.getByLabel('标准题号', { exact: true }).fill('1A 2A 1A');
+  await page.getByLabel('标准题号', { exact: true }).fill('2A 1A 1A');
   await page.getByRole('button', { name: '校验并添加题号', exact: true }).click();
   await expect(page.getByText('合成训练题一', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '下一步', exact: true }).click();
@@ -45,14 +50,24 @@ test('assigned task publish, frozen progress, member entry and statement round t
   const bar = member.getByRole('progressbar', { name: '训练测试姓名甲的做题进度' });
   await expect(bar).toHaveAttribute('aria-valuenow', '1');
   await expect(bar).toHaveAttribute('aria-valuemax', '2');
-  expect(
-    await bar
-      .locator('span')
-      .evaluate(
-        (fill) =>
-          fill.getBoundingClientRect().width / fill.parentElement.getBoundingClientRect().width,
-      ),
-  ).toBeCloseTo(0.5, 2);
+  await expect(bar.locator('.tt-problem-cell')).toHaveText(['1', '2']);
+  await expect(bar.locator('.tt-problem-cell').nth(0)).not.toHaveClass(/is-ac/);
+  await expect(bar.locator('.tt-problem-cell').nth(1)).toHaveClass(/is-ac/);
+  await expect(bar.locator('.tt-problem-cell').nth(1)).toHaveAttribute('title', /cf_1A.*AC/);
+  // A filtered page must still export the entire fixed training audience.
+  await page.getByPlaceholder('真实姓名、昵称或 QQ').fill('训练测试姓名甲');
+  await page.getByRole('button', { name: '筛选成员', exact: true }).click();
+  await expect(table.getByRole('progressbar')).toHaveCount(1);
+  const downloading = page.waitForEvent('download');
+  await page.getByRole('button', { name: '导出 Excel', exact: true }).click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toBe(title + '-完成情况.xlsx');
+  const exported = testInfo.outputPath('training-progress.xlsx');
+  await download.saveAs(exported);
+  const { readFile } = await import('node:fs/promises');
+  const bytes = await readFile(exported);
+  expect(bytes.subarray(0, 2).toString()).toBe('PK');
+  expect(bytes.length).toBeGreaterThan(3000);
   await expect(table).not.toContainText('10000118');
   await expect(table).not.toContainText('任务状态');
   await expect(table).not.toContainText('核验与账号');
@@ -68,7 +83,7 @@ test('assigned task publish, frozen progress, member entry and statement round t
     .locator('section')
     .filter({ has: page.getByRole('heading', { name: '训练与题目', exact: true }) })
     .first();
-  expect(await shortcuts.getByRole('link').allTextContents()).toEqual([
+  await expect(shortcuts.getByRole('link')).toHaveText([
     '今日训练',
     '训练任务',
     '题库',
@@ -93,8 +108,8 @@ test('assigned task publish, frozen progress, member entry and statement round t
   await expect(page.getByRole('alert')).toContainText('已有进度保留');
   await expect(page.getByText('1 / 2 题', { exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('member-detail-light.png'), fullPage: true });
-  await page.getByRole('button', { name: '切换主题', exact: true }).click();
-  await expect(page.locator('body')).toHaveAttribute('data-theme', 'dark');
+  await page.getByRole('button', { name: '切换到墨夜', exact: true }).click();
+  await expect(page.locator('html')).toHaveClass(/\btheme-ink\b/);
   await page.screenshot({ path: testInfo.outputPath('member-detail-dark.png'), fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
@@ -277,7 +292,7 @@ test('first binding permits task refresh before a successful sync', async ({
   });
 });
 
-test('completion real names, search and long progress bars remain usable across widths and themes', async ({
+test('completion real names, search and ordered cells remain usable across widths and themes', async ({
   page,
   context,
 }, testInfo) => {
@@ -309,13 +324,18 @@ test('completion real names, search and long progress bars remain usable across 
     '完成进度',
     '操作',
   ]);
-  for (const theme of ['light', 'dark']) {
-    if ((await page.locator('body').getAttribute('data-theme')) !== theme)
-      await page.getByRole('button', { name: '切换主题', exact: true }).click();
-    await expect(page.locator('body')).toHaveAttribute('data-theme', theme);
-    await expect(complete.locator('span')).toHaveCSS(
+  for (const [theme, label] of [
+    ['original', '原版'],
+    ['mist', '晨雾'],
+    ['forest', '林绿'],
+    ['sand', '暖砂'],
+    ['ink', '墨夜'],
+  ]) {
+    await page.getByRole('button', { name: '切换到' + label, exact: true }).click();
+    await expect(page.locator('html')).toHaveClass(new RegExp('\\btheme-' + theme + '\\b'));
+    await expect(complete.locator('.tt-problem-cell.is-ac')).toHaveCSS(
       'background-color',
-      theme === 'dark' ? 'rgb(169, 130, 255)' : 'rgb(130, 80, 223)',
+      theme === 'ink' ? 'rgb(169, 130, 255)' : 'rgb(130, 80, 223)',
     );
     for (const width of [1440, 768, 414, 360]) {
       await page.setViewportSize({ width, height: 960 });
@@ -330,9 +350,9 @@ test('completion real names, search and long progress bars remain usable across 
               fill.getBoundingClientRect().width / fill.parentElement.getBoundingClientRect().width,
           ),
       ).toBeCloseTo(1, 2);
-      expect(
-        await empty.locator('span').evaluate((fill) => fill.getBoundingClientRect().width),
-      ).toBe(0);
+      await expect(empty.locator('.tt-problem-cell')).toHaveCount(1);
+      await expect(empty.locator('.tt-problem-cell.is-ac')).toHaveCount(0);
+      await expect(complete.locator('.tt-problem-cell.is-ac')).toHaveCount(1);
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);
@@ -497,4 +517,83 @@ test('Luogu historical AC is already credited and visible to the member without 
     true,
   );
   await expect(page.getByText('已 AC，完成时段待确认', { exact: true })).toHaveCount(0);
+});
+
+test('fifty ordered cells wrap without moving scattered ACs on narrow screens', async ({
+  page,
+  context,
+}, testInfo) => {
+  await login(context, '10000003');
+  const problems = Array.from({ length: 50 }, (_, index) => ({
+    id: index + 1,
+    position: index,
+    platform: 'codeforces',
+    problem_id: `cf_${index + 1}A`,
+    problem_name: `合成题目 ${index + 1}`,
+  }));
+  const cells = problems.map((problem, index) => ({
+    ...problem,
+    completed: [1, 4, 49].includes(index),
+    status: [1, 4, 49].includes(index) ? 'on_time' : 'pending',
+  }));
+  const task = {
+    id: 999998,
+    title: '多题逐格布局验收',
+    state: 'published',
+    phase: 'active',
+    description: '',
+    creator_name: '合成管理员',
+    statuses: ['合成训练组'],
+    starts_at: 1795593600,
+    due_at: 1795680000,
+    rule: 'period_ac',
+    problems,
+    audit: [],
+  };
+  await page.route('**/api/admin/training-tasks/999998', (route) => route.fulfill({ json: task }));
+  await page.route('**/api/admin/training-tasks/999998/progress?*', (route) =>
+    route.fulfill({
+      json: {
+        summary: {
+          recipient_count: 1,
+          on_time_count: 0,
+          late_count: 0,
+          pending_count: 0,
+          completed_problem_count: 3,
+          total_problem_count: 50,
+          abnormal_count: 0,
+        },
+        items: [
+          {
+            id: 1,
+            real_name: '合成逐题成员',
+            account_status: 'active',
+            status_snapshot: '合成训练组',
+            completed_problems: 3,
+            problem_count: 50,
+            problem_cells: cells,
+          },
+        ],
+        total: 1,
+      },
+    }),
+  );
+  await page.goto('/admin.html?section=training&task_id=999998&tab=progress');
+  const bar = page.getByRole('progressbar', { name: '合成逐题成员的做题进度' });
+  for (const width of [1440, 768, 414, 360]) {
+    await page.setViewportSize({ width, height: 960 });
+    await expect(bar.locator('.tt-problem-cell')).toHaveCount(50);
+    await expect(bar.locator('.is-ac')).toHaveText(['2', '5', '50']);
+    await expect(bar.locator('.tt-problem-cell').first()).not.toHaveClass(/is-ac/);
+    const first = await bar.locator('.tt-problem-cell').first().boundingBox();
+    const last = await bar.locator('.tt-problem-cell').last().boundingBox();
+    expect(last.y).toBeGreaterThan(first.y);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: testInfo.outputPath(`ordered-cells-${width}.png`),
+      fullPage: true,
+    });
+  }
 });
