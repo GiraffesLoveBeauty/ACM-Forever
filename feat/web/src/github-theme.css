@@ -1,0 +1,1387 @@
+﻿/* =========================================================================
+   GitHub 椋庢牸鐨偆锛坓ithub-design锛?   -------------------------------------------------------------------------
+   璁捐璇█鍙栬嚜 GitHub Primer 鏆楄壊涓婚锛?     canvas var(--gh-canvas) / panel var(--gh-panel) / border var(--gh-border-strong) / fg var(--gh-fg)
+     muted var(--gh-fg-muted) / link var(--gh-link) / primary var(--gh-success-emphasis) / accent #1f6feb
+   鍦嗚 6px銆佺郴缁熷瓧浣撱€佹墎骞冲崱鐗囷紙鐢?1px 杈规鍒嗗眰鑰岄潪闃村奖锛?   鍚敤鏂瑰紡锛歎RL 鍔??skin=github锛?skin=default 杩斿洖鍘熺増涓婚銆?   璇存槑锛氭湰鏂囦欢鍙仛瑙嗚瑕嗙洊锛屼笉鏀瑰彉浠讳綍缁勪欢缁撴瀯銆佽矾鐢辨垨鎺ュ彛銆?   ========================================================================= */
+html.github-design body {
+  --bg: var(--gh-canvas) !important;
+  --panel: var(--gh-panel) !important;
+  --panel-raised: var(--gh-overlay) !important;
+  --text: var(--gh-fg) !important;
+  --muted: var(--gh-fg-muted) !important;
+  --line: var(--gh-border-strong) !important;
+  --line-muted: var(--gh-btn-bg);
+  --brand: var(--gh-link) !important;
+  --brand-strong: #1f6feb !important;
+  --brand2: #3fb950 !important;
+  --accent: var(--gh-success-emphasis) !important;
+  --accent-2: #d29922;
+  --on-brand: #ffffff !important;
+  --on-accent: #ffffff !important;
+  --hero-bg: var(--gh-panel) !important;
+  --hero-text: var(--gh-fg) !important;
+  --hero-muted: var(--gh-fg-muted) !important;
+  --subtle-bg: var(--gh-overlay);
+  --page-backdrop: var(--gh-canvas-inset);
+  --gh-canvas: var(--gh-canvas);
+  --gh-canvas-inset: var(--gh-canvas-inset);
+  --gh-panel: var(--gh-panel);
+  --gh-overlay: var(--gh-overlay);
+  --gh-border: var(--gh-border-strong);
+  --gh-border-muted: var(--gh-btn-bg);
+  --gh-fg: var(--gh-fg);
+  --gh-fg-muted: var(--gh-fg-muted);
+  --gh-fg-subtle: var(--gh-fg-subtle);
+  --gh-link: var(--gh-link);
+  --gh-success: #3fb950;
+  --gh-success-emphasis: var(--gh-success-emphasis);
+  --gh-success-hover: var(--gh-success-hover);
+  --gh-danger: #f85149;
+  --gh-attention: #d29922;
+  --gh-done: #a371f7;
+  --gh-radius: 6px;
+  --gh-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial,
+    sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --gh-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-body: var(--gh-font) !important;
+  --font-display: var(--gh-font) !important;
+  --font-data: var(--gh-font-mono) !important;
+  --shadow: none !important;
+  --industrial-grid: transparent !important;
+  background-color: var(--gh-canvas);
+  background-image: none;
+  color: var(--gh-fg);
+  font-family: var(--gh-font);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+html.github-design body .forum-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  width: 100%;
+  max-width: none;
+  min-height: 62px;
+  margin: 0;
+  padding: 10px 24px;
+  gap: 16px;
+  border: 0;
+  border-bottom: 1px solid var(--gh-border);
+  border-radius: 0;
+  background: var(--gh-panel);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+html.github-design body .forum-brand {
+  gap: 8px;
+  font-family: var(--gh-font);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0;
+  color: var(--gh-fg);
+}
+html.github-design body .forum-brand b {
+  color: var(--gh-fg);
+  font-weight: 600;
+}
+html.github-design body .forum-brand small {
+  color: var(--gh-fg-muted);
+  font-size: 11px;
+  letter-spacing: 0;
+}
+html.github-design body .icpc-brand-logo {
+  filter: brightness(0) invert(1);
+  width: 30px;
+  opacity: 0.95;
+}
+html.github-design body .primary-nav {
+  gap: 4px;
+}
+html.github-design body .primary-nav a {
+  position: relative;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: var(--gh-radius);
+  color: var(--gh-fg);
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 120ms ease;
+}
+html.github-design body .primary-nav a:hover {
+  background: rgba(var(--gh-hover-rgb), 0.12);
+}
+html.github-design body .primary-nav a.active {
+  background: transparent;
+  font-weight: 600;
+}
+html.github-design body .primary-nav a.active::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: -11px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--gh-underline);
+}
+
+html.github-design body .btn {
+  min-height: 32px;
+  padding: 5px 12px;
+  border: 1px solid var(--gh-border);
+  border-radius: var(--gh-radius);
+  background: var(--gh-btn-bg);
+  color: var(--gh-fg);
+  font-family: var(--gh-font);
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: none;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+html.github-design body .btn:hover {
+  background: var(--gh-border-strong);
+  border-color: var(--gh-fg-muted);
+  box-shadow: none;
+  transform: none;
+}
+html.github-design body .btn.primary {
+  background: var(--gh-success-emphasis);
+  border-color: rgba(var(--gh-fg-rgb), 0.1);
+  color: #ffffff;
+  box-shadow: 0 1px 0 rgba(27, 31, 36, 0.12);
+}
+html.github-design body .btn.primary:hover {
+  background: var(--gh-success-hover);
+  transform: none;
+}
+
+html.github-design body :is(input, select, textarea) {
+  min-height: 32px;
+  padding: 5px 12px;
+  border: 1px solid var(--gh-border);
+  border-radius: var(--gh-radius);
+  background: var(--gh-canvas-inset);
+  color: var(--gh-fg);
+  font-family: var(--gh-font);
+  font-size: 14px;
+  box-shadow: inset 0 1px 0 rgba(1, 4, 9, 0.6);
+}
+html.github-design body :is(input, select, textarea):focus {
+  outline: none;
+  border-color: var(--gh-link);
+  box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.3);
+}
+html.github-design body ::placeholder {
+  color: var(--gh-fg-subtle);
+}
+
+html.github-design body :is(
+    .forum-rail-card,
+    .forum-community-card,
+    .forum-directory,
+    .forum-post-card,
+    .forum-article,
+    .forum-comments,
+    .forum-author-card,
+    .forum-comment-form,
+    .forum-rank-link,
+    .community-panel,
+    .compose-editor-panel,
+    .compose-side-card,
+    .profile-stat-card,
+    .card
+  ) {
+  border: 1px solid var(--gh-border);
+  border-radius: var(--gh-radius);
+  background: var(--gh-panel);
+  box-shadow: none;
+}
+html.github-design body :is(.forum-post-card, .forum-directory, .forum-rail-card, .card):hover {
+  border-color: var(--gh-fg-muted);
+  box-shadow: none;
+  transform: none;
+}
+
+html.github-design body .forum-welcome {
+  border: 1px solid var(--gh-border);
+  border-radius: var(--gh-radius);
+  background: linear-gradient(180deg, var(--gh-panel) 0%, var(--gh-canvas) 100%);
+  box-shadow: none;
+  padding: 32px 28px;
+}
+html.github-design body .forum-welcome::after {
+  border-color: transparent;
+}
+html.github-design body .forum-welcome h1 {
+  font-family: var(--gh-font);
+  font-size: clamp(28px, 2.6vw, 40px);
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: var(--gh-fg);
+}
+html.github-design body .forum-kicker {
+  color: var(--gh-fg-muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+html.github-design body .forum-welcome p {
+  color: var(--gh-fg-muted);
+  font-size: 14px;
+  line-height: 1.6;
+  max-width: 42em;
+}
+html.github-design body .forum-hero-cta {
+  min-height: 32px;
+  padding: 5px 14px;
+  border: 1px solid rgba(var(--gh-fg-rgb), 0.1);
+  border-radius: var(--gh-radius);
+  background: var(--gh-success-emphasis);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: none;
+}
+html.github-design body .forum-hero-cta:hover {
+  background: var(--gh-success-hover);
+  box-shadow: none;
+}
+html.github-design body .forum-hero-cta span {
+  background: transparent;
+  color: inherit;
+  width: auto;
+  height: auto;
+  font-size: 14px;
+}
+html.github-design body .forum-hero-photo {
+  border-radius: 0 var(--gh-radius) var(--gh-radius) 0;
+  filter: grayscale(0.35);
+}
+
+html.github-design body .forum-post-card {
+  padding: 16px;
+  margin: 0 0 8px;
+  border-left: 1px solid var(--gh-border);
+}
+html.github-design body .forum-post-card:hover {
+  border-left-color: var(--gh-border);
+  background: var(--gh-overlay);
+}
+html.github-design body .forum-post-card h2,
+html.github-design body .forum-post-card h3 {
+  font-family: var(--gh-font);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.4;
+  margin: 6px 0 4px;
+  color: var(--gh-fg);
+}
+html.github-design body .forum-post-card h2 a:hover,
+html.github-design body .forum-post-card h3 a:hover {
+  color: var(--gh-link);
+  text-decoration: none;
+}
+html.github-design body .forum-post-excerpt {
+  color: var(--gh-fg-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+html.github-design body .forum-post-meta {
+  gap: 8px;
+  font-size: 12px;
+}
+html.github-design body .forum-post-time,
+html.github-design body .forum-post-actions,
+html.github-design body .forum-post-author {
+  color: var(--gh-fg-muted);
+  font-size: 12px;
+}
+html.github-design body .forum-post-actions button:hover,
+html.github-design body .forum-post-actions a:hover,
+html.github-design body .forum-post-actions .is-active {
+  color: var(--gh-link);
+}
+html.github-design body .forum-pinned {
+  color: var(--gh-attention);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+html.github-design body .forum-category-pill,
+html.github-design body .chip {
+  border: 1px solid rgba(var(--gh-accent-rgb), 0.4);
+  border-radius: 999px;
+  background: rgba(var(--gh-accent-rgb), 0.1);
+  color: var(--gh-link);
+  padding: 0 9px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: 0;
+}
+html.github-design body .forum-post-card[data-category="help"] .forum-category-pill {
+  border-color: rgba(248, 81, 73, 0.4);
+  background: rgba(248, 81, 73, 0.1);
+  color: var(--gh-danger);
+}
+html.github-design body .forum-post-card[data-category="solution"] .forum-category-pill {
+  border-color: rgba(163, 113, 247, 0.4);
+  background: rgba(163, 113, 247, 0.1);
+  color: var(--gh-done);
+}
+html.github-design body .forum-post-card[data-category="events"] .forum-category-pill {
+  border-color: rgba(210, 153, 34, 0.4);
+  background: rgba(210, 153, 34, 0.1);
+  color: var(--gh-attention);
+}
+
+html.github-design body .forum-tabs {
+  gap: 8px;
+  border-bottom: 1px solid var(--gh-border);
+  padding-bottom: 0;
+}
+html.github-design body .forum-tab {
+  position: relative;
+  padding: 8px 12px;
+  border-radius: 0;
+  background: transparent;
+  color: var(--gh-fg-muted);
+  font-size: 14px;
+  font-weight: 500;
+}
+html.github-design body .forum-tab:hover {
+  color: var(--gh-fg);
+  background: rgba(var(--gh-hover-rgb), 0.08);
+  border-radius: var(--gh-radius) var(--gh-radius) 0 0;
+}
+html.github-design body .forum-tab.active {
+  color: var(--gh-fg);
+  font-weight: 600;
+  background: transparent;
+  box-shadow: inset 0 -2px 0 var(--gh-underline);
+}
+html.github-design body .industrial-feed-title {
+  font-family: var(--gh-font);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--gh-fg);
+}
+
+html.github-design body .forum-view-switch {
+  border: 1px solid var(--gh-border);
+  border-radius: var(--gh-radius);
+  background: var(--gh-canvas);
+  overflow: hidden;
+}
+html.github-design body .forum-view-switch > * {
+  border-radius: 0;
+  background: transparent;
+  color: var(--gh-fg-muted);
+  font-size: 12px;
+}
+html.github-design body .forum-view-switch > .is-active,
+html.github-design body .forum-view-switch > .active {
+  background: var(--gh-btn-bg);
+  color: var(--gh-fg);
+}
+
+html.github-design body .forum-search {
+  border: 1px solid var(--gh-border);
+  border-radius: var(--gh-radius);
+  background: var(--gh-canvas-inset);
+  min-height: 40px;
+  box-shadow: none;
+}
+html.github-design body .forum-search:focus-within {
+  border-color: var(--gh-link);
+  box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.3);
+}
+html.github-design body .forum-search input {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 14px;
+}
+html.github-design body .forum-search .btn,
+html.github-design body .forum-search button {
+  border-radius: 0 var(--gh-radius) var(--gh-radius) 0;
+}
+
+html.github-design body .forum-rail-card,
+html.github-design body .forum-community-card {
+  padding: 16px;
+}
+html.github-design body .forum-rail-card h2,
+html.github-design body .forum-side-heading,
+html.github-design body .forum-side-links a {
+  font-family: var(--gh-font);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gh-fg);
+  letter-spacing: 0;
+}
+html.github-design body .forum-side-links a {
+  font-weight: 400;
+  color: var(--gh-link);
+  padding: 6px 8px;
+  border-radius: var(--gh-radius);
+}
+html.github-design body .forum-side-links a:hover {
+  background: rgba(var(--gh-hover-rgb), 0.08);
+  text-decoration: none;
+}
+
+html.github-design body .forum-directory {
+  padding: 16px;
+}
+html.github-design body .forum-directory-card {
+  border: 1px solid var(--gh-border);
+  border-radius: var(--gh-radius);
+  background: var(--gh-canvas);
+  transition: border-color 120ms ease, background 120ms ease;
+}
+html.github-design body .forum-directory-card:hover {
+  border-color: var(--gh-fg-muted);
+  background: var(--gh-overlay);
+}
+html.github-design body .forum-directory-card.active {
+  border-color: var(--gh-link);
+  background: rgba(var(--gh-accent-rgb), 0.1);
+}
+html.github-design body .forum-directory-heading,
+html.github-design body .forum-directory-heading h2 {
+  font-family: var(--gh-font);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+html.github-design body .community-table-wrap,
+html.github-design body .leaderboard-panel {
+  border: 1px solid var(--gh-border);
+  border-radius: var(--gh-radius);
+  background: var(--gh-panel);
+  box-shadow: none;
+  overflow: hidden;
+}
+html.github-design body .community-table :is(th, td) {
+  padding: 12px;
+  border-bottom: 1px solid var(--gh-border-muted);
+}
+html.github-design body .community-table thead th {
+  position: static;
+  background: var(--gh-panel);
+  border-bottom: 1px solid var(--gh-border);
+  color: var(--gh-fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  backdrop-filter: none;
+}
+html.github-design body .community-table tbody tr:hover {
+  background: rgba(var(--gh-hover-rgb), 0.06);
+}
+html.github-design body .community-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+html.github-design body .community-page-heading {
+  border: 1px solid var(--gh-border);
+  border-radius: var(--gh-radius);
+  border-bottom: 1px solid var(--gh-border);
+  background: linear-gradient(180deg, var(--gh-panel) 0%, var(--gh-canvas) 100%);
+  box-shadow: none;
+}
+html.github-design body .leaderboard-toolbar,
+html.github-design body .rank-platforms {
+  border: 1px solid var(--gh-border);
+  border-radius: var(--gh-radius);
+  background: var(--gh-panel);
+}
+html.github-design body .oj-filter {
+  border: 1px solid var(--gh-border);
+  border-radius: var(--gh-radius);
+  background: var(--gh-btn-bg);
+  color: var(--gh-fg);
+}
+html.github-design body .oj-filter.is-active,
+html.github-design body .oj-filter[aria-pressed="true"] {
+  border-color: var(--gh-link);
+  background: rgba(var(--gh-accent-rgb), 0.12);
+  color: var(--gh-link);
+}
+
+html.github-design body .forum-avatar {
+  background: var(--gh-border-strong);
+  color: var(--gh-fg);
+  border: 1px solid rgba(var(--gh-fg-rgb), 0.1);
+  font-weight: 600;
+  font-size: 11px;
+}
+
+html.github-design body :is(.forum-empty, .forum-loading) {
+  border: 1px dashed var(--gh-border);
+  border-radius: var(--gh-radius);
+  background: var(--gh-canvas);
+  color: var(--gh-fg-muted);
+  padding: 48px 20px;
+}
+html.github-design body .forum-empty h3 {
+  color: var(--gh-fg);
+  font-size: 16px;
+  font-weight: 600;
+}
+html.github-design body .spinner {
+  border-color: var(--gh-border-strong);
+  border-top-color: var(--gh-link);
+}
+html.github-design body .skeleton-line {
+  background: linear-gradient(90deg, var(--gh-btn-bg), var(--gh-border-strong), var(--gh-btn-bg));
+}
+
+html.github-design body .login form {
+  border: 1px solid var(--gh-border);
+  border-radius: var(--gh-radius);
+  background: var(--gh-panel);
+  box-shadow: 0 8px 24px rgba(1, 4, 9, 0.85);
+  padding: 24px;
+}
+html.github-design body .login h2 {
+  font-family: var(--gh-font);
+  font-size: 20px;
+  font-weight: 300;
+  letter-spacing: -0.01em;
+}
+html.github-design body .login label {
+  color: var(--gh-fg);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+html.github-design body .forum-footer {
+  border-top: 1px solid var(--gh-border-muted);
+  color: var(--gh-fg-subtle);
+  font-size: 12px;
+  padding: 24px 0;
+}
+html.github-design body .forum-footer a {
+  color: var(--gh-link);
+}
+
+html.github-design body ::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+html.github-design body ::-webkit-scrollbar-thumb {
+  background: var(--gh-border-strong);
+  border: 3px solid var(--gh-canvas);
+  border-radius: 6px;
+}
+html.github-design body ::-webkit-scrollbar-thumb:hover {
+  background: var(--gh-fg-subtle);
+}
+html.github-design body ::-webkit-scrollbar-track {
+  background: var(--gh-canvas);
+}
+
+html.github-design body #app { padding-left: 256px; }
+html.github-design body #app > .forum-header {
+  margin-left: -256px;
+  width: calc(100% + 256px);
+}
+
+
+
+html.github-design body .gh-sidebar {
+  position: fixed;
+  left: 0;
+  top: 62px;
+  bottom: 0;
+  z-index: 35;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 256px;
+  padding: 16px 8px 12px;
+  border-right: 1px solid var(--gh-border);
+  background: var(--gh-panel);
+  overflow-y: auto;
+  font-family: var(--gh-font);
+  scrollbar-width: thin;
+}
+
+html.github-design body .gh-sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px 14px;
+  color: var(--gh-fg);
+  text-decoration: none;
+}
+html.github-design body .gh-sidebar-mark {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--gh-border);
+  border-radius: 50%;
+  background: var(--gh-btn-bg);
+  color: var(--gh-fg-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+html.github-design body .gh-sidebar-title {
+  display: flex;
+  flex-direction: column;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+html.github-design body .gh-sidebar-title small {
+  color: var(--gh-fg-muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+html.github-design body .gh-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 auto;
+}
+html.github-design body .gh-sidebar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+html.github-design body .gh-sidebar-group-title {
+  margin: 4px 0 2px;
+  padding: 0 10px;
+  color: var(--gh-fg-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+html.github-design body .gh-sidebar-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: var(--gh-radius);
+  background: transparent;
+  color: var(--gh-fg);
+  font-family: var(--gh-font);
+  font-size: 13px;
+  font-weight: 400;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 100ms ease;
+}
+html.github-design body .gh-sidebar-item:hover {
+  background: rgba(var(--gh-hover-rgb), 0.1);
+  color: var(--gh-fg);
+  text-decoration: none;
+}
+html.github-design body .gh-sidebar-item.is-active {
+  background: rgba(var(--gh-hover-rgb), 0.16);
+  font-weight: 600;
+}
+html.github-design body .gh-sidebar-item.is-active::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--gh-underline);
+}
+html.github-design body .gh-sidebar-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--gh-fg-muted);
+}
+html.github-design body .gh-sidebar-item:hover .gh-sidebar-icon,
+html.github-design body .gh-sidebar-item.is-active .gh-sidebar-icon {
+  color: var(--gh-fg);
+}
+html.github-design body .gh-sidebar-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+html.github-design body .gh-sidebar-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  html.github-design body #app { padding-left: 0; }
+  html.github-design body #app > .forum-header {
+    margin-left: 0;
+    width: 100%;
+  }
+  html.github-design body :is(#app > .forum-home-layout, #app > .community-main, #app > .wiki-shell) {
+    padding-left: 0;
+    padding-right: 0;
+  }
+  html.github-design body .gh-sidebar { display: none; }
+}
+
+html.github-design body .primary-nav { display: none; }
+html.github-design body .forum-brand small { display: none; }
+html.github-design body .forum-brand { font-size: 14px; }
+html.github-design body .forum-header { justify-content: space-between; }
+
+html.github-design body .forum-directory-grid {
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 10px;
+}
+html.github-design body .forum-directory-card {
+  min-width: 0;
+  padding: 10px 12px;
+}
+html.github-design body .forum-directory-card :is(strong, b) {
+  font-size: 13px;
+  font-weight: 600;
+}
+html.github-design body .forum-directory { padding: 14px 16px; }
+
+html.github-design body .forum-post-card {
+  padding: 16px 18px;
+  margin: 0 0 12px;
+  border-left: 1px solid var(--gh-border);
+}
+html.github-design body .forum-post-card h2,
+html.github-design body .forum-post-card h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 6px;
+  color: var(--gh-link);
+}
+html.github-design body .forum-post-card h2 a,
+html.github-design body .forum-post-card h3 a { color: inherit; }
+html.github-design body .forum-post-card h2 a:hover,
+html.github-design body .forum-post-card h3 a:hover {
+  color: var(--gh-link);
+  text-decoration: underline;
+}
+html.github-design body .forum-post-meta {
+  order: 2;
+  margin-top: 8px;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--gh-fg-muted);
+}
+html.github-design body .forum-post-excerpt {
+  flex: 1 1 auto;
+  margin-bottom: 2px;
+  color: var(--gh-fg-muted);
+  font-size: 13px;
+  line-height: 1.55;
+  -webkit-line-clamp: 2;
+}
+html.github-design body .forum-post-time { margin-left: 0; color: var(--gh-fg-muted); }
+html.github-design body .forum-post-author { color: var(--gh-fg-muted); }
+html.github-design body .forum-post-author img,
+html.github-design body .forum-avatar { width: 20px; height: 20px; }
+
+html.github-design body .forum-post-meta > * + *::before {
+  content: "路";
+  margin-right: 10px;
+  color: var(--gh-fg-subtle);
+}
+html.github-design body .forum-post-actions {
+  gap: 16px;
+  color: var(--gh-fg-muted);
+  font-size: 12px;
+}
+html.github-design body .forum-post-actions :is(button, a):hover { color: var(--gh-link); }
+
+html.github-design body .forum-category-pill {
+  border-color: transparent;
+  background: rgba(var(--gh-accent-rgb), 0.15);
+  color: var(--gh-link);
+  font-weight: 500;
+}
+
+html.github-design body .forum-feed-toolbar {
+  margin: 20px 0 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--gh-border);
+}
+html.github-design body .forum-feed-toolbar .muted {
+  color: var(--gh-fg-muted);
+  font-size: 12px;
+}
+
+html.github-design body .forum-rail-card { padding: 14px 16px; }
+html.github-design body .forum-rail-card :is(ol, ul) { margin: 0; padding: 0; }
+html.github-design body .forum-rail-card li {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--gh-border-muted);
+  font-size: 13px;
+}
+html.github-design body .forum-rail-card li:last-child { border-bottom: 0; }
+html.github-design body .forum-rail-card li a { color: var(--gh-link); }
+html.github-design body .forum-rail-card li a:hover { text-decoration: underline; }
+
+html.github-design body .forum-search .btn,
+html.github-design body .forum-search button {
+  border-radius: 0 var(--gh-radius) var(--gh-radius) 0;
+  border: 0;
+  border-left: 1px solid var(--gh-border);
+  background: var(--gh-btn-bg);
+  color: var(--gh-fg);
+  min-height: 40px;
+}
+html.github-design body .forum-search .btn:hover,
+html.github-design body .forum-search button:hover { background: var(--gh-border-strong); }
+
+html.github-design body .forum-footer {
+  margin-left: 0;
+  padding: 20px 24px 28px;
+  color: var(--gh-fg-subtle);
+}
+
+html.github-design body .forum-header .primary-nav { display: none !important; }
+html.github-design body .forum-directory-grid {
+  grid-auto-flow: row !important;
+  grid-template-columns: repeat(auto-fill, minmax(142px, 1fr)) !important;
+  gap: 10px !important;
+}
+html.github-design body .forum-directory-card {
+  padding: 10px 12px !important;
+  gap: 8px;
+}
+html.github-design body .forum-directory-copy :is(strong, b, span) { font-size: 12.5px; }
+html.github-design body .forum-directory { overflow: visible; }
+
+/* sidebar footer: logout entry pinned below the nav */
+html.github-design body .gh-sidebar-footer {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--gh-border-muted);
+}
+html.github-design body .gh-sidebar-signout {
+  width: 100%;
+  color: var(--gh-fg-muted);
+}
+html.github-design body .gh-sidebar-signout:hover { color: var(--gh-fg); }
+/* =========================================================================
+   Feed typography: Tieba-style author-first card + Zhihu-style body density
+   ========================================================================= */
+
+/* 1. card shell */
+html.github-design body .forum-post-card {
+  padding: 14px 16px 10px;
+  margin: 0 0 10px;
+  border: 1px solid var(--gh-border);
+  border-radius: var(--gh-radius);
+  background: var(--gh-panel);
+}
+html.github-design body .forum-post-card:hover {
+  background: var(--gh-hover-bg);
+  border-color: var(--gh-border-strong);
+}
+html.github-design body .forum-post-card-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 84px;
+  gap: 12px;
+  align-items: start;
+}
+html.github-design body .forum-post-card-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 2. author row first (Tieba), like a GitHub issue header */
+html.github-design body .forum-post-author {
+  order: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--gh-fg-muted);
+  font-size: 12.5px;
+}
+html.github-design body .forum-post-author img,
+html.github-design body .forum-post-author .forum-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid rgba(var(--gh-fg-rgb), 0.12);
+}
+html.github-design body .forum-post-author > span:first-of-type {
+  color: var(--gh-fg);
+  font-weight: 600;
+  font-size: 13px;
+}
+html.github-design body .forum-post-author > span + span { color: var(--gh-fg-subtle); }
+
+/* 3. title second */
+html.github-design body .forum-post-card h2,
+html.github-design body .forum-post-card h3 {
+  order: 2;
+  margin: 2px 0 0;
+  font-size: 16.5px;
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: 0;
+  color: var(--gh-link);
+}
+html.github-design body .forum-post-card h2 a:hover,
+html.github-design body .forum-post-card h3 a:hover { text-decoration: underline; }
+
+/* 4. excerpt third */
+html.github-design body .forum-post-excerpt {
+  order: 3;
+  margin: 0;
+  color: var(--gh-fg-muted);
+  font-size: 13px;
+  line-height: 1.6;
+  -webkit-line-clamp: 3;
+}
+
+/* 5. meta last, small and quiet */
+html.github-design body .forum-post-meta {
+  order: 6;
+  margin-top: 2px;
+  gap: 8px;
+  color: var(--gh-fg-subtle);
+  font-size: 11.5px;
+}
+html.github-design body .forum-post-meta > * + *::before {
+  content: "\00B7";
+  margin-right: 8px;
+  color: var(--gh-fg-subtle);
+}
+html.github-design body .forum-category-pill {
+  padding: 0 8px;
+  border: 1px solid rgba(var(--gh-accent-rgb), 0.35);
+  border-radius: 999px;
+  background: rgba(var(--gh-accent-rgb), 0.12);
+  color: var(--gh-link);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+/* 6. cover thumbnail on the right */
+html.github-design body .forum-post-cover-link {
+  width: 84px;
+  height: 84px;
+  border: 1px solid var(--gh-border);
+  border-radius: var(--gh-radius);
+  background: var(--gh-canvas);
+  overflow: hidden;
+  align-self: start;
+}
+html.github-design body .forum-post-cover-link img { width: 100%; height: 100%; object-fit: cover; }
+html.github-design body .forum-post-cover-placeholder {
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  color: var(--gh-fg-subtle);
+}
+html.github-design body .forum-post-cover-placeholder svg { width: 26px; height: 26px; opacity: .55; }
+html.github-design body .forum-post-cover-placeholder span { font-size: 9px; letter-spacing: .02em; }
+
+/* 7. action bar: Tieba/Zhihu style counters with GitHub restraint */
+html.github-design body .forum-post-actions {
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--gh-border-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--gh-fg-muted);
+  font-size: 12px;
+}
+html.github-design body .forum-post-actions > * {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 3px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--gh-radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+html.github-design body .forum-post-actions > *:hover {
+  border-color: var(--gh-border);
+  background: var(--gh-btn-bg);
+  color: var(--gh-fg);
+  text-decoration: none;
+}
+html.github-design body .forum-post-actions .is-active,
+html.github-design body .forum-post-actions .active { color: var(--gh-attention); }
+html.github-design body .forum-post-actions :is(a, button, span) { white-space: nowrap; }
+html.github-design body .forum-post-actions > :last-child { margin-left: auto; }
+
+/* 8. right rail: ranked list like Tieba hot topics */
+html.github-design body .forum-rail-card {
+  padding: 0;
+  overflow: hidden;
+}
+html.github-design body .forum-rail-card > :is(h2, h3, .forum-rail-heading) {
+  margin: 0;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--gh-border);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--gh-fg);
+}
+html.github-design body .forum-rail-card li,
+html.github-design body .forum-rail-card .forum-side-links a {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--gh-border-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+html.github-design body .forum-rail-card li:last-child { border-bottom: 0; }
+html.github-design body .forum-rail-card li:hover { background: var(--gh-hover-bg); }
+html.github-design body .forum-rail-card li a { color: var(--gh-fg); }
+html.github-design body .forum-rail-card li a:hover { color: var(--gh-link); text-decoration: none; }
+html.github-design body .forum-rail-card li :is(small, .muted, span) { color: var(--gh-fg-subtle); }
+
+/* 9. sidebar links block: Tieba-style flat rows */
+html.github-design body .forum-side-links {
+  border: 1px solid var(--gh-border);
+  border-radius: var(--gh-radius);
+  background: var(--gh-panel);
+  overflow: hidden;
+}
+html.github-design body .forum-side-links a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--gh-border-muted);
+  border-radius: 0;
+  color: var(--gh-fg);
+  font-size: 13px;
+}
+html.github-design body .forum-side-links a:last-child { border-bottom: 0; }
+html.github-design body .forum-side-links a:hover { background: var(--gh-hover-bg); color: var(--gh-link); }
+
+/* 10. feed toolbar: Zhihu-like compact header */
+html.github-design body .forum-feed-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0 10px;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--gh-border);
+}
+html.github-design body .industrial-feed-title { font-size: 18px; }
+html.github-design body .forum-tabs { margin-left: auto; border-bottom: 0; }
+html.github-design body .forum-tab { padding: 6px 10px; font-size: 13px; }
+html.github-design body .forum-tab.active { box-shadow: inset 0 -2px 0 var(--gh-underline); }
+
+/* Wider feed deferred: the home grid keeps its original column definition. */
+
+/* =========================================================================
+   Simplify & harmonize: one accent family, less decoration, calmer rhythm
+   ========================================================================= */
+
+/* Hero: drop halftone dots and the busy algorithm art, keep a clean text block */
+html.github-design body .forum-welcome {
+  display: block !important;
+  min-height: 0 !important;
+  padding: 30px 32px 26px !important;
+  border: 1px solid var(--gh-border) !important;
+  border-radius: var(--gh-radius) !important;
+  background: linear-gradient(180deg, #171d26 0%, #12171f 100%) !important;
+  box-shadow: none !important;
+}
+html.github-design body .forum-welcome .industrial-hero-dots,
+html.github-design body .forum-welcome .forum-algorithm-art { display: none !important; }
+html.github-design body .forum-welcome .industrial-hero-copy {
+  width: 100% !important;
+  max-width: 720px !important;
+}
+html.github-design body .forum-kicker {
+  display: inline-block;
+  margin-bottom: 10px;
+  color: var(--gh-fg-muted);
+  font-size: 11px;
+  letter-spacing: .08em;
+}
+html.github-design body .forum-welcome h1 {
+  margin: 0 0 10px;
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -.015em;
+}
+html.github-design body .forum-welcome p {
+  margin: 0 0 20px;
+  max-width: 46em;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--gh-fg-muted);
+}
+html.github-design body .forum-hero-cta {
+  padding: 6px 16px;
+  border-radius: var(--gh-radius);
+  font-size: 13.5px;
+  font-weight: 500;
+  background: var(--gh-success-emphasis);
+}
+html.github-design body .industrial-hero-bottom {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--gh-border-muted);
+  color: var(--gh-fg-subtle) !important;
+  font-size: 11.5px;
+}
+
+/* Post list: hide empty cover placeholders, keep only real thumbnails */
+html.github-design body .forum-post-cover-placeholder { display: none !important; }
+html.github-design body .forum-post-card-layout { grid-template-columns: minmax(0, 1fr) !important; }
+html.github-design body .forum-post-card-layout:has(.forum-post-cover-link:not(.forum-post-cover-placeholder)) {
+  grid-template-columns: minmax(0, 1fr) 84px !important;
+}
+
+/* One accent family: active states use link blue, green stays for primary CTA only */
+html.github-design body .forum-tab.active { box-shadow: inset 0 -2px 0 var(--gh-link) !important; }
+html.github-design body .gh-sidebar-item.is-active::before { background: var(--gh-link) !important; }
+html.github-design body .primary-nav a.active::after { background: var(--gh-link) !important; }
+html.github-design body .forum-post-actions .is-active,
+html.github-design body .forum-post-actions .active { color: var(--gh-link) !important; }
+
+/* Search submit: default GitHub button instead of a colored block */
+html.github-design body .forum-search .btn,
+html.github-design body .forum-search button {
+  background: var(--gh-btn-bg) !important;
+  color: var(--gh-fg) !important;
+  border-left: 1px solid var(--gh-border) !important;
+}
+html.github-design body .forum-search .btn:hover,
+html.github-design body .forum-search button:hover { background: var(--gh-border-strong) !important; }
+
+/* Right rail: quieter numbering and tighter rows */
+html.github-design body .forum-rail-card li { padding: 9px 14px; }
+html.github-design body .forum-rail-card li :is(span, small) { color: var(--gh-fg-subtle); }
+
+/* Final cleanup: remove leftover hero footer line, align directory counters */
+html.github-design body .industrial-hero-bottom { display: none !important; }
+html.github-design body .forum-welcome { padding-bottom: 28px !important; }
+html.github-design body .forum-hero-cta span {
+  display: inline !important;
+  margin-left: 4px;
+  background: transparent !important;
+  font-size: 14px !important;
+}
+html.github-design body .forum-directory-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+html.github-design body .forum-directory-card > * { min-width: 0; }
+html.github-design body .forum-directory-copy { flex: 1 1 auto; }
+html.github-design body .forum-directory-card :is(.forum-directory-count, [class*="count"]) {
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  color: var(--gh-link);
+  font-size: 12px;
+  font-weight: 600;
+}
+html.github-design body .forum-directory-card :is(.forum-directory-count, [class*="count"]) span {
+  color: var(--gh-fg-subtle);
+  font-size: 10.5px;
+  font-weight: 400;
+}
+/* =========================================================================
+   Keep Tieba/Zhihu strengths inside the GitHub look
+   - Zhihu: quick compose bar above the feed,
+"read more" affordance
+   - Tieba: group cards,
+ranked rail rows
+   ========================================================================= */
+
+/* hidden unless the GitHub skin is active { display: none; }
+
+/* Zhihu-style read-more affordance on the excerpt link */
+html.github-design body .forum-post-excerpt::after {
+  content: " 阅读全文 \203A";
+  color: var(--gh-link);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+/* Tieba-style grouped rail rows: clearer separation between groups */
+html.github-design body .forum-community-card + .forum-side-links,
+html.github-design body .forum-rail-card + .forum-rail-card { margin-top: 12px; }
+html.github-design body .forum-rail { display: flex; flex-direction: column; gap: 12px; }
+html.github-design body .forum-rail > * { margin-bottom: 0 !important; }
+
+/* =========================================================================
+   Restore the original GitHub-skin spacing for the directory grid and the
+   right-rail ranking list (the compressed variants are reverted here).
+   ========================================================================= */
+
+/* 鎺㈢储鐗堝潡: natural block cards, no flex squeeze, labels never truncated */
+html.github-design body .forum-directory-card {
+  display: block !important;
+  justify-content: initial !important;
+  gap: 0 !important;
+  padding: 12px 14px !important;
+}
+html.github-design body .forum-directory-grid {
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)) !important;
+  gap: 10px !important;
+}
+html.github-design body .forum-directory-copy :is(strong, b, span) {
+  font-size: 13px !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
+html.github-design body .forum-directory-card :is(.forum-directory-count, [class*="count"]) {
+  display: block;
+  margin-top: 4px;
+  color: var(--gh-link);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+html.github-design body .forum-directory-card :is(.forum-directory-count, [class*="count"]) span {
+  color: var(--gh-fg-subtle);
+  font-size: 11px;
+}
+
+/* 鐑棬璇濋: roomier rows, number/title/count on a calm rhythm */
+html.github-design body .forum-rail-card li {
+  padding: 11px 16px !important;
+  display: block !important;
+}
+html.github-design body .forum-rail-card li a {
+  font-size: 13px !important;
+  line-height: 1.5 !important;
+  color: var(--gh-fg) !important;
+}
+html.github-design body .forum-rail-card li :is(span, small) {
+  display: block;
+  margin-top: 3px;
+  color: var(--gh-fg-subtle);
+  font-size: 11.5px;
+}
+
+/* =========================================================================
+   Right rail: align to the real markup (.forum-side-title / .hot-topic-list a),
+   restore padding so nothing sits flush against the card edge.
+   ========================================================================= */
+html.github-design body .forum-rail-card { padding: 0 !important; }
+html.github-design body .forum-rail-card .forum-side-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--gh-border);
+  color: var(--gh-fg);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+html.github-design body .forum-rail-card .forum-side-title span {
+  color: var(--gh-fg-subtle);
+  font-size: 12px;
+}
+
+html.github-design body .hot-topic-list { display: block; }
+html.github-design body .hot-topic-list a {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-areas:
+    "num title"
+    "num count";
+  align-items: baseline;
+  column-gap: 10px;
+  row-gap: 3px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--gh-border-muted);
+  text-decoration: none;
+}
+html.github-design body .hot-topic-list a:last-child { border-bottom: 0; }
+html.github-design body .hot-topic-list a:hover { background: var(--gh-hover-bg); }
+html.github-design body .hot-topic-list a > span {
+  grid-area: num;
+  color: var(--gh-fg-subtle);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
+}
+html.github-design body .hot-topic-list a > b {
+  grid-area: title;
+  min-width: 0;
+  color: var(--gh-fg);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+html.github-design body .hot-topic-list a:hover > b { color: var(--gh-link); }
+html.github-design body .hot-topic-list a > small {
+  grid-area: count;
+  color: var(--gh-fg-subtle);
+  font-size: 11.5px;
+}
+
+/* note card: paragraph and link get the same 16px gutter */
+html.github-design body .forum-rail-card > p {
+  margin: 0;
+  padding: 12px 16px 6px;
+  color: var(--gh-fg-muted);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+html.github-design body .forum-rail-card > a {
+  display: block;
+  padding: 8px 16px 13px;
+  color: var(--gh-link);
+  font-size: 12.5px;
+}
+html.github-design body .forum-rail-card > a:hover { text-decoration: underline; }
+
+/* small polish: keep a gap between the count number and its unit */
+html.github-design body .forum-directory-card :is(.forum-directory-count, [class*="count"]) {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  margin-top: 6px;
+}
+
+/* Right rail: all cards share the same full width */
+html.github-design body .forum-rail { align-items: stretch !important; }
+html.github-design body .forum-rail > * { width: 100% !important; max-width: none !important; }

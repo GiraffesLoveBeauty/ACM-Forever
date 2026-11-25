@@ -2,10 +2,11 @@
 import { ref, provide, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useRoute } from 'vue-router';
 import Header from './components/Header.vue';
-import ThemeEditor from './components/ThemeEditor.vue';
+import GitHubSidebar from './components/GitHubSidebar.vue';
 import { auth, notification, pageLoadError } from './lib/api.js';
 const route = useRoute();
-const themeEditor = ref();
+/* GitHub 皮肤下才渲染左侧导航（皮肤由 main.js 在挂载前加在 body 上） */
+const githubSkin = !!document.documentElement?.classList?.contains('github-design');
 const loadErrorHeading = ref();
 watch(
   pageLoadError,
@@ -16,10 +17,9 @@ watch(
   },
   { immediate: true },
 );
-provide('openTheme', () => themeEditor.value?.open());
-provide('toggleTheme', () => themeEditor.value?.toggle());
-provide('setDesignTemplate', (template) => themeEditor.value?.setTemplate(template));
-provide('getDesignTemplate', () => themeEditor.value?.getTemplate?.());
+/* 设计模板（主题库/自助调色）已移除：插画只保留默认样式 */
+provide('getDesignTemplate', () => 'original');
+provide('setDesignTemplate', () => {});
 function imageError(event) {
   const image = event.target;
   if (
@@ -37,6 +37,7 @@ function reloadPage() {
 </script>
 <template>
   <Header />
+  <GitHubSidebar v-if="githubSkin" />
   <section v-if="pageLoadError" class="community-main" aria-label="页面加载提示">
     <section class="card" role="alert">
       <h1 ref="loadErrorHeading" tabindex="-1">页面加载失败</h1>
@@ -59,6 +60,5 @@ function reloadPage() {
       "
     />
   </RouterView>
-  <ThemeEditor ref="themeEditor" />
-  <div class="forum-toast" :class="{ visible: notification }" role="status">{{ notification }}</div>
+    <div class="forum-toast" :class="{ visible: notification }" role="status">{{ notification }}</div>
 </template>

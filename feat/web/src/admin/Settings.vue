@@ -2,7 +2,6 @@
 import { ref, reactive, inject, onMounted } from 'vue';
 import { useRequests, notify, showError } from '../lib/api.js';
 const request = useRequests(),
-  openTheme = inject('openTheme'),
   font = ref(1),
   time = ref(''),
   group = ref(''),
@@ -64,8 +63,6 @@ onMounted(async () => {
 <template>
   <section class="admin-panel">
     <h2>外观</h2>
-    <p class="muted">自助调色仅保存在当前浏览器。</p>
-    <button class="btn" @click="openTheme">打开自助调色</button>
     <form class="filters" @submit.prevent="appearance">
       <label
         >字号比例<input
