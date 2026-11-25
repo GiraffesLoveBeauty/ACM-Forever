@@ -186,6 +186,23 @@ onMounted(async () => {
             >{{ categories.length }} 个版块 · {{ directory[0].post_count }} 个话题</span
           >
         </div>
+        <section class="forum-graph-hero" aria-labelledby="graph-hero-title">
+          <div class="forum-graph-copy">
+            <span class="forum-graph-kicker">ACM FOREVER / 计量算法社区</span>
+            <h2 id="graph-hero-title">拆解问题。<br />连接思路。</h2>
+            <p>从卡住的那一步开始。分享题解、交流训练，和大家一起走向下一个 AC。</p>
+            <RouterLink class="forum-graph-cta" to="/compose.html"
+              >写一个新话题 <span aria-hidden="true">+</span></RouterLink
+            >
+          </div>
+          <div class="forum-graph-canvas">
+            <GraphArt />
+          </div>
+          <footer class="forum-graph-foot">
+            <span>思考 / 编写 / 交流</span>
+            <span class="forum-graph-route" aria-hidden="true">s → v → d → t</span>
+          </footer>
+        </section>
         <div class="forum-directory-grid">
           <button
             v-for="c in directory"
@@ -240,6 +257,9 @@ onMounted(async () => {
       </form>
       <div class="forum-feed-toolbar">
         <h2 class="industrial-feed-title">讨论话题</h2>
+        <RouterLink class="gh-new-topic" to="/compose.html" aria-label="创建新话题" title="创建新话题">
+          <span aria-hidden="true">+</span>
+        </RouterLink>
         <div class="forum-tabs" role="group" aria-label="话题排序方式">
           <button
             v-for="(label, sort) in { latest: '最新', hot: '热门', unanswered: '等你回答' }"

@@ -281,10 +281,11 @@ for (const role of ['member', 'admin', 'root']) {
       textOf(node).includes('管理后台'),
     );
     assert.equal(management.length, role === 'member' ? 0 : 1);
+    /* 头像/账户入口已移到侧栏顶部区块，顶栏不再提供 */
     const account = controls(mounted.root, 'a').find(
       (node) => node.props['aria-label'] === '账户中心',
     );
-    assert.equal(account.props.href, role === 'member' ? '/home.html' : '/admin.html');
+    assert.equal(account, undefined);
   });
 }
 
