@@ -31,6 +31,7 @@ const options = ref({ statuses: [], capabilities: [] }),
   confirmed = ref(false),
   loading = ref(false),
   busy = ref(false),
+  exporting = ref(false),
   error = ref(''),
   catalog = ref({ items: [], total: 0 }),
   catalogQuery = ref(''),
@@ -80,6 +81,53 @@ function progressMemberName(member) {
   if (member.account_status === 'closed') return '已注销成员';
   if (member.account_status === 'changed') return '历史成员';
   return member.real_name?.trim() || '未填写姓名';
+}
+function problemCellTitle(cell, index) {
+  const status = cell.completed
+    ? cell.platform === 'luogu'
+      ? 'AC（历史）'
+      : cell.status === 'late'
+        ? 'AC（逾期）'
+        : 'AC'
+    : {
+        history_ac: '历史 AC，不计入本次训练',
+        timing_unknown: 'AC 时间待核验，暂不计入',
+        not_started: '未开始',
+        unverified: '不支持核验',
+      }[cell.status] || '未确认 AC';
+  return `第 ${index + 1} 题 · ${cell.problem_id} ${cell.problem_name}：${status}`;
+}
+async function exportProgress() {
+  if (exporting.value || !task.value) return;
+  exporting.value = true;
+  const id = task.value.id;
+  const filename = task.value.title.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').slice(0, 100);
+  try {
+    const blob = await request(
+      `${base}/${id}/export`,
+      {
+        responseType: 'blob',
+        timeoutMs: 60000,
+      },
+      'export',
+    );
+    if (disposed || task.value?.id !== id) return;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    try {
+      link.href = url;
+      link.download = `${filename || '训练'}-完成情况.xlsx`;
+      document.body.append(link);
+      link.click();
+    } finally {
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+  } catch (e) {
+    if (e.name !== 'AbortError') notify('导出失败：' + e.message);
+  } finally {
+    exporting.value = false;
+  }
 }
 function auditText(entry) {
   if (entry.action !== 'extended') return '';
@@ -928,6 +976,15 @@ function lifecycle(kind) {
           人。洛谷按历史 AC 计入，不判断完成时段。
           任务需全部必做题完成，账号异常保留在固定分母中。完成与核验状态独立。
         </p>
+        <div class="tt-between">
+          <p id="tt-progress-legend" class="tt-caption">
+            格子按题单顺序排列，紫色表示对应题目已 AC 并计入完成；悬停可查看题号和状态。
+          </p>
+          <button class="btn" :disabled="exporting" @click="exportProgress">
+            {{ exporting ? '正在导出…' : '导出 Excel' }}
+          </button>
+        </div>
+        <p class="tt-caption">导出当前训练全部成员的逐题进度，不受筛选和分页影响。</p>
         <form
           class="tt-filter"
           @submit.prevent="
@@ -991,15 +1048,16 @@ function lifecycle(kind) {
                       :aria-valuetext="
                         '已完成 ' + m.completed_problems + ' / ' + m.problem_count + ' 题'
                       "
-                      :style="{ '--tt-progress-steps': m.problem_count }"
+                      aria-describedby="tt-progress-legend"
                     >
                       <span
-                        :style="{
-                          width:
-                            (m.problem_count ? (m.completed_problems / m.problem_count) * 100 : 0) +
-                            '%',
-                        }"
-                      ></span>
+                        v-for="(cell, index) in m.problem_cells"
+                        :key="cell.id"
+                        class="tt-problem-cell"
+                        :class="{ 'is-ac': cell.completed }"
+                        :title="problemCellTitle(cell, index)"
+                        >{{ index + 1 }}</span
+                      >
                     </div>
                   </div>
                 </td>

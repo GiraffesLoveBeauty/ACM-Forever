@@ -5,6 +5,7 @@ import { date, showError, syncFailureMessage, useRequests } from '../lib/api.js'
 const request = useRequests();
 const loading = ref(false);
 const sending = reactive({});
+const memberStatuses = ref([]);
 const expanded = reactive(new Set());
 const feedback = ref('');
 const error = ref('');
@@ -17,7 +18,7 @@ const snapshot = ref({
   platforms: [],
   global: { luogu: {} },
 });
-const filters = reactive({ search: '', platform: '', status: '', page: 1 });
+const filters = reactive({ search: '', member_status: '', platform: '', status: '', page: 1 });
 let timer;
 let disposed = false;
 
@@ -29,6 +30,7 @@ const stats = computed(() => [
   { key: 'running', label: '同步中', hint: '已有任务排队或执行', tone: 'running' },
   { key: 'waiting', label: '等待重试', hint: '受冷却或退避影响', tone: 'waiting' },
   { key: 'failed', label: '失败', hint: '需要管理员关注', tone: 'failed' },
+  { key: 'disabled', label: '已停用', hint: '洛谷账号访问受限，等待管理员开启', tone: 'disabled' },
   { key: 'paused', label: '暂停', hint: '平台同步开关已关闭', tone: 'paused' },
   { key: 'never', label: '未同步', hint: '已绑定但尚无成功记录', tone: 'neutral' },
 ]);
@@ -39,6 +41,7 @@ function statusLabel(status) {
     running: '同步中',
     waiting: '等待重试',
     failed: '失败',
+    disabled: '已停用',
     paused: '已暂停',
     never: '未同步',
     cancelled: '已取消',
@@ -73,10 +76,20 @@ function buildQuery() {
     page_size: String(snapshot.value.page_size || 20),
   });
   if (filters.search.trim()) query.set('search', filters.search.trim());
+  if (filters.member_status) query.set('member_status', filters.member_status);
   if (filters.platform) query.set('platform', filters.platform);
   if (filters.status) query.set('status', filters.status);
   return query.toString();
 }
+async function loadMemberOptions() {
+  try {
+    const data = await request('/admin/members/options', {}, 'sync-member-options');
+    memberStatuses.value = Array.isArray(data?.statuses) ? data.statuses : [];
+  } catch (cause) {
+    if (cause.name !== 'AbortError') memberStatuses.value = [];
+  }
+}
+
 async function load({ quiet = false } = {}) {
   if (!quiet) loading.value = true;
   error.value = '';
@@ -108,6 +121,22 @@ function nextPage() {
     load();
   }
 }
+async function enableLuogu(row) {
+  const key = `enable:${row.qq_id}`;
+  if (sending[key]) return;
+  sending[key] = true;
+  feedback.value = '';
+  try {
+    const data = await request(`/admin/luogu-sync/${encodeURIComponent(row.qq_id)}/enable`, { method: 'POST' }, key);
+    feedback.value = `${row.name}：${data.message || '已重新开启洛谷同步。'}`;
+    await load({ quiet: true });
+  } catch (cause) {
+    if (cause.name !== 'AbortError') showError(cause);
+  } finally {
+    sending[key] = false;
+  }
+}
+
 async function startSync(row, platform = '') {
   const key = `${row.qq_id}:${platform || 'all'}`;
   if (sending[key]) return;
@@ -157,7 +186,8 @@ function accountLabel(platform) {
   return platform?.account || '未绑定';
 }
 onMounted(async () => {
-  await load();
+  await Promise.all([load(), loadMemberOptions()]);
+  if (disposed) return;
   const poll = async () => {
     if (disposed) return;
     await load({ quiet: true });
@@ -211,10 +241,11 @@ onBeforeUnmount(() => {
 
     <form class="sync-filters" @submit.prevent="resetPage">
       <label class="sync-search">搜索成员<input v-model="filters.search" type="search" placeholder="姓名、QQ、学校或 OJ 账号" /></label>
+      <label>成员身份<select v-model="filters.member_status" @change="resetPage"><option value="">全部身份</option><option value="__empty__">未设置身份</option><option v-for="status in memberStatuses" :key="status" :value="status">{{ status }}</option></select></label>
       <label>平台<select v-model="filters.platform" @change="resetPage"><option value="">全部平台</option><option v-for="platform in platformList" :key="platform.key" :value="platform.key">{{ platform.label }}</option></select></label>
-      <label>状态<select v-model="filters.status" @change="resetPage"><option value="">全部状态</option><option value="success">正常</option><option value="running">同步中</option><option value="waiting">等待重试</option><option value="failed">失败</option><option value="paused">已暂停</option><option value="never">未同步</option><option value="unbound">未绑定</option></select></label>
+      <label>状态<select v-model="filters.status" @change="resetPage"><option value="">全部状态</option><option value="success">正常</option><option value="running">同步中</option><option value="waiting">等待重试</option><option value="failed">失败</option><option value="disabled">已停用</option><option value="paused">已暂停</option><option value="never">未同步</option><option value="unbound">未绑定</option></select></label>
       <button class="btn" type="submit">应用筛选</button>
-      <button class="btn ghost" type="button" @click="filters.search = ''; filters.platform = ''; filters.status = ''; resetPage()">清空</button>
+      <button class="btn ghost" type="button" @click="filters.search = ''; filters.member_status = ''; filters.platform = ''; filters.status = ''; resetPage()">清空</button>
     </form>
 
     <div class="sync-table-wrap">
@@ -225,7 +256,7 @@ onBeforeUnmount(() => {
         <tbody>
           <template v-for="row in snapshot.items" :key="row.qq_id">
             <tr :class="{ expanded: isExpanded(row) }">
-              <td class="sync-member-cell"><button class="sync-expand" type="button" :aria-expanded="isExpanded(row)" @click="toggleRow(row)">{{ isExpanded(row) ? '−' : '+' }}</button><span class="sync-avatar">{{ (row.name || '?').slice(0, 1) }}</span><span><strong>{{ row.name }}</strong><small>{{ row.real_name || row.qq_id }}<span v-if="row.school"> · {{ row.school }}</span></small></span></td>
+              <td class="sync-member-cell"><button class="sync-expand" type="button" :aria-expanded="isExpanded(row)" @click="toggleRow(row)">{{ isExpanded(row) ? '−' : '+' }}</button><span class="sync-avatar">{{ (row.name || '?').slice(0, 1) }}</span><span><strong>{{ row.name }}</strong><small>{{ row.real_name || row.qq_id }}<span v-if="row.school"> · {{ row.school }}</span></small><small>身份：{{ row.member_status || '未设置' }}</small></span></td>
               <td v-for="platform in platformList" :key="platform.key" class="sync-platform-cell">
                 <div class="sync-platform-head"><span class="sync-dot" :class="statusTone(row.platforms[platform.key]?.status)"></span><span>{{ statusLabel(row.platforms[platform.key]?.status) }}</span></div>
                 <strong class="sync-account">{{ accountLabel(row.platforms[platform.key]) }}</strong>
@@ -234,9 +265,49 @@ onBeforeUnmount(() => {
                 <small v-if="shortError(row.platforms[platform.key])" class="sync-error-text" :title="shortError(row.platforms[platform.key])">{{ shortError(row.platforms[platform.key]) }}</small>
                 <small v-if="retryText(row.platforms[platform.key])" class="sync-retry-text">{{ retryText(row.platforms[platform.key]) }}</small>
               </td>
-              <td class="sync-table-actions"><button class="btn compact" :disabled="sending[`${row.qq_id}:all`]" @click="startSync(row)">{{ sending[`${row.qq_id}:all`] ? '排队…' : '同步成员' }}</button></td>
+              <td class="sync-table-actions">
+                <div class="sync-row-actions">
+                  <button class="btn compact" type="button" :disabled="sending[`${row.qq_id}:all`]" @click="startSync(row)">{{ sending[`${row.qq_id}:all`] ? '排队…' : '同步成员' }}</button>
+                  <button
+                    v-if="row.platforms.luogu?.status === 'disabled'"
+                    class="btn compact"
+                    type="button"
+                    :disabled="sending[`enable:${row.qq_id}`]"
+                    @click="enableLuogu(row)"
+                  >
+                    {{ sending[`enable:${row.qq_id}`] ? '开启中…' : '重新开启洛谷同步' }}
+                  </button>
+                </div>
+              </td>
             </tr>
-            <tr v-if="isExpanded(row)" class="sync-detail-row"><td :colspan="platformList.length + 2"><div class="sync-detail-grid"><article v-for="platform in platformList" :key="platform.key" class="sync-detail-card"><header><strong>{{ platform.label }}</strong><button class="btn compact" :disabled="!row.platforms[platform.key]?.bound || sending[`${row.qq_id}:${platform.key}`]" @click="startSync(row, platform.key)">{{ sending[`${row.qq_id}:${platform.key}`] ? '排队…' : '单独同步' }}</button></header><dl><div><dt>账号</dt><dd>{{ accountLabel(row.platforms[platform.key]) }}</dd></div><div><dt>上次尝试</dt><dd>{{ date(row.platforms[platform.key]?.last_attempt_at) }}</dd></div><div><dt>上次成功</dt><dd>{{ date(row.platforms[platform.key]?.last_success_at) }}</dd></div><div><dt>连续失败</dt><dd>{{ row.platforms[platform.key]?.consecutive_failures || 0 }}</dd></div><div><dt>完整覆盖</dt><dd>{{ date(row.platforms[platform.key]?.full_history_at) }}</dd></div><div><dt>错误码</dt><dd>{{ row.platforms[platform.key]?.last_error_code || '—' }}</dd></div></dl><p v-if="shortError(row.platforms[platform.key])" class="sync-detail-error">{{ shortError(row.platforms[platform.key]) }}</p></article></div></td></tr>
+            <tr v-if="isExpanded(row)" class="sync-detail-row">
+              <td :colspan="platformList.length + 2">
+                <div class="sync-detail-grid">
+                  <article v-for="platform in platformList" :key="platform.key" class="sync-detail-card">
+                    <header>
+                      <strong>{{ platform.label }}</strong>
+                      <button
+                        class="btn compact"
+                        type="button"
+                        :disabled="!row.platforms[platform.key]?.bound || row.platforms[platform.key]?.status === 'disabled' || sending[`${row.qq_id}:${platform.key}`]"
+                        @click="startSync(row, platform.key)"
+                      >
+                        {{ sending[`${row.qq_id}:${platform.key}`] ? '排队…' : '单独同步' }}
+                      </button>
+                    </header>
+                    <dl>
+                      <div><dt>账号</dt><dd>{{ accountLabel(row.platforms[platform.key]) }}</dd></div>
+                      <div><dt>上次尝试</dt><dd>{{ date(row.platforms[platform.key]?.last_attempt_at) }}</dd></div>
+                      <div><dt>上次成功</dt><dd>{{ date(row.platforms[platform.key]?.last_success_at) }}</dd></div>
+                      <div><dt>连续失败</dt><dd>{{ row.platforms[platform.key]?.consecutive_failures || 0 }}</dd></div>
+                      <div><dt>完整覆盖</dt><dd>{{ date(row.platforms[platform.key]?.full_history_at) }}</dd></div>
+                      <div><dt>错误码</dt><dd>{{ row.platforms[platform.key]?.last_error_code || '—' }}</dd></div>
+                    </dl>
+                    <p v-if="shortError(row.platforms[platform.key])" class="sync-detail-error">{{ shortError(row.platforms[platform.key]) }}</p>
+                  </article>
+                </div>
+              </td>
+            </tr>
           </template>
         </tbody>
       </table>
@@ -253,12 +324,13 @@ onBeforeUnmount(() => {
 .sync-center-header { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; }
 .sync-center-header h2 { margin: 4px 0 6px; }.sync-center-header .eyebrow { margin: 0; color: var(--brand); font-size: 10px; font-weight: 800; letter-spacing: .16em; }.sync-center-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .sync-feedback { padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--brand) 25%, var(--line)); border-radius: 8px; color: var(--brand-strong); background: color-mix(in srgb, var(--brand) 8%, var(--panel)); font-size: 12px; }.sync-feedback-error { color: var(--danger, #b74242); border-color: color-mix(in srgb, #b74242 25%, var(--line)); background: color-mix(in srgb, #b74242 6%, var(--panel)); }
-.sync-stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 9px; }.sync-stat { display: grid; gap: 3px; padding: 13px; text-align: left; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); cursor: pointer; }.sync-stat:hover { border-color: var(--brand); transform: translateY(-1px); }.sync-stat-value { font-size: 23px; font-weight: 800; }.sync-stat-label { font-size: 12px; font-weight: 700; }.sync-stat small { min-height: 26px; color: var(--muted); font-size: 10px; line-height: 1.35; }.sync-stat.good .sync-stat-value { color: #2e9472; }.sync-stat.running .sync-stat-value { color: #3d76b5; }.sync-stat.waiting .sync-stat-value { color: #b48531; }.sync-stat.failed .sync-stat-value { color: #bd5b5b; }.sync-stat.paused .sync-stat-value { color: #8b6bb2; }.sync-stat.neutral .sync-stat-value { color: var(--muted); }
+.sync-stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 9px; }.sync-stat { display: grid; gap: 3px; padding: 13px; text-align: left; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); cursor: pointer; }.sync-stat:hover { border-color: var(--brand); transform: translateY(-1px); }.sync-stat-value { font-size: 23px; font-weight: 800; }.sync-stat-label { font-size: 12px; font-weight: 700; }.sync-stat small { min-height: 26px; color: var(--muted); font-size: 10px; line-height: 1.35; }.sync-stat.good .sync-stat-value { color: #2e9472; }.sync-stat.running .sync-stat-value { color: #3d76b5; }.sync-stat.waiting .sync-stat-value { color: #b48531; }.sync-stat.failed .sync-stat-value { color: #bd5b5b; }.sync-stat.disabled .sync-stat-value { color: #c17a32; }.sync-stat.paused .sync-stat-value { color: #8b6bb2; }.sync-stat.neutral .sync-stat-value { color: var(--muted); }
 .sync-gate { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid color-mix(in srgb, #3b936e 25%, var(--line)); border-radius: 10px; background: color-mix(in srgb, #3b936e 7%, var(--panel)); }.sync-gate.blocked { border-color: color-mix(in srgb, #bd7f37 35%, var(--line)); background: color-mix(in srgb, #bd7f37 8%, var(--panel)); }.sync-gate-icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; color: var(--panel); background: var(--brand); font-size: 18px; }.sync-gate p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }.sync-gate-time { margin-left: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .sync-filters { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--subtle-bg); }.sync-filters label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; }.sync-filters .sync-search { flex: 1 1 250px; }.sync-filters input, .sync-filters select { min-height: 34px; min-width: 150px; }
 .sync-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }.sync-table { width: 100%; min-width: 1040px; border-collapse: collapse; }.sync-table th { padding: 11px 12px; color: var(--muted); background: var(--subtle-bg); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-align: left; white-space: nowrap; }.sync-table td { padding: 11px 12px; border-top: 1px solid var(--line); vertical-align: top; }.sync-table tbody tr:hover { background: color-mix(in srgb, var(--brand) 3%, transparent); }.sync-table tbody tr.expanded { background: color-mix(in srgb, var(--brand) 5%, transparent); }
 .sync-member-cell { display: flex; gap: 8px; align-items: center; min-width: 190px; }.sync-member-cell > span:last-child { display: grid; gap: 3px; }.sync-member-cell small, .sync-platform-cell small { display: block; color: var(--muted); font-size: 10px; line-height: 1.35; }.sync-expand { width: 21px; height: 21px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }.sync-avatar { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; background: color-mix(in srgb, var(--brand) 18%, var(--panel)); color: var(--brand-strong); font-weight: 800; }
-.sync-platform-cell { min-width: 145px; }.sync-platform-head { display: flex; gap: 5px; align-items: center; font-size: 10px; color: var(--muted); }.sync-dot { width: 7px; height: 7px; display: inline-block; border-radius: 50%; background: var(--muted); }.sync-status-success { background: #359a76; }.sync-status-running { background: #4f8bcc; }.sync-status-waiting { background: #c18a34; }.sync-status-failed { background: #c45f5f; }.sync-status-paused { background: #9472bc; }.sync-status-never, .sync-status-unbound, .sync-status-cancelled { background: #a6a7ac; }.sync-account { display: block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }.sync-error-text { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #bd5b5b !important; }.sync-retry-text { color: #b48531 !important; }.sync-table-actions { min-width: 96px; text-align: right !important; }.btn.compact { min-height: 29px; padding: 5px 9px; font-size: 10px; }.btn.ghost { background: transparent; }
+.sync-platform-cell { min-width: 145px; }.sync-platform-head { display: flex; gap: 5px; align-items: center; font-size: 10px; color: var(--muted); }.sync-dot { width: 7px; height: 7px; display: inline-block; border-radius: 50%; background: var(--muted); }.sync-status-success { background: #359a76; }.sync-status-running { background: #4f8bcc; }.sync-status-waiting { background: #c18a34; }.sync-status-failed { background: #c45f5f; }.sync-status-disabled { background: #c17a32; }.sync-status-paused { background: #9472bc; }.sync-status-never, .sync-status-unbound, .sync-status-cancelled { background: #a6a7ac; }.sync-account { display: block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }.sync-error-text { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #bd5b5b !important; }.sync-retry-text { color: #b48531 !important; }.sync-table-actions { min-width: 96px; text-align: right !important; }.btn.compact { min-height: 29px; padding: 5px 9px; font-size: 10px; }.btn.ghost { background: transparent; }
+.sync-row-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 .sync-detail-row td { padding: 0 12px 14px 46px; background: color-mix(in srgb, var(--brand) 3%, var(--panel)); }.sync-detail-grid { display: grid; grid-template-columns: repeat(5, minmax(170px, 1fr)); gap: 8px; padding-top: 10px; }.sync-detail-card { padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }.sync-detail-card header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }.sync-detail-card dl { display: grid; gap: 5px; margin: 10px 0 0; }.sync-detail-card dl div { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; }.sync-detail-card dt { color: var(--muted); }.sync-detail-card dd { margin: 0; text-align: right; }.sync-detail-error { margin: 9px 0 0; color: #bd5b5b; font-size: 10px; line-height: 1.4; }
 .sync-loading, .sync-pagination { padding: 12px; color: var(--muted); font-size: 11px; }.sync-pagination { display: flex; justify-content: space-between; gap: 12px; align-items: center; }.sync-pagination > div { display: flex; gap: 10px; align-items: center; }
 @media (max-width: 1100px) { .sync-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }.sync-detail-grid { grid-template-columns: repeat(2, minmax(170px, 1fr)); } }

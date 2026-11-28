@@ -58,7 +58,12 @@ const groups = computed(() => {
   }
   const training = out.find((group) => group.title === '训练与题目');
   if (training) {
-    training.items.push({ key: 'tag-management', label: '标签管理', icon: '▧', to: '/tag-management.html' });
+    training.items.push({
+      key: 'tag-management',
+      label: '标签管理',
+      icon: '▧',
+      to: '/tag-management.html',
+    });
   }
   return out;
 });
@@ -110,7 +115,9 @@ onMounted(async () => {
         <RouterLink
           v-for="item in currentItems"
           :key="item.key"
-          :to="item.to || (item.key === 'accounts' ? '/admin.html' : `/admin.html?section=${item.key}`)"
+          :to="
+            item.to || (item.key === 'accounts' ? '/admin.html' : `/admin.html?section=${item.key}`)
+          "
           class="admin-subtab"
           :class="{ active: section === item.key }"
           :aria-current="section === item.key ? 'page' : undefined"

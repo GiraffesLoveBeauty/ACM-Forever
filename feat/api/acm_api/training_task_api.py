@@ -1,13 +1,15 @@
 """Assigned training HTTP contract. Reads never call an OJ or enqueue work."""
+import asyncio
 import inspect
 import time
 from functools import wraps
 
 from . import training_task_progress as progress
 
-from quart import Blueprint, current_app, g, jsonify, request
+from quart import Blueprint, Response, current_app, g, jsonify, request
 
 from . import training_task_service as service
+from . import training_task_excel as excel
 from .account_lifecycle_service import AccountLifecycleError, require_web_actor
 from .binding_service import platform_spec, LABELS
 from .backend_api import admin_required, get_db, member_required
@@ -129,9 +131,11 @@ async def lifecycle(db, identity, task_id):
 @training_task_api.get("/admin/training-tasks/<int:task_id>/progress")
 @endpoint()
 async def admin_progress(db, identity, task_id):
-    await service.get_task(db, task_id)
+    await db.execute("BEGIN")
+    now = int(time.time())
+    task = await service.get_task(db, task_id)
     page, size = service.paging(request.args)
-    members = await progress.recipient_summaries(db, [task_id], include_real_name=True)
+    members = await progress.recipient_summaries(db, [task_id], now=now, include_real_name=True)
     overview = progress.summary(members)
     status = request.args.get("status", "")
     cohort = request.args.get("identity", "")
@@ -178,6 +182,7 @@ async def admin_progress(db, identity, task_id):
             row["rank"] = scores[row["id"]]["rank"] = rank
         board["rows"] = [scores[r["id"]] for r in selected[(page - 1) * size:page * size]]
     page_items = selected[(page - 1) * size:page * size]
+    await progress.add_problem_cells(db, task, page_items, now=now)
     result = {"summary": overview, "items": page_items, "total": len(selected), "page": page, "page_size": size, "order": order}
     if view == "xcpc":
         if board is None:
@@ -185,6 +190,25 @@ async def admin_progress(db, identity, task_id):
             board = await progress.xcpc_scoreboard(db, task, page_items, all_recipients=members)
         result["scoreboard"] = board
     return jsonify(result)
+
+
+@training_task_api.get("/admin/training-tasks/<int:task_id>/export")
+@endpoint()
+async def export_progress(db, identity, task_id):
+    # A single local snapshot: no OJ requests, refreshes or pagination truncation.
+    await db.execute("BEGIN")
+    now = int(time.time())
+    task = await service.detail(db, task_id)
+    if task["state"] == "draft":
+        raise service.TaskError("请先发布训练任务，再导出完成情况。", "invalid_state", 409)
+    members = await progress.recipient_summaries(db, [task_id], now=now, include_real_name=True)
+    await progress.add_problem_cells(db, task, members, now=now)
+    await db.commit()
+    content = await asyncio.to_thread(excel.workbook_bytes, task, members, now=now)
+    return Response(content, mimetype=excel.MIME, headers={
+        "Content-Disposition": f'attachment; filename="training-task-{task_id}.xlsx"',
+        "X-Content-Type-Options": "nosniff",
+    })
 
 
 @training_task_api.get("/admin/training-tasks/<int:task_id>/progress/<int:recipient_id>")
