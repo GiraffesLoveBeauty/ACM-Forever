@@ -160,7 +160,9 @@ async function submit() {
         <h2 id="problem-sync-heading">拉取题目</h2>
         <p>从公开比赛或洛谷 P 题库采集题面与样例。</p>
       </div>
-      <RouterLink class="admin-jump" to="/admin.html?section=tasks">查看同步任务 →</RouterLink>
+      <RouterLink class="admin-jump" to="/admin.html?section=sync-center&tab=queue">
+        查看任务队列 →
+      </RouterLink>
     </div>
     <div class="admin-panel">
       <form id="problem-sync-form" @submit.prevent="submit">

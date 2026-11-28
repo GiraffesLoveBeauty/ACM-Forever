@@ -89,7 +89,7 @@ onMounted(load);
         </article>
       </div>
       <p class="schedule-note">
-        关闭后不再安排新的每日任务；已经开始的任务可在下方或“同步任务”中查看、取消。设置保存在服务端。
+        关闭后不再安排新的每日任务；已经开始的任务可在下方或成员同步中心的任务队列中查看、取消。设置保存在服务端。
       </p>
       <p v-if="message" role="status">{{ message }}</p>
       <p v-if="error" role="alert">

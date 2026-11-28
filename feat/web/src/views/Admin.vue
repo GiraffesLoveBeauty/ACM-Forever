@@ -11,8 +11,7 @@ const modules = {
   problems: defineAsyncComponent(() => import('../admin/Problems.vue')),
   'cf-practice': defineAsyncComponent(() => import('../admin/CfPractice.vue')),
   contests: defineAsyncComponent(() => import('../admin/Contests.vue')),
-  tasks: defineAsyncComponent(() => import('../admin/Tasks.vue')),
-  'sync-center': defineAsyncComponent(() => import('../admin/SyncCenter.vue')),
+  'sync-center': defineAsyncComponent(() => import('../admin/SyncWorkspace.vue')),
   moderation: defineAsyncComponent(() => import('../admin/Moderation.vue')),
   settings: defineAsyncComponent(() => import('../admin/Settings.vue')),
   wiki: defineAsyncComponent(() => import('../admin/Wiki.vue')),
@@ -29,7 +28,6 @@ const ICONS = {
   problems: '▦',
   'cf-practice': '⌘',
   contests: '◈',
-  tasks: '↻',
   'sync-center': '⇄',
   moderation: '☷',
   settings: '⚙',
@@ -42,7 +40,6 @@ const GROUP_TITLES = {
   problems: '训练与题目',
   'cf-practice': '训练与题目',
   contests: '训练与题目',
-  tasks: '训练与题目',
   'sync-center': '训练与题目',
   moderation: '社区与系统',
   settings: '社区与系统',
@@ -61,7 +58,12 @@ const groups = computed(() => {
   }
   const training = out.find((group) => group.title === '训练与题目');
   if (training) {
-    training.items.push({ key: 'tag-management', label: '标签管理', icon: '▧', to: '/tag-management.html' });
+    training.items.push({
+      key: 'tag-management',
+      label: '标签管理',
+      icon: '▧',
+      to: '/tag-management.html',
+    });
   }
   return out;
 });
@@ -113,7 +115,9 @@ onMounted(async () => {
         <RouterLink
           v-for="item in currentItems"
           :key="item.key"
-          :to="item.to || (item.key === 'accounts' ? '/admin.html' : `/admin.html?section=${item.key}`)"
+          :to="
+            item.to || (item.key === 'accounts' ? '/admin.html' : `/admin.html?section=${item.key}`)
+          "
           class="admin-subtab"
           :class="{ active: section === item.key }"
           :aria-current="section === item.key ? 'page' : undefined"

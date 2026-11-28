@@ -167,6 +167,13 @@ test('legacy administration links and corrected filters retain their anchors', a
     router.currentRoute.value.fullPath,
     '/admin.html?qq_id=12345678&section=members#member-profile',
   );
+  for (const path of ['/tasks.html', '/admin.html?section=tasks']) {
+    await router.push(path + '#task-list');
+    assert.equal(
+      router.currentRoute.value.fullPath,
+      '/admin.html?section=sync-center&tab=queue#task-list',
+    );
+  }
   await router.push('/admin.html?section=bad&tab=bad#dashboard');
   assert.equal(router.currentRoute.value.fullPath, '/admin.html#dashboard');
 });
@@ -182,6 +189,12 @@ for (const role of ['member', 'admin', 'root']) {
       await router.push(`${path}?contest_id=1234&qq_id=99999999&owner_qq_id=99999999#activity`);
       assert.equal(router.currentRoute.value.fullPath, `${path}?contest_id=1234#activity`);
       assert.equal(Boolean(router.currentRoute.value.meta.admin), false);
+    }
+    if (role === 'member') {
+      for (const path of ['/tasks.html', '/admin.html?section=tasks']) {
+        await router.push(path);
+        assert.equal(router.currentRoute.value.path, '/forbidden.html');
+      }
     }
     await router.push('/admin.html?section=training');
     assert.equal(

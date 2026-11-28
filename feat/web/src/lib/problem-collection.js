@@ -128,7 +128,7 @@ export function useProblemCollection(published) {
       timeoutMs: 30000,
     })
       .then((response) => {
-        if (!response.task?.id) throw Error('接口未返回任务 ID，请在同步任务中确认。');
+        if (!response.task?.id) throw Error('接口未返回任务 ID，请在成员同步中心的任务队列中确认。');
         if (sessionVersion === adminSessionVersion() && problemMemory.submission === record)
           problemMemory.taskId = response.task.id;
       })

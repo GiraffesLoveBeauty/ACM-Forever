@@ -3,7 +3,7 @@ import { initializeAuth, auth, safeNext, notify, pageLoadError } from './lib/api
 const legacy = {
   '/member.html': 'members',
   '/problem-bank.html': 'problems',
-  '/tasks.html': 'tasks',
+  '/tasks.html': 'sync-center',
   '/settings.html': 'settings',
   '/forum-moderation.html': 'moderation',
   '/cf-practice.html': 'cf-practice',
@@ -15,7 +15,6 @@ export const sections = {
   problems: '题库管理',
   'cf-practice': 'CF 练习赛选题',
   contests: '复盘管理',
-  tasks: '同步任务',
   'sync-center': '成员同步中心',
   moderation: '内容审核',
   settings: '全局设置',
@@ -211,6 +210,13 @@ router.beforeEach(async (to) => {
       return { path: to.path, query, hash: to.hash, replace: true };
     }
   }
+  if (to.path === '/tasks.html' || (to.path === '/admin.html' && to.query.section === 'tasks'))
+    return {
+      path: '/admin.html',
+      query: { ...to.query, section: 'sync-center', tab: 'queue' },
+      hash: to.hash,
+      replace: true,
+    };
   if (to.meta.section && ['admin', 'root'].includes(auth.role))
     return { path: '/admin.html', query: { ...to.query, section: to.meta.section }, hash: to.hash };
   if (to.path === '/admin.html') {
@@ -235,6 +241,7 @@ router.beforeEach(async (to) => {
           accounts: ['open', 'import'],
           training: ['edit', 'overview', 'progress'],
           'cf-practice': ['recent', 'check'],
+          'sync-center': ['queue'],
           moderation: ['posts', 'reports'],
           wiki: ['categories', 'pages'],
         }[query.section || 'accounts'] || []
